@@ -18,12 +18,12 @@
       "description": "Binary version management (replaces grove gvm)"
     },
     {
-      "name": "agent",
-      "alias": "ag",
-      "repository": "github.com/mattsolo1/grove-agent", 
-      "binary": "ag",
+      "name": "sandbox",
+      "alias": "sb",
+      "repository": "github.com/mattsolo1/grove-sandbox", 
+      "binary": "sb",
       "version": "latest",
-      "description": "Agent sandbox environment"
+      "description": "Protected sandbox environment for development"
     },
     {
       "name": "monitor",
