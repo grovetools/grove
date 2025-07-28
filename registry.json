@@ -4,7 +4,7 @@
     {
       "name": "context",
       "alias": "cx",
-      "repository": "github.com/yourorg/grove-context",
+      "repository": "github.com/mattsolo1/grove-context",
       "binary": "cx",
       "version": "latest",
       "description": "LLM context management (replaces grove cx)"
@@ -12,7 +12,7 @@
     {
       "name": "version",
       "alias": "gvm", 
-      "repository": "github.com/yourorg/grove-version",
+      "repository": "github.com/mattsolo1/grove-version",
       "binary": "gvm",
       "version": "latest",
       "description": "Binary version management (replaces grove gvm)"
@@ -20,7 +20,7 @@
     {
       "name": "agent",
       "alias": "ag",
-      "repository": "github.com/yourorg/grove-agent", 
+      "repository": "github.com/mattsolo1/grove-agent", 
       "binary": "ag",
       "version": "latest",
       "description": "Agent sandbox environment"
@@ -28,7 +28,7 @@
     {
       "name": "monitor",
       "alias": "mon",
-      "repository": "github.com/yourorg/grove-monitor",
+      "repository": "github.com/mattsolo1/grove-monitor",
       "binary": "mon", 
       "version": "latest",
       "description": "Agent monitoring and overview"
@@ -36,7 +36,7 @@
     {
       "name": "proxy",
       "alias": "px",
-      "repository": "github.com/yourorg/grove-proxy",
+      "repository": "github.com/mattsolo1/grove-proxy",
       "binary": "px",
       "version": "latest", 
       "description": "Docker and proxy management"
@@ -44,7 +44,7 @@
     {
       "name": "jobs",
       "alias": "job",
-      "repository": "github.com/yourorg/grove-jobs",
+      "repository": "github.com/mattsolo1/grove-jobs",
       "binary": "job",
       "version": "latest",
       "description": "Job orchestration and workflows"
@@ -52,7 +52,7 @@
     {
       "name": "test",
       "alias": "test",
-      "repository": "github.com/yourorg/grove-test",
+      "repository": "github.com/mattsolo1/grove-test",
       "binary": "test", 
       "version": "latest",
       "description": "End-to-end scenario testing"
@@ -60,7 +60,7 @@
     {
       "name": "notebook",
       "alias": "nb",
-      "repository": "github.com/yourorg/grove-notebook",
+      "repository": "github.com/mattsolo1/grove-notebook",
       "binary": "nb",
       "version": "latest", 
       "description": "Notebook and documentation management"
