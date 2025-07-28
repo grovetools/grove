@@ -2,18 +2,20 @@
 
 BINARY_NAME=grove
 INSTALL_PATH=/usr/local/bin
+BIN_DIR=bin
 
 .PHONY: all build install uninstall test clean fmt vet lint run
 
 all: build
 
 build:
+	@mkdir -p $(BIN_DIR)
 	@echo "Building $(BINARY_NAME)..."
-	@go build -o $(BINARY_NAME) .
+	@go build -o $(BIN_DIR)/$(BINARY_NAME) .
 
 install: build
 	@echo "Installing $(BINARY_NAME) to $(INSTALL_PATH)..."
-	@sudo cp $(BINARY_NAME) $(INSTALL_PATH)/
+	@sudo cp $(BIN_DIR)/$(BINARY_NAME) $(INSTALL_PATH)/
 	@echo "Installed successfully!"
 
 uninstall:
@@ -28,6 +30,7 @@ test:
 clean:
 	@echo "Cleaning..."
 	@go clean
+	@rm -rf $(BIN_DIR)
 	@rm -f $(BINARY_NAME)
 	@rm -f coverage.out
 
@@ -49,15 +52,16 @@ lint:
 
 # Run the CLI
 run: build
-	@./$(BINARY_NAME) $(ARGS)
+	@$(BIN_DIR)/$(BINARY_NAME) $(ARGS)
 
 # Run all checks
 check: fmt vet lint test
 
 # Development build with race detector
 dev:
+	@mkdir -p $(BIN_DIR)
 	@echo "Building $(BINARY_NAME) with race detector..."
-	@go build -race -o $(BINARY_NAME) .
+	@go build -race -o $(BIN_DIR)/$(BINARY_NAME) .
 
 # Cross-compilation targets
 build-all:

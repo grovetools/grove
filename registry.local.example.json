@@ -1,0 +1,30 @@
+{
+  "version": "1.0",
+  "description": "Example local development registry - copy to registry.local.json and modify",
+  "tools": [
+    {
+      "name": "context",
+      "alias": "cx",
+      "repository": "./grove-context",
+      "binary": "cx",
+      "version": "local",
+      "description": "LLM context management (local development)"
+    },
+    {
+      "name": "mynewtool",
+      "alias": "mnt",
+      "repository": "/Users/me/projects/grove-mynewtool",
+      "binary": "mnt",
+      "version": "local",
+      "description": "My new tool in development (absolute path)"
+    },
+    {
+      "name": "forkedtool",
+      "alias": "ft",
+      "repository": "../my-forks/grove-agent",
+      "binary": "ag",
+      "version": "local",
+      "description": "My fork of grove-agent (relative path)"
+    }
+  ]
+}
