@@ -1,0 +1,45 @@
+linters:
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - gosimple
+    - ineffassign
+    - typecheck
+    - gosec
+    - gofmt
+    - goimports
+    - misspell
+    - unconvert
+
+linters-settings:
+  gofmt:
+    simplify: true
+  goimports:
+    local-prefixes: github.com/mattsolo1/grove
+  staticcheck:
+    checks: ["all", "-ST1000", "-ST1003", "-ST1016", "-ST1020", "-ST1021", "-ST1022"]
+    # Disable ST1000: at least one file in a package should have a package comment
+    # This matches the gopls configuration where we disabled ST1000
+
+run:
+  timeout: 5m
+  build-tags:
+    - integration
+
+issues:
+  exclude-dirs:
+    - vendor
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+    # Exclude unused parameter warnings for specific patterns
+    - text: "unused-parameter"
+      linters:
+        - revive
+    # Allow interface{} for now - can be replaced with 'any' when ready
+    - text: "interface{}"
+      linters:
+        - staticcheck

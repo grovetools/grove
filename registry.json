@@ -50,10 +50,10 @@
       "description": "Job orchestration and workflows"
     },
     {
-      "name": "test",
-      "alias": "test",
-      "repository": "github.com/mattsolo1/grove-test",
-      "binary": "test", 
+      "name": "tend",
+      "alias": "tend",
+      "repository": "github.com/mattsolo1/grove-tend",
+      "binary": "tend", 
       "version": "latest",
       "description": "End-to-end scenario testing"
     },
