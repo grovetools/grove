@@ -2,7 +2,7 @@ package cmd
 
 import (
     "fmt"
-    "github.com/yourorg/grove/registry"
+    "github.com/grovepm/grove/registry"
 )
 
 func HandleList() {

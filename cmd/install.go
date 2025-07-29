@@ -4,7 +4,7 @@ import (
     "fmt"
     "os"
     "os/exec"
-    "github.com/yourorg/grove/registry"
+    "github.com/grovepm/grove/registry"
 )
 
 func HandleInstall(args []string) {

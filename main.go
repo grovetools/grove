@@ -2,7 +2,7 @@ package main
 
 import (
     "os"
-    "github.com/yourorg/grove/cmd"
+    "github.com/grovepm/grove/cmd"
 )
 
 func main() {
