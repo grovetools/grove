@@ -26,10 +26,10 @@
       "description": "Protected sandbox environment for development"
     },
     {
-      "name": "monitor",
-      "alias": "mon",
-      "repository": "github.com/mattsolo1/grove-monitor",
-      "binary": "mon", 
+      "name": "canopy",
+      "alias": "canopy",
+      "repository": "github.com/mattsolo1/grove-canopy",
+      "binary": "canopy", 
       "version": "latest",
       "description": "Agent monitoring and overview"
     },
@@ -42,10 +42,10 @@
       "description": "Docker and proxy management"
     },
     {
-      "name": "jobs",
-      "alias": "job",
-      "repository": "github.com/mattsolo1/grove-jobs",
-      "binary": "job",
+      "name": "flow",
+      "alias": "flow",
+      "repository": "github.com/mattsolo1/grove-flow",
+      "binary": "flow",
       "version": "latest",
       "description": "Job orchestration and workflows"
     },
