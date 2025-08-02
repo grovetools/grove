@@ -29,12 +29,7 @@ var (
 	errorStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff4444")).Bold(true)
 )
 
-func init() {
-	workspaceCmd := getWorkspaceCmd()
-	if workspaceCmd != nil {
-		workspaceCmd.AddCommand(newWorkspaceStatusCmd())
-	}
-}
+// Removed init function - command is now added in workspace.go
 
 // getWorkspaceCmd finds the workspace command in the root command tree
 func getWorkspaceCmd() *cobra.Command {

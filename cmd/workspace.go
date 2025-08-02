@@ -17,6 +17,11 @@ func newWorkspaceCmd() *cobra.Command {
 	}
 	
 	// Subcommands will be added here
+	cmd.AddCommand(newWorkspaceStatusCmd())
+	cmd.AddCommand(NewWorkspaceWorktreesCmd())
+	cmd.AddCommand(NewWorkspaceIssuesCmd())
+	cmd.AddCommand(NewWorkspacePlansCmd())
+	cmd.AddCommand(NewWorkspaceChatsCmd())
 	
 	return cmd
 }
