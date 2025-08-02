@@ -28,8 +28,7 @@ func newGitCmd() *cobra.Command {
 		Args: cobra.ArbitraryArgs,
 	}
 	
-	// Add the custom status subcommand
-	cmd.AddCommand(newGitStatusCmd())
+	// Status command has been moved to workspace status
 	
 	return cmd
 }
