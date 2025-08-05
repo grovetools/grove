@@ -39,47 +39,22 @@ func Execute() error {
 
 // delegateToTool attempts to run an installed Grove tool
 func delegateToTool(toolName string, args []string) error {
-	registry, err := LoadRegistry()
+	// Check if the tool exists in the active version's bin directory
+	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("failed to load registry: %w", err)
+		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 	
-	// Find the tool by name or alias
-	var tool *Tool
-	for _, t := range registry.Tools {
-		if t.Name == toolName || t.Alias == toolName {
-			tool = &t
-			break
-		}
+	toolPath := filepath.Join(homeDir, ".grove", "bin", toolName)
+	
+	// Check if the tool exists
+	if _, err := os.Stat(toolPath); os.IsNotExist(err) {
+		return fmt.Errorf("unknown tool: %s", toolName)
 	}
 	
-	if tool == nil {
-		return fmt.Errorf("unknown command: %s", toolName)
-	}
-	
-	// Construct the binary name
-	binaryName := tool.Binary
-	if binaryName == "" {
-		binaryName = fmt.Sprintf("grove-%s", tool.Name)
-	}
-	
-	// Check if binary exists
-	groveDir := os.Getenv("GROVE_DIR")
-	if groveDir == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("failed to get home directory: %w", err)
-		}
-		groveDir = filepath.Join(homeDir, ".grove")
-	}
-	
-	binaryPath := filepath.Join(groveDir, "bin", binaryName)
-	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
-		return fmt.Errorf("tool '%s' is not installed. Run 'grove install %s' to install it", toolName, tool.Name)
-	}
 	
 	// Execute the binary
-	cmd := exec.Command(binaryPath, args...)
+	cmd := exec.Command(toolPath, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

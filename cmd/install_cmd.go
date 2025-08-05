@@ -3,12 +3,11 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	
+
 	"github.com/mattsolo1/grove-core/cli"
-	"github.com/sirupsen/logrus"
+	"github.com/grovepm/grove/pkg/sdk"
 	"github.com/spf13/cobra"
 )
 
@@ -18,123 +17,112 @@ func init() {
 
 func newInstallCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "install [tools...]",
-		Short: "Install Grove tools",
-		Long:  "Install one or more Grove tools from the registry",
-		Example: `  grove install context version
-  grove install cx nb`,
+		Use:   "install [tool[@version]...]",
+		Short: "Install Grove tools from GitHub releases",
+		Long: `Install one or more Grove tools from GitHub releases.
+
+You can specify a specific version using the @ syntax, or install the latest version.
+Use 'all' to install all available tools.
+
+Examples:
+  grove install cx           # Install latest version of cx
+  grove install cx@v0.1.0    # Install specific version of cx
+  grove install cx nb flow   # Install multiple tools
+  grove install all          # Install all available tools`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: runInstall,
 	}
-	
+
 	return cmd
 }
 
 func runInstall(cmd *cobra.Command, args []string) error {
 	logger := cli.GetLogger(cmd)
 	
-	registry, err := LoadRegistry()
+	// Create SDK manager
+	manager, err := sdk.NewManager()
 	if err != nil {
-		return fmt.Errorf("failed to load registry: %w", err)
+		return fmt.Errorf("failed to create SDK manager: %w", err)
 	}
 	
-	for _, toolName := range args {
-		if err := installTool(registry, toolName, logger); err != nil {
+	// Ensure directory structure exists
+	if err := manager.EnsureDirs(); err != nil {
+		return fmt.Errorf("failed to create directory structure: %w", err)
+	}
+	
+	// Expand "all" to list of all tools
+	tools := args
+	if len(args) == 1 && args[0] == "all" {
+		tools = sdk.GetAllTools()
+		logger.Info("Installing all Grove tools...")
+	}
+	
+	// Track if we need to set an active version
+	currentActive, _ := manager.GetActiveVersion()
+	needsActive := currentActive == ""
+	var versionToActivate string
+	
+	// Install each tool
+	for _, toolSpec := range tools {
+		// Parse tool[@version]
+		parts := strings.Split(toolSpec, "@")
+		toolName := parts[0]
+		version := "latest"
+		
+		if len(parts) > 1 {
+			version = parts[1]
+		}
+		
+		// Get actual version tag if "latest" specified
+		if version == "latest" {
+			latestVersion, err := manager.GetLatestVersionTag()
+			if err != nil {
+				logger.WithError(err).Errorf("Failed to get latest version for %s", toolName)
+				continue
+			}
+			version = latestVersion
+		}
+		
+		// Track version for activation
+		if needsActive && versionToActivate == "" {
+			versionToActivate = version
+		}
+		
+		logger.Infof("Installing %s %s...", toolName, version)
+		
+		if err := manager.InstallTool(toolName, version); err != nil {
 			logger.WithError(err).Errorf("Failed to install %s", toolName)
 			// Continue with other tools
+		} else {
+			logger.Infof("✅ Successfully installed %s %s", toolName, version)
 		}
 	}
 	
-	return nil
-}
-
-func installTool(registry *Registry, toolName string, logger *logrus.Logger) error {
-	// Find the tool by name or alias
-	var tool *Tool
-	for _, t := range registry.Tools {
-		if t.Name == toolName || t.Alias == toolName {
-			tool = &t
-			break
+	// If no version is active, activate the first version we installed
+	if needsActive && versionToActivate != "" {
+		logger.Infof("Setting %s as the active version...", versionToActivate)
+		if err := manager.UseVersion(versionToActivate); err != nil {
+			logger.WithError(err).Error("Failed to set active version")
+		} else {
+			logger.Infof("✅ Version %s is now active", versionToActivate)
 		}
 	}
 	
-	if tool == nil {
-		return fmt.Errorf("unknown tool: %s", toolName)
+	// Check if ~/.grove/bin is in PATH
+	homeDir, _ := os.UserHomeDir()
+	groveBin := filepath.Join(homeDir, ".grove", "bin")
+	path := os.Getenv("PATH")
+	
+	if !strings.Contains(path, groveBin) {
+		logger.Warn("")
+		logger.Warn("⚠️  IMPORTANT: Add Grove to your PATH")
+		logger.Warn("")
+		logger.Warnf("Add the following line to your shell profile (~/.zshrc, ~/.bashrc, etc.):")
+		logger.Warnf("  export PATH=\"%s:$PATH\"", groveBin)
+		logger.Warn("")
+		logger.Warn("Then restart your terminal or run:")
+		logger.Warn("  source ~/.zshrc  # or ~/.bashrc")
 	}
 	
-	// Check if this is a local repository
-	if IsLocalRepository(tool.Repository) {
-		return installLocalTool(tool, logger)
-	}
-	
-	// Remote repository installation
-	installPath := tool.Repository + "@" + tool.Version
-	logger.Infof("Installing %s from %s...", tool.Name, installPath)
-	
-	cmd := exec.Command("go", "install", installPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("go install failed: %w", err)
-	}
-	
-	logger.Infof("✓ Successfully installed %s (alias: %s, binary: %s)", tool.Name, tool.Alias, tool.Binary)
 	return nil
-}
-
-func installLocalTool(tool *Tool, logger *logrus.Logger) error {
-	// Expand the repository path
-	repoPath := tool.Repository
-	if strings.HasPrefix(repoPath, "~/") {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("failed to get home directory: %w", err)
-		}
-		repoPath = filepath.Join(homeDir, repoPath[2:])
-	}
-	
-	// Make it absolute
-	absPath, err := filepath.Abs(repoPath)
-	if err != nil {
-		return fmt.Errorf("failed to resolve path: %w", err)
-	}
-	
-	logger.Infof("Installing %s from local repository: %s", tool.Name, absPath)
-	
-	// Check if the directory exists
-	if _, err := os.Stat(absPath); os.IsNotExist(err) {
-		return fmt.Errorf("local repository not found: %s", absPath)
-	}
-	
-	// Build in the local directory
-	cmd := exec.Command("go", "build", "-o", getBinaryPath(tool))
-	cmd.Dir = absPath
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("go build failed: %w", err)
-	}
-	
-	logger.Infof("✓ Successfully installed %s from local repository", tool.Name)
-	return nil
-}
-
-func getBinaryPath(tool *Tool) string {
-	groveDir := os.Getenv("GROVE_DIR")
-	if groveDir == "" {
-		homeDir, _ := os.UserHomeDir()
-		groveDir = filepath.Join(homeDir, ".grove")
-	}
-	
-	binDir := filepath.Join(groveDir, "bin")
-	os.MkdirAll(binDir, 0755)
-	
-	binaryName := tool.Binary
-	if binaryName == "" {
-		binaryName = fmt.Sprintf("grove-%s", tool.Name)
-	}
-	
-	return filepath.Join(binDir, binaryName)
 }
