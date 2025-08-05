@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 	"github.com/grovepm/grove/pkg/aggregator"
 	"github.com/spf13/cobra"
 )
@@ -49,6 +51,10 @@ type CurrentNote struct {
 	Type       string    `json:"type"`
 }
 
+var (
+	currentTableView bool
+)
+
 func NewWorkspaceCurrentCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "current",
@@ -56,6 +62,8 @@ func NewWorkspaceCurrentCmd() *cobra.Command {
 		Long:  "Display current notes (from nb list --type current) for each workspace in the monorepo",
 		RunE:  runWorkspaceCurrent,
 	}
+
+	cmd.Flags().BoolVar(&currentTableView, "table", false, "Show all current notes in a single table ordered by date")
 
 	return cmd
 }
@@ -89,6 +97,12 @@ func runWorkspaceCurrent(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 
+		// Check if table view is requested
+		if currentTableView {
+			return renderCurrentTable(results)
+		}
+
+		// Default grouped view
 		// Sort workspace names for consistent output
 		var workspaceNames []string
 		hasAnyCurrent := false
@@ -148,4 +162,93 @@ func formatCurrentNote(note CurrentNote) string {
 	meta := currentMetaStyle.Render(fmt.Sprintf("%s • %s", note.ID[:8], timeAgo))
 
 	return fmt.Sprintf("%s\n%s", title, meta)
+}
+
+// renderCurrentTable renders all current notes in a single table sorted by date
+func renderCurrentTable(results map[string][]CurrentNote) error {
+	// Collect all notes with workspace info
+	type noteWithWorkspace struct {
+		Note      CurrentNote
+		Workspace string
+	}
+	
+	var allNotes []noteWithWorkspace
+	for wsName, notes := range results {
+		for _, note := range notes {
+			allNotes = append(allNotes, noteWithWorkspace{
+				Note:      note,
+				Workspace: wsName,
+			})
+		}
+	}
+	
+	if len(allNotes) == 0 {
+		fmt.Println(noCurrentStyle.Render("No current notes found in any workspace."))
+		return nil
+	}
+	
+	// Sort by ModifiedAt descending (most recent first)
+	sort.Slice(allNotes, func(i, j int) bool {
+		// If one has zero time, put it at the end
+		if allNotes[i].Note.ModifiedAt.IsZero() && !allNotes[j].Note.ModifiedAt.IsZero() {
+			return false
+		}
+		if !allNotes[i].Note.ModifiedAt.IsZero() && allNotes[j].Note.ModifiedAt.IsZero() {
+			return true
+		}
+		return allNotes[i].Note.ModifiedAt.After(allNotes[j].Note.ModifiedAt)
+	})
+	
+	// Create table
+	t := table.New().
+		Border(lipgloss.NormalBorder()).
+		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
+		Headers("WORKSPACE", "TITLE", "ID", "MODIFIED").
+		Width(100). // Set a reasonable total width
+		StyleFunc(func(row, col int) lipgloss.Style {
+			if row == 0 {
+				return lipgloss.NewStyle().
+					Foreground(lipgloss.Color("255")).
+					Bold(true).
+					Padding(0, 1)
+			}
+			return lipgloss.NewStyle().Padding(0, 1)
+		})
+	
+	// Add rows
+	for _, nw := range allNotes {
+		note := nw.Note
+		
+		// Format time
+		timeStr := ""
+		if !note.ModifiedAt.IsZero() {
+			timeStr = formatTimeAgo(note.ModifiedAt)
+			// Highlight recent modifications (within last day)
+			if time.Since(note.ModifiedAt) < 24*time.Hour {
+				timeStr = "● " + timeStr
+			}
+		}
+		
+		// Truncate ID to 8 characters
+		idStr := note.ID
+		if len(idStr) > 8 {
+			idStr = idStr[:8]
+		}
+		
+		// Format title
+		title := note.Title
+		if title == "" {
+			title = "(untitled)"
+		}
+		
+		t.Row(
+			nw.Workspace,
+			title,
+			idStr,
+			timeStr,
+		)
+	}
+	
+	fmt.Println(t)
+	return nil
 }
