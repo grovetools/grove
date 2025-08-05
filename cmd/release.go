@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/command"
@@ -69,18 +71,9 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to find workspace root: %w", err)
 	}
 
-	// Check if the main repository is clean
-	if !releaseForce && !releaseDryRun {
-		status, err := git.GetStatus(rootDir)
-		if err != nil {
-			return fmt.Errorf("failed to get git status: %w", err)
-		}
-		if status.IsDirty {
-			return fmt.Errorf("main repository has uncommitted changes. Use --force to skip this check")
-		}
-		if status.Branch != "main" {
-			return fmt.Errorf("main repository is not on main branch (current: %s). Use --force to skip this check", status.Branch)
-		}
+	// Run pre-flight checks
+	if err := runPreflightChecks(ctx, rootDir, version, logger); err != nil {
+		return err
 	}
 
 	// Execute git submodule foreach to check cleanliness and tag
@@ -117,6 +110,138 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	logger.Info("✅ Release successfully created", "version", version)
 	logger.Info("A GitHub Actions workflow will now build the binaries and create the release")
 
+	return nil
+}
+
+func runPreflightChecks(ctx context.Context, rootDir, version string, logger *logrus.Logger) error {
+	logger.Info("Running pre-flight checks...")
+	
+	// Check main repository status
+	mainStatus, err := git.GetStatus(rootDir)
+	if err != nil {
+		return fmt.Errorf("failed to get main repository status: %w", err)
+	}
+	
+	// Collect submodule statuses
+	type submoduleStatus struct {
+		Path   string
+		Branch string
+		Dirty  bool
+		Error  error
+	}
+	
+	var submoduleStatuses []submoduleStatus
+	
+	// Get submodule statuses
+	cmdBuilder := command.NewSafeBuilder()
+	cmd, err := cmdBuilder.Build(ctx, "git", "submodule", "foreach", "--quiet", "echo $sm_path")
+	if err != nil {
+		return fmt.Errorf("failed to build submodule list command: %w", err)
+	}
+	
+	execCmd := cmd.Exec()
+	execCmd.Dir = rootDir
+	output, err := execCmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to list submodules: %w", err)
+	}
+	
+	// Parse submodule paths
+	submodulePaths := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if len(submodulePaths) == 1 && submodulePaths[0] == "" {
+		submodulePaths = []string{}
+	}
+	
+	// Check each submodule
+	for _, smPath := range submodulePaths {
+		if smPath == "" {
+			continue
+		}
+		
+		smFullPath := filepath.Join(rootDir, smPath)
+		smStatus := submoduleStatus{Path: smPath}
+		
+		// Get submodule git status
+		status, err := git.GetStatus(smFullPath)
+		if err != nil {
+			smStatus.Error = err
+		} else {
+			smStatus.Branch = status.Branch
+			smStatus.Dirty = status.IsDirty
+		}
+		
+		submoduleStatuses = append(submoduleStatuses, smStatus)
+	}
+	
+	// Display status table
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "\nREPOSITORY\tBRANCH\tSTATUS\tISSUES")
+	fmt.Fprintln(w, "----------\t------\t------\t------")
+	
+	// Main repository
+	mainIssues := []string{}
+	if mainStatus.IsDirty {
+		mainIssues = append(mainIssues, "uncommitted changes")
+	}
+	if mainStatus.Branch != "main" {
+		mainIssues = append(mainIssues, "not on main branch")
+	}
+	mainStatusStr := "✓ Clean"
+	if mainStatus.IsDirty {
+		mainStatusStr = "✗ Dirty"
+	}
+	fmt.Fprintf(w, "grove-ecosystem\t%s\t%s\t%s\n", 
+		mainStatus.Branch, 
+		mainStatusStr,
+		strings.Join(mainIssues, ", "))
+	
+	// Submodules
+	hasIssues := len(mainIssues) > 0
+	for _, sm := range submoduleStatuses {
+		issues := []string{}
+		statusStr := "✓ Clean"
+		branch := sm.Branch
+		
+		if sm.Error != nil {
+			issues = append(issues, "error checking status")
+			statusStr = "? Error"
+			branch = "unknown"
+		} else {
+			if sm.Dirty {
+				issues = append(issues, "uncommitted changes")
+				statusStr = "✗ Dirty"
+			}
+			if sm.Branch != "main" {
+				issues = append(issues, "not on main branch")
+			}
+		}
+		
+		if len(issues) > 0 {
+			hasIssues = true
+		}
+		
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", 
+			sm.Path,
+			branch,
+			statusStr,
+			strings.Join(issues, ", "))
+	}
+	
+	w.Flush()
+	fmt.Println()
+	
+	// Check if we should proceed
+	if hasIssues && !releaseForce && !releaseDryRun {
+		logger.Error("Pre-flight checks failed. Fix the issues above or use --force to proceed anyway.")
+		return fmt.Errorf("pre-flight checks failed")
+	}
+	
+	if hasIssues && releaseForce {
+		logger.Warn("Issues detected but proceeding with --force flag")
+	} else if !hasIssues {
+		logger.Info("✅ All pre-flight checks passed")
+	}
+	
 	return nil
 }
 
