@@ -16,6 +16,8 @@ func init() {
 }
 
 func newInstallCmd() *cobra.Command {
+	var useGH bool
+	
 	cmd := &cobra.Command{
 		Use:   "install [tool[@version]...]",
 		Short: "Install Grove tools from GitHub releases",
@@ -28,15 +30,20 @@ Examples:
   grove install cx           # Install latest version of cx
   grove install cx@v0.1.0    # Install specific version of cx
   grove install cx nb flow   # Install multiple tools
-  grove install all          # Install all available tools`,
+  grove install all          # Install all available tools
+  grove install --use-gh cx  # Use gh CLI for private repo access`,
 		Args: cobra.MinimumNArgs(1),
-		RunE: runInstall,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runInstall(cmd, args, useGH)
+		},
 	}
+
+	cmd.Flags().BoolVar(&useGH, "use-gh", false, "Use gh CLI for downloading (supports private repos)")
 
 	return cmd
 }
 
-func runInstall(cmd *cobra.Command, args []string) error {
+func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 	logger := cli.GetLogger(cmd)
 	
 	// Create SDK manager
@@ -44,6 +51,9 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create SDK manager: %w", err)
 	}
+	
+	// Set the download method
+	manager.SetUseGH(useGH)
 	
 	// Ensure directory structure exists
 	if err := manager.EnsureDirs(); err != nil {

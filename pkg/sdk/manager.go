@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -19,7 +20,7 @@ const (
 	ActiveVersionFile = "active_version"
 	
 	// GitHub API constants
-	GitHubOwner = "grove-ecosystem"
+	GitHubOwner = "mattsolo1"
 	GitHubRepo  = "grove-ecosystem"
 	GitHubAPI   = "https://api.github.com"
 )
@@ -28,6 +29,7 @@ const (
 type Manager struct {
 	homeDir string
 	baseDir string
+	useGH   bool
 }
 
 // NewManager creates a new SDK manager instance
@@ -40,7 +42,13 @@ func NewManager() (*Manager, error) {
 	return &Manager{
 		homeDir: homeDir,
 		baseDir: filepath.Join(homeDir, GroveDir),
+		useGH:   false,
 	}, nil
+}
+
+// SetUseGH sets whether to use gh CLI for downloads
+func (m *Manager) SetUseGH(useGH bool) {
+	m.useGH = useGH
 }
 
 // EnsureDirs creates the necessary directory structure
@@ -91,6 +99,10 @@ type GitHubRelease struct {
 
 // GetLatestVersionTag fetches the latest release tag from GitHub
 func (m *Manager) GetLatestVersionTag() (string, error) {
+	if m.useGH {
+		return m.getLatestVersionTagWithGH()
+	}
+	
 	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", GitHubAPI, GitHubOwner, GitHubRepo)
 	
 	resp, err := http.Get(url)
@@ -111,8 +123,32 @@ func (m *Manager) GetLatestVersionTag() (string, error) {
 	return release.TagName, nil
 }
 
+// getLatestVersionTagWithGH fetches the latest release tag using gh CLI
+func (m *Manager) getLatestVersionTagWithGH() (string, error) {
+	cmd := exec.Command("gh", "release", "view", "--repo", fmt.Sprintf("%s/%s", GitHubOwner, GitHubRepo), "--json", "tagName")
+	
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("gh CLI failed to get latest release: %w", err)
+	}
+	
+	var result struct {
+		TagName string `json:"tagName"`
+	}
+	
+	if err := json.Unmarshal(output, &result); err != nil {
+		return "", fmt.Errorf("failed to parse gh output: %w", err)
+	}
+	
+	return result.TagName, nil
+}
+
 // GetRelease fetches release information for a specific version
 func (m *Manager) GetRelease(version string) (*GitHubRelease, error) {
+	if m.useGH {
+		return m.getReleaseWithGH(version)
+	}
+	
 	url := fmt.Sprintf("%s/repos/%s/%s/releases/tags/%s", GitHubAPI, GitHubOwner, GitHubRepo, version)
 	
 	resp, err := http.Get(url)
@@ -131,6 +167,46 @@ func (m *Manager) GetRelease(version string) (*GitHubRelease, error) {
 	}
 	
 	return &release, nil
+}
+
+// getReleaseWithGH fetches release information using gh CLI
+func (m *Manager) getReleaseWithGH(version string) (*GitHubRelease, error) {
+	cmd := exec.Command("gh", "release", "view", version, "--repo", fmt.Sprintf("%s/%s", GitHubOwner, GitHubRepo), "--json", "tagName,assets")
+	
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("gh CLI failed to get release %s: %w", version, err)
+	}
+	
+	var ghRelease struct {
+		TagName string `json:"tagName"`
+		Assets  []struct {
+			Name string `json:"name"`
+			URL  string `json:"url"`
+		} `json:"assets"`
+	}
+	
+	if err := json.Unmarshal(output, &ghRelease); err != nil {
+		return nil, fmt.Errorf("failed to parse gh output: %w", err)
+	}
+	
+	// Convert to GitHubRelease format
+	release := &GitHubRelease{
+		TagName: ghRelease.TagName,
+	}
+	
+	for _, asset := range ghRelease.Assets {
+		// Convert gh CLI URL format to browser download URL format
+		release.Assets = append(release.Assets, struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+		}{
+			Name:               asset.Name,
+			BrowserDownloadURL: fmt.Sprintf("https://github.com/%s/%s/releases/download/%s/%s", GitHubOwner, GitHubRepo, version, asset.Name),
+		})
+	}
+	
+	return release, nil
 }
 
 // ListInstalledVersions returns all installed versions
@@ -285,7 +361,11 @@ func (m *Manager) UninstallVersion(versionTag string) error {
 }
 
 // downloadFile downloads a file from a URL
-func (m *Manager) downloadFile(url, filepath string) error {
+func (m *Manager) downloadFile(url, targetPath string) error {
+	if m.useGH {
+		return m.downloadFileWithGH(url, targetPath)
+	}
+	
 	resp, err := http.Get(url)
 	if err != nil {
 		return err
@@ -296,7 +376,7 @@ func (m *Manager) downloadFile(url, filepath string) error {
 		return fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}
 	
-	out, err := os.Create(filepath)
+	out, err := os.Create(targetPath)
 	if err != nil {
 		return err
 	}
@@ -304,6 +384,39 @@ func (m *Manager) downloadFile(url, filepath string) error {
 	
 	_, err = io.Copy(out, resp.Body)
 	return err
+}
+
+// downloadFileWithGH downloads a file using gh CLI (supports private repos)
+func (m *Manager) downloadFileWithGH(url, targetPath string) error {
+	// Extract owner, repo, tag, and asset name from the URL
+	// URL format: https://github.com/{owner}/{repo}/releases/download/{tag}/{asset}
+	parts := strings.Split(url, "/")
+	if len(parts) < 8 || parts[2] != "github.com" || parts[5] != "releases" || parts[6] != "download" {
+		return fmt.Errorf("invalid GitHub release URL format: %s", url)
+	}
+	
+	owner := parts[3]
+	repo := parts[4]
+	tag := parts[7]
+	asset := parts[8]
+	
+	// Use gh CLI to download the release asset
+	cmd := exec.Command("gh", "release", "download", tag, "--repo", fmt.Sprintf("%s/%s", owner, repo), "--pattern", asset, "--dir", filepath.Dir(targetPath))
+	
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gh CLI download failed: %w\nOutput: %s", err, string(output))
+	}
+	
+	// gh downloads with the original filename, so we may need to rename
+	downloadedPath := filepath.Join(filepath.Dir(targetPath), asset)
+	if downloadedPath != targetPath {
+		if err := os.Rename(downloadedPath, targetPath); err != nil {
+			return fmt.Errorf("failed to rename downloaded file: %w", err)
+		}
+	}
+	
+	return nil
 }
 
 // GetAllTools returns the list of all available tools

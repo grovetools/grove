@@ -1,4 +1,4 @@
-module github.com/grovepm/grove
+module github.com/mattsolo1/grove
 
 go 1.24
 
