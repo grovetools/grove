@@ -17,6 +17,18 @@ jobs:
         with:
           go-version: '1.24.4'
 
+      - name: Configure git for private modules
+        run: |
+          git config --global url."https://${{ secrets.GROVE_PAT }}@github.com/".insteadOf "https://github.com/"
+          go env -w GOPRIVATE=github.com/mattsolo1/*
+          go env -w GOPROXY=direct
+          
+      - name: Update dependencies
+        run: |
+          rm -f go.sum
+          go mod download
+          go mod tidy
+
       - name: Create dist directory
         run: mkdir -p dist
 
