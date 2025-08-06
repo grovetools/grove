@@ -4,7 +4,7 @@ go 1.24
 
 require (
 	github.com/charmbracelet/lipgloss v0.9.1
-	github.com/mattsolo1/grove-core v0.0.0-20240101000000-000000000000
+	github.com/mattsolo1/grove-core v0.0.0-00010101000000-000000000000
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.7.0
 )
@@ -49,5 +49,3 @@ require (
 	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/mattsolo1/grove-core => ../grove-core
