@@ -50,7 +50,7 @@ func newWorkspaceStatusCmd() *cobra.Command {
 		RunE:  runWorkspaceStatus,
 	}
 	
-	cmd.Flags().String("cols", "git,cx", "Comma-separated columns to display (e.g., git,cx)")
+	cmd.Flags().String("cols", "git,cx,release", "Comma-separated columns to display (e.g., git,cx,release)")
 	
 	return cmd
 }
@@ -92,13 +92,21 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 		TotalSize    int64  `json:"total_size"`
 	}
 	
+	// ReleaseInfo represents release information for a workspace
+	type ReleaseInfo struct {
+		LatestTag    string
+		CommitsAhead int
+	}
+	
 	// Collect status for each workspace
 	type workspaceStatusInfo struct {
 		Name    string
 		Git     *git.StatusInfo
 		Context *ContextStats
+		Release *ReleaseInfo
 		GitErr  error
 		CxErr   error
+		RelErr  error
 	}
 	
 	var statuses []workspaceStatusInfo
@@ -163,6 +171,45 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 			statusInfo.CxErr = cxErr
 		}
 		
+		// Get release info if requested
+		if colMap["release"] {
+			var releaseInfo *ReleaseInfo
+			var relErr error
+			
+			// Get the latest tag
+			cmd := exec.Command("git", "describe", "--tags", "--abbrev=0")
+			cmd.Dir = ws
+			tagOutput, err := cmd.Output()
+			
+			if err != nil {
+				// No tags found
+				releaseInfo = &ReleaseInfo{
+					LatestTag:    "none",
+					CommitsAhead: -1,
+				}
+			} else {
+				latestTag := strings.TrimSpace(string(tagOutput))
+				
+				// Count commits between latest tag and HEAD
+				cmd = exec.Command("git", "rev-list", "--count", latestTag+"..HEAD")
+				cmd.Dir = ws
+				countOutput, err := cmd.Output()
+				
+				commitsAhead := 0
+				if err == nil {
+					fmt.Sscanf(strings.TrimSpace(string(countOutput)), "%d", &commitsAhead)
+				}
+				
+				releaseInfo = &ReleaseInfo{
+					LatestTag:    latestTag,
+					CommitsAhead: commitsAhead,
+				}
+			}
+			
+			statusInfo.Release = releaseInfo
+			statusInfo.RelErr = relErr
+		}
+		
 		statuses = append(statuses, statusInfo)
 	}
 	
@@ -173,6 +220,9 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 	}
 	if colMap["cx"] {
 		headers = append(headers, "CX FILES", "CX TOKENS", "CX SIZE")
+	}
+	if colMap["release"] {
+		headers = append(headers, "LATEST TAG", "COMMITS AHEAD")
 	}
 	
 	// Collect all rows
@@ -258,6 +308,21 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 			}
 		}
 		
+		// Add release columns if requested
+		if colMap["release"] {
+			if ws.Release != nil && ws.RelErr == nil {
+				commitsAheadStr := fmt.Sprintf("%d", ws.Release.CommitsAhead)
+				if ws.Release.CommitsAhead < 0 {
+					commitsAheadStr = "-"
+				}
+				row = append(row, ws.Release.LatestTag, commitsAheadStr)
+			} else if ws.RelErr != nil {
+				row = append(row, "error", "-")
+			} else {
+				row = append(row, "-", "-")
+			}
+		}
+		
 		rows = append(rows, row)
 	}
 	
@@ -299,6 +364,28 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 			// Don't override styling for changes column - it has embedded colors
 			if colMap["git"] && col == 3 {
 				return lipgloss.NewStyle().PaddingLeft(1).PaddingRight(1)
+			}
+			
+			// Style commits ahead column for releases
+			if colMap["release"] {
+				// Find the commits ahead column (last column if release is enabled)
+				commitsAheadCol := len(headers) - 1
+				if col == commitsAheadCol && len(rowData) > commitsAheadCol {
+					commitsStr := rowData[commitsAheadCol]
+					commits := 0
+					fmt.Sscanf(commitsStr, "%d", &commits)
+					
+					if commits > 20 {
+						// Red for many commits ahead
+						return baseStyle.Copy().Foreground(lipgloss.Color("#ff4444")).Bold(true)
+					} else if commits > 10 {
+						// Orange for moderate commits ahead
+						return baseStyle.Copy().Foreground(lipgloss.Color("#ffaa00")).Bold(true)
+					} else if commits > 0 {
+						// Yellow for few commits ahead
+						return baseStyle.Copy().Foreground(lipgloss.Color("#ffff00"))
+					}
+				}
 			}
 		}
 		
