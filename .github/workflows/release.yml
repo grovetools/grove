@@ -8,4 +8,4 @@ jobs:
     with:
       binary_name: 'grove'
     secrets:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GROVE_PAT }}
