@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 	
-	"github.com/grovepm/grove/pkg/runner"
-	"github.com/grovepm/grove/pkg/workspace"
+	"github.com/mattsolo1/grove-meta/pkg/runner"
+	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/spf13/cobra"
 )

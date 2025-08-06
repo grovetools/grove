@@ -12,7 +12,7 @@ import (
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/command"
 	"github.com/mattsolo1/grove-core/git"
-	"github.com/grovepm/grove/pkg/workspace"
+	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -35,10 +35,14 @@ func newReleaseCmd() *cobra.Command {
 This command will:
 1. Validate the version format (vMAJOR.MINOR.PATCH)
 2. Check that all repositories are clean (unless --force is used)
-3. Tag each submodule with the specified version
+3. Tag each submodule with the specified version (triggers individual releases)
 4. Update submodule references in the parent repository
-5. Tag the parent repository
+5. Tag the parent repository (triggers meta-release)
 6. Push all tags to origin
+
+Note: Each submodule now has its own release workflow that will build and 
+publish binaries independently. The parent repository creates a meta-release
+that documents the versions of all included submodules.
 
 Example:
   grove release v0.1.0`,
@@ -108,7 +112,13 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	}
 
 	logger.Info("✅ Release successfully created", "version", version)
-	logger.Info("A GitHub Actions workflow will now build the binaries and create the release")
+	logger.Info("")
+	logger.Info("GitHub Actions will now:")
+	logger.Info("  - Build and release each tool independently in its own repository")
+	logger.Info("  - Create a meta-release in grove-ecosystem with submodule versions")
+	logger.Info("")
+	logger.Info("Monitor the release progress at:")
+	logger.Info("  https://github.com/mattsolo1/grove-ecosystem/actions")
 
 	return nil
 }

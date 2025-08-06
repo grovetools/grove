@@ -21,9 +21,21 @@ const (
 	
 	// GitHub API constants
 	GitHubOwner = "mattsolo1"
-	GitHubRepo  = "grove-ecosystem"
 	GitHubAPI   = "https://api.github.com"
 )
+
+// toolToRepo maps tool names to their repository names
+var toolToRepo = map[string]string{
+	"grove":  "grove-meta",
+	"cx":     "grove-context",
+	"flow":   "grove-flow",
+	"nb":     "grove-notebook",
+	"gvm":    "grove-version",
+	"px":     "grove-proxy",
+	"sb":     "grove-sandbox",
+	"tend":   "grove-tend",
+	"canopy": "grove-canopy",
+}
 
 // Manager handles SDK installation and version management
 type Manager struct {
@@ -97,13 +109,18 @@ type GitHubRelease struct {
 	} `json:"assets"`
 }
 
-// GetLatestVersionTag fetches the latest release tag from GitHub
-func (m *Manager) GetLatestVersionTag() (string, error) {
-	if m.useGH {
-		return m.getLatestVersionTagWithGH()
+// GetLatestVersionTag fetches the latest release tag from GitHub for a specific tool
+func (m *Manager) GetLatestVersionTag(toolName string) (string, error) {
+	repoName, ok := toolToRepo[toolName]
+	if !ok {
+		return "", fmt.Errorf("unknown tool: %s", toolName)
 	}
 	
-	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", GitHubAPI, GitHubOwner, GitHubRepo)
+	if m.useGH {
+		return m.getLatestVersionTagWithGH(repoName)
+	}
+	
+	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", GitHubAPI, GitHubOwner, repoName)
 	
 	resp, err := http.Get(url)
 	if err != nil {
@@ -124,8 +141,8 @@ func (m *Manager) GetLatestVersionTag() (string, error) {
 }
 
 // getLatestVersionTagWithGH fetches the latest release tag using gh CLI
-func (m *Manager) getLatestVersionTagWithGH() (string, error) {
-	cmd := exec.Command("gh", "release", "view", "--repo", fmt.Sprintf("%s/%s", GitHubOwner, GitHubRepo), "--json", "tagName")
+func (m *Manager) getLatestVersionTagWithGH(repoName string) (string, error) {
+	cmd := exec.Command("gh", "release", "view", "--repo", fmt.Sprintf("%s/%s", GitHubOwner, repoName), "--json", "tagName")
 	
 	output, err := cmd.Output()
 	if err != nil {
@@ -143,13 +160,18 @@ func (m *Manager) getLatestVersionTagWithGH() (string, error) {
 	return result.TagName, nil
 }
 
-// GetRelease fetches release information for a specific version
-func (m *Manager) GetRelease(version string) (*GitHubRelease, error) {
-	if m.useGH {
-		return m.getReleaseWithGH(version)
+// GetRelease fetches release information for a specific tool and version
+func (m *Manager) GetRelease(toolName, version string) (*GitHubRelease, error) {
+	repoName, ok := toolToRepo[toolName]
+	if !ok {
+		return nil, fmt.Errorf("unknown tool: %s", toolName)
 	}
 	
-	url := fmt.Sprintf("%s/repos/%s/%s/releases/tags/%s", GitHubAPI, GitHubOwner, GitHubRepo, version)
+	if m.useGH {
+		return m.getReleaseWithGH(repoName, version)
+	}
+	
+	url := fmt.Sprintf("%s/repos/%s/%s/releases/tags/%s", GitHubAPI, GitHubOwner, repoName, version)
 	
 	resp, err := http.Get(url)
 	if err != nil {
@@ -170,8 +192,8 @@ func (m *Manager) GetRelease(version string) (*GitHubRelease, error) {
 }
 
 // getReleaseWithGH fetches release information using gh CLI
-func (m *Manager) getReleaseWithGH(version string) (*GitHubRelease, error) {
-	cmd := exec.Command("gh", "release", "view", version, "--repo", fmt.Sprintf("%s/%s", GitHubOwner, GitHubRepo), "--json", "tagName,assets")
+func (m *Manager) getReleaseWithGH(repoName, version string) (*GitHubRelease, error) {
+	cmd := exec.Command("gh", "release", "view", version, "--repo", fmt.Sprintf("%s/%s", GitHubOwner, repoName), "--json", "tagName,assets")
 	
 	output, err := cmd.Output()
 	if err != nil {
@@ -202,7 +224,7 @@ func (m *Manager) getReleaseWithGH(version string) (*GitHubRelease, error) {
 			BrowserDownloadURL string `json:"browser_download_url"`
 		}{
 			Name:               asset.Name,
-			BrowserDownloadURL: fmt.Sprintf("https://github.com/%s/%s/releases/download/%s/%s", GitHubOwner, GitHubRepo, version, asset.Name),
+			BrowserDownloadURL: fmt.Sprintf("https://github.com/%s/%s/releases/download/%s/%s", GitHubOwner, repoName, version, asset.Name),
 		})
 	}
 	
@@ -238,7 +260,7 @@ func (m *Manager) InstallTool(toolName, versionTag string) error {
 	}
 	
 	// Get release information
-	release, err := m.GetRelease(versionTag)
+	release, err := m.GetRelease(toolName, versionTag)
 	if err != nil {
 		return err
 	}

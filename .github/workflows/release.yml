@@ -1,0 +1,11 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+jobs:
+  release:
+    uses: mattsolo1/grove-ecosystem/.github/workflows/releasable-go-tool.yml@main
+    with:
+      binary_name: 'grove'
+    secrets:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	"github.com/sirupsen/logrus"
-	"github.com/grovepm/grove/pkg/workspace"
+	"github.com/mattsolo1/grove-meta/pkg/workspace"
 )
 
 // CollectorFunc is a function that collects data for a single workspace

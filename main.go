@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 	
-	"github.com/grovepm/grove/cmd"
+	"github.com/mattsolo1/grove-meta/cmd"
 )
 
 func main() {

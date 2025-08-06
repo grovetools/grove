@@ -10,7 +10,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
-	"github.com/grovepm/grove/pkg/aggregator"
+	"github.com/mattsolo1/grove-meta/pkg/aggregator"
 	"github.com/spf13/cobra"
 )
 

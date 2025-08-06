@@ -1,4 +1,4 @@
-module github.com/mattsolo1/grove
+module github.com/mattsolo1/grove-meta
 
 go 1.24
 

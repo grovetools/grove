@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/mattsolo1/grove-core/cli"
-	"github.com/grovepm/grove/pkg/sdk"
+	"github.com/mattsolo1/grove-meta/pkg/sdk"
 	"github.com/spf13/cobra"
 )
 
@@ -85,7 +85,7 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 		
 		// Get actual version tag if "latest" specified
 		if version == "latest" {
-			latestVersion, err := manager.GetLatestVersionTag()
+			latestVersion, err := manager.GetLatestVersionTag(toolName)
 			if err != nil {
 				logger.WithError(err).Errorf("Failed to get latest version for %s", toolName)
 				continue

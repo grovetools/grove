@@ -8,7 +8,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattsolo1/grove-core/git"
-	"github.com/grovepm/grove/pkg/aggregator"
+	"github.com/mattsolo1/grove-meta/pkg/aggregator"
 	"github.com/spf13/cobra"
 )
 

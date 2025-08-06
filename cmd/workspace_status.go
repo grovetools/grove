@@ -10,7 +10,7 @@ import (
 	
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
-	"github.com/grovepm/grove/pkg/workspace"
+	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/spf13/cobra"

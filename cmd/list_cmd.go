@@ -8,7 +8,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/mattsolo1/grove-core/cli"
-	"github.com/grovepm/grove/pkg/sdk"
+	"github.com/mattsolo1/grove-meta/pkg/sdk"
 	"github.com/spf13/cobra"
 )
 
