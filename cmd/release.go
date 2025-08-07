@@ -167,10 +167,11 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, logger *lo
 	
 	// Collect submodule statuses
 	type submoduleStatus struct {
-		Path   string
-		Branch string
-		Dirty  bool
-		Error  error
+		Path       string
+		Branch     string
+		Dirty      bool
+		AheadCount int
+		Error      error
 	}
 	
 	var submoduleStatuses []submoduleStatus
@@ -211,6 +212,7 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, logger *lo
 		} else {
 			smStatus.Branch = status.Branch
 			smStatus.Dirty = status.IsDirty
+			smStatus.AheadCount = status.AheadCount
 		}
 		
 		submoduleStatuses = append(submoduleStatuses, smStatus)
@@ -228,6 +230,9 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, logger *lo
 	}
 	if mainStatus.Branch != "main" {
 		mainIssues = append(mainIssues, "not on main branch")
+	}
+	if mainStatus.HasUpstream && mainStatus.AheadCount > 0 {
+		mainIssues = append(mainIssues, fmt.Sprintf("ahead of remote by %d commits", mainStatus.AheadCount))
 	}
 	mainStatusStr := "✓ Clean"
 	if mainStatus.IsDirty {
@@ -256,6 +261,9 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, logger *lo
 			}
 			if sm.Branch != "main" {
 				issues = append(issues, "not on main branch")
+			}
+			if sm.AheadCount > 0 {
+				issues = append(issues, fmt.Sprintf("ahead of remote by %d commits", sm.AheadCount))
 			}
 		}
 		
@@ -346,6 +354,10 @@ func tagSubmodules(ctx context.Context, rootDir string, versions map[string]stri
 			}
 			if status.Branch != "main" {
 				return fmt.Errorf("submodule %s is not on main branch (current: %s)", smPath, status.Branch)
+			}
+			// Check if local branch is ahead of remote
+			if status.HasUpstream && status.AheadCount > 0 {
+				return fmt.Errorf("submodule %s is ahead of remote by %d commits - please push changes first", smPath, status.AheadCount)
 			}
 		}
 		
