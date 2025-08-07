@@ -21,11 +21,12 @@ import (
 )
 
 var (
-	releaseDryRun bool
-	releaseForce  bool
-	releaseMajor  []string
-	releaseMinor  []string
-	releasePatch  []string
+	releaseDryRun      bool
+	releaseForce       bool
+	releaseForceIncrement bool
+	releaseMajor       []string
+	releaseMinor       []string
+	releasePatch       []string
 )
 
 func init() {
@@ -60,6 +61,7 @@ Examples:
 
 	cmd.Flags().BoolVar(&releaseDryRun, "dry-run", false, "Print commands without executing them")
 	cmd.Flags().BoolVar(&releaseForce, "force", false, "Skip clean workspace checks")
+	cmd.Flags().BoolVar(&releaseForceIncrement, "force-increment", false, "Force version increment even if current commit has a tag")
 	cmd.Flags().StringSliceVar(&releaseMajor, "major", []string{}, "Repositories to receive major version bump")
 	cmd.Flags().StringSliceVar(&releaseMinor, "minor", []string{}, "Repositories to receive minor version bump")
 	cmd.Flags().StringSliceVar(&releasePatch, "patch", []string{}, "Repositories to receive patch version bump (default for all)")
@@ -499,13 +501,26 @@ func calculateNextVersions(ctx context.Context, rootDir string, major, minor, pa
 			}
 			
 			commitCount := strings.TrimSpace(string(countOutput))
-			if commitCount == "0" {
-				// Keep the same version - no bump needed
-				versions[repoName] = currentTag
-				hasChanges[repoName] = false
-				continue
+			if commitCount == "0" && !releaseForceIncrement {
+				// Check if current commit already has the tag
+				tagCheckCmd, err := cmd.Build(ctx, "git", "describe", "--exact-match", "--tags", "HEAD")
+				if err != nil {
+					return nil, nil, nil, fmt.Errorf("failed to build git command: %w", err)
+				}
+				
+				execCmd := tagCheckCmd.Exec()
+				execCmd.Dir = smFullPath
+				tagCheckOutput, err := execCmd.Output()
+				
+				if err == nil && strings.TrimSpace(string(tagCheckOutput)) == currentTag {
+					// Current commit already has this tag, keep the same version
+					versions[repoName] = currentTag
+					hasChanges[repoName] = false
+					continue
+				}
 			}
 			
+			// Either there are new commits, or force increment is enabled
 			hasChanges[repoName] = true
 		}
 		
