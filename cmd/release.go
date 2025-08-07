@@ -24,6 +24,7 @@ var (
 	releaseDryRun      bool
 	releaseForce       bool
 	releaseForceIncrement bool
+	releasePush        bool
 	releaseMajor       []string
 	releaseMinor       []string
 	releasePatch       []string
@@ -62,6 +63,7 @@ Examples:
 	cmd.Flags().BoolVar(&releaseDryRun, "dry-run", false, "Print commands without executing them")
 	cmd.Flags().BoolVar(&releaseForce, "force", false, "Skip clean workspace checks")
 	cmd.Flags().BoolVar(&releaseForceIncrement, "force-increment", false, "Force version increment even if current commit has a tag")
+	cmd.Flags().BoolVar(&releasePush, "push", false, "Push all repositories to remote before tagging")
 	cmd.Flags().StringSliceVar(&releaseMajor, "major", []string{}, "Repositories to receive major version bump")
 	cmd.Flags().StringSliceVar(&releaseMinor, "minor", []string{}, "Repositories to receive minor version bump")
 	cmd.Flags().StringSliceVar(&releasePatch, "patch", []string{}, "Repositories to receive patch version bump (default for all)")
@@ -113,6 +115,13 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	// Run pre-flight checks
 	if err := runPreflightChecks(ctx, rootDir, parentVersion, logger); err != nil {
 		return err
+	}
+
+	// Push repositories to remote if requested
+	if releasePush {
+		if err := pushRepositories(ctx, rootDir, hasChanges, logger); err != nil {
+			return fmt.Errorf("failed to push repositories: %w", err)
+		}
 	}
 
 	// Execute git submodule foreach to check cleanliness and tag
@@ -298,6 +307,58 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, logger *lo
 	return nil
 }
 
+func pushRepositories(ctx context.Context, rootDir string, hasChanges map[string]bool, logger *logrus.Logger) error {
+	logger.Info("Pushing repositories to remote...")
+	
+	// First push the main repository
+	logger.Info("Pushing main repository")
+	if err := executeGitCommand(ctx, rootDir, []string{"push", "origin", "main"}, "Push main repository", logger); err != nil {
+		return fmt.Errorf("failed to push main repository: %w", err)
+	}
+	
+	// Get list of submodules
+	cmd := command.NewSafeBuilder()
+	listCmd, err := cmd.Build(ctx, "git", "submodule", "status")
+	if err != nil {
+		return fmt.Errorf("failed to build git command: %w", err)
+	}
+	
+	execCmd := listCmd.Exec()
+	execCmd.Dir = rootDir
+	output, err := execCmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to list submodules: %w", err)
+	}
+	
+	// Process each submodule
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		
+		// Parse submodule path from status output
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		smPath := parts[1]
+		
+		// Push submodule
+		smFullPath := filepath.Join(rootDir, smPath)
+		logger.WithField("path", smPath).Info("Pushing submodule")
+		
+		if err := executeGitCommand(ctx, smFullPath, []string{"push", "origin", "main"}, 
+			fmt.Sprintf("Push %s", smPath), logger); err != nil {
+			// Only warn on push failures, don't fail the entire process
+			logger.WithFields(logrus.Fields{"path": smPath, "error": err}).Warn("Failed to push submodule")
+		}
+	}
+	
+	logger.Info("All repositories pushed to remote")
+	return nil
+}
+
 func tagSubmodules(ctx context.Context, rootDir string, versions map[string]string, hasChanges map[string]bool, logger *logrus.Logger) error {
 	// Get list of submodules
 	cmd := command.NewSafeBuilder()
@@ -332,18 +393,18 @@ func tagSubmodules(ctx context.Context, rootDir string, versions map[string]stri
 		repoName := filepath.Base(smPath)
 		version, ok := versions[repoName]
 		if !ok {
-			logger.Warn("No version found for submodule", "path", smPath)
+			logger.WithField("path", smPath).Warn("No version found for submodule")
 			continue
 		}
 		
 		// Skip if no changes
 		if changes, ok := hasChanges[repoName]; ok && !changes {
-			logger.Info("Skipping submodule (no changes)", "path", smPath)
+			logger.WithField("path", smPath).Info("Skipping submodule (no changes)")
 			continue
 		}
 		
 		smFullPath := filepath.Join(rootDir, smPath)
-		logger.Info("Tagging submodule", "path", smPath, "version", version)
+		logger.WithFields(logrus.Fields{"path": smPath, "version": version}).Info("Tagging submodule")
 		
 		// Check if clean (unless force)
 		if !releaseForce {
@@ -381,11 +442,14 @@ func tagSubmodules(ctx context.Context, rootDir string, versions map[string]stri
 
 func executeGitCommand(ctx context.Context, dir string, args []string, description string, logger *logrus.Logger) error {
 	if releaseDryRun {
-		logger.Info("[DRY RUN] Would execute", "command", fmt.Sprintf("git %s", strings.Join(args, " ")), "dir", dir)
+		logger.WithFields(logrus.Fields{
+			"command": fmt.Sprintf("git %s", strings.Join(args, " ")),
+			"dir": dir,
+		}).Info("[DRY RUN] Would execute")
 		return nil
 	}
 
-	logger.Info(description, "command", fmt.Sprintf("git %s", strings.Join(args, " ")))
+	logger.WithField("command", fmt.Sprintf("git %s", strings.Join(args, " "))).Info(description)
 
 	cmdBuilder := command.NewSafeBuilder()
 	cmd, err := cmdBuilder.Build(ctx, "git", args...)
@@ -477,7 +541,7 @@ func calculateNextVersions(ctx context.Context, rootDir string, major, minor, pa
 			// No tags found, start with v0.1.0
 			currentVersion = semver.MustParse("0.0.0")
 			currentVersions[repoName] = "v0.0.0"
-			logger.Info("No tags found for", "repo", repoName, "defaulting to", "v0.0.0")
+			logger.WithFields(logrus.Fields{"repo": repoName, "default": "v0.0.0"}).Info("No tags found, using default")
 			hasChanges[repoName] = true  // New repo always needs initial release
 		} else {
 			currentTag = strings.TrimSpace(string(tagOutput))
