@@ -25,6 +25,7 @@ var (
 	releaseForce       bool
 	releaseForceIncrement bool
 	releasePush        bool
+	releaseRepos       []string
 	releaseMajor       []string
 	releaseMinor       []string
 	releasePatch       []string
@@ -64,6 +65,7 @@ Examples:
 	cmd.Flags().BoolVar(&releaseForce, "force", false, "Skip clean workspace checks")
 	cmd.Flags().BoolVar(&releaseForceIncrement, "force-increment", false, "Force version increment even if current commit has a tag")
 	cmd.Flags().BoolVar(&releasePush, "push", false, "Push all repositories to remote before tagging")
+	cmd.Flags().StringSliceVar(&releaseRepos, "repos", []string{}, "Only release specified repositories (e.g., grove-meta,grove-core)")
 	cmd.Flags().StringSliceVar(&releaseMajor, "major", []string{}, "Repositories to receive major version bump")
 	cmd.Flags().StringSliceVar(&releaseMinor, "minor", []string{}, "Repositories to receive minor version bump")
 	cmd.Flags().StringSliceVar(&releasePatch, "patch", []string{}, "Repositories to receive patch version bump (default for all)")
@@ -310,6 +312,14 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, logger *lo
 func pushRepositories(ctx context.Context, rootDir string, hasChanges map[string]bool, logger *logrus.Logger) error {
 	logger.Info("Pushing repositories to remote...")
 	
+	// Create a map for filtering repositories if specified
+	repoFilter := make(map[string]bool)
+	if len(releaseRepos) > 0 {
+		for _, repo := range releaseRepos {
+			repoFilter[repo] = true
+		}
+	}
+	
 	// First push the main repository
 	logger.Info("Pushing main repository")
 	if err := executeGitCommand(ctx, rootDir, []string{"push", "origin", "main"}, "Push main repository", logger); err != nil {
@@ -343,6 +353,12 @@ func pushRepositories(ctx context.Context, rootDir string, hasChanges map[string
 			continue
 		}
 		smPath := parts[1]
+		repoName := filepath.Base(smPath)
+		
+		// Skip if not in the filter list (when filter is specified)
+		if len(repoFilter) > 0 && !repoFilter[repoName] {
+			continue
+		}
 		
 		// Push submodule
 		smFullPath := filepath.Join(rootDir, smPath)
@@ -393,7 +409,10 @@ func tagSubmodules(ctx context.Context, rootDir string, versions map[string]stri
 		repoName := filepath.Base(smPath)
 		version, ok := versions[repoName]
 		if !ok {
-			logger.WithField("path", smPath).Warn("No version found for submodule")
+			// Don't warn if we're filtering repos - this is expected
+			if len(releaseRepos) == 0 {
+				logger.WithField("path", smPath).Warn("No version found for submodule")
+			}
 			continue
 		}
 		
@@ -481,6 +500,14 @@ func calculateNextVersions(ctx context.Context, rootDir string, major, minor, pa
 	currentVersions := make(map[string]string)
 	hasChanges := make(map[string]bool)
 	
+	// Create a map for filtering repositories if specified
+	repoFilter := make(map[string]bool)
+	if len(releaseRepos) > 0 {
+		for _, repo := range releaseRepos {
+			repoFilter[repo] = true
+		}
+	}
+	
 	// Create bump type map for easier lookup
 	bumpTypes := make(map[string]string)
 	for _, repo := range major {
@@ -521,6 +548,12 @@ func calculateNextVersions(ctx context.Context, rootDir string, major, minor, pa
 		}
 		smPath := parts[1]
 		repoName := filepath.Base(smPath)
+		
+		// Skip if not in the filter list (when filter is specified)
+		if len(repoFilter) > 0 && !repoFilter[repoName] {
+			continue
+		}
+		
 		smFullPath := filepath.Join(rootDir, smPath)
 		
 		// Get latest tag
