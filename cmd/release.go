@@ -189,6 +189,14 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, logger *lo
 	
 	var submoduleStatuses []submoduleStatus
 	
+	// Create a map for filtering repositories if specified
+	repoFilter := make(map[string]bool)
+	if len(releaseRepos) > 0 {
+		for _, repo := range releaseRepos {
+			repoFilter[repo] = true
+		}
+	}
+	
 	// Get submodule statuses
 	cmdBuilder := command.NewSafeBuilder()
 	cmd, err := cmdBuilder.Build(ctx, "git", "submodule", "foreach", "--quiet", "echo $sm_path")
@@ -212,6 +220,13 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, logger *lo
 	// Check each submodule
 	for _, smPath := range submodulePaths {
 		if smPath == "" {
+			continue
+		}
+		
+		repoName := filepath.Base(smPath)
+		
+		// Skip if not in the filter list (when filter is specified)
+		if len(repoFilter) > 0 && !repoFilter[repoName] {
 			continue
 		}
 		
@@ -245,16 +260,24 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, logger *lo
 		mainIssues = append(mainIssues, "not on main branch")
 	}
 	if mainStatus.HasUpstream && mainStatus.AheadCount > 0 {
-		mainIssues = append(mainIssues, fmt.Sprintf("ahead of remote by %d commits", mainStatus.AheadCount))
+		// Only add as issue if we're not going to push
+		if !releasePush {
+			mainIssues = append(mainIssues, fmt.Sprintf("ahead of remote by %d commits", mainStatus.AheadCount))
+		}
 	}
 	mainStatusStr := "✓ Clean"
 	if mainStatus.IsDirty {
 		mainStatusStr = "✗ Dirty"
 	}
+	// Add ahead info even if not an issue
+	displayIssues := mainIssues
+	if releasePush && mainStatus.HasUpstream && mainStatus.AheadCount > 0 && len(mainIssues) == 0 {
+		displayIssues = []string{fmt.Sprintf("ahead of remote by %d commits (will push)", mainStatus.AheadCount)}
+	}
 	fmt.Fprintf(w, "grove-ecosystem\t%s\t%s\t%s\n", 
 		mainStatus.Branch, 
 		mainStatusStr,
-		strings.Join(mainIssues, ", "))
+		strings.Join(displayIssues, ", "))
 	
 	// Submodules
 	hasIssues := len(mainIssues) > 0
@@ -276,7 +299,10 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, logger *lo
 				issues = append(issues, "not on main branch")
 			}
 			if sm.AheadCount > 0 {
-				issues = append(issues, fmt.Sprintf("ahead of remote by %d commits", sm.AheadCount))
+				// Only add as issue if we're not going to push
+				if !releasePush {
+					issues = append(issues, fmt.Sprintf("ahead of remote by %d commits", sm.AheadCount))
+				}
 			}
 		}
 		
@@ -284,11 +310,17 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, logger *lo
 			hasIssues = true
 		}
 		
+		// Add ahead info even if not an issue
+		displayIssues := issues
+		if releasePush && sm.AheadCount > 0 && len(issues) == 0 {
+			displayIssues = []string{fmt.Sprintf("ahead of remote by %d commits (will push)", sm.AheadCount)}
+		}
+		
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", 
 			sm.Path,
 			branch,
 			statusStr,
-			strings.Join(issues, ", "))
+			strings.Join(displayIssues, ", "))
 	}
 	
 	w.Flush()
