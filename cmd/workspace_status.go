@@ -222,7 +222,7 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 		headers = append(headers, "CX FILES", "CX TOKENS", "CX SIZE")
 	}
 	if colMap["release"] {
-		headers = append(headers, "LATEST TAG", "COMMITS AHEAD")
+		headers = append(headers, "RELEASE")
 	}
 	
 	// Collect all rows
@@ -308,18 +308,18 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 			}
 		}
 		
-		// Add release columns if requested
+		// Add release column if requested
 		if colMap["release"] {
 			if ws.Release != nil && ws.RelErr == nil {
-				commitsAheadStr := fmt.Sprintf("%d", ws.Release.CommitsAhead)
-				if ws.Release.CommitsAhead < 0 {
-					commitsAheadStr = "-"
+				releaseStr := ws.Release.LatestTag
+				if ws.Release.CommitsAhead > 0 {
+					releaseStr = fmt.Sprintf("%s (↑%d)", ws.Release.LatestTag, ws.Release.CommitsAhead)
 				}
-				row = append(row, ws.Release.LatestTag, commitsAheadStr)
+				row = append(row, releaseStr)
 			} else if ws.RelErr != nil {
-				row = append(row, "error", "-")
+				row = append(row, "error")
 			} else {
-				row = append(row, "-", "-")
+				row = append(row, "-")
 			}
 		}
 		
@@ -366,14 +366,17 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 				return lipgloss.NewStyle().PaddingLeft(1).PaddingRight(1)
 			}
 			
-			// Style commits ahead column for releases
+			// Style release column
 			if colMap["release"] {
-				// Find the commits ahead column (last column if release is enabled)
-				commitsAheadCol := len(headers) - 1
-				if col == commitsAheadCol && len(rowData) > commitsAheadCol {
-					commitsStr := rowData[commitsAheadCol]
+				// Find the release column (last column if release is enabled)
+				releaseCol := len(headers) - 1
+				if col == releaseCol && len(rowData) > releaseCol {
+					releaseStr := rowData[releaseCol]
+					// Extract commits from format like "v0.2.0 (↑15)"
 					commits := 0
-					fmt.Sscanf(commitsStr, "%d", &commits)
+					if strings.Contains(releaseStr, "(↑") {
+						fmt.Sscanf(releaseStr, "%*s (↑%d)", &commits)
+					}
 					
 					if commits > 20 {
 						// Red for many commits ahead
