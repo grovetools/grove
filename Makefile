@@ -1,10 +1,9 @@
 # Makefile for grove (meta CLI)
 
 BINARY_NAME=grove
-INSTALL_PATH=/usr/local/bin
 BIN_DIR=bin
 
-.PHONY: all build install uninstall test clean fmt vet lint run
+.PHONY: all build test clean fmt vet lint run check dev build-all help
 
 all: build
 
@@ -12,16 +11,6 @@ build:
 	@mkdir -p $(BIN_DIR)
 	@echo "Building $(BINARY_NAME)..."
 	@go build -o $(BIN_DIR)/$(BINARY_NAME) .
-
-install: build
-	@echo "Installing $(BINARY_NAME) to $(INSTALL_PATH)..."
-	@sudo cp $(BIN_DIR)/$(BINARY_NAME) $(INSTALL_PATH)/
-	@echo "Installed successfully!"
-
-uninstall:
-	@echo "Uninstalling $(BINARY_NAME)..."
-	@sudo rm -f $(INSTALL_PATH)/$(BINARY_NAME)
-	@echo "Uninstalled successfully!"
 
 test:
 	@echo "Running tests..."
@@ -76,8 +65,6 @@ build-all:
 help:
 	@echo "Available targets:"
 	@echo "  make build       - Build the binary"
-	@echo "  make install     - Build and install to $(INSTALL_PATH)"
-	@echo "  make uninstall   - Remove from $(INSTALL_PATH)"
 	@echo "  make test        - Run tests"
 	@echo "  make clean       - Clean build artifacts"
 	@echo "  make fmt         - Format code"
@@ -87,4 +74,3 @@ help:
 	@echo "  make check       - Run all checks"
 	@echo "  make dev         - Build with race detector"
 	@echo "  make build-all   - Build for multiple platforms"
-	@echo "  make help        - Show this help"

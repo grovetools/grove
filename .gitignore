@@ -2,7 +2,4 @@
 grove
 bin/
 
-# Local registry override
-registry.local.json
-
 .grove

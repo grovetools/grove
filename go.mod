@@ -3,6 +3,7 @@ module github.com/mattsolo1/grove-meta
 go 1.24
 
 require (
+	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/mattsolo1/grove-core v0.2.1
 	github.com/sirupsen/logrus v1.9.3

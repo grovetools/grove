@@ -235,16 +235,18 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 		if colMap["git"] {
 			// Handle git error case
 			if ws.GitErr != nil {
-				row = append(row, "-", "ERROR", ws.GitErr.Error())
+				row = append(row, "-", errorStyle.Render("ERROR"), ws.GitErr.Error())
 			} else if ws.Git == nil {
 				row = append(row, "-", "-", "-")
 			} else {
 				status := ws.Git
 				
-				// Format status column - we'll apply colors in the StyleFunc instead
+				// Format status column with pre-styling
 				statusStr := "✓ Clean"
+				styledStatus := cleanStyle.Render(statusStr)
 				if status.IsDirty {
 					statusStr = "● Dirty"
+					styledStatus = dirtyStyle.Render(statusStr)
 				}
 				
 				// Format changes column
@@ -256,10 +258,10 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 						aheadStr := ""
 						behindStr := ""
 						if status.AheadCount > 0 {
-							aheadStr = fmt.Sprintf("↑%d", status.AheadCount)
+							aheadStr = aheadStyle.Render(fmt.Sprintf("↑%d", status.AheadCount))
 						}
 						if status.BehindCount > 0 {
-							behindStr = fmt.Sprintf("↓%d", status.BehindCount)
+							behindStr = behindStyle.Render(fmt.Sprintf("↓%d", status.BehindCount))
 						}
 						if aheadStr != "" && behindStr != "" {
 							changes = append(changes, aheadStr+"/"+behindStr)
@@ -275,13 +277,13 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 				
 				// Add file counts
 				if status.ModifiedCount > 0 {
-					changes = append(changes, fmt.Sprintf("M:%d", status.ModifiedCount))
+					changes = append(changes, modifiedStyle.Render(fmt.Sprintf("M:%d", status.ModifiedCount)))
 				}
 				if status.StagedCount > 0 {
-					changes = append(changes, fmt.Sprintf("S:%d", status.StagedCount))
+					changes = append(changes, stagedStyle.Render(fmt.Sprintf("S:%d", status.StagedCount)))
 				}
 				if status.UntrackedCount > 0 {
-					changes = append(changes, fmt.Sprintf("?:%d", status.UntrackedCount))
+					changes = append(changes, untrackedStyle.Render(fmt.Sprintf("?:%d", status.UntrackedCount)))
 				}
 				
 				changesStr := strings.Join(changes, " ")
@@ -289,7 +291,7 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 					changesStr = "up to date"
 				}
 				
-				row = append(row, status.Branch, statusStr, changesStr)
+				row = append(row, status.Branch, styledStatus, changesStr)
 			}
 		}
 		
@@ -314,6 +316,14 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 				releaseStr := ws.Release.LatestTag
 				if ws.Release.CommitsAhead > 0 {
 					releaseStr = fmt.Sprintf("%s (↑%d)", ws.Release.LatestTag, ws.Release.CommitsAhead)
+					// Style based on how many commits ahead
+					if ws.Release.CommitsAhead > 20 {
+						releaseStr = errorStyle.Render(releaseStr)
+					} else if ws.Release.CommitsAhead > 10 {
+						releaseStr = dirtyStyle.Render(releaseStr)
+					} else {
+						releaseStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffff00")).Render(releaseStr)
+					}
 				}
 				row = append(row, releaseStr)
 			} else if ws.RelErr != nil {
@@ -339,60 +349,13 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 		Headers(headers...).
 		Rows(rows...)
 	
-	// Apply column-specific styling
+	// Apply styling - only for headers since content is pre-styled
 	t.StyleFunc(func(row, col int) lipgloss.Style {
 		if row == 0 {
 			return headerStyle
 		}
-		
-		// For data rows, check if we need special styling
-		if row > 0 && row-1 < len(rows) {
-			rowData := rows[row-1]
-			
-			// Style git status column
-			if colMap["git"] && col == 2 && len(rowData) > 2 {
-				status := rowData[2]
-				if strings.Contains(status, "✓") {
-					return baseStyle.Copy().Foreground(lipgloss.Color("#00ff00")).Bold(true)
-				} else if strings.Contains(status, "●") {
-					return baseStyle.Copy().Foreground(lipgloss.Color("#ffaa00")).Bold(true)
-				} else if status == "ERROR" {
-					return baseStyle.Copy().Foreground(lipgloss.Color("#ff4444")).Bold(true)
-				}
-			}
-			
-			// Don't override styling for changes column - it has embedded colors
-			if colMap["git"] && col == 3 {
-				return lipgloss.NewStyle().PaddingLeft(1).PaddingRight(1)
-			}
-			
-			// Style release column
-			if colMap["release"] {
-				// Find the release column (last column if release is enabled)
-				releaseCol := len(headers) - 1
-				if col == releaseCol && len(rowData) > releaseCol {
-					releaseStr := rowData[releaseCol]
-					// Extract commits from format like "v0.2.0 (↑15)"
-					commits := 0
-					if strings.Contains(releaseStr, "(↑") {
-						fmt.Sscanf(releaseStr, "%*s (↑%d)", &commits)
-					}
-					
-					if commits > 20 {
-						// Red for many commits ahead
-						return baseStyle.Copy().Foreground(lipgloss.Color("#ff4444")).Bold(true)
-					} else if commits > 10 {
-						// Orange for moderate commits ahead
-						return baseStyle.Copy().Foreground(lipgloss.Color("#ffaa00")).Bold(true)
-					} else if commits > 0 {
-						// Yellow for few commits ahead
-						return baseStyle.Copy().Foreground(lipgloss.Color("#ffff00"))
-					}
-				}
-			}
-		}
-		
-		return baseStyle
+		// Return minimal style to preserve pre-styled content
+		return lipgloss.NewStyle().Padding(0, 1)
 	})
 	
 	fmt.Println(t)
