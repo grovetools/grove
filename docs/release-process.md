@@ -65,9 +65,17 @@ The SDK manager in grove-meta handles tool installation:
 
 Meta-releases track compatible versions across all tools.
 
-1. **Tag all tools with their current versions** (if not already tagged)
+1. **Update dependencies across all tools** (if needed):
+   ```bash
+   # After releasing a new version of grove-core
+   grove deps bump github.com/mattsolo1/grove-core@latest --commit
+   ```
+   
+   See [Dependency Management](dependency-management.md) for more details.
 
-2. **Run the grove release command**:
+2. **Tag all tools with their current versions** (if not already tagged)
+
+3. **Run the grove release command**:
    ```bash
    grove release create-meta-release v0.3.0
    ```

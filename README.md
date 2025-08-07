@@ -1,6 +1,6 @@
 # Grove
 
-Grove is the meta-CLI and package manager for the Grove ecosystem. It provides a unified entry point for installing and managing Grove tools.
+Grove is the meta-CLI and package manager for the Grove ecosystem. It provides a unified entry point for installing and managing Grove tools, as well as orchestrating operations across the entire ecosystem.
 
 ## Installation
 
@@ -52,6 +52,18 @@ Update tools to their latest version:
 grove update context
 grove update cx gvm
 ```
+
+### Managing Dependencies
+
+Update Go module dependencies across all Grove submodules:
+```bash
+grove deps sync                                                # Update all Grove deps to latest
+grove deps sync --commit                                       # Update and commit changes
+grove deps bump github.com/mattsolo1/grove-core@latest        # Update specific dependency
+grove deps bump github.com/mattsolo1/grove-core@v0.2.1        # Update to specific version
+```
+
+See [Dependency Management](docs/dependency-management.md) for detailed documentation.
 
 ## Tool Registry
 

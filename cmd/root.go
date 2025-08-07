@@ -13,6 +13,8 @@ import (
 var rootCmd = cli.NewStandardCommand("grove", "Grove workspace orchestrator and tool manager")
 
 func init() {
+	// Add subcommands
+	rootCmd.AddCommand(newDepsCmd())
 	
 	// Set up the root command's RunE to handle tool delegation
 	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
