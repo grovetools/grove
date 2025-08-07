@@ -469,8 +469,8 @@ func tagSubmodules(ctx context.Context, rootDir string, versions map[string]stri
 			if status.Branch != "main" {
 				return fmt.Errorf("submodule %s is not on main branch (current: %s)", smPath, status.Branch)
 			}
-			// Check if local branch is ahead of remote
-			if status.HasUpstream && status.AheadCount > 0 {
+			// Check if local branch is ahead of remote (only if we didn't just push)
+			if !releasePush && status.HasUpstream && status.AheadCount > 0 {
 				return fmt.Errorf("submodule %s is ahead of remote by %d commits - please push changes first", smPath, status.AheadCount)
 			}
 		}
