@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/mattsolo1/grove-meta/pkg/devlinks"
 )
 
 const (
@@ -30,7 +32,6 @@ var toolToRepo = map[string]string{
 	"cx":     "grove-context",
 	"flow":   "grove-flow",
 	"nb":     "grove-notebook",
-	"gvm":    "grove-version",
 	"px":     "grove-proxy",
 	"sb":     "grove-sandbox",
 	"tend":   "grove-tend",
@@ -51,9 +52,16 @@ func NewManager() (*Manager, error) {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
 	
+	baseDir := filepath.Join(homeDir, GroveDir)
+	
+	// Run migration on initialization
+	if err := MigrateFromSingleVersion(baseDir); err != nil {
+		// Ignore migration errors - it's a one-time operation
+	}
+	
 	return &Manager{
 		homeDir: homeDir,
-		baseDir: filepath.Join(homeDir, GroveDir),
+		baseDir: baseDir,
 		useGH:   false,
 	}, nil
 }
@@ -80,24 +88,53 @@ func (m *Manager) EnsureDirs() error {
 	return nil
 }
 
-// GetActiveVersion returns the currently active version
+// GetActiveVersion returns the currently active version (DEPRECATED)
+// This method is kept for backward compatibility but should not be used
 func (m *Manager) GetActiveVersion() (string, error) {
-	versionFile := filepath.Join(m.baseDir, ActiveVersionFile)
-	data, err := os.ReadFile(versionFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil // No active version
-		}
-		return "", fmt.Errorf("failed to read active version: %w", err)
+	// Try to migrate from old format if needed
+	if err := MigrateFromSingleVersion(m.baseDir); err != nil {
+		// Ignore migration errors
 	}
 	
-	return strings.TrimSpace(string(data)), nil
+	// Return empty string as there's no single active version anymore
+	return "", fmt.Errorf("no single active version - use GetToolVersion instead")
 }
 
-// SetActiveVersion sets the active version
+// GetToolVersion returns the active version for a specific tool
+func (m *Manager) GetToolVersion(tool string) (string, error) {
+	tv, err := LoadToolVersions(m.baseDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to load tool versions: %w", err)
+	}
+	
+	version := tv.GetToolVersion(tool)
+	if version == "" {
+		return "", fmt.Errorf("no active version for %s", tool)
+	}
+	
+	return version, nil
+}
+
+// SetActiveVersion sets the active version (DEPRECATED)
+// This method is kept for backward compatibility but should not be used
 func (m *Manager) SetActiveVersion(version string) error {
-	versionFile := filepath.Join(m.baseDir, ActiveVersionFile)
-	return os.WriteFile(versionFile, []byte(version), 0644)
+	return fmt.Errorf("SetActiveVersion is deprecated - use SetToolVersion instead")
+}
+
+// SetToolVersion sets the active version for a specific tool
+func (m *Manager) SetToolVersion(tool, version string) error {
+	tv, err := LoadToolVersions(m.baseDir)
+	if err != nil {
+		return fmt.Errorf("failed to load tool versions: %w", err)
+	}
+	
+	tv.SetToolVersion(tool, version)
+	
+	if err := tv.Save(m.baseDir); err != nil {
+		return fmt.Errorf("failed to save tool versions: %w", err)
+	}
+	
+	return nil
 }
 
 // GitHubRelease represents a GitHub release
@@ -303,51 +340,28 @@ func (m *Manager) InstallTool(toolName, versionTag string) error {
 	return nil
 }
 
-// UseVersion switches to a specific version
+// UseVersion switches to a specific version (DEPRECATED)
 func (m *Manager) UseVersion(versionTag string) error {
-	// Check if version is installed
-	versionDir := filepath.Join(m.baseDir, VersionsDir, versionTag)
-	if _, err := os.Stat(versionDir); os.IsNotExist(err) {
-		return fmt.Errorf("version %s is not installed", versionTag)
+	return fmt.Errorf("UseVersion is deprecated - use UseToolVersion instead")
+}
+
+// UseToolVersion switches a specific tool to a specific version
+func (m *Manager) UseToolVersion(tool, versionTag string) error {
+	// Check if the tool at this version is installed
+	toolPath := filepath.Join(m.baseDir, VersionsDir, versionTag, BinDir, tool)
+	if _, err := os.Stat(toolPath); os.IsNotExist(err) {
+		return fmt.Errorf("tool %s version %s is not installed", tool, versionTag)
 	}
 	
-	// Clear existing symlinks in bin directory
-	binDir := filepath.Join(m.baseDir, BinDir)
-	entries, err := os.ReadDir(binDir)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to read bin directory: %w", err)
+	// Update the tool version
+	if err := m.SetToolVersion(tool, versionTag); err != nil {
+		return err
 	}
 	
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			path := filepath.Join(binDir, entry.Name())
-			// Check if it's a symlink
-			if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				os.Remove(path)
-			}
-		}
-	}
+	// The caller should handle symlinking via reconciler
+	// This avoids circular dependencies
 	
-	// Create new symlinks
-	versionBinDir := filepath.Join(versionDir, BinDir)
-	binaries, err := os.ReadDir(versionBinDir)
-	if err != nil {
-		return fmt.Errorf("failed to read version bin directory: %w", err)
-	}
-	
-	for _, binary := range binaries {
-		if !binary.IsDir() {
-			source := filepath.Join(versionBinDir, binary.Name())
-			target := filepath.Join(binDir, binary.Name())
-			
-			if err := os.Symlink(source, target); err != nil {
-				return fmt.Errorf("failed to create symlink for %s: %w", binary.Name(), err)
-			}
-		}
-	}
-	
-	// Update active version file
-	return m.SetActiveVersion(versionTag)
+	return nil
 }
 
 // UninstallVersion removes a specific version
@@ -441,6 +455,11 @@ func (m *Manager) downloadFileWithGH(url, targetPath string) error {
 	return nil
 }
 
+// resetDevLinks clears all active development links
+func (m *Manager) resetDevLinks() error {
+	return devlinks.ClearAllCurrentLinks()
+}
+
 // GetAllTools returns the list of all available tools
 func GetAllTools() []string {
 	return []string{
@@ -448,7 +467,6 @@ func GetAllTools() []string {
 		"cx",
 		"flow",
 		"nb",
-		"gvm",
 		"px",
 		"sb",
 		"tend",

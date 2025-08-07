@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-meta/pkg/reconciler"
 	"github.com/mattsolo1/grove-meta/pkg/sdk"
 	"github.com/spf13/cobra"
 )
@@ -67,10 +68,10 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 		logger.Info("Installing all Grove tools...")
 	}
 	
-	// Track if we need to set an active version
-	currentActive, _ := manager.GetActiveVersion()
-	needsActive := currentActive == ""
-	var versionToActivate string
+	// Migration: ensure we're using the new per-tool version system
+	if err := sdk.MigrateFromSingleVersion(os.Getenv("HOME") + "/.grove"); err != nil {
+		logger.Debug("Migration check failed: %v", err)
+	}
 	
 	// Install each tool
 	for _, toolSpec := range tools {
@@ -93,11 +94,6 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 			version = latestVersion
 		}
 		
-		// Track version for activation
-		if needsActive && versionToActivate == "" {
-			versionToActivate = version
-		}
-		
 		logger.Infof("Installing %s %s...", toolName, version)
 		
 		if err := manager.InstallTool(toolName, version); err != nil {
@@ -105,18 +101,22 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 			// Continue with other tools
 		} else {
 			logger.Infof("✅ Successfully installed %s %s", toolName, version)
+			
+			// Auto-activate the installed version
+			logger.Infof("Activating %s %s...", toolName, version)
+			if err := manager.UseToolVersion(toolName, version); err != nil {
+				logger.WithError(err).Warnf("Failed to activate %s %s", toolName, version)
+			} else {
+				// Reconcile the symlink
+				tv, _ := sdk.LoadToolVersions(os.Getenv("HOME") + "/.grove")
+				if r, err := reconciler.NewWithToolVersions(tv); err == nil {
+					r.Reconcile(toolName)
+				}
+			}
 		}
 	}
 	
-	// If no version is active, activate the first version we installed
-	if needsActive && versionToActivate != "" {
-		logger.Infof("Setting %s as the active version...", versionToActivate)
-		if err := manager.UseVersion(versionToActivate); err != nil {
-			logger.WithError(err).Error("Failed to set active version")
-		} else {
-			logger.Infof("✅ Version %s is now active", versionToActivate)
-		}
-	}
+	// No longer need to set a single active version - each tool is activated individually
 	
 	// Check if ~/.grove/bin is in PATH
 	homeDir, _ := os.UserHomeDir()

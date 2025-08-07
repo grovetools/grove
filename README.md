@@ -4,9 +4,34 @@ Grove is the meta-CLI and package manager for the Grove ecosystem. It provides a
 
 ## Installation
 
+The `grove` CLI is the entry point to the ecosystem. Install it with a single command:
+
 ```bash
-go install github.com/yourorg/grove@latest
+curl -sSfL https://raw.githubusercontent.com/mattsolo1/grove-meta/main/scripts/install.sh | sh
 ```
+
+The installer is smart:
+- If the repository is public, it uses `curl`.
+- If the repository is private, it will automatically use the `gh` CLI if you are logged in (`gh auth status`).
+
+### Post-Installation
+
+1. **Update your PATH:** The installer will place the `grove` binary in `~/.grove/bin`. Make sure to add this directory to your shell's `PATH`.
+
+   ```bash
+   # Add this to your ~/.zshrc, ~/.bashrc, or equivalent
+   export PATH="$HOME/.grove/bin:$PATH"
+   ```
+
+2. **Install Grove Tools:** Once the `grove` CLI is installed and in your `PATH`, you can install all the other tools:
+
+   ```bash
+   # For public repositories
+   grove install all
+
+   # If repositories are private, use the --use-gh flag
+   grove install all --use-gh
+   ```
 
 ## Usage
 
@@ -49,8 +74,17 @@ Once installed, tools can be run in three ways:
 
 Update tools to their latest version:
 ```bash
-grove update context
-grove update cx gvm
+grove update                   # Update grove itself
+grove self-update              # Alternative way to update grove
+grove update context           # Update specific tool
+grove update cx flow           # Update multiple tools
+grove update all               # Update all installed tools
+```
+
+For private repositories, use the `--use-gh` flag:
+```bash
+grove update --use-gh
+grove self-update --use-gh
 ```
 
 ### Managing Dependencies

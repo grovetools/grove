@@ -4,10 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-meta/pkg/devlinks"
+	"github.com/mattsolo1/grove-meta/pkg/reconciler"
 	"github.com/mattsolo1/grove-meta/pkg/sdk"
 	"github.com/spf13/cobra"
 )
@@ -42,14 +46,16 @@ func newVersionListCmd() *cobra.Command {
 
 func newVersionUseCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "use <version>",
-		Short: "Switch to a specific version",
-		Long: `Switch to a specific installed version of Grove tools.
+		Use:   "use <tool@version>",
+		Short: "Switch a tool to a specific version",
+		Long: `Switch a specific tool to an installed version.
 
-This command updates the symlinks in ~/.grove/bin to point to the specified version.
+This command updates the symlink in ~/.grove/bin for the specified tool.
 
-Example:
-  grove version use v0.1.0`,
+Examples:
+  grove version use cx@v0.1.0
+  grove version use flow@v1.2.3
+  grove version use grove@v0.5.0`,
 		Args: cobra.ExactArgs(1),
 		RunE: runVersionUse,
 	}
@@ -80,7 +86,15 @@ func runVersionList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create SDK manager: %w", err)
 	}
 
-	// Get installed versions
+	// Load tool versions
+	tv, err := sdk.LoadToolVersions(os.Getenv("HOME") + "/.grove")
+	if err != nil {
+		tv = &sdk.ToolVersions{
+			Versions: make(map[string]string),
+		}
+	}
+
+	// Get all installed versions
 	versions, err := manager.ListInstalledVersions()
 	if err != nil {
 		return fmt.Errorf("failed to list versions: %w", err)
@@ -91,29 +105,42 @@ func runVersionList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Get active version
-	activeVersion, err := manager.GetActiveVersion()
-	if err != nil {
-		logger.WithError(err).Warn("Failed to get active version")
-		activeVersion = ""
+	// Build a map of version -> tools
+	versionTools := make(map[string][]string)
+	for _, version := range versions {
+		versionDir := filepath.Join(os.Getenv("HOME"), ".grove", "versions", version, "bin")
+		entries, err := os.ReadDir(versionDir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				versionTools[version] = append(versionTools[version], entry.Name())
+			}
+		}
 	}
 
 	if opts.JSONOutput {
 		// Output as JSON
-		type VersionInfo struct {
+		type ToolVersion struct {
+			Tool    string `json:"tool"`
 			Version string `json:"version"`
 			Active  bool   `json:"active"`
 		}
 		
-		var versionInfos []VersionInfo
-		for _, v := range versions {
-			versionInfos = append(versionInfos, VersionInfo{
-				Version: v,
-				Active:  v == activeVersion,
-			})
+		var toolVersions []ToolVersion
+		for version, tools := range versionTools {
+			for _, tool := range tools {
+				activeVersion := tv.GetToolVersion(tool)
+				toolVersions = append(toolVersions, ToolVersion{
+					Tool:    tool,
+					Version: version,
+					Active:  version == activeVersion,
+				})
+			}
 		}
 		
-		jsonData, err := json.MarshalIndent(versionInfos, "", "  ")
+		jsonData, err := json.MarshalIndent(toolVersions, "", "  ")
 		if err != nil {
 			return fmt.Errorf("failed to marshal JSON: %w", err)
 		}
@@ -123,15 +150,42 @@ func runVersionList(cmd *cobra.Command, args []string) error {
 
 	// Output as table
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "VERSION\tSTATUS")
-	fmt.Fprintln(w, "-------\t------")
+	fmt.Fprintln(w, "TOOL\tVERSION\tSTATUS")
+	fmt.Fprintln(w, "----\t-------\t------")
 
-	for _, version := range versions {
+	// Sort tools for consistent output
+	type toolVersionInfo struct {
+		tool    string
+		version string
+		active  bool
+	}
+	var allTools []toolVersionInfo
+	
+	for version, tools := range versionTools {
+		for _, tool := range tools {
+			activeVersion := tv.GetToolVersion(tool)
+			allTools = append(allTools, toolVersionInfo{
+				tool:    tool,
+				version: version,
+				active:  version == activeVersion,
+			})
+		}
+	}
+	
+	// Sort by tool name, then version
+	sort.Slice(allTools, func(i, j int) bool {
+		if allTools[i].tool != allTools[j].tool {
+			return allTools[i].tool < allTools[j].tool
+		}
+		return allTools[i].version < allTools[j].version
+	})
+	
+	for _, info := range allTools {
 		status := ""
-		if version == activeVersion {
+		if info.active {
 			status = "Active"
 		}
-		fmt.Fprintf(w, "%s\t%s\n", version, status)
+		fmt.Fprintf(w, "%s\t%s\t%s\n", info.tool, info.version, status)
 	}
 
 	w.Flush()
@@ -140,7 +194,16 @@ func runVersionList(cmd *cobra.Command, args []string) error {
 
 func runVersionUse(cmd *cobra.Command, args []string) error {
 	logger := cli.GetLogger(cmd)
-	version := args[0]
+	toolSpec := args[0]
+
+	// Parse tool@version
+	parts := strings.Split(toolSpec, "@")
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid format: use 'tool@version' (e.g., cx@v0.1.0)")
+	}
+
+	toolName := parts[0]
+	version := parts[1]
 
 	// Ensure version starts with 'v'
 	if !strings.HasPrefix(version, "v") {
@@ -153,34 +216,39 @@ func runVersionUse(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create SDK manager: %w", err)
 	}
 
-	// Check if version is installed
-	installed, err := manager.ListInstalledVersions()
-	if err != nil {
-		return fmt.Errorf("failed to list versions: %w", err)
-	}
-
-	found := false
-	for _, v := range installed {
-		if v == version {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		logger.Errorf("Version %s is not installed", version)
-		logger.Info("Use 'grove install <tool>@%s' to install this version first", version)
-		return fmt.Errorf("version not found")
-	}
-
 	// Switch to the version
-	logger.Infof("Switching to version %s...", version)
+	logger.Infof("Switching %s to version %s...", toolName, version)
 	
-	if err := manager.UseVersion(version); err != nil {
+	if err := manager.UseToolVersion(toolName, version); err != nil {
 		return fmt.Errorf("failed to switch version: %w", err)
 	}
+	
+	// Clear any dev override for this tool since user explicitly wants a released version
+	devConfig, err := devlinks.LoadConfig()
+	if err == nil {
+		if binInfo, exists := devConfig.Binaries[toolName]; exists && binInfo.Current != "" {
+			logger.Infof("Clearing dev override for %s", toolName)
+			binInfo.Current = ""
+			devlinks.SaveConfig(devConfig)
+		}
+	}
+	
+	// Load tool versions and reconcile
+	tv, err := sdk.LoadToolVersions(os.Getenv("HOME") + "/.grove")
+	if err != nil {
+		return fmt.Errorf("failed to load tool versions: %w", err)
+	}
+	
+	r, err := reconciler.NewWithToolVersions(tv)
+	if err != nil {
+		return fmt.Errorf("failed to create reconciler: %w", err)
+	}
+	
+	if err := r.Reconcile(toolName); err != nil {
+		return fmt.Errorf("failed to update symlink: %w", err)
+	}
 
-	logger.Infof("✅ Successfully switched to version %s", version)
+	logger.Infof("✅ Successfully switched %s to version %s", toolName, version)
 	return nil
 }
 
