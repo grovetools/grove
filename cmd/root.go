@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-meta/cmd/internal"
 	"github.com/spf13/cobra"
 )
 
@@ -15,6 +16,7 @@ var rootCmd = cli.NewStandardCommand("grove", "Grove workspace orchestrator and 
 func init() {
 	// Add subcommands
 	rootCmd.AddCommand(newDepsCmd())
+	rootCmd.AddCommand(internal.NewInternalCmd())
 	
 	// Set up the root command's RunE to handle tool delegation
 	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {

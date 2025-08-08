@@ -23,6 +23,7 @@ func newWorkspaceCmd() *cobra.Command {
 	cmd.AddCommand(NewWorkspaceCurrentCmd())
 	cmd.AddCommand(NewWorkspacePlansCmd())
 	cmd.AddCommand(NewWorkspaceChatsCmd())
+	cmd.AddCommand(newWorkspaceGitHooksCmd())
 	
 	return cmd
 }

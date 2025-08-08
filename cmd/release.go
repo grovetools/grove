@@ -77,6 +77,9 @@ Examples:
 	cmd.Flags().StringSliceVar(&releasePatch, "patch", []string{}, "Repositories to receive patch version bump (default for all)")
 	cmd.Flags().BoolVar(&releaseYes, "yes", false, "Skip interactive confirmation (for CI/CD)")
 
+	// Add subcommands
+	cmd.AddCommand(newReleaseChangelogCmd())
+
 	return cmd
 }
 
@@ -918,6 +921,29 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 			if levelIndex > 0 && !releaseDryRun {
 				if err := updateGoDependencies(ctx, smFullPath, versions, graph, logger); err != nil {
 					return fmt.Errorf("failed to update dependencies for %s: %w", repoName, err)
+				}
+			}
+			
+			// Generate and commit changelog
+			if !releaseDryRun {
+				changelogCmd := exec.CommandContext(ctx, "grove", "release", "changelog", smFullPath, "--version", version)
+				if err := changelogCmd.Run(); err != nil {
+					// Log a warning but don't fail the release if changelog fails
+					logger.WithError(err).Warnf("Failed to generate changelog for %s", repoName)
+				} else {
+					// Commit the changelog if it was modified
+					status, _ := git.GetStatus(smFullPath)
+					if status.IsDirty {
+						logger.Infof("Committing CHANGELOG.md for %s", repoName)
+						if err := executeGitCommand(ctx, smFullPath, []string{"add", "CHANGELOG.md"}, "Stage changelog", logger); err != nil {
+							logger.WithError(err).Warnf("Failed to stage changelog for %s", repoName)
+						} else {
+							commitMsg := fmt.Sprintf("docs(changelog): update CHANGELOG.md for %s", version)
+							if err := executeGitCommand(ctx, smFullPath, []string{"commit", "-m", commitMsg}, "Commit changelog", logger); err != nil {
+								logger.WithError(err).Warnf("Failed to commit changelog for %s", repoName)
+							}
+						}
+					}
 				}
 			}
 			
