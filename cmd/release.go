@@ -96,8 +96,9 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to discover workspaces: %w", err)
 	}
+	logger.WithField("workspaceCount", len(workspaces)).Info("Discovered workspaces")
 
-	// Build dependency graph
+	// Build dependency graph with ALL workspaces to get complete dependency info
 	logger.Info("Building dependency graph...")
 	graph, err := depsgraph.BuildGraph(rootDir, workspaces)
 	if err != nil {
@@ -131,7 +132,7 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	}
 
 	// Display proposed versions and get confirmation
-	if !displayAndConfirmVersionsWithOrder(versions, currentVersions, hasChanges, releaseLevels, logger) {
+	if !displayAndConfirmVersionsWithOrder(versions, currentVersions, hasChanges, releaseLevels, graph, logger) {
 		logger.Info("Release cancelled by user")
 		return nil
 	}
@@ -754,8 +755,8 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 				"version": version,
 			}).Info("Releasing module")
 			
-			// Update dependencies if this is not the first level
-			if levelIndex > 0 {
+			// Update dependencies if this is not the first level (skip in dry-run mode)
+			if levelIndex > 0 && !releaseDryRun {
 				if err := updateGoDependencies(ctx, smFullPath, versions, graph, logger); err != nil {
 					return fmt.Errorf("failed to update dependencies for %s: %w", repoName, err)
 				}
@@ -779,17 +780,19 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 				return fmt.Errorf("node not found in graph: %s", repoName)
 			}
 			
-			// Wait for module to be available
-			logger.WithFields(logrus.Fields{
-				"module": node.Path,
-				"version": version,
-			}).Info("Waiting for module availability...")
-			
-			if err := release.WaitForModuleAvailability(ctx, node.Path, version); err != nil {
-				return fmt.Errorf("failed waiting for %s@%s: %w", node.Path, version, err)
+			// Wait for module to be available (skip in dry-run mode)
+			if !releaseDryRun {
+				logger.WithFields(logrus.Fields{
+					"module": node.Path,
+					"version": version,
+				}).Info("Waiting for module availability...")
+				
+				if err := release.WaitForModuleAvailability(ctx, node.Path, version); err != nil {
+					return fmt.Errorf("failed waiting for %s@%s: %w", node.Path, version, err)
+				}
+				
+				logger.WithField("repo", repoName).Info("Module successfully released and available")
 			}
-			
-			logger.WithField("repo", repoName).Info("Module successfully released and available")
 		}
 	}
 	
@@ -907,37 +910,161 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 	return nil
 }
 
-func displayAndConfirmVersionsWithOrder(versions map[string]string, currentVersions map[string]string, hasChanges map[string]bool, releaseLevels [][]string, logger *logrus.Logger) bool {
-	fmt.Println("\nProposed versions and release order:")
-	fmt.Println("====================================")
+func displayAndConfirmVersionsWithOrder(versions map[string]string, currentVersions map[string]string, hasChanges map[string]bool, releaseLevels [][]string, graph *depsgraph.Graph, logger *logrus.Logger) bool {
+	fmt.Println("\nProposed versions:")
+	fmt.Println("==================")
 	
-	// Count repos with changes
-	changeCount := 0
-	for _, changes := range hasChanges {
-		if changes {
-			changeCount++
+	// Create separate lists for repos with and without changes
+	var reposWithChanges []string
+	var reposWithoutChanges []string
+	for repo := range versions {
+		if hasChanges[repo] {
+			reposWithChanges = append(reposWithChanges, repo)
+		} else {
+			reposWithoutChanges = append(reposWithoutChanges, repo)
 		}
 	}
+	
+	// Sort both lists
+	sortRepos := func(repos []string) {
+		for i := 0; i < len(repos); i++ {
+			for j := i + 1; j < len(repos); j++ {
+				if repos[i] > repos[j] {
+					repos[i], repos[j] = repos[j], repos[i]
+				}
+			}
+		}
+	}
+	sortRepos(reposWithChanges)
+	sortRepos(reposWithoutChanges)
+	
+	// Count repos with changes
+	changeCount := len(reposWithChanges)
 	
 	if changeCount == 0 {
 		fmt.Println("\nNo repositories have changes to release.")
 		return false
 	}
 	
-	// Display release levels
+	// Define styles
+	highlightStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00ff00"))
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	
+	// Prepare rows
+	var rows [][]string
+	
+	// Add repos with changes first
+	for _, repo := range reposWithChanges {
+		current := currentVersions[repo]
+		if current == "" {
+			current = "-"
+		}
+		proposed := versions[repo]
+		increment := getVersionIncrement(current, proposed)
+		// Pre-style the proposed version
+		styledProposed := highlightStyle.Render(proposed)
+		rows = append(rows, []string{repo, current, styledProposed, increment})
+	}
+	
+	// Then add repos without changes
+	for _, repo := range reposWithoutChanges {
+		current := currentVersions[repo]
+		if current == "" {
+			current = "-"
+		}
+		proposed := versions[repo]
+		// Pre-style all columns for dimmed rows
+		rows = append(rows, []string{
+			dimStyle.Render(repo), 
+			dimStyle.Render(current), 
+			dimStyle.Render(proposed), 
+			dimStyle.Render("-"),
+		})
+	}
+	
+	// Create table with lipgloss
+	re := lipgloss.NewRenderer(os.Stdout)
+	
+	baseStyle := re.NewStyle().Padding(0, 1)
+	headerStyle := baseStyle.Copy().Bold(true).Foreground(lipgloss.Color("255"))
+	
+	// Create the table
+	t := table.New().
+		Border(lipgloss.NormalBorder()).
+		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
+		Headers("REPOSITORY", "CURRENT", "PROPOSED", "INCREMENT").
+		Rows(rows...)
+	
+	// Apply styling only to header since content is pre-styled
+	t.StyleFunc(func(row, col int) lipgloss.Style {
+		if row == 0 {
+			return headerStyle
+		}
+		// Return a minimal style that preserves the pre-styled content
+		return lipgloss.NewStyle().Padding(0, 1)
+	})
+	
+	fmt.Println(t)
+	
+	// Display release order by dependency level
 	fmt.Println("\nRelease Order (by dependency level):")
-	for i, level := range releaseLevels {
-		fmt.Printf("\nLevel %d (can release in parallel):\n", i+1)
-		for _, repo := range level {
-			if hasChanges[repo] {
-				current := currentVersions[repo]
-				if current == "" {
-					current = "-"
+	fmt.Println("====================================")
+	
+	// Show dependency levels
+	if len(releaseLevels) > 0 {
+		levelCount := 0
+		for levelIdx, level := range releaseLevels {
+			// Check if this level has any repos with changes
+			hasReposInLevel := false
+			var reposInLevel []string
+			for _, repo := range level {
+				// Check if this repo is in our release set (has a version)
+				if _, hasVersion := versions[repo]; hasVersion && hasChanges[repo] {
+					hasReposInLevel = true
+					reposInLevel = append(reposInLevel, repo)
 				}
-				proposed := versions[repo]
-				increment := getVersionIncrement(current, proposed)
-				fmt.Printf("  - %s: %s → %s (%s)\n", repo, current, proposed, increment)
 			}
+			
+			if hasReposInLevel {
+				levelCount++
+				fmt.Printf("\nLevel %d (can release in parallel):\n", levelCount)
+				for _, repo := range reposInLevel {
+					current := currentVersions[repo]
+					if current == "" {
+						current = "-"
+					}
+					proposed := versions[repo]
+					increment := getVersionIncrement(current, proposed)
+					
+					// Show dependencies if not first level
+					deps := graph.GetDependencies(repo)
+					depStr := ""
+					if len(deps) > 0 && levelIdx > 0 {
+						var depNames []string
+						for _, dep := range deps {
+							// Find the repo name for this dependency
+							for name, node := range graph.GetAllNodes() {
+								if node.Path == dep {
+									depNames = append(depNames, name)
+									break
+								}
+							}
+						}
+						if len(depNames) > 0 {
+							depStr = fmt.Sprintf(" (depends on: %s)", strings.Join(depNames, ", "))
+						}
+					}
+					
+					fmt.Printf("  - %s: %s → %s (%s)%s\n", repo, current, proposed, increment, depStr)
+				}
+			}
+		}
+		
+		// If only one level, all repos are independent
+		if levelCount == 1 {
+			fmt.Println("\nNote: All repositories are independent and will be released in parallel.")
+		} else if levelCount == 0 {
+			fmt.Println("\nNo repositories with changes found in release plan.")
 		}
 	}
 	

@@ -58,8 +58,12 @@ func BuildGraph(rootDir string, workspaces []string) (*Graph, error) {
 
 	// First pass: collect all modules
 	for _, ws := range workspaces {
-		wsPath := filepath.Join(rootDir, ws)
+		// workspaces are already absolute paths from Discover
+		wsPath := ws
 		goModPath := filepath.Join(wsPath, "go.mod")
+		
+		// Get workspace name for the node
+		wsName := filepath.Base(ws)
 		
 		data, err := os.ReadFile(goModPath)
 		if err != nil {
@@ -76,19 +80,20 @@ func BuildGraph(rootDir string, workspaces []string) (*Graph, error) {
 		}
 
 		node := &Node{
-			Name: ws,
+			Name: wsName,
 			Path: modFile.Module.Mod.Path,
 			Dir:  wsPath,
 			Deps: []string{},
 		}
 		
 		graph.AddNode(node)
-		modulePathToName[modFile.Module.Mod.Path] = ws
+		modulePathToName[modFile.Module.Mod.Path] = wsName
 	}
 
 	// Second pass: build edges
 	for _, ws := range workspaces {
-		node, exists := graph.GetNode(ws)
+		wsName := filepath.Base(ws)
+		node, exists := graph.GetNode(wsName)
 		if !exists {
 			continue
 		}
@@ -110,7 +115,7 @@ func BuildGraph(rootDir string, workspaces []string) (*Graph, error) {
 			if strings.HasPrefix(req.Mod.Path, "github.com/mattsolo1/") {
 				if depName, ok := modulePathToName[req.Mod.Path]; ok {
 					node.Deps = append(node.Deps, req.Mod.Path)
-					graph.AddEdge(ws, depName)
+					graph.AddEdge(wsName, depName)
 				}
 			}
 		}
@@ -122,6 +127,11 @@ func BuildGraph(rootDir string, workspaces []string) (*Graph, error) {
 // TopologicalSort performs a topological sort of the graph using Kahn's algorithm
 // Returns modules grouped by levels that can be released in parallel
 func (g *Graph) TopologicalSort() ([][]string, error) {
+	// If graph is empty, return empty result
+	if len(g.nodes) == 0 {
+		return [][]string{}, nil
+	}
+	
 	// Calculate in-degrees (number of dependencies each node has)
 	inDegree := make(map[string]int)
 	for name := range g.nodes {
