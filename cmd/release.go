@@ -352,6 +352,14 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, logger *lo
 	w.Flush()
 	fmt.Println()
 	
+	// Check if the parent version tag already exists
+	checkCmd := exec.Command("git", "tag", "-l", version)
+	checkOutput, _ := checkCmd.Output()
+	if len(checkOutput) > 0 {
+		logger.WithField("version", version).Error("Parent repository tag already exists")
+		hasIssues = true
+	}
+	
 	// Check if we should proceed
 	if hasIssues && !releaseForce && !releaseDryRun {
 		logger.Error("Pre-flight checks failed. Fix the issues above or use --force to proceed anyway.")
@@ -1210,29 +1218,45 @@ func displayAndConfirmVersions(versions map[string]string, currentVersions map[s
 }
 
 func determineParentVersion(versions map[string]string, hasChanges map[string]bool) string {
-	// Use the highest version among all submodules with changes
-	var highest *semver.Version
+	// Get the current version of the parent repository
+	cmd := exec.Command("git", "describe", "--tags", "--abbrev=0")
+	output, err := cmd.Output()
 	
-	for repo, versionStr := range versions {
-		// Skip repos without changes
-		if changes, ok := hasChanges[repo]; ok && !changes {
-			continue
-		}
-		v, err := semver.NewVersion(versionStr)
+	var currentVersion *semver.Version
+	if err == nil {
+		currentTag := strings.TrimSpace(string(output))
+		currentVersion, err = semver.NewVersion(currentTag)
 		if err != nil {
-			continue
+			// If we can't parse the current tag, start fresh
+			currentVersion = semver.MustParse("0.0.0")
 		}
+	} else {
+		// No tags found, start with v0.0.0
+		currentVersion = semver.MustParse("0.0.0")
+	}
+	
+	// Always increment the patch version of the parent repository
+	newVersion := currentVersion.IncPatch()
+	proposedVersion := "v" + newVersion.String()
+	
+	// Check if this version already exists (in case of manual tagging)
+	checkCmd := exec.Command("git", "tag", "-l", proposedVersion)
+	checkOutput, _ := checkCmd.Output()
+	if len(checkOutput) > 0 {
+		// Version exists, increment minor instead
+		newVersion = currentVersion.IncMinor()
+		proposedVersion = "v" + newVersion.String()
 		
-		if highest == nil || v.GreaterThan(highest) {
-			highest = v
+		// If that also exists, increment major
+		checkCmd = exec.Command("git", "tag", "-l", proposedVersion)
+		checkOutput, _ = checkCmd.Output()
+		if len(checkOutput) > 0 {
+			newVersion = currentVersion.IncMajor()
+			proposedVersion = "v" + newVersion.String()
 		}
 	}
 	
-	if highest == nil {
-		return "v0.1.0"
-	}
-	
-	return "v" + highest.String()
+	return proposedVersion
 }
 
 func createReleaseCommitMessage(versions map[string]string, hasChanges map[string]bool) string {
