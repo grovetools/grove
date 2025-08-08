@@ -175,10 +175,21 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Commit the submodule updates
-	commitMsg := createReleaseCommitMessage(versions, hasChanges)
-	if err := executeGitCommand(ctx, rootDir, []string{"commit", "-m", commitMsg}, "Commit release", logger); err != nil {
-		return err
+	// Check if there are actually changes to commit after staging
+	status, err := git.GetStatus(rootDir)
+	if err != nil {
+		return fmt.Errorf("failed to check git status: %w", err)
+	}
+
+	// Only commit if there are staged changes
+	if status.IsDirty {
+		// Commit the submodule updates
+		commitMsg := createReleaseCommitMessage(versions, hasChanges)
+		if err := executeGitCommand(ctx, rootDir, []string{"commit", "-m", commitMsg}, "Commit release", logger); err != nil {
+			return err
+		}
+	} else {
+		logger.Info("No changes to commit after staging submodules")
 	}
 
 	// Recalculate parent version to handle same-day releases
