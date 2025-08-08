@@ -1,6 +1,6 @@
 package tests
 
-import "github.com/grovepm/grove-tend/internal/harness"
+import "github.com/mattsolo1/grove-tend/internal/harness"
 
 // AllScenarios returns all test scenarios for grove-meta
 func AllScenarios() []*harness.Scenario {

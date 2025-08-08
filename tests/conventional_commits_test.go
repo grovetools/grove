@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/grovepm/grove-tend/internal/harness"
-	"github.com/grovepm/grove-tend/pkg/command"
-	"github.com/grovepm/grove-tend/pkg/fs"
-	"github.com/grovepm/grove-tend/pkg/git"
+	"github.com/mattsolo1/grove-tend/internal/harness"
+	"github.com/mattsolo1/grove-tend/pkg/command"
+	"github.com/mattsolo1/grove-tend/pkg/fs"
+	"github.com/mattsolo1/grove-tend/pkg/git"
 )
 
 // ConventionalCommitsScenario tests the full lifecycle of conventional commits and changelog generation
