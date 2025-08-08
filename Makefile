@@ -2,6 +2,25 @@
 
 BINARY_NAME=grove
 BIN_DIR=bin
+VERSION_PKG=github.com/mattsolo1/grove-core/version
+
+# --- Versioning ---
+# For dev builds, we construct a version string from git info.
+# For release builds, VERSION is passed in by the CI/CD pipeline (e.g., VERSION=v1.2.3)
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD)
+GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
+GIT_DIRTY  ?= $(shell test -n "`git status --porcelain`" && echo "-dirty")
+BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# If VERSION is not set, default to a dev version string
+VERSION ?= $(GIT_BRANCH)-$(GIT_COMMIT)$(GIT_DIRTY)
+
+# Go LDFLAGS to inject version info at compile time
+LDFLAGS = -ldflags="\
+-X '$(VERSION_PKG).Version=$(VERSION)' \
+-X '$(VERSION_PKG).Commit=$(GIT_COMMIT)' \
+-X '$(VERSION_PKG).Branch=$(GIT_BRANCH)' \
+-X '$(VERSION_PKG).BuildDate=$(BUILD_DATE)'"
 
 .PHONY: all build test clean fmt vet lint run check dev build-all help
 
@@ -9,8 +28,8 @@ all: build
 
 build:
 	@mkdir -p $(BIN_DIR)
-	@echo "Building $(BINARY_NAME)..."
-	@go build -o $(BIN_DIR)/$(BINARY_NAME) .
+	@echo "Building $(BINARY_NAME) version $(VERSION)..."
+	@go build $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) .
 
 test:
 	@echo "Running tests..."
@@ -49,17 +68,23 @@ check: fmt vet lint test
 # Development build with race detector
 dev:
 	@mkdir -p $(BIN_DIR)
-	@echo "Building $(BINARY_NAME) with race detector..."
-	@go build -race -o $(BIN_DIR)/$(BINARY_NAME) .
+	@echo "Building $(BINARY_NAME) version $(VERSION) with race detector..."
+	@go build -race $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) .
 
 # Cross-compilation targets
+PLATFORMS ?= darwin/amd64 darwin/arm64 linux/amd64 linux/arm64
+DIST_DIR ?= dist
+
 build-all:
-	@echo "Building for multiple platforms..."
-	@GOOS=darwin GOARCH=amd64 go build -o $(BINARY_NAME)-darwin-amd64 .
-	@GOOS=darwin GOARCH=arm64 go build -o $(BINARY_NAME)-darwin-arm64 .
-	@GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME)-linux-amd64 .
-	@GOOS=linux GOARCH=arm64 go build -o $(BINARY_NAME)-linux-arm64 .
-	@GOOS=windows GOARCH=amd64 go build -o $(BINARY_NAME)-windows-amd64.exe .
+	@echo "Building for multiple platforms into $(DIST_DIR)..."
+	@mkdir -p $(DIST_DIR)
+	@for platform in $(PLATFORMS); do \
+		os=$$(echo $$platform | cut -d'/' -f1); \
+		arch=$$(echo $$platform | cut -d'/' -f2); \
+		output_name="$(BINARY_NAME)-$${os}-$${arch}"; \
+		echo "  -> Building $${output_name} version $(VERSION)"; \
+		GOOS=$$os GOARCH=$$arch go build $(LDFLAGS) -o $(DIST_DIR)/$${output_name} .; \
+	done
 
 # Show available targets
 help:

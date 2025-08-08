@@ -34,18 +34,7 @@ jobs:
 
       - name: Build binaries
         run: |
-          # Define target platforms
-          PLATFORMS=("darwin/amd64" "darwin/arm64" "linux/amd64" "linux/arm64")
-          
-          # Build for each platform
-          for platform in "${PLATFORMS[@]}"; do
-            os="${platform%%/*}"
-            arch="${platform##*/}"
-            output_name="grove-${os}-${arch}"
-            
-            echo "Building ${output_name}"
-            GOOS=$os GOARCH=$arch go build -ldflags="-s -w" -o "dist/${output_name}" .
-          done
+          make build-all VERSION=${{ github.ref_name }}
 
       - name: Generate checksums
         run: |

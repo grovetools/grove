@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/version"
 	"github.com/mattsolo1/grove-meta/pkg/devlinks"
 	"github.com/mattsolo1/grove-meta/pkg/reconciler"
 	"github.com/mattsolo1/grove-meta/pkg/sdk"
@@ -21,11 +22,30 @@ func init() {
 }
 
 func newVersionCmd() *cobra.Command {
+	var jsonOutput bool
+
 	cmd := &cobra.Command{
 		Use:   "version",
 		Short: "Manage Grove tool versions",
 		Long:  "List, switch between, and uninstall different versions of Grove tools",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// When run without subcommands, print grove version info
+			info := version.GetInfo()
+
+			if jsonOutput {
+				jsonData, err := json.MarshalIndent(info, "", "  ")
+				if err != nil {
+					return fmt.Errorf("failed to marshal version info to JSON: %w", err)
+				}
+				fmt.Println(string(jsonData))
+			} else {
+				fmt.Println(info.String())
+			}
+			return nil
+		},
 	}
+
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output version information in JSON format")
 
 	cmd.AddCommand(newVersionListCmd())
 	cmd.AddCommand(newVersionUseCmd())
