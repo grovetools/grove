@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -15,9 +16,12 @@ import (
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/command"
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-meta/pkg/depsgraph"
+	"github.com/mattsolo1/grove-meta/pkg/release"
 	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"golang.org/x/mod/modfile"
 )
 
 var (
@@ -29,6 +33,7 @@ var (
 	releaseMajor       []string
 	releaseMinor       []string
 	releasePatch       []string
+	releaseYes         bool
 )
 
 func init() {
@@ -69,6 +74,7 @@ Examples:
 	cmd.Flags().StringSliceVar(&releaseMajor, "major", []string{}, "Repositories to receive major version bump")
 	cmd.Flags().StringSliceVar(&releaseMinor, "minor", []string{}, "Repositories to receive minor version bump")
 	cmd.Flags().StringSliceVar(&releasePatch, "patch", []string{}, "Repositories to receive patch version bump (default for all)")
+	cmd.Flags().BoolVar(&releaseYes, "yes", false, "Skip interactive confirmation (for CI/CD)")
 
 	return cmd
 }
@@ -83,6 +89,25 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	rootDir, err := workspace.FindRoot("")
 	if err != nil {
 		return fmt.Errorf("failed to find workspace root: %w", err)
+	}
+
+	// Discover all workspaces
+	workspaces, err := workspace.Discover(rootDir)
+	if err != nil {
+		return fmt.Errorf("failed to discover workspaces: %w", err)
+	}
+
+	// Build dependency graph
+	logger.Info("Building dependency graph...")
+	graph, err := depsgraph.BuildGraph(rootDir, workspaces)
+	if err != nil {
+		return fmt.Errorf("failed to build dependency graph: %w", err)
+	}
+
+	// Get topologically sorted release order
+	releaseLevels, err := graph.TopologicalSort()
+	if err != nil {
+		return fmt.Errorf("failed to sort dependencies: %w", err)
 	}
 
 	// Calculate versions for all submodules
@@ -106,7 +131,7 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	}
 
 	// Display proposed versions and get confirmation
-	if !displayAndConfirmVersions(versions, currentVersions, hasChanges, logger) {
+	if !displayAndConfirmVersionsWithOrder(versions, currentVersions, hasChanges, releaseLevels, logger) {
 		logger.Info("Release cancelled by user")
 		return nil
 	}
@@ -126,9 +151,9 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Execute git submodule foreach to check cleanliness and tag
-	if err := tagSubmodules(ctx, rootDir, versions, hasChanges, logger); err != nil {
-		return fmt.Errorf("failed to tag submodules: %w", err)
+	// Execute dependency-aware release orchestration
+	if err := orchestrateRelease(ctx, rootDir, releaseLevels, versions, hasChanges, graph, logger); err != nil {
+		return fmt.Errorf("failed to orchestrate release: %w", err)
 	}
 
 	// Stage the updated submodule references
@@ -697,6 +722,248 @@ func getVersionIncrement(current, proposed string) string {
 	}
 	
 	return "-"
+}
+
+func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]string, versions map[string]string, hasChanges map[string]bool, graph *depsgraph.Graph, logger *logrus.Logger) error {
+	logger.Info("Starting dependency-aware release orchestration...")
+	
+	// Process each level of dependencies
+	for levelIndex, level := range releaseLevels {
+		logger.WithField("level", levelIndex).Info("Processing release level")
+		
+		// Process all modules in this level
+		for _, repoName := range level {
+			// Skip if no changes
+			if changes, ok := hasChanges[repoName]; !ok || !changes {
+				logger.WithField("repo", repoName).Info("Skipping (no changes)")
+				continue
+			}
+			
+			// Skip if no version
+			version, ok := versions[repoName]
+			if !ok {
+				logger.WithField("repo", repoName).Warn("No version found, skipping")
+				continue
+			}
+			
+			smPath := repoName
+			smFullPath := filepath.Join(rootDir, smPath)
+			
+			logger.WithFields(logrus.Fields{
+				"repo": repoName,
+				"version": version,
+			}).Info("Releasing module")
+			
+			// Update dependencies if this is not the first level
+			if levelIndex > 0 {
+				if err := updateGoDependencies(ctx, smFullPath, versions, graph, logger); err != nil {
+					return fmt.Errorf("failed to update dependencies for %s: %w", repoName, err)
+				}
+			}
+			
+			// Tag the module
+			if err := executeGitCommand(ctx, smFullPath, []string{"tag", "-a", version, "-m", fmt.Sprintf("Release %s", version)}, 
+				fmt.Sprintf("Tag %s", repoName), logger); err != nil {
+				return err
+			}
+			
+			// Push the tag
+			if err := executeGitCommand(ctx, smFullPath, []string{"push", "origin", version}, 
+				fmt.Sprintf("Push tag for %s", repoName), logger); err != nil {
+				return err
+			}
+			
+			// Get module path for waiting
+			node, exists := graph.GetNode(repoName)
+			if !exists {
+				return fmt.Errorf("node not found in graph: %s", repoName)
+			}
+			
+			// Wait for module to be available
+			logger.WithFields(logrus.Fields{
+				"module": node.Path,
+				"version": version,
+			}).Info("Waiting for module availability...")
+			
+			if err := release.WaitForModuleAvailability(ctx, node.Path, version); err != nil {
+				return fmt.Errorf("failed waiting for %s@%s: %w", node.Path, version, err)
+			}
+			
+			logger.WithField("repo", repoName).Info("Module successfully released and available")
+		}
+	}
+	
+	logger.Info("All modules released successfully")
+	return nil
+}
+
+func updateGoDependencies(ctx context.Context, modulePath string, releasedVersions map[string]string, graph *depsgraph.Graph, logger *logrus.Logger) error {
+	goModPath := filepath.Join(modulePath, "go.mod")
+	
+	// Read current go.mod
+	data, err := os.ReadFile(goModPath)
+	if err != nil {
+		return fmt.Errorf("failed to read go.mod: %w", err)
+	}
+	
+	modFile, err := modfile.Parse(goModPath, data, nil)
+	if err != nil {
+		return fmt.Errorf("failed to parse go.mod: %w", err)
+	}
+	
+	// Track if we made any updates
+	hasUpdates := false
+	
+	// Check each dependency
+	for _, req := range modFile.Require {
+		// Only update Grove ecosystem dependencies
+		if !strings.HasPrefix(req.Mod.Path, "github.com/mattsolo1/") {
+			continue
+		}
+		
+		// Find the module name from path
+		var depName string
+		for name, node := range graph.GetAllNodes() {
+			if node.Path == req.Mod.Path {
+				depName = name
+				break
+			}
+		}
+		
+		if depName == "" {
+			continue
+		}
+		
+		// Check if this dependency has a new version
+		newVersion, hasNewVersion := releasedVersions[depName]
+		if !hasNewVersion {
+			continue
+		}
+		
+		logger.WithFields(logrus.Fields{
+			"dep": req.Mod.Path,
+			"old": req.Mod.Version,
+			"new": newVersion,
+		}).Info("Updating dependency")
+		
+		// Update to new version
+		cmd := exec.CommandContext(ctx, "go", "get", fmt.Sprintf("%s@%s", req.Mod.Path, newVersion))
+		cmd.Dir = modulePath
+		cmd.Env = append(os.Environ(),
+			"GOPRIVATE=github.com/mattsolo1/*",
+			"GOPROXY=direct",
+		)
+		
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("failed to update %s: %w (output: %s)", req.Mod.Path, err, output)
+		}
+		
+		hasUpdates = true
+	}
+	
+	if hasUpdates {
+		// Run go mod tidy
+		cmd := exec.CommandContext(ctx, "go", "mod", "tidy")
+		cmd.Dir = modulePath
+		cmd.Env = append(os.Environ(),
+			"GOPRIVATE=github.com/mattsolo1/*",
+			"GOPROXY=direct",
+		)
+		
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("go mod tidy failed: %w (output: %s)", err, output)
+		}
+		
+		// Check for changes
+		status, err := git.GetStatus(modulePath)
+		if err != nil {
+			return fmt.Errorf("failed to get git status: %w", err)
+		}
+		
+		if status.IsDirty {
+			// Commit the dependency updates
+			if err := executeGitCommand(ctx, modulePath, []string{"add", "go.mod", "go.sum"}, 
+				"Stage dependency updates", logger); err != nil {
+				return err
+			}
+			
+			commitMsg := "chore(deps): bump dependencies"
+			if err := executeGitCommand(ctx, modulePath, []string{"commit", "-m", commitMsg}, 
+				"Commit dependency updates", logger); err != nil {
+				return err
+			}
+			
+			// Push if requested
+			if releasePush {
+				if err := executeGitCommand(ctx, modulePath, []string{"push", "origin", "HEAD"}, 
+					"Push dependency updates", logger); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	
+	return nil
+}
+
+func displayAndConfirmVersionsWithOrder(versions map[string]string, currentVersions map[string]string, hasChanges map[string]bool, releaseLevels [][]string, logger *logrus.Logger) bool {
+	fmt.Println("\nProposed versions and release order:")
+	fmt.Println("====================================")
+	
+	// Count repos with changes
+	changeCount := 0
+	for _, changes := range hasChanges {
+		if changes {
+			changeCount++
+		}
+	}
+	
+	if changeCount == 0 {
+		fmt.Println("\nNo repositories have changes to release.")
+		return false
+	}
+	
+	// Display release levels
+	fmt.Println("\nRelease Order (by dependency level):")
+	for i, level := range releaseLevels {
+		fmt.Printf("\nLevel %d (can release in parallel):\n", i+1)
+		for _, repo := range level {
+			if hasChanges[repo] {
+				current := currentVersions[repo]
+				if current == "" {
+					current = "-"
+				}
+				proposed := versions[repo]
+				increment := getVersionIncrement(current, proposed)
+				fmt.Printf("  - %s: %s → %s (%s)\n", repo, current, proposed, increment)
+			}
+		}
+	}
+	
+	fmt.Printf("\n%d repositories will be released.\n", changeCount)
+	
+	if releaseDryRun {
+		fmt.Println("\n[DRY RUN] Would proceed with these versions")
+		return true
+	}
+	
+	if releaseYes {
+		fmt.Println("\n[AUTO-CONFIRM] Proceeding with release (--yes flag)")
+		return true
+	}
+	
+	// Ask for confirmation
+	fmt.Print("\nProceed with release? [y/N]: ")
+	reader := bufio.NewReader(os.Stdin)
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		logger.Error("Failed to read input", "error", err)
+		return false
+	}
+	
+	response = strings.TrimSpace(strings.ToLower(response))
+	return response == "y" || response == "yes"
 }
 
 func displayAndConfirmVersions(versions map[string]string, currentVersions map[string]string, hasChanges map[string]bool, logger *logrus.Logger) bool {

@@ -1,0 +1,193 @@
+package depsgraph
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"golang.org/x/mod/modfile"
+)
+
+// Node represents a module in the dependency graph
+type Node struct {
+	Name     string   // Module name (e.g., "grove-core")
+	Path     string   // Full module path (e.g., "github.com/mattsolo1/grove-core")
+	Dir      string   // Directory path
+	Deps     []string // Direct dependencies (module paths)
+	Version  string   // Current version (if known)
+}
+
+// Graph represents the dependency graph of all modules
+type Graph struct {
+	nodes    map[string]*Node // Key is module name
+	edges    map[string][]string // Adjacency list: module -> dependencies
+	revEdges map[string][]string // Reverse edges: module -> dependents
+}
+
+// NewGraph creates a new dependency graph
+func NewGraph() *Graph {
+	return &Graph{
+		nodes:    make(map[string]*Node),
+		edges:    make(map[string][]string),
+		revEdges: make(map[string][]string),
+	}
+}
+
+// AddNode adds a node to the graph
+func (g *Graph) AddNode(node *Node) {
+	g.nodes[node.Name] = node
+}
+
+// AddEdge adds a directed edge from 'from' to 'to' (from depends on to)
+func (g *Graph) AddEdge(from, to string) {
+	g.edges[from] = append(g.edges[from], to)
+	g.revEdges[to] = append(g.revEdges[to], from)
+}
+
+// GetNode returns a node by name
+func (g *Graph) GetNode(name string) (*Node, bool) {
+	node, exists := g.nodes[name]
+	return node, exists
+}
+
+// BuildGraph builds a dependency graph from the workspace
+func BuildGraph(rootDir string, workspaces []string) (*Graph, error) {
+	graph := NewGraph()
+	modulePathToName := make(map[string]string)
+
+	// First pass: collect all modules
+	for _, ws := range workspaces {
+		wsPath := filepath.Join(rootDir, ws)
+		goModPath := filepath.Join(wsPath, "go.mod")
+		
+		data, err := os.ReadFile(goModPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				// Skip workspaces without go.mod
+				continue
+			}
+			return nil, fmt.Errorf("reading go.mod for %s: %w", ws, err)
+		}
+
+		modFile, err := modfile.Parse(goModPath, data, nil)
+		if err != nil {
+			return nil, fmt.Errorf("parsing go.mod for %s: %w", ws, err)
+		}
+
+		node := &Node{
+			Name: ws,
+			Path: modFile.Module.Mod.Path,
+			Dir:  wsPath,
+			Deps: []string{},
+		}
+		
+		graph.AddNode(node)
+		modulePathToName[modFile.Module.Mod.Path] = ws
+	}
+
+	// Second pass: build edges
+	for _, ws := range workspaces {
+		node, exists := graph.GetNode(ws)
+		if !exists {
+			continue
+		}
+
+		goModPath := filepath.Join(node.Dir, "go.mod")
+		data, err := os.ReadFile(goModPath)
+		if err != nil {
+			continue
+		}
+
+		modFile, err := modfile.Parse(goModPath, data, nil)
+		if err != nil {
+			continue
+		}
+
+		// Check each dependency
+		for _, req := range modFile.Require {
+			// Only consider dependencies within the Grove ecosystem
+			if strings.HasPrefix(req.Mod.Path, "github.com/mattsolo1/") {
+				if depName, ok := modulePathToName[req.Mod.Path]; ok {
+					node.Deps = append(node.Deps, req.Mod.Path)
+					graph.AddEdge(ws, depName)
+				}
+			}
+		}
+	}
+
+	return graph, nil
+}
+
+// TopologicalSort performs a topological sort of the graph using Kahn's algorithm
+// Returns modules grouped by levels that can be released in parallel
+func (g *Graph) TopologicalSort() ([][]string, error) {
+	// Calculate in-degrees (number of dependencies each node has)
+	inDegree := make(map[string]int)
+	for name := range g.nodes {
+		inDegree[name] = len(g.edges[name])
+	}
+
+	// Find all nodes with no dependencies
+	var queue []string
+	for name, degree := range inDegree {
+		if degree == 0 {
+			queue = append(queue, name)
+		}
+	}
+
+	var result [][]string
+	processed := 0
+
+	// Process nodes level by level
+	for len(queue) > 0 {
+		// All nodes in current queue can be processed in parallel
+		currentLevel := make([]string, len(queue))
+		copy(currentLevel, queue)
+		result = append(result, currentLevel)
+		processed += len(currentLevel)
+
+		// Prepare next level
+		var nextQueue []string
+		for _, node := range queue {
+			// For each module that depends on the current node
+			if dependents, ok := g.revEdges[node]; ok {
+				for _, dep := range dependents {
+					inDegree[dep]--
+					if inDegree[dep] == 0 {
+						nextQueue = append(nextQueue, dep)
+					}
+				}
+			}
+		}
+		queue = nextQueue
+	}
+
+	// Check for cycles
+	if processed != len(g.nodes) {
+		return nil, fmt.Errorf("dependency cycle detected: processed %d nodes out of %d", processed, len(g.nodes))
+	}
+
+	return result, nil
+}
+
+// GetDependencies returns the direct dependencies of a module
+func (g *Graph) GetDependencies(module string) []string {
+	return g.edges[module]
+}
+
+// GetDependents returns the modules that depend on the given module
+func (g *Graph) GetDependents(module string) []string {
+	return g.revEdges[module]
+}
+
+// HasCycle checks if the graph contains a cycle
+func (g *Graph) HasCycle() bool {
+	_, err := g.TopologicalSort()
+	return err != nil
+}
+
+// GetAllNodes returns all nodes in the graph
+func (g *Graph) GetAllNodes() map[string]*Node {
+	return g.nodes
+}
