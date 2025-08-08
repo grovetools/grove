@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/charmbracelet/lipgloss"
@@ -131,14 +132,19 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Determine parent repo version early so we can display it
+	parentVersion := determineParentVersion(rootDir, versions, hasChanges)
+
 	// Display proposed versions and get confirmation
-	if !displayAndConfirmVersionsWithOrder(versions, currentVersions, hasChanges, releaseLevels, graph, logger) {
+	if !displayAndConfirmVersionsWithOrder(rootDir, versions, currentVersions, hasChanges, releaseLevels, graph, parentVersion, logger) {
 		logger.Info("Release cancelled by user")
 		return nil
 	}
 
-	// Determine parent repo version (use the highest version among all submodules with changes)
-	parentVersion := determineParentVersion(versions, hasChanges)
+	// Auto-commit grove-ecosystem changes if needed (only for repos being released)
+	if err := autoCommitEcosystemChanges(ctx, rootDir, hasChanges, logger); err != nil {
+		return fmt.Errorf("failed to auto-commit ecosystem changes: %w", err)
+	}
 
 	// Run pre-flight checks
 	if err := runPreflightChecks(ctx, rootDir, parentVersion, logger); err != nil {
@@ -157,9 +163,13 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to orchestrate release: %w", err)
 	}
 
-	// Stage the updated submodule references
-	if err := executeGitCommand(ctx, rootDir, []string{"add", "."}, "Stage submodule updates", logger); err != nil {
-		return err
+	// Stage only the submodules that were released
+	for repo := range hasChanges {
+		if hasChanges[repo] {
+			if err := executeGitCommand(ctx, rootDir, []string{"add", repo}, fmt.Sprintf("Stage %s", repo), logger); err != nil {
+				return err
+			}
+		}
 	}
 
 	// Commit the submodule updates
@@ -168,8 +178,17 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Recalculate parent version to handle same-day releases
+	finalParentVersion := determineParentVersion(rootDir, versions, hasChanges)
+	if finalParentVersion != parentVersion {
+		logger.WithFields(logrus.Fields{
+			"original": parentVersion,
+			"adjusted": finalParentVersion,
+		}).Info("Adjusted parent version for same-day release")
+	}
+	
 	// Tag the main repository
-	if err := executeGitCommand(ctx, rootDir, []string{"tag", "-a", parentVersion, "-m", fmt.Sprintf("Release %s", parentVersion)}, "Tag main repository", logger); err != nil {
+	if err := executeGitCommand(ctx, rootDir, []string{"tag", "-a", finalParentVersion, "-m", fmt.Sprintf("Release %s", finalParentVersion)}, "Tag main repository", logger); err != nil {
 		return err
 	}
 
@@ -179,7 +198,7 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	}
 
 	// Push the main repository tag
-	if err := executeGitCommand(ctx, rootDir, []string{"push", "origin", parentVersion}, "Push release tag", logger); err != nil {
+	if err := executeGitCommand(ctx, rootDir, []string{"push", "origin", finalParentVersion}, "Push release tag", logger); err != nil {
 		return err
 	}
 
@@ -188,9 +207,98 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	logger.Info("GitHub Actions will now:")
 	logger.Info("  - Build and release each tool independently in its own repository")
 	logger.Info("")
-	logger.Info("The new tag on grove-ecosystem (%s) now marks this coordinated release.", parentVersion)
+	logger.Info("The new tag on grove-ecosystem (%s) now marks this coordinated release.", finalParentVersion)
 	logger.Info("")
 	logger.Info("Monitor the individual tool releases in their respective repositories.")
+
+	return nil
+}
+
+func autoCommitEcosystemChanges(ctx context.Context, rootDir string, hasChanges map[string]bool, logger *logrus.Logger) error {
+	// Check if grove-ecosystem has uncommitted changes
+	status, err := git.GetStatus(rootDir)
+	if err != nil {
+		return fmt.Errorf("failed to get git status: %w", err)
+	}
+
+	if !status.IsDirty {
+		// No changes to commit
+		return nil
+	}
+
+	if releaseDryRun {
+		logger.Info("[DRY RUN] Would auto-commit grove-ecosystem changes")
+		return nil
+	}
+
+	logger.Info("Auto-committing grove-ecosystem changes...")
+
+	// Check what files are modified
+	statusCmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
+	statusCmd.Dir = rootDir
+	statusOutput, err := statusCmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get git status output: %w", err)
+	}
+
+	// Parse the status output to understand what changed
+	lines := strings.Split(string(statusOutput), "\n")
+	var submodulesToCommit []string
+	var relevantSubmodules []string
+	
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		
+		// Status format is "XY filename"
+		if len(line) < 3 {
+			continue
+		}
+		
+		filename := strings.TrimSpace(line[2:])
+		
+		// Check if it's a submodule (git status shows them as modified)
+		if strings.HasPrefix(filename, "grove-") {
+			// Check if this is actually a submodule
+			checkCmd := exec.CommandContext(ctx, "git", "submodule", "status", filename)
+			checkCmd.Dir = rootDir
+			if _, err := checkCmd.Output(); err == nil {
+				// It's a submodule - check if it's being released
+				if changes, ok := hasChanges[filename]; ok && changes {
+					submodulesToCommit = append(submodulesToCommit, filename)
+					relevantSubmodules = append(relevantSubmodules, filename)
+				}
+			}
+		}
+	}
+
+	// Only proceed if we have submodules to commit that are being released
+	if len(submodulesToCommit) == 0 {
+		logger.Info("No submodule updates needed for repos being released")
+		return nil
+	}
+
+	// Stage only the specific submodules being released
+	for _, submodule := range submodulesToCommit {
+		if err := executeGitCommand(ctx, rootDir, []string{"add", submodule}, fmt.Sprintf("Stage submodule %s", submodule), logger); err != nil {
+			return err
+		}
+	}
+	
+	// Create a descriptive commit message
+	commitMsg := fmt.Sprintf("chore: update submodule references for release (%s)", strings.Join(relevantSubmodules, ", "))
+	
+	if err := executeGitCommand(ctx, rootDir, []string{"commit", "-m", commitMsg}, "Auto-commit submodule updates", logger); err != nil {
+		// Check if there's nothing to commit
+		if strings.Contains(err.Error(), "nothing to commit") {
+			return nil
+		}
+		return err
+	}
+	
+	logger.WithField("submodules", relevantSubmodules).Info("Successfully auto-committed submodule updates")
 
 	return nil
 }
@@ -279,9 +387,8 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, logger *lo
 	
 	// Main repository
 	mainIssues := []string{}
-	if mainStatus.IsDirty {
-		mainIssues = append(mainIssues, "uncommitted changes")
-	}
+	// Don't consider dirty status an issue since we auto-commit
+	// but still show it in the display
 	if mainStatus.Branch != "main" {
 		mainIssues = append(mainIssues, "not on main branch")
 	}
@@ -291,14 +398,28 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, logger *lo
 			mainIssues = append(mainIssues, fmt.Sprintf("ahead of remote by %d commits", mainStatus.AheadCount))
 		}
 	}
+	
+	// For display purposes, still show uncommitted changes
+	displayMainIssues := make([]string, len(mainIssues))
+	copy(displayMainIssues, mainIssues)
+	if mainStatus.IsDirty {
+		displayMainIssues = append(displayMainIssues, "uncommitted changes (will auto-commit relevant submodules)")
+	}
 	mainStatusStr := "✓ Clean"
 	if mainStatus.IsDirty {
 		mainStatusStr = "✗ Dirty"
 	}
 	// Add ahead info even if not an issue
-	displayIssues := mainIssues
-	if releasePush && mainStatus.HasUpstream && mainStatus.AheadCount > 0 && len(mainIssues) == 0 {
+	displayIssues := displayMainIssues
+	if releasePush && mainStatus.HasUpstream && mainStatus.AheadCount > 0 && len(displayMainIssues) == 0 {
 		displayIssues = []string{fmt.Sprintf("ahead of remote by %d commits (will push)", mainStatus.AheadCount)}
+	} else if releasePush && mainStatus.HasUpstream && mainStatus.AheadCount > 0 {
+		// Update the ahead message to indicate it will be pushed
+		for i, issue := range displayIssues {
+			if strings.Contains(issue, "ahead of remote") {
+				displayIssues[i] = fmt.Sprintf("ahead of remote by %d commits (will push)", mainStatus.AheadCount)
+			}
+		}
 	}
 	fmt.Fprintf(w, "grove-ecosystem\t%s\t%s\t%s\n", 
 		mainStatus.Branch, 
@@ -715,11 +836,41 @@ func getVersionIncrement(current, proposed string) string {
 		return "initial"
 	}
 	
+	// Check if this looks like a date-based version (v2025.01.08 format)
+	if strings.Count(proposed, ".") >= 2 && len(proposed) > 6 {
+		// Try to parse as date version
+		var year1, month1, day1, suffix1 int
+		var year2, month2, day2, suffix2 int
+		
+		// Parse current version
+		n1, _ := fmt.Sscanf(current, "v%d.%d.%d.%d", &year1, &month1, &day1, &suffix1)
+		if n1 < 3 {
+			n1, _ = fmt.Sscanf(current, "v%d.%d.%d", &year1, &month1, &day1)
+		}
+		
+		// Parse proposed version
+		n2, _ := fmt.Sscanf(proposed, "v%d.%d.%d.%d", &year2, &month2, &day2, &suffix2)
+		if n2 < 3 {
+			n2, _ = fmt.Sscanf(proposed, "v%d.%d.%d", &year2, &month2, &day2)
+		}
+		
+		// If both parsed as date versions
+		if n1 >= 3 && n2 >= 3 && year1 > 2000 && year2 > 2000 {
+			if year1 != year2 || month1 != month2 || day1 != day2 {
+				return "new date"
+			} else if suffix1 != suffix2 {
+				return "same day"
+			}
+			return "-"
+		}
+	}
+	
+	// Fall back to semver parsing
 	currentVer, err1 := semver.NewVersion(current)
 	proposedVer, err2 := semver.NewVersion(proposed)
 	
 	if err1 != nil || err2 != nil {
-		return "unknown"
+		return "update"
 	}
 	
 	if currentVer.Major() != proposedVer.Major() {
@@ -918,7 +1069,7 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 	return nil
 }
 
-func displayAndConfirmVersionsWithOrder(versions map[string]string, currentVersions map[string]string, hasChanges map[string]bool, releaseLevels [][]string, graph *depsgraph.Graph, logger *logrus.Logger) bool {
+func displayAndConfirmVersionsWithOrder(rootDir string, versions map[string]string, currentVersions map[string]string, hasChanges map[string]bool, releaseLevels [][]string, graph *depsgraph.Graph, parentVersion string, logger *logrus.Logger) bool {
 	fmt.Println("\nProposed versions:")
 	fmt.Println("==================")
 	
@@ -961,7 +1112,42 @@ func displayAndConfirmVersionsWithOrder(versions map[string]string, currentVersi
 	// Prepare rows
 	var rows [][]string
 	
-	// Add repos with changes first
+	// Add grove-ecosystem first (parent repository)
+	if changeCount > 0 {
+		// Get current version of grove-ecosystem - find the latest tag  
+		cmd := exec.Command("git", "describe", "--tags", "--abbrev=0")
+		cmd.Dir = rootDir // Ensure we're in the root directory
+		output, err := cmd.Output()
+		currentEcosystemVersion := "-"
+		if err == nil {
+			currentEcosystemVersion = strings.TrimSpace(string(output))
+		}
+		
+		// Check if parent version would need a suffix
+		displayParentVersion := parentVersion
+		// Check if this version already exists
+		checkCmd := exec.Command("git", "tag", "-l", parentVersion)
+		checkCmd.Dir = rootDir
+		checkOutput, _ := checkCmd.Output()
+		if len(strings.TrimSpace(string(checkOutput))) > 0 {
+			// Show with asterisk to indicate it will be adjusted
+			displayParentVersion = parentVersion + "*"
+		}
+		
+		// Style the parent version
+		styledParentVersion := highlightStyle.Render(displayParentVersion)
+		// For date-based versions, show "date" as increment type
+		parentIncrement := "date"
+		if currentEcosystemVersion == parentVersion {
+			parentIncrement = "-"
+		}
+		rows = append(rows, []string{"grove-ecosystem", currentEcosystemVersion, styledParentVersion, parentIncrement})
+		
+		// Add a separator
+		rows = append(rows, []string{"───────────────", "─────────", "──────────", "───────────"})
+	}
+	
+	// Add repos with changes
 	for _, repo := range reposWithChanges {
 		current := currentVersions[repo]
 		if current == "" {
@@ -1077,6 +1263,15 @@ func displayAndConfirmVersionsWithOrder(versions map[string]string, currentVersi
 	}
 	
 	fmt.Printf("\n%d repositories will be released.\n", changeCount)
+	
+	// Check if parent version needs adjustment  
+	checkCmd := exec.Command("git", "tag", "-l", parentVersion)
+	checkCmd.Dir = rootDir
+	checkOutput, _ := checkCmd.Output()
+	if len(strings.TrimSpace(string(checkOutput))) > 0 {
+		fmt.Printf("\nNote: grove-ecosystem tag %s already exists - will use %s.1 instead\n", 
+			parentVersion, parentVersion)
+	}
 	
 	if releaseDryRun {
 		fmt.Println("\n[DRY RUN] Would proceed with these versions")
@@ -1217,46 +1412,93 @@ func displayAndConfirmVersions(versions map[string]string, currentVersions map[s
 	return response == "y" || response == "yes"
 }
 
-func determineParentVersion(versions map[string]string, hasChanges map[string]bool) string {
-	// Get the current version of the parent repository
-	cmd := exec.Command("git", "describe", "--tags", "--abbrev=0")
+func determineParentVersion(rootDir string, versions map[string]string, hasChanges map[string]bool) string {
+	// Check if any submodules have changes
+	hasAnyChanges := false
+	for _, hasChange := range hasChanges {
+		if hasChange {
+			hasAnyChanges = true
+			break
+		}
+	}
+	
+	// Get the latest date-based tag
+	cmd := exec.Command("git", "tag", "-l", "--sort=-version:refname")
+	cmd.Dir = rootDir
 	output, err := cmd.Output()
 	
-	var currentVersion *semver.Version
+	currentTag := ""
 	if err == nil {
-		currentTag := strings.TrimSpace(string(output))
-		currentVersion, err = semver.NewVersion(currentTag)
-		if err != nil {
-			// If we can't parse the current tag, start fresh
-			currentVersion = semver.MustParse("0.0.0")
+		tags := strings.Split(strings.TrimSpace(string(output)), "\n")
+		// Find the latest date-based tag
+		for _, tag := range tags {
+			if tag != "" {
+				// Check if it's a date-based tag
+				var year, month, day int
+				n, _ := fmt.Sscanf(tag, "v%d.%d.%d", &year, &month, &day)
+				if n >= 3 && year > 2000 {
+					currentTag = tag
+					break
+				}
+			}
 		}
-	} else {
-		// No tags found, start with v0.0.0
-		currentVersion = semver.MustParse("0.0.0")
 	}
 	
-	// Always increment the patch version of the parent repository
-	newVersion := currentVersion.IncPatch()
-	proposedVersion := "v" + newVersion.String()
+	// If no submodules have changes, return current version
+	if !hasAnyChanges {
+		if currentTag != "" {
+			return currentTag
+		}
+		// Generate today's date as default
+		now := time.Now()
+		return fmt.Sprintf("v%d.%02d.%02d", now.Year(), int(now.Month()), now.Day())
+	}
 	
-	// Check if this version already exists (in case of manual tagging)
-	checkCmd := exec.Command("git", "tag", "-l", proposedVersion)
+	// Generate date-based version
+	now := time.Now()
+	baseVersion := fmt.Sprintf("v%d.%02d.%02d", now.Year(), int(now.Month()), now.Day())
+	
+	// Check if we already have a release today
+	checkCmd := exec.Command("git", "tag", "-l", baseVersion+"*")
+	checkCmd.Dir = rootDir
 	checkOutput, _ := checkCmd.Output()
-	if len(checkOutput) > 0 {
-		// Version exists, increment minor instead
-		newVersion = currentVersion.IncMinor()
-		proposedVersion = "v" + newVersion.String()
+	
+	if len(checkOutput) == 0 {
+		// No release today yet
+		return baseVersion
+	}
+	
+	// Find the highest suffix for today
+	existingTags := strings.Split(strings.TrimSpace(string(checkOutput)), "\n")
+	maxSuffix := 0
+	hasBasicVersion := false
+	
+	for _, tag := range existingTags {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			continue
+		}
 		
-		// If that also exists, increment major
-		checkCmd = exec.Command("git", "tag", "-l", proposedVersion)
-		checkOutput, _ = checkCmd.Output()
-		if len(checkOutput) > 0 {
-			newVersion = currentVersion.IncMajor()
-			proposedVersion = "v" + newVersion.String()
+		if tag == baseVersion {
+			// Found base version without suffix
+			hasBasicVersion = true
+		} else if strings.HasPrefix(tag, baseVersion+".") {
+			// Extract numeric suffix
+			suffix := strings.TrimPrefix(tag, baseVersion+".")
+			var num int
+			if _, err := fmt.Sscanf(suffix, "%d", &num); err == nil && num > maxSuffix {
+				maxSuffix = num
+			}
 		}
 	}
 	
-	return proposedVersion
+	// Return next available version
+	if !hasBasicVersion && maxSuffix == 0 {
+		return baseVersion
+	}
+	
+	// If base version exists or we have numeric suffixes, increment
+	return fmt.Sprintf("%s.%d", baseVersion, maxSuffix+1)
 }
 
 func createReleaseCommitMessage(versions map[string]string, hasChanges map[string]bool) string {
