@@ -952,6 +952,12 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 							commitMsg := fmt.Sprintf("docs(changelog): update CHANGELOG.md for %s", version)
 							if err := executeGitCommand(ctx, smFullPath, []string{"commit", "-m", commitMsg}, "Commit changelog", logger); err != nil {
 								logger.WithError(err).Warnf("Failed to commit changelog for %s", repoName)
+							} else {
+								// Push the changelog commit to remote
+								if err := executeGitCommand(ctx, smFullPath, []string{"push", "origin", "HEAD:main"}, 
+									fmt.Sprintf("Push changelog for %s", repoName), logger); err != nil {
+									logger.WithError(err).Warnf("Failed to push changelog commit for %s", repoName)
+								}
 							}
 						}
 					}
