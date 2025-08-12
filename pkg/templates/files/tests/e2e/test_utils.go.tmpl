@@ -1,0 +1,45 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+)
+
+// FindBinary is a helper to find the binary path for tests.
+// It checks in the following order:
+// 1. {{.BinaryAliasUpper}}_BINARY environment variable
+// 2. Common relative paths from test execution directory
+// 3. System PATH
+func FindBinary() (string, error) {
+	// Check environment variable first
+	if binary := os.Getenv("{{.BinaryAliasUpper}}_BINARY"); binary != "" {
+		return binary, nil
+	}
+
+	// Try common locations relative to test execution directory
+	candidates := []string{
+		"./bin/{{.BinaryAlias}}",
+		"../bin/{{.BinaryAlias}}",
+		"../../bin/{{.BinaryAlias}}",
+		"../../../bin/{{.BinaryAlias}}",
+	}
+
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			absPath, err := filepath.Abs(candidate)
+			if err != nil {
+				return "", err
+			}
+			return absPath, nil
+		}
+	}
+
+	// Try to find in PATH
+	if path, err := exec.LookPath("{{.BinaryAlias}}"); err == nil {
+		return path, nil
+	}
+
+	return "", fmt.Errorf("could not find {{.BinaryAlias}} binary - please set {{.BinaryAliasUpper}}_BINARY environment variable or ensure {{.BinaryAlias}} is built and in PATH")
+}

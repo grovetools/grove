@@ -1,0 +1,17 @@
+linters:
+  enable:
+    - gofmt
+    - govet
+    - gosec
+    - ineffassign
+    - misspell
+    - unconvert
+    - prealloc
+    - nakedret
+
+linters-settings:
+  nakedret:
+    max-func-lines: 30
+
+issues:
+  exclude-use-default: false

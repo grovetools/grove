@@ -10,6 +10,14 @@ import (
 
 type GHClient struct{}
 
+// Client represents a GitHub API client
+type Client struct{}
+
+// NewClient creates a new GitHub client
+func NewClient() *Client {
+	return &Client{}
+}
+
 var gitURLRegex = regexp.MustCompile(`(?:git@github\.com:|https://github\.com/)([^/]+)/([^/]+?)(?:\.git)?$`)
 
 func getRepoSlug(repoPath string) (string, error) {

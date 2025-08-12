@@ -1,0 +1,49 @@
+package main
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/mattsolo1/grove-tend/pkg/command"
+	"github.com/mattsolo1/grove-tend/pkg/harness"
+)
+
+func BasicScenario() *harness.Scenario {
+	return &harness.Scenario{
+		Name:        "basic",
+		Description: "Basic functionality tests",
+		Tags:        []string{"smoke"},
+		Steps: []harness.Step{
+			harness.NewStep("version command", func(ctx *harness.Context) error {
+				binary, err := FindBinary()
+				if err != nil {
+					return err
+				}
+				cmd := command.New(binary, "version").Dir(ctx.RootDir)
+				result := cmd.Run()
+				if result.ExitCode != 0 {
+					return result.Error
+				}
+				if !strings.Contains(result.Stdout, "Version:") {
+					return fmt.Errorf("expected version output to contain 'Version:', got: %s", result.Stdout)
+				}
+				return nil
+			}),
+			harness.NewStep("help command", func(ctx *harness.Context) error {
+				binary, err := FindBinary()
+				if err != nil {
+					return err
+				}
+				cmd := command.New(binary, "--help").Dir(ctx.RootDir)
+				result := cmd.Run()
+				if result.ExitCode != 0 {
+					return result.Error
+				}
+				if !strings.Contains(result.Stdout, "{{.Description}}") {
+					return fmt.Errorf("expected help output to contain '{{.Description}}'")
+				}
+				return nil
+			}),
+		},
+	}
+}

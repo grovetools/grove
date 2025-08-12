@@ -1,0 +1,291 @@
+package repository
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+)
+
+// updateRootMakefile updates the root Makefile to include the new package and binary
+func updateRootMakefile(repoName, binaryAlias string) error {
+	makefilePath := "Makefile"
+	
+	// Read the current Makefile
+	content, err := os.ReadFile(makefilePath)
+	if err != nil {
+		return fmt.Errorf("failed to read Makefile: %w", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	
+	// Find and update PACKAGES
+	packagesUpdated := false
+	binariesUpdated := false
+	
+	for i, line := range lines {
+		// Update PACKAGES
+		if strings.HasPrefix(line, "PACKAGES =") || strings.HasPrefix(line, "PACKAGES=") {
+			packages := extractMakefileList(lines, i)
+			packages = append(packages, repoName)
+			sort.Strings(packages)
+			lines[i] = fmt.Sprintf("PACKAGES = %s", strings.Join(packages, " "))
+			packagesUpdated = true
+		}
+		
+		// Update BINARIES
+		if strings.HasPrefix(line, "BINARIES =") || strings.HasPrefix(line, "BINARIES=") {
+			binaries := extractMakefileList(lines, i)
+			binaries = append(binaries, binaryAlias)
+			sort.Strings(binaries)
+			lines[i] = fmt.Sprintf("BINARIES = %s", strings.Join(binaries, " "))
+			binariesUpdated = true
+		}
+	}
+	
+	if !packagesUpdated {
+		return fmt.Errorf("could not find PACKAGES variable in Makefile")
+	}
+	
+	if !binariesUpdated {
+		return fmt.Errorf("could not find BINARIES variable in Makefile")
+	}
+	
+	// Write the updated Makefile
+	updatedContent := strings.Join(lines, "\n")
+	if err := os.WriteFile(makefilePath, []byte(updatedContent), 0644); err != nil {
+		return fmt.Errorf("failed to write Makefile: %w", err)
+	}
+	
+	return nil
+}
+
+// extractMakefileList extracts a space-separated list from a Makefile variable
+// that might span multiple lines with backslash continuations
+func extractMakefileList(lines []string, startIdx int) []string {
+	var items []string
+	
+	// Extract the first line
+	line := lines[startIdx]
+	parts := strings.SplitN(line, "=", 2)
+	if len(parts) != 2 {
+		return items
+	}
+	
+	value := strings.TrimSpace(parts[1])
+	
+	// Check for continuation
+	for strings.HasSuffix(value, "\\") && startIdx+1 < len(lines) {
+		value = strings.TrimSuffix(value, "\\")
+		items = append(items, strings.Fields(value)...)
+		startIdx++
+		value = strings.TrimSpace(lines[startIdx])
+	}
+	
+	// Add the final line's items
+	items = append(items, strings.Fields(value)...)
+	
+	// Remove duplicates
+	seen := make(map[string]bool)
+	var unique []string
+	for _, item := range items {
+		if !seen[item] {
+			seen[item] = true
+			unique = append(unique, item)
+		}
+	}
+	
+	return unique
+}
+
+// updateGoWork updates the go.work file to include the new module
+func updateGoWork(repoName string) error {
+	workPath := "go.work"
+	
+	// Read the current go.work file
+	content, err := os.ReadFile(workPath)
+	if err != nil {
+		return fmt.Errorf("failed to read go.work: %w", err)
+	}
+	
+	// Parse go.work to find the use directives
+	lines := strings.Split(string(content), "\n")
+	var newLines []string
+	inUseBlock := false
+	useDirectives := []string{}
+	var beforeUse, afterUse []string
+	useBlockStart := -1
+	
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		
+		if trimmed == "use (" {
+			inUseBlock = true
+			useBlockStart = i
+			beforeUse = lines[:i+1]
+			continue
+		}
+		
+		if inUseBlock {
+			if trimmed == ")" {
+				inUseBlock = false
+				afterUse = lines[i:]
+				break
+			}
+			if trimmed != "" {
+				useDirectives = append(useDirectives, trimmed)
+			}
+		}
+	}
+	
+	// If we didn't find a use block, look for single use directives
+	if useBlockStart == -1 {
+		for i, line := range lines {
+			if strings.HasPrefix(strings.TrimSpace(line), "use ") {
+				// Convert to block format
+				beforeUse = lines[:i]
+				afterUse = lines[i+1:]
+				useDirectives = []string{strings.TrimPrefix(strings.TrimSpace(line), "use ")}
+				break
+			}
+		}
+		
+		// If still no use directives found, create a new block after "go" directive
+		if len(useDirectives) == 0 {
+			for i, line := range lines {
+				if strings.HasPrefix(strings.TrimSpace(line), "go ") {
+					beforeUse = lines[:i+1]
+					beforeUse = append(beforeUse, "")
+					afterUse = lines[i+1:]
+					break
+				}
+			}
+		}
+	}
+	
+	// Add the new module
+	newModule := fmt.Sprintf("./%s", repoName)
+	useDirectives = append(useDirectives, newModule)
+	
+	// Sort the directives
+	sort.Strings(useDirectives)
+	
+	// Rebuild the file
+	newLines = append(newLines, beforeUse...)
+	if len(beforeUse) > 0 && !strings.HasSuffix(beforeUse[len(beforeUse)-1], "use (") {
+		newLines = append(newLines, "use (")
+	}
+	
+	for _, directive := range useDirectives {
+		newLines = append(newLines, fmt.Sprintf("\t%s", directive))
+	}
+	
+	if len(afterUse) > 0 && !strings.HasPrefix(afterUse[0], ")") {
+		newLines = append(newLines, ")")
+	}
+	newLines = append(newLines, afterUse...)
+	
+	// Write the updated go.work file
+	updatedContent := strings.Join(newLines, "\n")
+	if err := os.WriteFile(workPath, []byte(updatedContent), 0644); err != nil {
+		return fmt.Errorf("failed to write go.work: %w", err)
+	}
+	
+	return nil
+}
+
+// validateGroveYML checks if grove.yml exists and has the expected structure
+func validateGroveYML() error {
+	if _, err := os.Stat("grove.yml"); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("grove.yml not found - must be run from grove-ecosystem root")
+		}
+		return fmt.Errorf("error accessing grove.yml: %w", err)
+	}
+	return nil
+}
+
+// isValidRepoName checks if the repository name follows Grove conventions
+func isValidRepoName(name string) bool {
+	// Must start with "grove-"
+	if !strings.HasPrefix(name, "grove-") {
+		return false
+	}
+	
+	// Must only contain lowercase letters, numbers, and hyphens
+	validName := regexp.MustCompile(`^grove-[a-z0-9-]+$`)
+	return validName.MatchString(name)
+}
+
+// deriveAliasFromRepoName generates a binary alias from the repository name
+// e.g., grove-context -> ct, grove-tend -> td
+func deriveAliasFromRepoName(repoName string) string {
+	parts := strings.Split(repoName, "-")
+	if len(parts) < 2 {
+		return ""
+	}
+	
+	var alias strings.Builder
+	for i := 1; i < len(parts); i++ {
+		if len(parts[i]) > 0 {
+			alias.WriteByte(parts[i][0])
+		}
+	}
+	
+	return alias.String()
+}
+
+// checkBinaryAliasConflict checks if the binary alias is already in use
+func checkBinaryAliasConflict(alias string) error {
+	// Read Makefile to get current binaries
+	content, err := os.ReadFile("Makefile")
+	if err != nil {
+		return fmt.Errorf("failed to read Makefile: %w", err)
+	}
+	
+	lines := strings.Split(string(content), "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "BINARIES =") || strings.HasPrefix(line, "BINARIES=") {
+			binaries := extractMakefileList(lines, i)
+			for _, binary := range binaries {
+				if binary == alias {
+					return fmt.Errorf("binary alias '%s' is already in use", alias)
+				}
+			}
+			break
+		}
+	}
+	
+	return nil
+}
+
+// getEcosystemRoot finds the grove-ecosystem root directory
+func getEcosystemRoot() (string, error) {
+	// Start from current directory and walk up
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	
+	for {
+		// Check if grove.yml exists in this directory
+		if _, err := os.Stat(filepath.Join(dir, "grove.yml")); err == nil {
+			// Also check if it's the ecosystem root by looking for go.work
+			if _, err := os.Stat(filepath.Join(dir, "go.work")); err == nil {
+				return dir, nil
+			}
+		}
+		
+		// Move up one directory
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached the root
+			break
+		}
+		dir = parent
+	}
+	
+	return "", fmt.Errorf("grove-ecosystem root not found")
+}
