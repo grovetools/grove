@@ -12,7 +12,7 @@ import (
 var (
 	addRepoAlias       string
 	addRepoDescription string
-	addRepoSkipGitHub  bool = true
+	addRepoSkipGitHub  bool
 	addRepoDryRun      bool
 )
 
@@ -37,7 +37,7 @@ Example:
 
 	cmd.Flags().StringVarP(&addRepoAlias, "alias", "a", "", "Binary alias (e.g., 'ct' for grove-context)")
 	cmd.Flags().StringVarP(&addRepoDescription, "description", "d", "", "Repository description")
-	cmd.Flags().BoolVar(&addRepoSkipGitHub, "skip-github", true, "Skip GitHub repository creation (default: true)")
+	cmd.Flags().BoolVar(&addRepoSkipGitHub, "skip-github", false, "Skip GitHub repository creation")
 	cmd.Flags().BoolVar(&addRepoDryRun, "dry-run", false, "Preview operations without executing")
 
 	return cmd

@@ -29,6 +29,12 @@ jobs:
         go env -w GOPRIVATE=github.com/mattsolo1/*
         go env -w GOPROXY=direct
     
+    - name: Update dependencies
+      run: |
+        rm -f go.sum
+        go mod download
+        go mod tidy
+    
     - name: Run tests
       run: make test
     

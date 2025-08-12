@@ -7,7 +7,59 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/sirupsen/logrus"
 )
+
+// Ecosystem handles ecosystem-level operations
+type Ecosystem struct {
+	logger *logrus.Logger
+}
+
+// removeFromGoWork removes a repository from the go.work file
+func (e *Ecosystem) removeFromGoWork(repoName string) error {
+	goWorkPath := "go.work"
+	
+	// Read the current go.work file
+	content, err := os.ReadFile(goWorkPath)
+	if err != nil {
+		return fmt.Errorf("failed to read go.work: %w", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	var newLines []string
+	inUseBlock := false
+	
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		
+		// Track when we're in the use block
+		if trimmed == "use (" {
+			inUseBlock = true
+			newLines = append(newLines, line)
+			continue
+		}
+		if trimmed == ")" && inUseBlock {
+			inUseBlock = false
+			newLines = append(newLines, line)
+			continue
+		}
+		
+		// Skip the line if it contains the repo we're removing
+		if inUseBlock && strings.Contains(trimmed, "./"+repoName) {
+			continue
+		}
+		
+		newLines = append(newLines, line)
+	}
+	
+	// Write the updated content back
+	if err := os.WriteFile(goWorkPath, []byte(strings.Join(newLines, "\n")), 0644); err != nil {
+		return fmt.Errorf("failed to write go.work: %w", err)
+	}
+	
+	return nil
+}
 
 // updateRootMakefile updates the root Makefile to include the new package and binary
 func updateRootMakefile(repoName, binaryAlias string) error {
