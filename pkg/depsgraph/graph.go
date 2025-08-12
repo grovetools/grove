@@ -11,16 +11,16 @@ import (
 
 // Node represents a module in the dependency graph
 type Node struct {
-	Name     string   // Module name (e.g., "grove-core")
-	Path     string   // Full module path (e.g., "github.com/mattsolo1/grove-core")
-	Dir      string   // Directory path
-	Deps     []string // Direct dependencies (module paths)
-	Version  string   // Current version (if known)
+	Name    string   // Module name (e.g., "grove-core")
+	Path    string   // Full module path (e.g., "github.com/mattsolo1/grove-core")
+	Dir     string   // Directory path
+	Deps    []string // Direct dependencies (module paths)
+	Version string   // Current version (if known)
 }
 
 // Graph represents the dependency graph of all modules
 type Graph struct {
-	nodes    map[string]*Node // Key is module name
+	nodes    map[string]*Node    // Key is module name
 	edges    map[string][]string // Adjacency list: module -> dependencies
 	revEdges map[string][]string // Reverse edges: module -> dependents
 }
@@ -61,10 +61,10 @@ func BuildGraph(rootDir string, workspaces []string) (*Graph, error) {
 		// workspaces are already absolute paths from Discover
 		wsPath := ws
 		goModPath := filepath.Join(wsPath, "go.mod")
-		
+
 		// Get workspace name for the node
 		wsName := filepath.Base(ws)
-		
+
 		data, err := os.ReadFile(goModPath)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -85,7 +85,7 @@ func BuildGraph(rootDir string, workspaces []string) (*Graph, error) {
 			Dir:  wsPath,
 			Deps: []string{},
 		}
-		
+
 		graph.AddNode(node)
 		modulePathToName[modFile.Module.Mod.Path] = wsName
 	}
@@ -131,7 +131,7 @@ func (g *Graph) TopologicalSort() ([][]string, error) {
 	if len(g.nodes) == 0 {
 		return [][]string{}, nil
 	}
-	
+
 	// Calculate in-degrees (number of dependencies each node has)
 	inDegree := make(map[string]int)
 	for name := range g.nodes {

@@ -20,7 +20,7 @@ const (
 	VersionsDir       = "versions"
 	BinDir            = "bin"
 	ActiveVersionFile = "active_version"
-	
+
 	// GitHub API constants
 	GitHubOwner = "mattsolo1"
 	GitHubAPI   = "https://api.github.com"
@@ -51,14 +51,14 @@ func NewManager() (*Manager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
-	
+
 	baseDir := filepath.Join(homeDir, GroveDir)
-	
+
 	// Run migration on initialization
 	if err := MigrateFromSingleVersion(baseDir); err != nil {
 		// Ignore migration errors - it's a one-time operation
 	}
-	
+
 	return &Manager{
 		homeDir: homeDir,
 		baseDir: baseDir,
@@ -78,13 +78,13 @@ func (m *Manager) EnsureDirs() error {
 		filepath.Join(m.baseDir, BinDir),
 		filepath.Join(m.baseDir, VersionsDir),
 	}
-	
+
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return fmt.Errorf("failed to create directory %s: %w", dir, err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -95,7 +95,7 @@ func (m *Manager) GetActiveVersion() (string, error) {
 	if err := MigrateFromSingleVersion(m.baseDir); err != nil {
 		// Ignore migration errors
 	}
-	
+
 	// Return empty string as there's no single active version anymore
 	return "", fmt.Errorf("no single active version - use GetToolVersion instead")
 }
@@ -106,12 +106,12 @@ func (m *Manager) GetToolVersion(tool string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to load tool versions: %w", err)
 	}
-	
+
 	version := tv.GetToolVersion(tool)
 	if version == "" {
 		return "", fmt.Errorf("no active version for %s", tool)
 	}
-	
+
 	return version, nil
 }
 
@@ -127,13 +127,13 @@ func (m *Manager) SetToolVersion(tool, version string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load tool versions: %w", err)
 	}
-	
+
 	tv.SetToolVersion(tool, version)
-	
+
 	if err := tv.Save(m.baseDir); err != nil {
 		return fmt.Errorf("failed to save tool versions: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -152,48 +152,48 @@ func (m *Manager) GetLatestVersionTag(toolName string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("unknown tool: %s", toolName)
 	}
-	
+
 	if m.useGH {
 		return m.getLatestVersionTagWithGH(repoName)
 	}
-	
+
 	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", GitHubAPI, GitHubOwner, repoName)
-	
+
 	resp, err := http.Get(url)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch latest release: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
 	}
-	
+
 	var release GitHubRelease
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
 		return "", fmt.Errorf("failed to decode release data: %w", err)
 	}
-	
+
 	return release.TagName, nil
 }
 
 // getLatestVersionTagWithGH fetches the latest release tag using gh CLI
 func (m *Manager) getLatestVersionTagWithGH(repoName string) (string, error) {
 	cmd := exec.Command("gh", "release", "view", "--repo", fmt.Sprintf("%s/%s", GitHubOwner, repoName), "--json", "tagName")
-	
+
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("gh CLI failed to get latest release: %w", err)
 	}
-	
+
 	var result struct {
 		TagName string `json:"tagName"`
 	}
-	
+
 	if err := json.Unmarshal(output, &result); err != nil {
 		return "", fmt.Errorf("failed to parse gh output: %w", err)
 	}
-	
+
 	return result.TagName, nil
 }
 
@@ -203,40 +203,40 @@ func (m *Manager) GetRelease(toolName, version string) (*GitHubRelease, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown tool: %s", toolName)
 	}
-	
+
 	if m.useGH {
 		return m.getReleaseWithGH(repoName, version)
 	}
-	
+
 	url := fmt.Sprintf("%s/repos/%s/%s/releases/tags/%s", GitHubAPI, GitHubOwner, repoName, version)
-	
+
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch release %s: %w", version, err)
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GitHub API returned status %d for version %s", resp.StatusCode, version)
 	}
-	
+
 	var release GitHubRelease
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
 		return nil, fmt.Errorf("failed to decode release data: %w", err)
 	}
-	
+
 	return &release, nil
 }
 
 // getReleaseWithGH fetches release information using gh CLI
 func (m *Manager) getReleaseWithGH(repoName, version string) (*GitHubRelease, error) {
 	cmd := exec.Command("gh", "release", "view", version, "--repo", fmt.Sprintf("%s/%s", GitHubOwner, repoName), "--json", "tagName,assets")
-	
+
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("gh CLI failed to get release %s: %w", version, err)
 	}
-	
+
 	var ghRelease struct {
 		TagName string `json:"tagName"`
 		Assets  []struct {
@@ -244,16 +244,16 @@ func (m *Manager) getReleaseWithGH(repoName, version string) (*GitHubRelease, er
 			URL  string `json:"url"`
 		} `json:"assets"`
 	}
-	
+
 	if err := json.Unmarshal(output, &ghRelease); err != nil {
 		return nil, fmt.Errorf("failed to parse gh output: %w", err)
 	}
-	
+
 	// Convert to GitHubRelease format
 	release := &GitHubRelease{
 		TagName: ghRelease.TagName,
 	}
-	
+
 	for _, asset := range ghRelease.Assets {
 		// Convert gh CLI URL format to browser download URL format
 		release.Assets = append(release.Assets, struct {
@@ -264,7 +264,7 @@ func (m *Manager) getReleaseWithGH(repoName, version string) (*GitHubRelease, er
 			BrowserDownloadURL: fmt.Sprintf("https://github.com/%s/%s/releases/download/%s/%s", GitHubOwner, repoName, version, asset.Name),
 		})
 	}
-	
+
 	return release, nil
 }
 
@@ -278,14 +278,14 @@ func (m *Manager) ListInstalledVersions() ([]string, error) {
 		}
 		return nil, fmt.Errorf("failed to read versions directory: %w", err)
 	}
-	
+
 	var versions []string
 	for _, entry := range entries {
 		if entry.IsDir() && strings.HasPrefix(entry.Name(), "v") {
 			versions = append(versions, entry.Name())
 		}
 	}
-	
+
 	return versions, nil
 }
 
@@ -295,18 +295,18 @@ func (m *Manager) InstallTool(toolName, versionTag string) error {
 	if err := m.EnsureDirs(); err != nil {
 		return err
 	}
-	
+
 	// Get release information
 	release, err := m.GetRelease(toolName, versionTag)
 	if err != nil {
 		return err
 	}
-	
+
 	// Construct the binary name
 	osName := runtime.GOOS
 	archName := runtime.GOARCH
 	binaryName := fmt.Sprintf("%s-%s-%s", toolName, osName, archName)
-	
+
 	// Find the asset URL
 	var downloadURL string
 	for _, asset := range release.Assets {
@@ -315,28 +315,28 @@ func (m *Manager) InstallTool(toolName, versionTag string) error {
 			break
 		}
 	}
-	
+
 	if downloadURL == "" {
 		return fmt.Errorf("no binary found for %s on %s/%s", toolName, osName, archName)
 	}
-	
+
 	// Create version directory
 	versionBinDir := filepath.Join(m.baseDir, VersionsDir, versionTag, BinDir)
 	if err := os.MkdirAll(versionBinDir, 0755); err != nil {
 		return fmt.Errorf("failed to create version directory: %w", err)
 	}
-	
+
 	// Download the binary
 	targetPath := filepath.Join(versionBinDir, toolName)
 	if err := m.downloadFile(downloadURL, targetPath); err != nil {
 		return fmt.Errorf("failed to download %s: %w", toolName, err)
 	}
-	
+
 	// Make executable
 	if err := os.Chmod(targetPath, 0755); err != nil {
 		return fmt.Errorf("failed to make %s executable: %w", toolName, err)
 	}
-	
+
 	return nil
 }
 
@@ -352,15 +352,15 @@ func (m *Manager) UseToolVersion(tool, versionTag string) error {
 	if _, err := os.Stat(toolPath); os.IsNotExist(err) {
 		return fmt.Errorf("tool %s version %s is not installed", tool, versionTag)
 	}
-	
+
 	// Update the tool version
 	if err := m.SetToolVersion(tool, versionTag); err != nil {
 		return err
 	}
-	
+
 	// The caller should handle symlinking via reconciler
 	// This avoids circular dependencies
-	
+
 	return nil
 }
 
@@ -371,13 +371,13 @@ func (m *Manager) UninstallVersion(versionTag string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	if activeVersion == versionTag {
 		// Clear active version and symlinks
 		if err := m.SetActiveVersion(""); err != nil {
 			return err
 		}
-		
+
 		// Clear symlinks
 		binDir := filepath.Join(m.baseDir, BinDir)
 		entries, _ := os.ReadDir(binDir)
@@ -390,7 +390,7 @@ func (m *Manager) UninstallVersion(versionTag string) error {
 			}
 		}
 	}
-	
+
 	// Remove version directory
 	versionDir := filepath.Join(m.baseDir, VersionsDir, versionTag)
 	return os.RemoveAll(versionDir)
@@ -401,23 +401,23 @@ func (m *Manager) downloadFile(url, targetPath string) error {
 	if m.useGH {
 		return m.downloadFileWithGH(url, targetPath)
 	}
-	
+
 	resp, err := http.Get(url)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}
-	
+
 	out, err := os.Create(targetPath)
 	if err != nil {
 		return err
 	}
 	defer out.Close()
-	
+
 	_, err = io.Copy(out, resp.Body)
 	return err
 }
@@ -430,20 +430,20 @@ func (m *Manager) downloadFileWithGH(url, targetPath string) error {
 	if len(parts) < 8 || parts[2] != "github.com" || parts[5] != "releases" || parts[6] != "download" {
 		return fmt.Errorf("invalid GitHub release URL format: %s", url)
 	}
-	
+
 	owner := parts[3]
 	repo := parts[4]
 	tag := parts[7]
 	asset := parts[8]
-	
+
 	// Use gh CLI to download the release asset
 	cmd := exec.Command("gh", "release", "download", tag, "--repo", fmt.Sprintf("%s/%s", owner, repo), "--pattern", asset, "--dir", filepath.Dir(targetPath))
-	
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("gh CLI download failed: %w\nOutput: %s", err, string(output))
 	}
-	
+
 	// gh downloads with the original filename, so we may need to rename
 	downloadedPath := filepath.Join(filepath.Dir(targetPath), asset)
 	if downloadedPath != targetPath {
@@ -451,7 +451,7 @@ func (m *Manager) downloadFileWithGH(url, targetPath string) error {
 			return fmt.Errorf("failed to rename downloaded file: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 

@@ -162,7 +162,7 @@ func runDepsBump(moduleSpec string, commit, push bool) error {
 
 		// Update the dependency
 		fmt.Printf("UPDATING  %s...", wsName)
-		
+
 		// Run go get
 		if err := runGoGet(ws, modulePath, version); err != nil {
 			fmt.Printf(" FAILED: %v\n", err)
@@ -215,13 +215,13 @@ func runDepsBump(moduleSpec string, commit, push bool) error {
 func getLatestModuleVersion(modulePath string) (string, error) {
 	// Use go list to get module info
 	cmd := exec.Command("go", "list", "-m", "-json", modulePath+"@latest")
-	
+
 	// Set up environment for private modules
 	cmd.Env = append(os.Environ(),
 		"GOPRIVATE=github.com/mattsolo1/*",
 		"GOPROXY=direct",
 	)
-	
+
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("go list failed: %w", err)
@@ -245,13 +245,13 @@ func getLatestModuleVersion(modulePath string) (string, error) {
 func runGoGet(workspacePath, modulePath, version string) error {
 	cmd := exec.Command("go", "get", modulePath+"@"+version)
 	cmd.Dir = workspacePath
-	
+
 	// Set up environment for private modules
 	cmd.Env = append(os.Environ(),
 		"GOPRIVATE=github.com/mattsolo1/*",
 		"GOPROXY=direct",
 	)
-	
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s: %s", err, string(output))
@@ -262,13 +262,13 @@ func runGoGet(workspacePath, modulePath, version string) error {
 func runGoModTidy(workspacePath string) error {
 	cmd := exec.Command("go", "mod", "tidy")
 	cmd.Dir = workspacePath
-	
+
 	// Set up environment for private modules
 	cmd.Env = append(os.Environ(),
 		"GOPRIVATE=github.com/mattsolo1/*",
 		"GOPROXY=direct",
 	)
-	
+
 	if err := cmd.Run(); err != nil {
 		return err
 	}
@@ -341,7 +341,7 @@ func runDepsSync(commit, push bool) error {
 
 	// Track all unique Grove dependencies for version resolution
 	uniqueDeps := make(map[string]bool)
-	
+
 	// First pass: discover all Grove dependencies per workspace
 	for _, ws := range workspaces {
 		// Skip the root workspace
@@ -350,7 +350,7 @@ func runDepsSync(commit, push bool) error {
 		}
 
 		wsName := filepath.Base(ws)
-		
+
 		// Read go.mod to find Grove dependencies
 		goModPath := filepath.Join(ws, "go.mod")
 		goModContent, err := os.ReadFile(goModPath)
@@ -375,7 +375,7 @@ func runDepsSync(commit, push bool) error {
 		inRequire := false
 		for _, line := range lines {
 			line = strings.TrimSpace(line)
-			
+
 			if line == "require (" {
 				inRequire = true
 				continue
@@ -384,7 +384,7 @@ func runDepsSync(commit, push bool) error {
 				inRequire = false
 				continue
 			}
-			
+
 			if inRequire || strings.HasPrefix(line, "require ") {
 				// Extract Grove dependencies
 				if strings.Contains(line, "github.com/mattsolo1/") {
@@ -431,10 +431,10 @@ func runDepsSync(commit, push bool) error {
 	// Update each workspace
 	var updatedWorkspaces []string
 	var failedWorkspaces []string
-	
+
 	for _, ws := range workspaceList {
 		fmt.Printf("Updating %s...\n", ws.name)
-		
+
 		// Update all dependencies for this workspace
 		hasUpdates := false
 		for _, dep := range ws.deps {
@@ -442,7 +442,7 @@ func runDepsSync(commit, push bool) error {
 			if !ok {
 				continue
 			}
-			
+
 			fmt.Printf("  %s -> %s\n", dep, version)
 			if err := runGoGet(ws.path, dep, version); err != nil {
 				fmt.Printf("    ERROR: %v\n", err)
@@ -451,7 +451,7 @@ func runDepsSync(commit, push bool) error {
 			}
 			hasUpdates = true
 		}
-		
+
 		if hasUpdates {
 			// Run go mod tidy
 			if err := runGoModTidy(ws.path); err != nil {
@@ -459,7 +459,7 @@ func runDepsSync(commit, push bool) error {
 				failedWorkspaces = append(failedWorkspaces, ws.name)
 			} else {
 				updatedWorkspaces = append(updatedWorkspaces, ws.name)
-				
+
 				// Handle git operations if requested
 				if commit {
 					commitMsg := "chore(deps): update Grove dependencies to latest versions"
@@ -472,7 +472,7 @@ func runDepsSync(commit, push bool) error {
 							commitCmd.Dir = ws.path
 							if err := commitCmd.Run(); err == nil {
 								fmt.Printf("  INFO: Created commit in %s\n", ws.name)
-								
+
 								if push {
 									pushCmd := exec.Command("git", "push", "origin", "HEAD")
 									pushCmd.Dir = ws.path

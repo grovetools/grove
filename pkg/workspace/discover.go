@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	
+
 	"github.com/mattsolo1/grove-core/config"
 )
 
@@ -19,13 +19,13 @@ func FindRoot(startDir string) (string, error) {
 			return "", fmt.Errorf("failed to get current directory: %w", err)
 		}
 	}
-	
+
 	// Make startDir absolute
 	absStart, err := filepath.Abs(startDir)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve absolute path: %w", err)
 	}
-	
+
 	current := absStart
 	for {
 		configPath := filepath.Join(current, "grove.yml")
@@ -36,7 +36,7 @@ func FindRoot(startDir string) (string, error) {
 				return current, nil
 			}
 		}
-		
+
 		// Move up one directory
 		parent := filepath.Dir(current)
 		if parent == current {
@@ -45,7 +45,7 @@ func FindRoot(startDir string) (string, error) {
 		}
 		current = parent
 	}
-	
+
 	return "", fmt.Errorf("no grove.yml with workspaces found in %s or parent directories", absStart)
 }
 
@@ -56,53 +56,53 @@ func Discover(rootDir string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
-	
+
 	if len(cfg.Workspaces) == 0 {
 		return nil, fmt.Errorf("no workspaces defined in %s", configPath)
 	}
-	
+
 	var workspaces []string
 	seen := make(map[string]bool)
-	
+
 	for _, pattern := range cfg.Workspaces {
 		// Convert pattern to absolute path
 		absPattern := filepath.Join(rootDir, pattern)
-		
+
 		// Find all matches
 		matches, err := filepath.Glob(absPattern)
 		if err != nil {
 			return nil, fmt.Errorf("invalid glob pattern %s: %w", pattern, err)
 		}
-		
+
 		for _, match := range matches {
 			// Skip if not a directory
 			info, err := os.Stat(match)
 			if err != nil || !info.IsDir() {
 				continue
 			}
-			
+
 			// Skip if no grove.yml in the directory
 			groveYmlPath := filepath.Join(match, "grove.yml")
 			if _, err := os.Stat(groveYmlPath); os.IsNotExist(err) {
 				continue
 			}
-			
+
 			// Normalize path and add if not seen
 			absMatch, err := filepath.Abs(match)
 			if err != nil {
 				continue
 			}
-			
+
 			if !seen[absMatch] {
 				workspaces = append(workspaces, absMatch)
 				seen[absMatch] = true
 			}
 		}
 	}
-	
+
 	// Sort for consistent ordering
 	sort.Strings(workspaces)
-	
+
 	return workspaces, nil
 }
 
@@ -111,7 +111,7 @@ func FilterWorkspaces(workspaces []string, filter string) []string {
 	if filter == "" {
 		return workspaces
 	}
-	
+
 	var filtered []string
 	for _, ws := range workspaces {
 		base := filepath.Base(ws)
@@ -120,7 +120,7 @@ func FilterWorkspaces(workspaces []string, filter string) []string {
 			filtered = append(filtered, ws)
 		}
 	}
-	
+
 	return filtered
 }
 
@@ -130,7 +130,7 @@ func GetWorkspaceName(workspacePath, rootDir string) string {
 	if rel, err := filepath.Rel(rootDir, workspacePath); err == nil && !strings.HasPrefix(rel, "..") {
 		return rel
 	}
-	
+
 	// Fall back to base name
 	return filepath.Base(workspacePath)
 }

@@ -17,46 +17,46 @@ import (
 var (
 	// Styles for chats display
 	chatsHeaderStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("219")).
-		MarginTop(1).
-		MarginBottom(0)
+				Bold(true).
+				Foreground(lipgloss.Color("219")).
+				MarginTop(1).
+				MarginBottom(0)
 
 	chatTitleStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("255"))
+			Foreground(lipgloss.Color("255"))
 
 	chatModelStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("219")).
-		Bold(true)
+			Foreground(lipgloss.Color("219")).
+			Bold(true)
 
 	chatMetaStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
+			Foreground(lipgloss.Color("245"))
 
 	chatsBoxStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("219")).
-		Padding(0, 1).
-		MarginLeft(2).
-		MarginBottom(1)
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("219")).
+			Padding(0, 1).
+			MarginLeft(2).
+			MarginBottom(1)
 
 	noChatsStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("242")).
-		Italic(true)
+			Foreground(lipgloss.Color("242")).
+			Italic(true)
 
 	chatActiveStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("46")).
-		Bold(true)
+			Foreground(lipgloss.Color("46")).
+			Bold(true)
 )
 
 // Chat represents a simplified version of a flow chat
 type Chat struct {
-	ID          string    `json:"id"`
-	Title       string    `json:"title"`
-	Status      string    `json:"status"`
-	Model       string    `json:"model"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	MessageCount int      `json:"message_count"`
+	ID           string    `json:"id"`
+	Title        string    `json:"title"`
+	Status       string    `json:"status"`
+	Model        string    `json:"model"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	MessageCount int       `json:"message_count"`
 }
 
 var (
@@ -82,7 +82,7 @@ func runWorkspaceChats(cmd *cobra.Command, args []string) error {
 		// Run flow chat list --json
 		flowCmd := exec.Command("flow", "chat", "list", "--json")
 		flowCmd.Dir = workspacePath
-		
+
 		output, err := flowCmd.Output()
 		if err != nil {
 			// flow might not be available in this workspace
@@ -94,14 +94,14 @@ func runWorkspaceChats(cmd *cobra.Command, args []string) error {
 		if err := json.Unmarshal(output, &chats); err != nil {
 			// Fallback to text parsing if JSON fails
 			lines := strings.Split(string(output), "\n")
-			
+
 			// Skip header line
 			for i := 1; i < len(lines); i++ {
 				line := strings.TrimSpace(lines[i])
 				if line == "" {
 					continue
 				}
-				
+
 				// Parse columns: TITLE STATUS MODEL FILE
 				fields := strings.Fields(line)
 				if len(fields) >= 3 {
@@ -114,7 +114,7 @@ func runWorkspaceChats(cmd *cobra.Command, args []string) error {
 						Title: fields[0],
 						Model: fields[2],
 					}
-					
+
 					// Simple status parsing
 					if len(fields) >= 2 {
 						chat.Title = fields[0]
@@ -123,7 +123,7 @@ func runWorkspaceChats(cmd *cobra.Command, args []string) error {
 							chat.Model = fields[2]
 						}
 					}
-					
+
 					chats = append(chats, chat)
 				}
 			}
@@ -163,7 +163,7 @@ func runWorkspaceChats(cmd *cobra.Command, args []string) error {
 
 		for _, wsName := range workspaceNames {
 			chats := results[wsName]
-			
+
 			// Skip workspaces with no chats
 			if len(chats) == 0 {
 				continue
@@ -213,20 +213,20 @@ func formatChat(chat Chat) string {
 	if len(idStr) > 8 {
 		idStr = idStr[:8]
 	}
-	
+
 	// Include date if available
 	if !chat.UpdatedAt.IsZero() {
 		timeAgo := formatTimeAgo(chat.UpdatedAt)
-		
+
 		// Check if recently active (within last hour)
 		if time.Since(chat.UpdatedAt) < time.Hour {
 			timeAgo = chatActiveStyle.Render("● " + timeAgo)
 		}
-		
+
 		meta := chatMetaStyle.Render(fmt.Sprintf("%s • %s", idStr, timeAgo))
 		return fmt.Sprintf("%s %s\n%s", title, model, meta)
 	}
-	
+
 	meta := chatMetaStyle.Render(idStr)
 	return fmt.Sprintf("%s %s\n%s", title, model, meta)
 }
@@ -254,7 +254,7 @@ func renderChatsTable(results map[string][]Chat) error {
 		Chat      Chat
 		Workspace string
 	}
-	
+
 	var allChats []chatWithWorkspace
 	for wsName, chats := range results {
 		for _, chat := range chats {
@@ -264,12 +264,12 @@ func renderChatsTable(results map[string][]Chat) error {
 			})
 		}
 	}
-	
+
 	if len(allChats) == 0 {
 		fmt.Println(noChatsStyle.Render("No chats found in any workspace."))
 		return nil
 	}
-	
+
 	// Sort by UpdatedAt descending (most recent first)
 	sort.Slice(allChats, func(i, j int) bool {
 		// If one has zero time, put it at the end
@@ -281,7 +281,7 @@ func renderChatsTable(results map[string][]Chat) error {
 		}
 		return allChats[i].Chat.UpdatedAt.After(allChats[j].Chat.UpdatedAt)
 	})
-	
+
 	// Create table
 	t := table.New().
 		Border(lipgloss.NormalBorder()).
@@ -303,11 +303,11 @@ func renderChatsTable(results map[string][]Chat) error {
 			}
 			return style
 		})
-	
+
 	// Add rows
 	for _, cw := range allChats {
 		chat := cw.Chat
-		
+
 		// Format time
 		timeStr := ""
 		if !chat.UpdatedAt.IsZero() {
@@ -317,7 +317,7 @@ func renderChatsTable(results map[string][]Chat) error {
 				timeStr = "● " + timeStr
 			}
 		}
-		
+
 		// Format model
 		modelStr := chat.Model
 		if modelStr == "" {
@@ -329,7 +329,7 @@ func renderChatsTable(results map[string][]Chat) error {
 		} else if strings.Contains(modelStr, "claude") {
 			modelStr = "Claude"
 		}
-		
+
 		// Format status with color
 		statusStr := string(chat.Status)
 		switch chat.Status {
@@ -342,7 +342,7 @@ func renderChatsTable(results map[string][]Chat) error {
 		case "running":
 			statusStr = lipgloss.NewStyle().Foreground(lipgloss.Color("33")).Render("running")
 		}
-		
+
 		t.Row(
 			cw.Workspace,
 			chat.Title,
@@ -351,7 +351,7 @@ func renderChatsTable(results map[string][]Chat) error {
 			timeStr,
 		)
 	}
-	
+
 	fmt.Println(t)
 	return nil
 }

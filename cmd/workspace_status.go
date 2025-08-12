@@ -6,27 +6,30 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
-	
+	"sync"
+
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-meta/pkg/gh"
+	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
 
 // Color styles using lipgloss
 var (
-	cleanStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff00")).Bold(true)
-	dirtyStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffaa00")).Bold(true)
-	untrackedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff4444")).Bold(true)
-	modifiedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffaa00")).Bold(true)
-	stagedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#4ecdc4")).Bold(true)
-	aheadStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#95e1d3")).Bold(true)
-	behindStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#f38181")).Bold(true)
-	grayStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#808080"))
-	errorStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff4444")).Bold(true)
+	cleanStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff00")).Bold(true)
+	dirtyStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffaa00")).Bold(true)
+	untrackedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff4444")).Bold(true)
+	modifiedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffaa00")).Bold(true)
+	stagedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#4ecdc4")).Bold(true)
+	aheadStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#95e1d3")).Bold(true)
+	behindStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#f38181")).Bold(true)
+	grayStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#808080"))
+	errorStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff4444")).Bold(true)
 )
 
 // Removed init function - command is now added in workspace.go
@@ -49,16 +52,15 @@ func newWorkspaceStatusCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE:  runWorkspaceStatus,
 	}
-	
-	cmd.Flags().String("cols", "git,cx,release", "Comma-separated columns to display (e.g., git,cx,release)")
-	
+
+	cmd.Flags().String("cols", "git,main-ci,my-prs,cx,release", "Comma-separated columns to display (e.g., git,main-ci,my-prs,cx,release)")
+
 	return cmd
 }
 
-
 func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 	logger := cli.GetLogger(cmd)
-	
+
 	// Parse column selection
 	colsStr, _ := cmd.Flags().GetString("cols")
 	selectedCols := strings.Split(colsStr, ",")
@@ -66,157 +68,209 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 	for _, c := range selectedCols {
 		colMap[strings.TrimSpace(c)] = true
 	}
-	
+
 	// Find root directory with workspaces
 	rootDir, err := workspace.FindRoot("")
 	if err != nil {
 		return fmt.Errorf("failed to find workspace root: %w", err)
 	}
-	
+
 	// Discover workspaces
 	workspaces, err := workspace.Discover(rootDir)
 	if err != nil {
 		return fmt.Errorf("failed to discover workspaces: %w", err)
 	}
-	
+
 	if len(workspaces) == 0 {
 		return fmt.Errorf("no workspaces found")
 	}
-	
+
 	logger.WithField("count", len(workspaces)).Debug("Discovered workspaces")
-	
+
 	// ContextStats represents the structure from grove-context
 	type ContextStats struct {
-		TotalFiles   int    `json:"total_files"`
-		TotalTokens  int    `json:"total_tokens"`
-		TotalSize    int64  `json:"total_size"`
+		TotalFiles  int   `json:"total_files"`
+		TotalTokens int   `json:"total_tokens"`
+		TotalSize   int64 `json:"total_size"`
 	}
-	
+
 	// ReleaseInfo represents release information for a workspace
 	type ReleaseInfo struct {
 		LatestTag    string
 		CommitsAhead int
 	}
-	
+
 	// Collect status for each workspace
 	type workspaceStatusInfo struct {
 		Name    string
 		Git     *git.StatusInfo
 		Context *ContextStats
 		Release *ReleaseInfo
+		MainCI  string
+		MyPRs   string
 		GitErr  error
 		CxErr   error
 		RelErr  error
+		CIErr   error
 	}
-	
-	var statuses []workspaceStatusInfo
-	
+
+	// Process workspaces concurrently
+	statusChannel := make(chan workspaceStatusInfo, len(workspaces))
+	var wg sync.WaitGroup
+
 	for _, ws := range workspaces {
-		wsName := workspace.GetWorkspaceName(ws, rootDir)
-		
-		statusInfo := workspaceStatusInfo{
-			Name: wsName,
-		}
-		
-		// Get git status if requested
-		if colMap["git"] {
-			gitStatus, gitErr := git.GetStatus(ws)
-			statusInfo.Git = gitStatus
-			statusInfo.GitErr = gitErr
-		}
-		
-		// Get context stats if requested
-		if colMap["cx"] {
-			var cxStats *ContextStats
-			var cxErr error
-			
-			// Try to run cx stats --json
-			// First try grove-context binary, then fall back to cx in PATH
-			cxCmd := "cx"
-			if gcxPath := filepath.Join(rootDir, "grove-context", "grove-cx"); fileExists(gcxPath) {
-				cxCmd = gcxPath
-			} else if gcxPath := filepath.Join(rootDir, "grove-context", "cx"); fileExists(gcxPath) {
-				cxCmd = gcxPath
+		wg.Add(1)
+		go func(wsPath string) {
+			defer wg.Done()
+			wsName := workspace.GetWorkspaceName(wsPath, rootDir)
+
+			statusInfo := workspaceStatusInfo{
+				Name: wsName,
 			}
-			
-			cmd := exec.Command(cxCmd, "stats", "--json")
-			cmd.Dir = ws
-			output, err := cmd.Output()
-			
-			if err == nil && len(output) > 0 {
-				// Check if output starts with JSON array
-				trimmed := strings.TrimSpace(string(output))
-				if strings.HasPrefix(trimmed, "[") {
-					// Parse JSON output - cx returns an array
-					var statsArray []ContextStats
-					if err := json.Unmarshal([]byte(trimmed), &statsArray); err == nil && len(statsArray) > 0 {
-						cxStats = &statsArray[0]
+
+			// Get git status if requested
+			if colMap["git"] {
+				gitStatus, gitErr := git.GetStatus(wsPath)
+				statusInfo.Git = gitStatus
+				statusInfo.GitErr = gitErr
+			}
+
+			// Get context stats if requested
+			if colMap["cx"] {
+				var cxStats *ContextStats
+				var cxErr error
+
+				// Try to run cx stats --json
+				// First try grove-context binary, then fall back to cx in PATH
+				cxCmd := "cx"
+				if gcxPath := filepath.Join(rootDir, "grove-context", "grove-cx"); fileExists(gcxPath) {
+					cxCmd = gcxPath
+				} else if gcxPath := filepath.Join(rootDir, "grove-context", "cx"); fileExists(gcxPath) {
+					cxCmd = gcxPath
+				}
+
+				cmd := exec.Command(cxCmd, "stats", "--json")
+				cmd.Dir = wsPath
+				output, err := cmd.Output()
+
+				if err == nil && len(output) > 0 {
+					// Check if output starts with JSON array
+					trimmed := strings.TrimSpace(string(output))
+					if strings.HasPrefix(trimmed, "[") {
+						// Parse JSON output - cx returns an array
+						var statsArray []ContextStats
+						if err := json.Unmarshal([]byte(trimmed), &statsArray); err == nil && len(statsArray) > 0 {
+							cxStats = &statsArray[0]
+						} else {
+							cxErr = fmt.Errorf("failed to parse cx output: %v", err)
+						}
 					} else {
-						cxErr = fmt.Errorf("failed to parse cx output: %v", err)
+						// Non-JSON output, cx might not support --json flag properly
+						cxErr = fmt.Errorf("cx does not support JSON output")
+					}
+				} else if err != nil {
+					// Check if it's just a missing rules file
+					if strings.Contains(err.Error(), "exit status") {
+						cxErr = fmt.Errorf("no rules file")
+					} else {
+						cxErr = err
+					}
+				}
+
+				statusInfo.Context = cxStats
+				statusInfo.CxErr = cxErr
+			}
+
+			// Get release info if requested
+			if colMap["release"] {
+				var releaseInfo *ReleaseInfo
+				var relErr error
+
+				// Get the latest tag
+				cmd := exec.Command("git", "describe", "--tags", "--abbrev=0")
+				cmd.Dir = wsPath
+				tagOutput, err := cmd.Output()
+
+				if err != nil {
+					// No tags found
+					releaseInfo = &ReleaseInfo{
+						LatestTag:    "none",
+						CommitsAhead: -1,
 					}
 				} else {
-					// Non-JSON output, cx might not support --json flag properly
-					cxErr = fmt.Errorf("cx does not support JSON output")
+					latestTag := strings.TrimSpace(string(tagOutput))
+
+					// Count commits between latest tag and HEAD
+					cmd = exec.Command("git", "rev-list", "--count", latestTag+"..HEAD")
+					cmd.Dir = wsPath
+					countOutput, err := cmd.Output()
+
+					commitsAhead := 0
+					if err == nil {
+						fmt.Sscanf(strings.TrimSpace(string(countOutput)), "%d", &commitsAhead)
+					}
+
+					releaseInfo = &ReleaseInfo{
+						LatestTag:    latestTag,
+						CommitsAhead: commitsAhead,
+					}
 				}
-			} else if err != nil {
-				// Check if it's just a missing rules file
-				if strings.Contains(err.Error(), "exit status") {
-					cxErr = fmt.Errorf("no rules file")
-				} else {
-					cxErr = err
+
+				statusInfo.Release = releaseInfo
+				statusInfo.RelErr = relErr
+			}
+
+			// Get CI/CD status if requested
+			if colMap["main-ci"] || colMap["my-prs"] {
+				var mainCI, myPRs string
+				var err1, err2 error
+
+				if colMap["main-ci"] {
+					mainCI, err1 = gh.GetMainCIStatus(wsPath)
+					statusInfo.MainCI = mainCI
+				}
+
+				if colMap["my-prs"] {
+					myPRs, err2 = gh.GetMyPRsStatus(wsPath)
+					statusInfo.MyPRs = myPRs
+				}
+
+				if err1 != nil || err2 != nil {
+					statusInfo.CIErr = fmt.Errorf("main: %v, prs: %v", err1, err2)
 				}
 			}
-			
-			statusInfo.Context = cxStats
-			statusInfo.CxErr = cxErr
-		}
-		
-		// Get release info if requested
-		if colMap["release"] {
-			var releaseInfo *ReleaseInfo
-			var relErr error
-			
-			// Get the latest tag
-			cmd := exec.Command("git", "describe", "--tags", "--abbrev=0")
-			cmd.Dir = ws
-			tagOutput, err := cmd.Output()
-			
-			if err != nil {
-				// No tags found
-				releaseInfo = &ReleaseInfo{
-					LatestTag:    "none",
-					CommitsAhead: -1,
-				}
-			} else {
-				latestTag := strings.TrimSpace(string(tagOutput))
-				
-				// Count commits between latest tag and HEAD
-				cmd = exec.Command("git", "rev-list", "--count", latestTag+"..HEAD")
-				cmd.Dir = ws
-				countOutput, err := cmd.Output()
-				
-				commitsAhead := 0
-				if err == nil {
-					fmt.Sscanf(strings.TrimSpace(string(countOutput)), "%d", &commitsAhead)
-				}
-				
-				releaseInfo = &ReleaseInfo{
-					LatestTag:    latestTag,
-					CommitsAhead: commitsAhead,
-				}
-			}
-			
-			statusInfo.Release = releaseInfo
-			statusInfo.RelErr = relErr
-		}
-		
-		statuses = append(statuses, statusInfo)
+
+			statusChannel <- statusInfo
+		}(ws)
 	}
-	
+
+	// Wait for all goroutines to complete and close the channel
+	go func() {
+		wg.Wait()
+		close(statusChannel)
+	}()
+
+	// Collect results from channel
+	var statuses []workspaceStatusInfo
+	for status := range statusChannel {
+		statuses = append(statuses, status)
+	}
+
+	// Sort by workspace name for consistent output
+	sort.Slice(statuses, func(i, j int) bool {
+		return statuses[i].Name < statuses[j].Name
+	})
+
 	// Build table headers dynamically
 	headers := []string{"WORKSPACE"}
 	if colMap["git"] {
 		headers = append(headers, "BRANCH", "GIT STATUS", "CHANGES")
+	}
+	if colMap["main-ci"] {
+		headers = append(headers, "MAIN CI")
+	}
+	if colMap["my-prs"] {
+		headers = append(headers, "MY PRS")
 	}
 	if colMap["cx"] {
 		headers = append(headers, "CX FILES", "CX TOKENS", "CX SIZE")
@@ -224,13 +278,14 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 	if colMap["release"] {
 		headers = append(headers, "RELEASE")
 	}
-	
+	headers = append(headers, "LINK")
+
 	// Collect all rows
 	var rows [][]string
-	
+
 	for _, ws := range statuses {
 		row := []string{ws.Name}
-		
+
 		// Add git columns if requested
 		if colMap["git"] {
 			// Handle git error case
@@ -240,7 +295,7 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 				row = append(row, "-", "-", "-")
 			} else {
 				status := ws.Git
-				
+
 				// Format status column with pre-styling
 				statusStr := "✓ Clean"
 				styledStatus := cleanStyle.Render(statusStr)
@@ -248,10 +303,10 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 					statusStr = "● Dirty"
 					styledStatus = dirtyStyle.Render(statusStr)
 				}
-				
+
 				// Format changes column
 				var changes []string
-				
+
 				// Add upstream status
 				if status.HasUpstream {
 					if status.AheadCount > 0 || status.BehindCount > 0 {
@@ -274,7 +329,7 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 				} else {
 					changes = append(changes, "no upstream")
 				}
-				
+
 				// Add file counts
 				if status.ModifiedCount > 0 {
 					changes = append(changes, modifiedStyle.Render(fmt.Sprintf("M:%d", status.ModifiedCount)))
@@ -285,20 +340,37 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 				if status.UntrackedCount > 0 {
 					changes = append(changes, untrackedStyle.Render(fmt.Sprintf("?:%d", status.UntrackedCount)))
 				}
-				
+
 				changesStr := strings.Join(changes, " ")
 				if changesStr == "" && status.HasUpstream {
 					changesStr = "up to date"
 				}
-				
+
 				row = append(row, status.Branch, styledStatus, changesStr)
 			}
 		}
-		
+
+		// Add CI/CD columns if requested
+		if colMap["main-ci"] {
+			if ws.CIErr != nil {
+				row = append(row, "? Unknown")
+			} else {
+				row = append(row, ws.MainCI)
+			}
+		}
+
+		if colMap["my-prs"] {
+			if ws.CIErr != nil {
+				row = append(row, "? Unknown")
+			} else {
+				row = append(row, ws.MyPRs)
+			}
+		}
+
 		// Add context columns if requested
 		if colMap["cx"] {
 			if ws.Context != nil && ws.CxErr == nil {
-				row = append(row, 
+				row = append(row,
 					fmt.Sprintf("%d", ws.Context.TotalFiles),
 					formatTokens(ws.Context.TotalTokens),
 					formatBytes(ws.Context.TotalSize))
@@ -309,7 +381,7 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 				row = append(row, "-", "-", "-")
 			}
 		}
-		
+
 		// Add release column if requested
 		if colMap["release"] {
 			if ws.Release != nil && ws.RelErr == nil {
@@ -332,23 +404,27 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 				row = append(row, "-")
 			}
 		}
-		
+
+		// Add GitHub link column
+		githubURL := fmt.Sprintf("https://github.com/mattsolo1/%s", ws.Name)
+		row = append(row, githubURL)
+
 		rows = append(rows, row)
 	}
-	
+
 	// Create a simple table style
 	re := lipgloss.NewRenderer(os.Stdout)
-	
+
 	baseStyle := re.NewStyle().Padding(0, 1)
 	headerStyle := baseStyle.Copy().Bold(true).Foreground(lipgloss.Color("255"))
-	
+
 	// Create the table
 	t := table.New().
 		Border(lipgloss.NormalBorder()).
 		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
 		Headers(headers...).
 		Rows(rows...)
-	
+
 	// Apply styling - only for headers since content is pre-styled
 	t.StyleFunc(func(row, col int) lipgloss.Style {
 		if row == 0 {
@@ -357,7 +433,7 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 		// Return minimal style to preserve pre-styled content
 		return lipgloss.NewStyle().Padding(0, 1)
 	})
-	
+
 	fmt.Println(t)
 	return nil
 }
@@ -380,7 +456,7 @@ func formatBytes(bytes int64) string {
 		MB = KB * 1024
 		GB = MB * 1024
 	)
-	
+
 	if bytes < KB {
 		return fmt.Sprintf("%d B", bytes)
 	} else if bytes < MB {
@@ -397,3 +473,4 @@ func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
+

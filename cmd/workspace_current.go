@@ -17,28 +17,28 @@ import (
 var (
 	// Styles for current notes display
 	currentHeaderStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("213")).
-		MarginTop(1).
-		MarginBottom(0)
+				Bold(true).
+				Foreground(lipgloss.Color("213")).
+				MarginTop(1).
+				MarginBottom(0)
 
 	currentTitleStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("255"))
+				Foreground(lipgloss.Color("255"))
 
 	currentMetaStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245")).
-		Italic(true)
+				Foreground(lipgloss.Color("245")).
+				Italic(true)
 
 	currentBoxStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("213")).
-		Padding(0, 1).
-		MarginLeft(2).
-		MarginBottom(1)
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("213")).
+			Padding(0, 1).
+			MarginLeft(2).
+			MarginBottom(1)
 
 	noCurrentStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("242")).
-		Italic(true)
+			Foreground(lipgloss.Color("242")).
+			Italic(true)
 )
 
 // Note represents a simplified version of a notebook note
@@ -74,7 +74,7 @@ func runWorkspaceCurrent(cmd *cobra.Command, args []string) error {
 		// Run nb list --type current --json
 		nbCmd := exec.Command("nb", "list", "--type", "current", "--json")
 		nbCmd.Dir = workspacePath
-		
+
 		output, err := nbCmd.Output()
 		if err != nil {
 			// nb might not be available in this workspace
@@ -121,7 +121,7 @@ func runWorkspaceCurrent(cmd *cobra.Command, args []string) error {
 
 		for _, wsName := range workspaceNames {
 			notes := results[wsName]
-			
+
 			// Skip workspaces with no current notes
 			if len(notes) == 0 {
 				continue
@@ -171,7 +171,7 @@ func renderCurrentTable(results map[string][]CurrentNote) error {
 		Note      CurrentNote
 		Workspace string
 	}
-	
+
 	var allNotes []noteWithWorkspace
 	for wsName, notes := range results {
 		for _, note := range notes {
@@ -181,12 +181,12 @@ func renderCurrentTable(results map[string][]CurrentNote) error {
 			})
 		}
 	}
-	
+
 	if len(allNotes) == 0 {
 		fmt.Println(noCurrentStyle.Render("No current notes found in any workspace."))
 		return nil
 	}
-	
+
 	// Sort by ModifiedAt descending (most recent first)
 	sort.Slice(allNotes, func(i, j int) bool {
 		// If one has zero time, put it at the end
@@ -198,7 +198,7 @@ func renderCurrentTable(results map[string][]CurrentNote) error {
 		}
 		return allNotes[i].Note.ModifiedAt.After(allNotes[j].Note.ModifiedAt)
 	})
-	
+
 	// Create table
 	t := table.New().
 		Border(lipgloss.NormalBorder()).
@@ -214,11 +214,11 @@ func renderCurrentTable(results map[string][]CurrentNote) error {
 			}
 			return lipgloss.NewStyle().Padding(0, 1)
 		})
-	
+
 	// Add rows
 	for _, nw := range allNotes {
 		note := nw.Note
-		
+
 		// Format time
 		timeStr := ""
 		if !note.ModifiedAt.IsZero() {
@@ -228,19 +228,19 @@ func renderCurrentTable(results map[string][]CurrentNote) error {
 				timeStr = "● " + timeStr
 			}
 		}
-		
+
 		// Truncate ID to 8 characters
 		idStr := note.ID
 		if len(idStr) > 8 {
 			idStr = idStr[:8]
 		}
-		
+
 		// Format title
 		title := note.Title
 		if title == "" {
 			title = "(untitled)"
 		}
-		
+
 		t.Row(
 			nw.Workspace,
 			title,
@@ -248,7 +248,7 @@ func renderCurrentTable(results map[string][]CurrentNote) error {
 			timeStr,
 		)
 	}
-	
+
 	fmt.Println(t)
 	return nil
 }

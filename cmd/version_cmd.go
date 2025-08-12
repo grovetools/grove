@@ -147,7 +147,7 @@ func runVersionList(cmd *cobra.Command, args []string) error {
 			Version string `json:"version"`
 			Active  bool   `json:"active"`
 		}
-		
+
 		var toolVersions []ToolVersion
 		for version, tools := range versionTools {
 			for _, tool := range tools {
@@ -159,7 +159,7 @@ func runVersionList(cmd *cobra.Command, args []string) error {
 				})
 			}
 		}
-		
+
 		jsonData, err := json.MarshalIndent(toolVersions, "", "  ")
 		if err != nil {
 			return fmt.Errorf("failed to marshal JSON: %w", err)
@@ -180,7 +180,7 @@ func runVersionList(cmd *cobra.Command, args []string) error {
 		active  bool
 	}
 	var allTools []toolVersionInfo
-	
+
 	for version, tools := range versionTools {
 		for _, tool := range tools {
 			activeVersion := tv.GetToolVersion(tool)
@@ -191,7 +191,7 @@ func runVersionList(cmd *cobra.Command, args []string) error {
 			})
 		}
 	}
-	
+
 	// Sort by tool name, then version
 	sort.Slice(allTools, func(i, j int) bool {
 		if allTools[i].tool != allTools[j].tool {
@@ -199,7 +199,7 @@ func runVersionList(cmd *cobra.Command, args []string) error {
 		}
 		return allTools[i].version < allTools[j].version
 	})
-	
+
 	for _, info := range allTools {
 		status := ""
 		if info.active {
@@ -238,11 +238,11 @@ func runVersionUse(cmd *cobra.Command, args []string) error {
 
 	// Switch to the version
 	logger.Infof("Switching %s to version %s...", toolName, version)
-	
+
 	if err := manager.UseToolVersion(toolName, version); err != nil {
 		return fmt.Errorf("failed to switch version: %w", err)
 	}
-	
+
 	// Clear any dev override for this tool since user explicitly wants a released version
 	devConfig, err := devlinks.LoadConfig()
 	if err == nil {
@@ -252,18 +252,18 @@ func runVersionUse(cmd *cobra.Command, args []string) error {
 			devlinks.SaveConfig(devConfig)
 		}
 	}
-	
+
 	// Load tool versions and reconcile
 	tv, err := sdk.LoadToolVersions(os.Getenv("HOME") + "/.grove")
 	if err != nil {
 		return fmt.Errorf("failed to load tool versions: %w", err)
 	}
-	
+
 	r, err := reconciler.NewWithToolVersions(tv)
 	if err != nil {
 		return fmt.Errorf("failed to create reconciler: %w", err)
 	}
-	
+
 	if err := r.Reconcile(toolName); err != nil {
 		return fmt.Errorf("failed to update symlink: %w", err)
 	}
@@ -313,16 +313,16 @@ func runVersionUninstall(cmd *cobra.Command, args []string) error {
 
 	// Uninstall the version
 	logger.Infof("Uninstalling version %s...", version)
-	
+
 	if err := manager.UninstallVersion(version); err != nil {
 		return fmt.Errorf("failed to uninstall version: %w", err)
 	}
 
 	logger.Infof("✅ Successfully uninstalled version %s", version)
-	
+
 	if activeVersion == version {
 		logger.Info("No version is currently active. Use 'grove version use <version>' to activate a version.")
 	}
-	
+
 	return nil
 }

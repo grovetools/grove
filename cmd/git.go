@@ -19,7 +19,7 @@ func newGitCmd() *cobra.Command {
 			if len(args) == 0 {
 				return cmd.Help()
 			}
-			
+
 			// Prepend 'git' to the args and use the run command logic
 			runArgs := append([]string{"git"}, args...)
 			return runCommand(cmd, runArgs)
@@ -27,8 +27,8 @@ func newGitCmd() *cobra.Command {
 		// Allow arbitrary args for git commands
 		Args: cobra.ArbitraryArgs,
 	}
-	
+
 	// Status command has been moved to workspace status
-	
+
 	return cmd
 }

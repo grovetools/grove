@@ -15,32 +15,32 @@ import (
 var (
 	// Styles for worktree display
 	worktreeHeaderStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("99")).
-		MarginTop(1).
-		MarginBottom(0)
+				Bold(true).
+				Foreground(lipgloss.Color("99")).
+				MarginTop(1).
+				MarginBottom(0)
 
 	worktreePathStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241"))
+				Foreground(lipgloss.Color("241"))
 
 	worktreeBranchStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("33")).
-		Bold(true)
+				Foreground(lipgloss.Color("33")).
+				Bold(true)
 
 	worktreeCleanStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("34"))
+				Foreground(lipgloss.Color("34"))
 
 	worktreeDirtyStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208"))
+				Foreground(lipgloss.Color("208"))
 
 	worktreeErrorStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("196"))
+				Foreground(lipgloss.Color("196"))
 
 	worktreeBoxStyle = lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Padding(0, 1).
-		MarginLeft(2)
+				Border(lipgloss.NormalBorder()).
+				BorderForeground(lipgloss.Color("240")).
+				Padding(0, 1).
+				MarginLeft(2)
 )
 
 func NewWorkspaceWorktreesCmd() *cobra.Command {
@@ -76,7 +76,7 @@ func runWorkspaceWorktrees(cmd *cobra.Command, args []string) error {
 
 		for _, wsName := range workspaceNames {
 			worktrees := results[wsName]
-			
+
 			// Skip workspaces with only one worktree (the main one)
 			if len(worktrees) <= 1 {
 				continue

@@ -11,33 +11,33 @@ import (
 
 func newDevListBinsCmd() *cobra.Command {
 	cmd := cli.NewStandardCommand("list-bins", "List all binaries managed by local development links")
-	
+
 	cmd.Long = `Shows a simple list of all binary names that have registered local
 development versions. This is useful for scripts and automation.`
-	
+
 	cmd.Example = `  # List all managed binaries
   grove dev list-bins`
-	
+
 	cmd.Args = cobra.NoArgs
-	
+
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		config, err := devlinks.LoadConfig()
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
 		}
-		
+
 		if len(config.Binaries) == 0 {
 			// No output for scripts
 			return nil
 		}
-		
+
 		// Get and sort binary names
 		var binaryNames []string
 		for name := range config.Binaries {
 			binaryNames = append(binaryNames, name)
 		}
 		sort.Strings(binaryNames)
-		
+
 		// Check if JSON output is requested
 		jsonFlag, _ := cmd.Flags().GetBool("json")
 		if jsonFlag {
@@ -53,9 +53,9 @@ development versions. This is useful for scripts and automation.`
 				fmt.Printf("  %s\n", name)
 			}
 		}
-		
+
 		return nil
 	}
-	
+
 	return cmd
 }

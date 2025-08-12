@@ -15,28 +15,28 @@ import (
 var (
 	// Styles for issues display
 	issuesHeaderStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("205")).
-		MarginTop(1).
-		MarginBottom(0)
+				Bold(true).
+				Foreground(lipgloss.Color("205")).
+				MarginTop(1).
+				MarginBottom(0)
 
 	issueTitleStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("255"))
+			Foreground(lipgloss.Color("255"))
 
 	issueMetaStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245")).
-		Italic(true)
+			Foreground(lipgloss.Color("245")).
+			Italic(true)
 
 	issueBoxStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("205")).
-		Padding(0, 1).
-		MarginLeft(2).
-		MarginBottom(1)
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("205")).
+			Padding(0, 1).
+			MarginLeft(2).
+			MarginBottom(1)
 
 	noIssuesStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("242")).
-		Italic(true)
+			Foreground(lipgloss.Color("242")).
+			Italic(true)
 )
 
 // Note represents a simplified version of a notebook note
@@ -66,7 +66,7 @@ func runWorkspaceIssues(cmd *cobra.Command, args []string) error {
 		// Run nb list --type issues --json
 		nbCmd := exec.Command("nb", "list", "--type", "issues", "--json")
 		nbCmd.Dir = workspacePath
-		
+
 		output, err := nbCmd.Output()
 		if err != nil {
 			// nb might not be available in this workspace
@@ -107,7 +107,7 @@ func runWorkspaceIssues(cmd *cobra.Command, args []string) error {
 
 		for _, wsName := range workspaceNames {
 			issues := results[wsName]
-			
+
 			// Skip workspaces with no issues
 			if len(issues) == 0 {
 				continue
@@ -152,7 +152,7 @@ func formatIssue(note Note) string {
 
 func formatTimeAgo(t time.Time) string {
 	duration := time.Since(t)
-	
+
 	switch {
 	case duration < time.Minute:
 		return "just now"

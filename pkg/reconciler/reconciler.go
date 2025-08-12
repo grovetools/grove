@@ -12,9 +12,9 @@ import (
 
 // Reconciler manages the intelligent layering of dev links over released versions
 type Reconciler struct {
-	devConfig     *devlinks.Config
-	toolVersions  *sdk.ToolVersions
-	groveHome     string
+	devConfig    *devlinks.Config
+	toolVersions *sdk.ToolVersions
+	groveHome    string
 }
 
 // New creates a new reconciler instance (DEPRECATED - use NewWithToolVersions)
@@ -35,9 +35,9 @@ func NewWithToolVersions(toolVersions *sdk.ToolVersions) (*Reconciler, error) {
 			Binaries: make(map[string]*devlinks.BinaryLinks),
 		}
 	}
-	
+
 	groveHome := filepath.Join(os.Getenv("HOME"), ".grove")
-	
+
 	return &Reconciler{
 		devConfig:    devConfig,
 		toolVersions: toolVersions,
@@ -55,7 +55,7 @@ func (r *Reconciler) ReconcileAll(tools []string) error {
 			// Continue with other tools even if one fails
 		}
 	}
-	
+
 	return nil
 }
 
@@ -63,7 +63,7 @@ func (r *Reconciler) ReconcileAll(tools []string) error {
 func (r *Reconciler) Reconcile(toolName string) error {
 	binDir := filepath.Join(r.groveHome, "bin")
 	symlinkPath := filepath.Join(binDir, toolName)
-	
+
 	// Check if a dev override is active
 	if binLinks, exists := r.devConfig.Binaries[toolName]; exists && binLinks.Current != "" {
 		// Dev override is active
@@ -72,7 +72,7 @@ func (r *Reconciler) Reconcile(toolName string) error {
 			return createOrUpdateSymlink(symlinkPath, linkInfo.Path)
 		}
 	}
-	
+
 	// No dev override, fall back to released version
 	toolVersion := r.toolVersions.GetToolVersion(toolName)
 	if toolVersion == "" {
@@ -81,14 +81,14 @@ func (r *Reconciler) Reconcile(toolName string) error {
 		os.Remove(symlinkPath)
 		return nil
 	}
-	
+
 	// Check if the tool exists in the active version
 	releasedBinPath := filepath.Join(r.groveHome, "versions", toolVersion, "bin", toolName)
 	if _, err := os.Stat(releasedBinPath); err == nil {
 		logger.Info("'%s' is using released version '%s'", toolName, toolVersion)
 		return createOrUpdateSymlink(symlinkPath, releasedBinPath)
 	}
-	
+
 	// Tool doesn't exist in the active version
 	logger.Debug("%s not found in version %s", toolName, toolVersion)
 	os.Remove(symlinkPath)
@@ -103,7 +103,7 @@ func (r *Reconciler) GetEffectiveSource(toolName string) (source string, version
 			return "dev", binLinks.Current, linkInfo.Path
 		}
 	}
-	
+
 	// Check released version
 	toolVersion := r.toolVersions.GetToolVersion(toolName)
 	if toolVersion != "" {
@@ -112,7 +112,7 @@ func (r *Reconciler) GetEffectiveSource(toolName string) (source string, version
 			return "release", toolVersion, releasedBinPath
 		}
 	}
-	
+
 	return "none", "", ""
 }
 
@@ -122,14 +122,14 @@ func createOrUpdateSymlink(symlinkPath, targetPath string) error {
 	if err := os.MkdirAll(filepath.Dir(symlinkPath), 0755); err != nil {
 		return fmt.Errorf("failed to create bin directory: %w", err)
 	}
-	
+
 	// Remove existing symlink if it exists
 	os.Remove(symlinkPath)
-	
+
 	// Create new symlink
 	if err := os.Symlink(targetPath, symlinkPath); err != nil {
 		return fmt.Errorf("failed to create symlink: %w", err)
 	}
-	
+
 	return nil
 }

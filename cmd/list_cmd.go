@@ -29,9 +29,9 @@ func newListCmd() *cobra.Command {
 }
 
 type ToolInfo struct {
-	Name      string `json:"name"`
-	Installed bool   `json:"installed"`
-	Active    bool   `json:"active"`
+	Name      string   `json:"name"`
+	Installed bool     `json:"installed"`
+	Active    bool     `json:"active"`
 	Versions  []string `json:"versions,omitempty"`
 }
 
@@ -61,7 +61,7 @@ func runList(cmd *cobra.Command, args []string) error {
 
 	// Get all available tools
 	allTools := sdk.GetAllTools()
-	
+
 	// Build tool info
 	var toolInfos []ToolInfo
 	for _, toolName := range allTools {
@@ -78,7 +78,7 @@ func runList(cmd *cobra.Command, args []string) error {
 			if _, err := os.Stat(versionBinPath); err == nil {
 				info.Installed = true
 				info.Versions = append(info.Versions, version)
-				
+
 				// Check if this version is active
 				if version == activeVersion {
 					info.Active = true
@@ -111,12 +111,12 @@ func runList(cmd *cobra.Command, args []string) error {
 		} else if info.Installed {
 			status = "Installed"
 		}
-		
+
 		versions := "-"
 		if len(info.Versions) > 0 {
 			versions = strings.Join(info.Versions, ", ")
 		}
-		
+
 		fmt.Fprintf(w, "%s\t%s\t%s\n", info.Name, status, versions)
 	}
 

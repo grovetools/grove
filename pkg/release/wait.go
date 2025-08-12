@@ -65,7 +65,7 @@ func WaitForModuleAvailabilityWithConfig(ctx context.Context, modulePath, versio
 		}
 
 		// Log the retry attempt
-		fmt.Printf("Waiting for module %s@%s to be available (attempt %d/%d)...\n", 
+		fmt.Printf("Waiting for module %s@%s to be available (attempt %d/%d)...\n",
 			modulePath, version, attempt, config.MaxRetries)
 
 		// Wait with backoff
@@ -93,18 +93,18 @@ func checkGitTagExists(ctx context.Context, modulePath, version string) error {
 // checkModuleAvailable checks if a module version is available via go list
 func checkModuleAvailable(ctx context.Context, modulePath, version string) error {
 	cmd := exec.CommandContext(ctx, "go", "list", "-m", fmt.Sprintf("%s@%s", modulePath, version))
-	
+
 	// Set up environment for private modules
 	cmd.Env = append(os.Environ(),
 		"GOPRIVATE=github.com/mattsolo1/*",
 		"GOPROXY=direct",
 	)
-	
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("module not available: %w (output: %s)", err, output)
 	}
-	
+
 	return nil
 }
 

@@ -71,7 +71,7 @@ func DiscoverLocalBinaries(worktreePath string) ([]BinaryMeta, error) {
 	if _, err := os.Stat(filepath.Join(worktreePath, "grove-core")); err == nil {
 		// This is the grove-ecosystem repo, discover all binary packages
 		var ecosystemBinaries []BinaryMeta
-		
+
 		// List of known grove-ecosystem binary packages
 		packages := []struct {
 			dir    string
@@ -86,7 +86,7 @@ func DiscoverLocalBinaries(worktreePath string) ([]BinaryMeta, error) {
 			{"grove-proxy", "px"},
 			{"grove-tend", "tend"},
 		}
-		
+
 		for _, pkg := range packages {
 			binPath := filepath.Join(worktreePath, pkg.dir, "bin", pkg.binary)
 			// Check if the binary exists
@@ -97,7 +97,7 @@ func DiscoverLocalBinaries(worktreePath string) ([]BinaryMeta, error) {
 				})
 			}
 		}
-		
+
 		if len(ecosystemBinaries) > 0 {
 			return ecosystemBinaries, nil
 		}

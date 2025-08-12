@@ -56,7 +56,7 @@ func newWorkspaceGitHooksInstallCmd() *cobra.Command {
 			// Install hooks in each repository
 			for _, path := range allPaths {
 				logger.WithField("path", path).Info("Installing git hooks")
-				
+
 				if err := githooks.Install(path); err != nil {
 					logger.WithError(err).WithField("path", path).Error("Failed to install git hooks")
 					failed = append(failed, path)
@@ -125,7 +125,7 @@ func newWorkspaceGitHooksUninstallCmd() *cobra.Command {
 			// Uninstall hooks from each repository
 			for _, path := range allPaths {
 				logger.WithField("path", path).Info("Uninstalling git hooks")
-				
+
 				if err := githooks.Uninstall(path); err != nil {
 					logger.WithError(err).WithField("path", path).Error("Failed to uninstall git hooks")
 					failed = append(failed, path)

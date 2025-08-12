@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/sirupsen/logrus"
 	"github.com/mattsolo1/grove-meta/pkg/workspace"
+	"github.com/sirupsen/logrus"
 )
 
 // CollectorFunc is a function that collects data for a single workspace
@@ -16,10 +16,10 @@ type RendererFunc[T any] func(results map[string]T) error
 
 // WorkspaceResult holds the result from a single workspace
 type WorkspaceResult[T any] struct {
-	Name   string
-	Path   string
-	Data   T
-	Error  error
+	Name  string
+	Path  string
+	Data  T
+	Error error
 }
 
 // Run executes a collector function across all workspaces and renders the results
@@ -29,7 +29,7 @@ func Run[T any](collector CollectorFunc[T], renderer RendererFunc[T]) error {
 	if err != nil {
 		return fmt.Errorf("failed to find root: %w", err)
 	}
-	
+
 	workspaces, err := workspace.Discover(rootDir)
 	if err != nil {
 		return fmt.Errorf("failed to discover workspaces: %w", err)
@@ -47,7 +47,7 @@ func Run[T any](collector CollectorFunc[T], renderer RendererFunc[T]) error {
 		wg.Add(1)
 		go func(path string) {
 			defer wg.Done()
-			
+
 			name := workspace.GetWorkspaceName(path, rootDir)
 			data, err := collector(path, name)
 			results <- WorkspaceResult[T]{
@@ -86,7 +86,7 @@ func RunWithErrors[T any](collector CollectorFunc[T], renderer func(map[string]W
 	if err != nil {
 		return fmt.Errorf("failed to find root: %w", err)
 	}
-	
+
 	workspaces, err := workspace.Discover(rootDir)
 	if err != nil {
 		return fmt.Errorf("failed to discover workspaces: %w", err)
@@ -104,7 +104,7 @@ func RunWithErrors[T any](collector CollectorFunc[T], renderer func(map[string]W
 		wg.Add(1)
 		go func(path string) {
 			defer wg.Done()
-			
+
 			name := workspace.GetWorkspaceName(path, rootDir)
 			data, err := collector(path, name)
 			results <- WorkspaceResult[T]{

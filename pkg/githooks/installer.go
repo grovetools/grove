@@ -23,24 +23,24 @@ func Install(repoPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to find hooks directory: %w", err)
 	}
-	
+
 	hooksDir := strings.TrimSpace(string(output))
 	// Make path absolute if it's relative
 	if !filepath.IsAbs(hooksDir) {
 		hooksDir = filepath.Join(repoPath, hooksDir)
 	}
-	
+
 	// Ensure hooks directory exists
 	if err := os.MkdirAll(hooksDir, 0755); err != nil {
 		return fmt.Errorf("failed to create hooks directory: %w", err)
 	}
-	
+
 	// Write the commit-msg hook
 	hookPath := filepath.Join(hooksDir, "commit-msg")
 	if err := os.WriteFile(hookPath, []byte(commitMsgHookContent), 0755); err != nil {
 		return fmt.Errorf("failed to write commit-msg hook: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -52,13 +52,13 @@ func Uninstall(repoPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to find hooks directory: %w", err)
 	}
-	
+
 	hooksDir := strings.TrimSpace(string(output))
 	// Make path absolute if it's relative
 	if !filepath.IsAbs(hooksDir) {
 		hooksDir = filepath.Join(repoPath, hooksDir)
 	}
-	
+
 	// Check if the commit-msg hook exists
 	hookPath := filepath.Join(hooksDir, "commit-msg")
 	content, err := os.ReadFile(hookPath)
@@ -69,16 +69,16 @@ func Uninstall(repoPath string) error {
 		}
 		return fmt.Errorf("failed to read commit-msg hook: %w", err)
 	}
-	
+
 	// Verify it's a Grove-managed hook
 	if !strings.Contains(string(content), "Grove Conventional Commit Hook") {
 		return fmt.Errorf("commit-msg hook exists but is not managed by Grove")
 	}
-	
+
 	// Remove the hook
 	if err := os.Remove(hookPath); err != nil {
 		return fmt.Errorf("failed to remove commit-msg hook: %w", err)
 	}
-	
+
 	return nil
 }

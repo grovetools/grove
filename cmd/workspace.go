@@ -15,7 +15,7 @@ func newWorkspaceCmd() *cobra.Command {
 		Short:   "Workspace operations across the monorepo",
 		Long:    "Execute operations and view aggregated information across all discovered workspaces",
 	}
-	
+
 	// Subcommands will be added here
 	cmd.AddCommand(newWorkspaceStatusCmd())
 	cmd.AddCommand(NewWorkspaceWorktreesCmd())
@@ -24,6 +24,6 @@ func newWorkspaceCmd() *cobra.Command {
 	cmd.AddCommand(NewWorkspacePlansCmd())
 	cmd.AddCommand(NewWorkspaceChatsCmd())
 	cmd.AddCommand(newWorkspaceGitHooksCmd())
-	
+
 	return cmd
 }

@@ -15,43 +15,43 @@ import (
 var (
 	// Styles for plans display
 	plansHeaderStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("81")).
-		MarginTop(1).
-		MarginBottom(0)
+				Bold(true).
+				Foreground(lipgloss.Color("81")).
+				MarginTop(1).
+				MarginBottom(0)
 
 	planTitleStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("255"))
+			Foreground(lipgloss.Color("255"))
 
 	planStatusPendingStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("226")).
-		Bold(true)
+				Foreground(lipgloss.Color("226")).
+				Bold(true)
 
 	planStatusRunningStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("33")).
-		Bold(true)
+				Foreground(lipgloss.Color("33")).
+				Bold(true)
 
 	planStatusCompletedStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("34")).
-		Bold(true)
+					Foreground(lipgloss.Color("34")).
+					Bold(true)
 
 	planStatusFailedStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("196")).
-		Bold(true)
+				Foreground(lipgloss.Color("196")).
+				Bold(true)
 
 	planMetaStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
+			Foreground(lipgloss.Color("245"))
 
 	plansBoxStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("81")).
-		Padding(0, 1).
-		MarginLeft(2).
-		MarginBottom(1)
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("81")).
+			Padding(0, 1).
+			MarginLeft(2).
+			MarginBottom(1)
 
 	noPlansStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("242")).
-		Italic(true)
+			Foreground(lipgloss.Color("242")).
+			Italic(true)
 )
 
 // Plan represents a simplified version of a flow plan
@@ -81,7 +81,7 @@ func runWorkspacePlans(cmd *cobra.Command, args []string) error {
 		// Run flow plan list --json
 		flowCmd := exec.Command("flow", "plan", "list", "--json")
 		flowCmd.Dir = workspacePath
-		
+
 		output, err := flowCmd.Output()
 		if err != nil {
 			// flow might not be available in this workspace
@@ -93,14 +93,14 @@ func runWorkspacePlans(cmd *cobra.Command, args []string) error {
 		if err := json.Unmarshal(output, &plans); err != nil {
 			// Fallback to text parsing if JSON fails
 			lines := strings.Split(string(output), "\n")
-			
+
 			// Skip header line
 			for i := 1; i < len(lines); i++ {
 				line := strings.TrimSpace(lines[i])
 				if line == "" {
 					continue
 				}
-				
+
 				// Parse columns: NAME JOBS STATUS
 				fields := strings.Fields(line)
 				if len(fields) >= 2 {
@@ -142,7 +142,7 @@ func runWorkspacePlans(cmd *cobra.Command, args []string) error {
 
 		for _, wsName := range workspaceNames {
 			plans := results[wsName]
-			
+
 			// Skip workspaces with no plans
 			if len(plans) == 0 {
 				continue
@@ -198,14 +198,14 @@ func formatPlan(plan Plan) string {
 	if len(idStr) > 8 {
 		idStr = idStr[:8]
 	}
-	
+
 	// Include date if available
 	if !plan.UpdatedAt.IsZero() {
 		timeAgo := formatTimeAgo(plan.UpdatedAt)
 		meta := planMetaStyle.Render(fmt.Sprintf("%s • %s", idStr, timeAgo))
 		return fmt.Sprintf("%s %s\n%s", title, statusStr, meta)
 	}
-	
+
 	meta := planMetaStyle.Render(idStr)
 	return fmt.Sprintf("%s %s\n%s", title, statusStr, meta)
 }

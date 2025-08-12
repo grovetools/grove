@@ -10,7 +10,7 @@ func init() {
 
 func newUpdateCmd() *cobra.Command {
 	var useGH bool
-	
+
 	cmd := &cobra.Command{
 		Use:   "update [tools...]",
 		Short: "Update Grove tools",
@@ -25,13 +25,13 @@ If no tools are specified, updates grove itself.`,
 			if len(args) == 0 {
 				args = []string{"grove"}
 			}
-			
+
 			// Update is just an alias for install
 			return runInstall(cmd, args, useGH)
 		},
 	}
-	
+
 	cmd.Flags().BoolVar(&useGH, "use-gh", false, "Use gh CLI for downloading (supports private repos)")
-	
+
 	return cmd
 }

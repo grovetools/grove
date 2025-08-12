@@ -74,12 +74,12 @@ func TestTopologicalSort(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			g := tt.setup()
 			result, err := g.TopologicalSort()
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("TopologicalSort() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			
+
 			if !tt.wantErr {
 				// Sort each level for consistent comparison
 				for i := range result {
@@ -88,7 +88,7 @@ func TestTopologicalSort(t *testing.T) {
 				for i := range tt.expected {
 					sortStrings(tt.expected[i])
 				}
-				
+
 				if !reflect.DeepEqual(result, tt.expected) {
 					t.Errorf("TopologicalSort() = %v, want %v", result, tt.expected)
 				}
