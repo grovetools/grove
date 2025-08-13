@@ -39,6 +39,17 @@ func AddRepoDryRunScenario() *harness.Scenario {
 					// Set required env
 					os.Setenv("GROVE_PAT", "test-pat")
 					
+					// Set up mocks directory
+					mockDir := ctx.NewDir("mocks")
+					
+					// Create gh mock
+					ghMockPath := filepath.Join(mockDir, "gh")
+					fs.WriteString(ghMockPath, ghMockScript)
+					os.Chmod(ghMockPath, 0755)
+					
+					// Set PATH to use our mocks
+					os.Setenv("PATH", mockDir+":"+os.Getenv("PATH"))
+					
 					// Get grove binary path
 					groveBinary := ctx.GroveBinary
 					
@@ -98,61 +109,29 @@ func AddRepoWithGitHubScenario() *harness.Scenario {
 					// Set up mocks directory with both gh and make
 					mockDir := ctx.NewDir("mocks")
 					
-					// Copy the gh mock from the e2e/mocks directory
-					ghMockSrc, _ := fs.ReadString("/Users/solom4/Code/grove-ecosystem/grove-meta/tests/e2e/mocks/gh")
+					// Create gh mock
 					ghMockPath := filepath.Join(mockDir, "gh")
-					fs.WriteString(ghMockPath, ghMockSrc)
+					fs.WriteString(ghMockPath, ghMockScript)
 					os.Chmod(ghMockPath, 0755)
 					
-					// Copy the make mock from the e2e/mocks directory
-					makeMockSrc, _ := fs.ReadString("/Users/solom4/Code/grove-ecosystem/grove-meta/tests/e2e/mocks/make")
+					// Create make mock
 					makeMockPath := filepath.Join(mockDir, "make")
-					fs.WriteString(makeMockPath, makeMockSrc)
+					fs.WriteString(makeMockPath, makeMockScript)
 					os.Chmod(makeMockPath, 0755)
 					
 					// Create git mock to avoid actual git operations
 					gitMockPath := filepath.Join(mockDir, "git")
-					fs.WriteString(gitMockPath, `#!/bin/bash
-# Create .git directory structure for grove git-hooks
-if [[ ! -d ".git" ]]; then
-  mkdir -p .git/hooks
-fi
-
-case "$1" in
-  "init"|"add"|"commit"|"tag"|"push"|"remote"|"submodule"|"config"|"rev-parse")
-    echo "git $@: SUCCESS"
-    exit 0
-    ;;
-  *)
-    echo "git $@"
-    exit 0
-    ;;
-esac
-`)
+					fs.WriteString(gitMockPath, gitMockScript)
 					os.Chmod(gitMockPath, 0755)
 					
 					// Create go mock to handle go mod operations
 					goMockPath := filepath.Join(mockDir, "go")
-					fs.WriteString(goMockPath, `#!/bin/bash
-case "$1" in
-  "mod")
-    echo "go mod $2: SUCCESS"
-    exit 0
-    ;;
-  *)
-    echo "go $@"
-    exit 0
-    ;;
-esac
-`)
+					fs.WriteString(goMockPath, goMockScript)
 					os.Chmod(goMockPath, 0755)
 					
 					// Create gofmt mock
 					gofmtMockPath := filepath.Join(mockDir, "gofmt")
-					fs.WriteString(gofmtMockPath, `#!/bin/bash
-echo "gofmt: SUCCESS"
-exit 0
-`)
+					fs.WriteString(gofmtMockPath, gofmtMockScript)
 					os.Chmod(gofmtMockPath, 0755)
 					
 					// Set PATH to use our mocks

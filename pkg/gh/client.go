@@ -41,22 +41,30 @@ type WorkflowRun struct {
 	Conclusion string `json:"conclusion"`
 }
 
-func GetMainCIStatus(repoPath string) (string, error) {
+func GetCurrentBranchCIStatus(repoPath string) (string, error) {
 	slug, err := getRepoSlug(repoPath)
 	if err != nil {
 		return "? Unknown", err
 	}
 
+	// Get current branch
+	cmd := exec.Command("git", "-C", repoPath, "rev-parse", "--abbrev-ref", "HEAD")
+	branchOutput, err := cmd.Output()
+	if err != nil {
+		return "? Unknown", fmt.Errorf("failed to get current branch: %w", err)
+	}
+	currentBranch := strings.TrimSpace(string(branchOutput))
+
 	// Get current HEAD commit
-	cmd := exec.Command("git", "-C", repoPath, "rev-parse", "HEAD")
+	cmd = exec.Command("git", "-C", repoPath, "rev-parse", "HEAD")
 	headOutput, err := cmd.Output()
 	if err != nil {
 		return "? Unknown", fmt.Errorf("failed to get HEAD commit: %w", err)
 	}
 	headSha := strings.TrimSpace(string(headOutput))
 
-	// Get workflow runs for the specific commit
-	cmd = exec.Command("gh", "run", "list", "--branch", "main", "--commit", headSha, "--limit", "1", "--json", "status,conclusion", "--repo", slug)
+	// Get workflow runs for the specific commit on the current branch
+	cmd = exec.Command("gh", "run", "list", "--branch", currentBranch, "--commit", headSha, "--limit", "1", "--json", "status,conclusion", "--repo", slug)
 	output, err := cmd.Output()
 	if err != nil {
 		return "? Unknown", fmt.Errorf("failed to get CI status: %w", err)

@@ -6,7 +6,7 @@ require (
 	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/mattsolo1/grove-core v0.2.10
-	github.com/mattsolo1/grove-tend v0.2.6
+	github.com/mattsolo1/grove-tend v0.2.7
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.9.1
 	golang.org/x/mod v0.25.0

@@ -1,7 +1,7 @@
 # Makefile for grove (meta CLI)
 
 BINARY_NAME=grove
-E2E_BINARY_NAME=tend-grove
+E2E_BINARY_NAME=tend
 BIN_DIR=bin
 VERSION_PKG=github.com/mattsolo1/grove-core/version
 
@@ -98,7 +98,7 @@ test-e2e-build:
 # Pass arguments via ARGS, e.g., make test-e2e ARGS="run -i"
 test-e2e: build test-e2e-build
 	@echo "Running E2E tests..."
-	@GROVE_BINARY=$(abspath $(BIN_DIR)/$(BINARY_NAME)) $(BIN_DIR)/$(E2E_BINARY_NAME) run
+	@PATH="$(abspath $(BIN_DIR)):$$PATH" $(BIN_DIR)/$(E2E_BINARY_NAME) run $(ARGS)
 
 # Show available targets
 help:

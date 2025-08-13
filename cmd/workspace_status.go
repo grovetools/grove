@@ -226,7 +226,7 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 				var err1, err2 error
 
 				if colMap["main-ci"] {
-					mainCI, err1 = gh.GetMainCIStatus(wsPath)
+					mainCI, err1 = gh.GetCurrentBranchCIStatus(wsPath)
 					statusInfo.MainCI = mainCI
 				}
 
@@ -267,7 +267,7 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 		headers = append(headers, "BRANCH", "GIT STATUS", "CHANGES")
 	}
 	if colMap["main-ci"] {
-		headers = append(headers, "MAIN CI")
+		headers = append(headers, "CI STATUS")
 	}
 	if colMap["my-prs"] {
 		headers = append(headers, "MY PRS")
