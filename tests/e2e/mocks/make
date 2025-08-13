@@ -1,0 +1,22 @@
+#!/bin/bash
+# Mock make command for testing grove meta add-repo failures
+
+# Log all calls
+echo "make $@" >> "${MAKE_MOCK_LOG:-/tmp/make-mock.log}"
+
+# Check if we should fail
+if [[ "$1" == "check" && "${MAKE_FAIL_CHECK:-false}" == "true" ]]; then
+    echo "ERROR: Lint check failed" >&2
+    echo "main.go:10:1: syntax error" >&2
+    exit 1
+fi
+
+if [[ "$1" == "test-e2e" && "${MAKE_FAIL_E2E:-false}" == "true" ]]; then
+    echo "ERROR: E2E tests failed" >&2
+    echo "FAIL: TestBasicScenario" >&2
+    exit 1
+fi
+
+# Default: succeed
+echo "make $1: SUCCESS"
+exit 0

@@ -2,6 +2,7 @@ package tests
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -23,6 +24,11 @@ func ConventionalCommitsScenario() *harness.Scenario {
 				Description: "Creates a new Git repository with initial files",
 				Func: func(ctx *harness.Context) error {
 					repoDir := ctx.NewDir("test-repo")
+					
+					// Ensure the directory exists before git init
+					if err := os.MkdirAll(repoDir, 0755); err != nil {
+						return fmt.Errorf("failed to create directory %s: %w", repoDir, err)
+					}
 					
 					if err := git.Init(repoDir); err != nil {
 						return fmt.Errorf("failed to initialize git repository: %w", err)

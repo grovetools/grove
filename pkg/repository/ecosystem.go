@@ -29,6 +29,8 @@ func (e *Ecosystem) removeFromGoWork(repoName string) error {
 	lines := strings.Split(string(content), "\n")
 	var newLines []string
 	inUseBlock := false
+	removed := false
+	pathToRemove := "./" + repoName
 	
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -46,11 +48,23 @@ func (e *Ecosystem) removeFromGoWork(repoName string) error {
 		}
 		
 		// Skip the line if it contains the repo we're removing
-		if inUseBlock && strings.Contains(trimmed, "./"+repoName) {
+		if inUseBlock && strings.Contains(trimmed, pathToRemove) {
+			removed = true
+			continue
+		}
+		
+		// Handle single use directive
+		if strings.HasPrefix(trimmed, "use ") && strings.Contains(trimmed, pathToRemove) {
+			removed = true
 			continue
 		}
 		
 		newLines = append(newLines, line)
+	}
+	
+	if !removed {
+		// Module wasn't in the file, nothing to do
+		return nil
 	}
 	
 	// Write the updated content back
@@ -73,36 +87,65 @@ func updateRootMakefile(repoName, binaryAlias string) error {
 
 	lines := strings.Split(string(content), "\n")
 	
-	// Find and update PACKAGES
+	// Hook markers
+	packagesHook := "# GROVE-META:ADD-REPO:PACKAGES"
+	binariesHook := "# GROVE-META:ADD-REPO:BINARIES"
+	
 	packagesUpdated := false
 	binariesUpdated := false
 	
 	for i, line := range lines {
-		// Update PACKAGES
-		if strings.HasPrefix(line, "PACKAGES =") || strings.HasPrefix(line, "PACKAGES=") {
-			packages := extractMakefileList(lines, i)
-			packages = append(packages, repoName)
-			sort.Strings(packages)
-			lines[i] = fmt.Sprintf("PACKAGES = %s", strings.Join(packages, " "))
+		// Find PACKAGES hook and update the line before it
+		if strings.Contains(line, packagesHook) && i > 0 {
+			// Parse the PACKAGES line (previous line)
+			packages := extractMakefileList(lines, i-1)
+			
+			// Check if package already exists
+			alreadyExists := false
+			for _, pkg := range packages {
+				if pkg == repoName {
+					alreadyExists = true
+					break
+				}
+			}
+			
+			if !alreadyExists {
+				packages = append(packages, repoName)
+				sort.Strings(packages)
+				lines[i-1] = fmt.Sprintf("PACKAGES = %s", strings.Join(packages, " "))
+			}
 			packagesUpdated = true
 		}
 		
-		// Update BINARIES
-		if strings.HasPrefix(line, "BINARIES =") || strings.HasPrefix(line, "BINARIES=") {
-			binaries := extractMakefileList(lines, i)
-			binaries = append(binaries, binaryAlias)
-			sort.Strings(binaries)
-			lines[i] = fmt.Sprintf("BINARIES = %s", strings.Join(binaries, " "))
+		// Find BINARIES hook and update the line before it
+		if strings.Contains(line, binariesHook) && i > 0 {
+			// Parse the BINARIES line (previous line)
+			binaries := extractMakefileList(lines, i-1)
+			
+			// Check if binary already exists
+			alreadyExists := false
+			for _, bin := range binaries {
+				if bin == binaryAlias {
+					alreadyExists = true
+					break
+				}
+			}
+			
+			if !alreadyExists {
+				binaries = append(binaries, binaryAlias)
+				sort.Strings(binaries)
+				lines[i-1] = fmt.Sprintf("BINARIES = %s", strings.Join(binaries, " "))
+			}
 			binariesUpdated = true
 		}
 	}
 	
 	if !packagesUpdated {
-		return fmt.Errorf("could not find PACKAGES variable in Makefile")
+		return fmt.Errorf("could not find PACKAGES hook (%s) in Makefile", packagesHook)
 	}
 	
 	if !binariesUpdated {
-		return fmt.Errorf("could not find BINARIES variable in Makefile")
+		return fmt.Errorf("could not find BINARIES hook (%s) in Makefile", binariesHook)
 	}
 	
 	// Write the updated Makefile
@@ -162,6 +205,13 @@ func updateGoWork(repoName string) error {
 		return fmt.Errorf("failed to read go.work: %w", err)
 	}
 	
+	// Check if module already exists
+	newModulePath := "./" + repoName
+	if strings.Contains(string(content), newModulePath) {
+		// Module already exists, nothing to do
+		return nil
+	}
+	
 	// Parse go.work to find the use directives
 	lines := strings.Split(string(content), "\n")
 	var newLines []string
@@ -218,10 +268,9 @@ func updateGoWork(repoName string) error {
 	}
 	
 	// Add the new module
-	newModule := fmt.Sprintf("./%s", repoName)
-	useDirectives = append(useDirectives, newModule)
+	useDirectives = append(useDirectives, newModulePath)
 	
-	// Sort the directives
+	// Sort the directives for consistency
 	sort.Strings(useDirectives)
 	
 	// Rebuild the file

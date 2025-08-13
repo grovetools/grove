@@ -70,7 +70,7 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 
 	// Migration: ensure we're using the new per-tool version system
 	if err := sdk.MigrateFromSingleVersion(os.Getenv("HOME") + "/.grove"); err != nil {
-		logger.Debug("Migration check failed: %v", err)
+		logger.Debugf("Migration check failed: %v", err)
 	}
 
 	// Install each tool

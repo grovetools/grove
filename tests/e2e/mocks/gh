@@ -1,0 +1,75 @@
+#!/bin/bash
+# Mock gh CLI for testing grove meta add-repo
+
+# Log all calls for verification
+echo "gh $@" >> "${GH_MOCK_LOG:-/tmp/gh-mock.log}"
+
+# Parse command
+case "$1" in
+    "auth")
+        if [[ "$2" == "status" ]]; then
+            echo "Logged in as test-user"
+            exit 0
+        fi
+        ;;
+    
+    "repo")
+        case "$2" in
+            "create")
+                # Simulate successful repo creation
+                echo "✓ Created repository $3"
+                exit 0
+                ;;
+            "delete")
+                # Simulate successful repo deletion
+                echo "✓ Deleted repository $3"
+                exit 0
+                ;;
+            "view")
+                # Check if repo exists
+                if [[ "$3" == *"grove-existing"* ]]; then
+                    echo "Repository exists"
+                    exit 0
+                else
+                    echo "Repository not found"
+                    exit 1
+                fi
+                ;;
+        esac
+        ;;
+    
+    "secret")
+        if [[ "$2" == "set" && "$3" == "GROVE_PAT" ]]; then
+            # Read from stdin but don't actually do anything
+            cat > /dev/null
+            echo "✓ Set secret GROVE_PAT"
+            exit 0
+        fi
+        ;;
+    
+    "run")
+        case "$2" in
+            "list")
+                # Return a mock run ID
+                echo '{"databaseId": 12345}'
+                exit 0
+                ;;
+            "watch")
+                # Simulate successful CI run
+                echo "✓ Workflow run completed successfully"
+                exit 0
+                ;;
+        esac
+        ;;
+    
+    "api")
+        # Mock API calls for getting latest releases
+        if [[ "$2" == *"releases/latest"* ]]; then
+            echo '{"tag_name": "v0.2.10"}'
+            exit 0
+        fi
+        ;;
+esac
+
+echo "Mock gh: Unhandled command: gh $@" >&2
+exit 1

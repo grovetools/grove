@@ -14,6 +14,7 @@ var (
 	addRepoDescription string
 	addRepoSkipGitHub  bool
 	addRepoDryRun      bool
+	addRepoStageChanges bool
 )
 
 func init() {
@@ -39,6 +40,7 @@ Example:
 	cmd.Flags().StringVarP(&addRepoDescription, "description", "d", "", "Repository description")
 	cmd.Flags().BoolVar(&addRepoSkipGitHub, "skip-github", false, "Skip GitHub repository creation")
 	cmd.Flags().BoolVar(&addRepoDryRun, "dry-run", false, "Preview operations without executing")
+	cmd.Flags().BoolVar(&addRepoStageChanges, "stage-ecosystem", false, "Stage ecosystem changes in git")
 
 	return cmd
 }
@@ -82,6 +84,7 @@ func runAddRepo(cmd *cobra.Command, args []string) error {
 		Description: addRepoDescription,
 		SkipGitHub:  addRepoSkipGitHub,
 		DryRun:      addRepoDryRun,
+		StageChanges: addRepoStageChanges,
 	}
 
 	logger.Infof("Creating new Grove repository: %s (alias: %s)", repoName, addRepoAlias)

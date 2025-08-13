@@ -6,5 +6,8 @@ import "github.com/mattsolo1/grove-tend/pkg/harness"
 func AllScenarios() []*harness.Scenario {
 	return []*harness.Scenario{
 		ConventionalCommitsScenario(),
+		AddRepoDryRunScenario(),
+		AddRepoWithGitHubScenario(),
+		AddRepoSkipGitHubScenario(),
 	}
 }

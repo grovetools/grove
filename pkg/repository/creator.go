@@ -25,6 +25,7 @@ type CreateOptions struct {
 	Description string
 	SkipGitHub  bool
 	DryRun      bool
+	StageChanges bool
 }
 
 type creationState struct {
@@ -106,7 +107,7 @@ func (c *Creator) Create(opts CreateOptions) error {
 	if !opts.SkipGitHub {
 		if err := c.waitForCI(opts); err != nil {
 			c.logger.Warnf("Could not monitor CI build: %v", err)
-			c.logger.Info("Repository created successfully. Check CI status at: https://github.com/mattsolo1/%s/actions", opts.Name)
+			c.logger.Infof("Repository created successfully. Check CI status at: https://github.com/mattsolo1/%s/actions", opts.Name)
 		}
 	}
 
@@ -116,9 +117,11 @@ func (c *Creator) Create(opts CreateOptions) error {
 		return err
 	}
 
-	// Phase 6: Stage changes
-	if err := c.stageEcosystemChanges(opts); err != nil {
-		return err
+	// Phase 6: Stage changes (only if requested)
+	if opts.StageChanges {
+		if err := c.stageEcosystemChanges(opts); err != nil {
+			return err
+		}
 	}
 
 	// Phase 7: Final summary
@@ -127,6 +130,24 @@ func (c *Creator) Create(opts CreateOptions) error {
 
 func (c *Creator) validate(opts CreateOptions) error {
 	c.logger.Info("Validating repository configuration...")
+
+	// Validate repository name
+	if !strings.HasPrefix(opts.Name, "grove-") {
+		return fmt.Errorf("repository name must start with 'grove-' prefix")
+	}
+	if !isValidRepoName(opts.Name) {
+		return fmt.Errorf("invalid repository name: must only contain lowercase letters, numbers, and hyphens")
+	}
+
+	// Validate alias
+	if opts.Alias == "" {
+		return fmt.Errorf("binary alias cannot be empty")
+	}
+
+	// Check for alias conflicts
+	if err := checkBinaryAliasConflict(opts.Alias); err != nil {
+		return err
+	}
 
 	// Check if directory already exists
 	if _, err := os.Stat(opts.Name); err == nil {
@@ -540,16 +561,27 @@ func (c *Creator) showSummary(opts CreateOptions) error {
 
 	fmt.Println("\nNEXT STEPS")
 	fmt.Println("----------")
-	fmt.Println("1. Review the staged changes in the ecosystem repo:")
-	fmt.Println("   > git status")
-	fmt.Println("   (You should see a modified Makefile, go.work, .gitmodules, and a new submodule entry)")
-	fmt.Println("")
-	fmt.Printf("2. Commit the integration to the main branch:\n")
-	fmt.Printf("   > git commit -m \"feat: add %s to the ecosystem\"\n", opts.Name)
-	fmt.Println("")
-	fmt.Printf("3. Start developing your new tool:\n")
-	fmt.Printf("   > cd %s\n", opts.Name)
-	fmt.Printf("   > grove install %s\n", opts.Alias)
+	
+	if opts.StageChanges {
+		fmt.Println("1. Review the staged changes in the ecosystem repo:")
+		fmt.Println("   > git status")
+		fmt.Println("   (You should see a modified Makefile, go.work, .gitmodules, and a new submodule entry)")
+		fmt.Println("")
+		fmt.Printf("2. Commit the integration to the main branch:\n")
+		fmt.Printf("   > git commit -m \"feat: add %s to the ecosystem\"\n", opts.Name)
+		fmt.Println("")
+		fmt.Printf("3. Start developing your new tool:\n")
+		fmt.Printf("   > cd %s\n", opts.Name)
+		fmt.Printf("   > grove install %s\n", opts.Alias)
+	} else {
+		fmt.Println("1. Stage and commit the ecosystem changes:")
+		fmt.Println("   > git add Makefile go.work .gitmodules " + opts.Name)
+		fmt.Printf("   > git commit -m \"feat: add %s to the ecosystem\"\n", opts.Name)
+		fmt.Println("")
+		fmt.Printf("2. Start developing your new tool:\n")
+		fmt.Printf("   > cd %s\n", opts.Name)
+		fmt.Printf("   > grove install %s\n", opts.Alias)
+	}
 
 	return nil
 }
@@ -560,7 +592,7 @@ func (c *Creator) rollback(state *creationState, opts CreateOptions) {
 	if state.githubRepoCreated && !opts.SkipGitHub {
 		c.logger.Warnf("GitHub repository was created but setup failed.")
 		c.logger.Warnf("Please delete it manually: https://github.com/mattsolo1/%s", opts.Name)
-		c.logger.Warn("Run: gh repo delete mattsolo1/%s", opts.Name)
+		c.logger.Warnf("Run: gh repo delete mattsolo1/%s", opts.Name)
 	}
 
 	if state.localRepoCreated {
@@ -615,7 +647,10 @@ func (c *Creator) dryRun(opts CreateOptions) error {
 	c.logger.Infof("  Update Makefile: Add %s to PACKAGES", opts.Name)
 	c.logger.Infof("  Update Makefile: Add %s to BINARIES", opts.Alias)
 	c.logger.Infof("  Update go.work: Add use (./%s)", opts.Name)
-	c.logger.Infof("  git add Makefile go.work .gitmodules %s", opts.Name)
+	
+	if opts.StageChanges {
+		c.logger.Infof("  git add Makefile go.work .gitmodules %s", opts.Name)
+	}
 
 	return nil
 }
