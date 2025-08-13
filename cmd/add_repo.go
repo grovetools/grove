@@ -42,13 +42,21 @@ Example:
 	cmd.Flags().BoolVar(&addRepoSkipGitHub, "skip-github", false, "Skip GitHub repository creation")
 	cmd.Flags().BoolVar(&addRepoDryRun, "dry-run", false, "Preview operations without executing")
 	cmd.Flags().BoolVar(&addRepoStageChanges, "stage-ecosystem", false, "Stage ecosystem changes in git")
-	cmd.Flags().StringVar(&addRepoTemplate, "template", "", "Path to external template directory (hidden flag)")
-	if err := cmd.Flags().MarkHidden("template"); err != nil {
-		// This should never fail, but handle it anyway
-		panic(fmt.Sprintf("Failed to mark template flag as hidden: %v", err))
-	}
+	cmd.Flags().StringVar(&addRepoTemplate, "template", "go", "Template to use (go, or path/URL to custom template)")
 
 	return cmd
+}
+
+var templateAliases = map[string]string{
+	"go": "/Users/solom4/Code/grove-ecosystem/grove-project-tmpl-go", // For now, use absolute path
+	// Future: "maturin", "react-ts", etc.
+}
+
+func resolveTemplate(spec string) string {
+	if alias, ok := templateAliases[spec]; ok {
+		return alias
+	}
+	return spec
 }
 
 func runAddRepo(cmd *cobra.Command, args []string) error {
@@ -84,6 +92,9 @@ func runAddRepo(cmd *cobra.Command, args []string) error {
 
 	creator := repository.NewCreator(logger)
 
+	// Resolve template
+	resolvedTemplate := resolveTemplate(addRepoTemplate)
+	
 	opts := repository.CreateOptions{
 		Name:         repoName,
 		Alias:        addRepoAlias,
@@ -91,7 +102,7 @@ func runAddRepo(cmd *cobra.Command, args []string) error {
 		SkipGitHub:   addRepoSkipGitHub,
 		DryRun:       addRepoDryRun,
 		StageChanges: addRepoStageChanges,
-		TemplatePath: addRepoTemplate,
+		TemplatePath: resolvedTemplate,
 	}
 
 	logger.Infof("Creating new Grove repository: %s (alias: %s)", repoName, addRepoAlias)

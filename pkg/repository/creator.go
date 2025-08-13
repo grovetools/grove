@@ -205,111 +205,49 @@ func (c *Creator) generateSkeleton(opts CreateOptions) error {
 		TendVersion:      c.getLatestVersion("grove-tend"),
 	}
 
-	// Check if external template is specified
-	if opts.TemplatePath != "" {
-		return c.generateFromExternalTemplate(opts, data)
-	}
-
-	// Default behavior: use embedded templates
-	// Generate directory structure
-	dirs := []string{
-		filepath.Join(opts.Name, ".github", "workflows"),
-		filepath.Join(opts.Name, "cmd"),
-		filepath.Join(opts.Name, "tests", "e2e"),
-		filepath.Join(opts.Name, "bin"),
-	}
-
-	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory %s: %w", dir, err)
-		}
-	}
-
-	// Generate files
-	files := map[string]string{
-		"go.mod":                          "go.mod.tmpl",
-		"Makefile":                        "Makefile.tmpl",
-		"grove.yml":                       "grove.yml.tmpl",
-		"main.go":                         "main.go.tmpl",
-		"cmd/root.go":                     "cmd/root.go.tmpl",
-		"cmd/version.go":                  "cmd/version.go.tmpl",
-		".github/workflows/ci.yml":        ".github/workflows/ci.yml.tmpl",
-		".github/workflows/release.yml":   ".github/workflows/release.yml.tmpl",
-		"tests/e2e/main.go":               "tests/e2e/main.go.tmpl",
-		"tests/e2e/scenarios_basic.go":    "tests/e2e/scenarios_basic.go.tmpl",
-		"tests/e2e/test_utils.go":         "tests/e2e/test_utils.go.tmpl",
-		".gitignore":                      ".gitignore.tmpl",
-		".golangci.yml":                   ".golangci.yml.tmpl",
-		"README.md":                       "README.md.tmpl",
-		"CHANGELOG.md":                    "CHANGELOG.md.tmpl",
-	}
-
-	for file, template := range files {
-		outputPath := filepath.Join(opts.Name, file)
-		if err := c.tmpl.GenerateFile(template, outputPath, data); err != nil {
-			return fmt.Errorf("failed to generate %s: %w", file, err)
-		}
-	}
-
-	// Format Go files
-	c.logger.Info("Formatting Go files...")
-	fmtCmd := exec.Command("gofmt", "-w", ".")
-	fmtCmd.Dir = opts.Name
-	if err := fmtCmd.Run(); err != nil {
-		// Don't fail if gofmt isn't available, just warn
-		c.logger.Warnf("Failed to format Go files: %v", err)
-	}
-
-	// Initialize git repository
-	c.logger.Info("Initializing git repository...")
-	gitInit := exec.Command("git", "init")
-	gitInit.Dir = opts.Name
-	if err := gitInit.Run(); err != nil {
-		return fmt.Errorf("failed to initialize git: %w", err)
-	}
-
-	// Add all files
-	gitAdd := exec.Command("git", "add", ".")
-	gitAdd.Dir = opts.Name
-	if err := gitAdd.Run(); err != nil {
-		return fmt.Errorf("failed to add files: %w", err)
-	}
-
-	// Create initial commit
-	gitCommit := exec.Command("git", "commit", "-m", "feat: initial repository setup\n\nCreated new Grove repository with:\n- Standard project structure\n- CLI framework with version command\n- Testing setup (unit and e2e)\n- CI/CD workflows\n- Documentation templates")
-	gitCommit.Dir = opts.Name
-	if err := gitCommit.Run(); err != nil {
-		return fmt.Errorf("failed to create initial commit: %w", err)
-	}
-
-	// Install git hooks
-	c.logger.Info("Installing git hooks...")
-	hooksCmd := exec.Command("grove", "git-hooks", "install")
-	hooksCmd.Dir = opts.Name
-	if output, err := hooksCmd.CombinedOutput(); err != nil {
-		// Don't fail if hooks can't be installed, just warn
-		c.logger.Warnf("Failed to install git hooks: %v\nOutput: %s", err, string(output))
-		c.logger.Warn("You can install them manually later with: grove git-hooks install")
-	}
-
-	return nil
+	// Always use external template (TemplatePath defaults to "go" which resolves to the Go template)
+	return c.generateFromExternalTemplate(opts, data)
 }
 
 func (c *Creator) generateFromExternalTemplate(opts CreateOptions, data templates.TemplateData) error {
 	c.logger.Infof("Using external template from: %s", opts.TemplatePath)
 
-	// Create fetcher
-	fetcher := templates.NewLocalFetcher()
-	defer func() {
-		if err := fetcher.Cleanup(); err != nil {
-			c.logger.Warnf("Failed to cleanup fetcher: %v", err)
-		}
-	}()
+	var fetcher templates.Fetcher
+	var templateDir string
+	var err error
 
-	// Fetch template directory
-	templateDir, err := fetcher.Fetch(opts.TemplatePath)
-	if err != nil {
-		return fmt.Errorf("failed to fetch template: %w", err)
+	// Determine which fetcher to use based on the template path
+	if templates.IsGitURL(opts.TemplatePath) {
+		// Use GitFetcher for Git URLs
+		gitFetcher, err := templates.NewGitFetcher()
+		if err != nil {
+			return fmt.Errorf("failed to create git fetcher: %w", err)
+		}
+		fetcher = gitFetcher
+		defer func() {
+			if err := fetcher.Cleanup(); err != nil {
+				c.logger.Warnf("Failed to cleanup fetcher: %v", err)
+			}
+		}()
+		
+		templateDir, err = fetcher.Fetch(opts.TemplatePath)
+		if err != nil {
+			return fmt.Errorf("failed to fetch template: %w", err)
+		}
+	} else {
+		// Use LocalFetcher for local paths
+		localFetcher := templates.NewLocalFetcher()
+		fetcher = localFetcher
+		defer func() {
+			if err := fetcher.Cleanup(); err != nil {
+				c.logger.Warnf("Failed to cleanup fetcher: %v", err)
+			}
+		}()
+		
+		templateDir, err = fetcher.Fetch(opts.TemplatePath)
+		if err != nil {
+			return fmt.Errorf("failed to fetch template: %w", err)
+		}
 	}
 
 	// Create renderer
