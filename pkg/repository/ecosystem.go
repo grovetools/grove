@@ -82,7 +82,7 @@ func updateRootMakefile(repoName, binaryAlias string) error {
 	// Read the current Makefile
 	content, err := os.ReadFile(makefilePath)
 	if err != nil {
-		return fmt.Errorf("failed to read Makefile: %w", err)
+		return fmt.Errorf("failed to read Makefile: %w\nEnsure you're in the grove-ecosystem root directory", err)
 	}
 
 	lines := strings.Split(string(content), "\n")
@@ -141,17 +141,17 @@ func updateRootMakefile(repoName, binaryAlias string) error {
 	}
 	
 	if !packagesUpdated {
-		return fmt.Errorf("could not find PACKAGES hook (%s) in Makefile", packagesHook)
+		return fmt.Errorf("could not find PACKAGES hook (%s) in Makefile\nEnsure the Makefile has the required hook comment", packagesHook)
 	}
 	
 	if !binariesUpdated {
-		return fmt.Errorf("could not find BINARIES hook (%s) in Makefile", binariesHook)
+		return fmt.Errorf("could not find BINARIES hook (%s) in Makefile\nEnsure the Makefile has the required hook comment", binariesHook)
 	}
 	
 	// Write the updated Makefile
 	updatedContent := strings.Join(lines, "\n")
 	if err := os.WriteFile(makefilePath, []byte(updatedContent), 0644); err != nil {
-		return fmt.Errorf("failed to write Makefile: %w", err)
+		return fmt.Errorf("failed to write Makefile: %w\nThe file may be read-only or you may lack permissions", err)
 	}
 	
 	return nil
@@ -202,7 +202,7 @@ func updateGoWork(repoName string) error {
 	// Read the current go.work file
 	content, err := os.ReadFile(workPath)
 	if err != nil {
-		return fmt.Errorf("failed to read go.work: %w", err)
+		return fmt.Errorf("failed to read go.work: %w\nEnsure you're in the grove-ecosystem root directory", err)
 	}
 	
 	// Check if module already exists
@@ -291,7 +291,7 @@ func updateGoWork(repoName string) error {
 	// Write the updated go.work file
 	updatedContent := strings.Join(newLines, "\n")
 	if err := os.WriteFile(workPath, []byte(updatedContent), 0644); err != nil {
-		return fmt.Errorf("failed to write go.work: %w", err)
+		return fmt.Errorf("failed to write go.work: %w\nThe file may be read-only or you may lack permissions", err)
 	}
 	
 	return nil

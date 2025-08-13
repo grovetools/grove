@@ -114,13 +114,13 @@ func (c *Creator) Create(opts CreateOptions) error {
 	// Phase 5: Add to ecosystem
 	if err := c.addToEcosystem(opts); err != nil {
 		c.rollback(state, opts)
-		return err
+		return fmt.Errorf("failed to add repository to ecosystem: %w\n\nNote: The grove-ecosystem may have been partially modified.\nYou can clean up with: git reset --hard", err)
 	}
 
 	// Phase 6: Stage changes (only if requested)
 	if opts.StageChanges {
 		if err := c.stageEcosystemChanges(opts); err != nil {
-			return err
+			return fmt.Errorf("failed to stage ecosystem changes: %w\n\nNote: The grove-ecosystem has been modified but changes were not staged.\nYou can:\n  - Stage manually: git add Makefile go.work .gitmodules %s\n  - Or reset: git reset --hard", err, opts.Name)
 		}
 	}
 
