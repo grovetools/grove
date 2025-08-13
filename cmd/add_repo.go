@@ -10,11 +10,12 @@ import (
 )
 
 var (
-	addRepoAlias       string
-	addRepoDescription string
-	addRepoSkipGitHub  bool
-	addRepoDryRun      bool
+	addRepoAlias        string
+	addRepoDescription  string
+	addRepoSkipGitHub   bool
+	addRepoDryRun       bool
 	addRepoStageChanges bool
+	addRepoTemplate     string
 )
 
 func init() {
@@ -41,6 +42,11 @@ Example:
 	cmd.Flags().BoolVar(&addRepoSkipGitHub, "skip-github", false, "Skip GitHub repository creation")
 	cmd.Flags().BoolVar(&addRepoDryRun, "dry-run", false, "Preview operations without executing")
 	cmd.Flags().BoolVar(&addRepoStageChanges, "stage-ecosystem", false, "Stage ecosystem changes in git")
+	cmd.Flags().StringVar(&addRepoTemplate, "template", "", "Path to external template directory (hidden flag)")
+	if err := cmd.Flags().MarkHidden("template"); err != nil {
+		// This should never fail, but handle it anyway
+		panic(fmt.Sprintf("Failed to mark template flag as hidden: %v", err))
+	}
 
 	return cmd
 }
@@ -79,12 +85,13 @@ func runAddRepo(cmd *cobra.Command, args []string) error {
 	creator := repository.NewCreator(logger)
 
 	opts := repository.CreateOptions{
-		Name:        repoName,
-		Alias:       addRepoAlias,
-		Description: addRepoDescription,
-		SkipGitHub:  addRepoSkipGitHub,
-		DryRun:      addRepoDryRun,
+		Name:         repoName,
+		Alias:        addRepoAlias,
+		Description:  addRepoDescription,
+		SkipGitHub:   addRepoSkipGitHub,
+		DryRun:       addRepoDryRun,
 		StageChanges: addRepoStageChanges,
+		TemplatePath: addRepoTemplate,
 	}
 
 	logger.Infof("Creating new Grove repository: %s (alias: %s)", repoName, addRepoAlias)

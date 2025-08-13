@@ -26,6 +26,7 @@ type CreateOptions struct {
 	SkipGitHub  bool
 	DryRun      bool
 	StageChanges bool
+	TemplatePath string
 }
 
 type creationState struct {
@@ -204,6 +205,12 @@ func (c *Creator) generateSkeleton(opts CreateOptions) error {
 		TendVersion:      c.getLatestVersion("grove-tend"),
 	}
 
+	// Check if external template is specified
+	if opts.TemplatePath != "" {
+		return c.generateFromExternalTemplate(opts, data)
+	}
+
+	// Default behavior: use embedded templates
 	// Generate directory structure
 	dirs := []string{
 		filepath.Join(opts.Name, ".github", "workflows"),
@@ -245,6 +252,75 @@ func (c *Creator) generateSkeleton(opts CreateOptions) error {
 	}
 
 	// Format Go files
+	c.logger.Info("Formatting Go files...")
+	fmtCmd := exec.Command("gofmt", "-w", ".")
+	fmtCmd.Dir = opts.Name
+	if err := fmtCmd.Run(); err != nil {
+		// Don't fail if gofmt isn't available, just warn
+		c.logger.Warnf("Failed to format Go files: %v", err)
+	}
+
+	// Initialize git repository
+	c.logger.Info("Initializing git repository...")
+	gitInit := exec.Command("git", "init")
+	gitInit.Dir = opts.Name
+	if err := gitInit.Run(); err != nil {
+		return fmt.Errorf("failed to initialize git: %w", err)
+	}
+
+	// Add all files
+	gitAdd := exec.Command("git", "add", ".")
+	gitAdd.Dir = opts.Name
+	if err := gitAdd.Run(); err != nil {
+		return fmt.Errorf("failed to add files: %w", err)
+	}
+
+	// Create initial commit
+	gitCommit := exec.Command("git", "commit", "-m", "feat: initial repository setup\n\nCreated new Grove repository with:\n- Standard project structure\n- CLI framework with version command\n- Testing setup (unit and e2e)\n- CI/CD workflows\n- Documentation templates")
+	gitCommit.Dir = opts.Name
+	if err := gitCommit.Run(); err != nil {
+		return fmt.Errorf("failed to create initial commit: %w", err)
+	}
+
+	// Install git hooks
+	c.logger.Info("Installing git hooks...")
+	hooksCmd := exec.Command("grove", "git-hooks", "install")
+	hooksCmd.Dir = opts.Name
+	if output, err := hooksCmd.CombinedOutput(); err != nil {
+		// Don't fail if hooks can't be installed, just warn
+		c.logger.Warnf("Failed to install git hooks: %v\nOutput: %s", err, string(output))
+		c.logger.Warn("You can install them manually later with: grove git-hooks install")
+	}
+
+	return nil
+}
+
+func (c *Creator) generateFromExternalTemplate(opts CreateOptions, data templates.TemplateData) error {
+	c.logger.Infof("Using external template from: %s", opts.TemplatePath)
+
+	// Create fetcher
+	fetcher := templates.NewLocalFetcher()
+	defer func() {
+		if err := fetcher.Cleanup(); err != nil {
+			c.logger.Warnf("Failed to cleanup fetcher: %v", err)
+		}
+	}()
+
+	// Fetch template directory
+	templateDir, err := fetcher.Fetch(opts.TemplatePath)
+	if err != nil {
+		return fmt.Errorf("failed to fetch template: %w", err)
+	}
+
+	// Create renderer
+	renderer := templates.NewRenderer()
+
+	// Render template to target directory
+	if err := renderer.Render(templateDir, opts.Name, data); err != nil {
+		return fmt.Errorf("failed to render template: %w", err)
+	}
+
+	// Format Go files (if any)
 	c.logger.Info("Formatting Go files...")
 	fmtCmd := exec.Command("gofmt", "-w", ".")
 	fmtCmd.Dir = opts.Name
