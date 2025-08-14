@@ -9,5 +9,9 @@ func AllScenarios() []*harness.Scenario {
 		AddRepoDryRunScenario(),
 		AddRepoWithGitHubScenario(),
 		AddRepoSkipGitHubScenario(),
+		PolyglotProjectTypesScenario(),
+		PolyglotDependencyGraphScenario(),
+		PolyglotAddRepoScenario(),
+		PolyglotReleaseScenario(),
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-meta/pkg/gh"
 	"github.com/mattsolo1/grove-meta/pkg/workspace"
@@ -103,6 +104,7 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 	// Collect status for each workspace
 	type workspaceStatusInfo struct {
 		Name    string
+		Type    string // Project type (go, maturin, etc.)
 		Git     *git.StatusInfo
 		Context *ContextStats
 		Release *ReleaseInfo
@@ -127,6 +129,17 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 			statusInfo := workspaceStatusInfo{
 				Name: wsName,
 			}
+			
+			// Determine project type
+			projectType := "go" // default
+			groveYmlPath := filepath.Join(wsPath, "grove.yml")
+			if cfg, err := config.Load(groveYmlPath); err == nil {
+				var typeStr string
+				if err := cfg.UnmarshalExtension("type", &typeStr); err == nil && typeStr != "" {
+					projectType = typeStr
+				}
+			}
+			statusInfo.Type = projectType
 
 			// Get git status if requested
 			if colMap["git"] {
@@ -263,6 +276,9 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 
 	// Build table headers dynamically
 	headers := []string{"WORKSPACE"}
+	if colMap["type"] {
+		headers = append(headers, "TYPE")
+	}
 	if colMap["git"] {
 		headers = append(headers, "BRANCH", "GIT STATUS", "CHANGES")
 	}
@@ -285,6 +301,11 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 
 	for _, ws := range statuses {
 		row := []string{ws.Name}
+		
+		// Add type column if requested
+		if colMap["type"] {
+			row = append(row, ws.Type)
+		}
 
 		// Add git columns if requested
 		if colMap["git"] {

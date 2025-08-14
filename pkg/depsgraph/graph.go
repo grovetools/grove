@@ -2,11 +2,8 @@ package depsgraph
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
-
-	"golang.org/x/mod/modfile"
+	
+	"github.com/sirupsen/logrus"
 )
 
 // Node represents a module in the dependency graph
@@ -53,75 +50,12 @@ func (g *Graph) GetNode(name string) (*Node, bool) {
 
 // BuildGraph builds a dependency graph from the workspace
 func BuildGraph(rootDir string, workspaces []string) (*Graph, error) {
-	graph := NewGraph()
-	modulePathToName := make(map[string]string)
-
-	// First pass: collect all modules
-	for _, ws := range workspaces {
-		// workspaces are already absolute paths from Discover
-		wsPath := ws
-		goModPath := filepath.Join(wsPath, "go.mod")
-
-		// Get workspace name for the node
-		wsName := filepath.Base(ws)
-
-		data, err := os.ReadFile(goModPath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				// Skip workspaces without go.mod
-				continue
-			}
-			return nil, fmt.Errorf("reading go.mod for %s: %w", ws, err)
-		}
-
-		modFile, err := modfile.Parse(goModPath, data, nil)
-		if err != nil {
-			return nil, fmt.Errorf("parsing go.mod for %s: %w", ws, err)
-		}
-
-		node := &Node{
-			Name: wsName,
-			Path: modFile.Module.Mod.Path,
-			Dir:  wsPath,
-			Deps: []string{},
-		}
-
-		graph.AddNode(node)
-		modulePathToName[modFile.Module.Mod.Path] = wsName
-	}
-
-	// Second pass: build edges
-	for _, ws := range workspaces {
-		wsName := filepath.Base(ws)
-		node, exists := graph.GetNode(wsName)
-		if !exists {
-			continue
-		}
-
-		goModPath := filepath.Join(node.Dir, "go.mod")
-		data, err := os.ReadFile(goModPath)
-		if err != nil {
-			continue
-		}
-
-		modFile, err := modfile.Parse(goModPath, data, nil)
-		if err != nil {
-			continue
-		}
-
-		// Check each dependency
-		for _, req := range modFile.Require {
-			// Only consider dependencies within the Grove ecosystem
-			if strings.HasPrefix(req.Mod.Path, "github.com/mattsolo1/") {
-				if depName, ok := modulePathToName[req.Mod.Path]; ok {
-					node.Deps = append(node.Deps, req.Mod.Path)
-					graph.AddEdge(wsName, depName)
-				}
-			}
-		}
-	}
-
-	return graph, nil
+	// Use the new builder with a default logger
+	logger := logrus.New()
+	logger.SetLevel(logrus.WarnLevel) // Only show warnings and errors
+	
+	builder := NewBuilder(workspaces, logger)
+	return builder.Build()
 }
 
 // TopologicalSort performs a topological sort of the graph using Kahn's algorithm

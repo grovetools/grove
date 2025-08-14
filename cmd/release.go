@@ -15,8 +15,10 @@ import (
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/command"
+	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-meta/pkg/depsgraph"
+	"github.com/mattsolo1/grove-meta/pkg/project"
 	"github.com/mattsolo1/grove-meta/pkg/release"
 	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/sirupsen/logrus"
@@ -34,6 +36,7 @@ var (
 	releaseMinor          []string
 	releasePatch          []string
 	releaseYes            bool
+	releaseSkipParent     bool
 )
 
 func init() {
@@ -75,6 +78,7 @@ Examples:
 	cmd.Flags().StringSliceVar(&releaseMinor, "minor", []string{}, "Repositories to receive minor version bump")
 	cmd.Flags().StringSliceVar(&releasePatch, "patch", []string{}, "Repositories to receive patch version bump (default for all)")
 	cmd.Flags().BoolVar(&releaseYes, "yes", false, "Skip interactive confirmation (for CI/CD)")
+	cmd.Flags().BoolVar(&releaseSkipParent, "skip-parent", false, "Skip parent repository updates (submodules and tagging)")
 
 	// Add subcommands
 	cmd.AddCommand(newReleaseChangelogCmd())
@@ -114,8 +118,8 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to sort dependencies: %w", err)
 	}
 
-	// Calculate versions for all submodules
-	versions, currentVersions, hasChanges, err := calculateNextVersions(ctx, rootDir, releaseMajor, releaseMinor, releasePatch, logger)
+	// Calculate versions for all workspaces
+	versions, currentVersions, hasChanges, err := calculateNextVersions(ctx, rootDir, workspaces, releaseMajor, releaseMinor, releasePatch, logger)
 	if err != nil {
 		return fmt.Errorf("failed to calculate versions: %w", err)
 	}
@@ -135,7 +139,10 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine parent repo version early so we can display it
-	parentVersion := determineParentVersion(rootDir, versions, hasChanges)
+	parentVersion := ""
+	if !releaseSkipParent {
+		parentVersion = determineParentVersion(rootDir, versions, hasChanges)
+	}
 
 	// Display proposed versions and get confirmation
 	if !displayAndConfirmVersionsWithOrder(rootDir, versions, currentVersions, hasChanges, releaseLevels, graph, parentVersion, logger) {
@@ -149,13 +156,13 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	}
 
 	// Run pre-flight checks
-	if err := runPreflightChecks(ctx, rootDir, parentVersion, logger); err != nil {
+	if err := runPreflightChecks(ctx, rootDir, parentVersion, workspaces, logger); err != nil {
 		return err
 	}
 
 	// Push repositories to remote if requested
 	if releasePush {
-		if err := pushRepositories(ctx, rootDir, hasChanges, logger); err != nil {
+		if err := pushRepositories(ctx, rootDir, workspaces, hasChanges, logger); err != nil {
 			return fmt.Errorf("failed to push repositories: %w", err)
 		}
 	}
@@ -168,51 +175,32 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	// Final phase: commit and tag ecosystem
 	displaySection("🏁 Finalizing Ecosystem Release")
 
-	// Stage only the submodules that were released
-	for repo := range hasChanges {
-		if hasChanges[repo] {
-			if err := executeGitCommand(ctx, rootDir, []string{"add", repo}, fmt.Sprintf("Stage %s", repo), logger); err != nil {
-				return err
+	if !releaseSkipParent {
+		// Stage only the submodules that were released
+		for repo := range hasChanges {
+			if hasChanges[repo] {
+				if err := executeGitCommand(ctx, rootDir, []string{"add", repo}, fmt.Sprintf("Stage %s", repo), logger); err != nil {
+					return err
+				}
 			}
 		}
-	}
 
-	// Check if there are actually changes to commit after staging
-	status, err := git.GetStatus(rootDir)
-	if err != nil {
-		return fmt.Errorf("failed to check git status: %w", err)
-	}
-
-	// Only commit if there are staged changes
-	if status.IsDirty {
-		// Commit the submodule updates
-		commitMsg := createReleaseCommitMessage(versions, hasChanges)
-		if err := executeGitCommand(ctx, rootDir, []string{"commit", "-m", commitMsg}, "Commit release", logger); err != nil {
-			return err
+		// Check if there are actually changes to commit after staging
+		status, err := git.GetStatus(rootDir)
+		if err != nil {
+			return fmt.Errorf("failed to check git status: %w", err)
 		}
-	} else {
-		displayInfo("No changes to commit after staging submodules")
-	}
 
-	// Recalculate parent version to handle same-day releases
-	finalParentVersion := determineParentVersion(rootDir, versions, hasChanges)
-	if finalParentVersion != parentVersion {
-		displayInfo(fmt.Sprintf("Adjusted parent version: %s → %s (same-day release)", parentVersion, finalParentVersion))
-	}
-
-	// Tag the main repository
-	if err := executeGitCommand(ctx, rootDir, []string{"tag", "-a", finalParentVersion, "-m", fmt.Sprintf("Release %s", finalParentVersion)}, "Tag main repository", logger); err != nil {
-		return err
-	}
-
-	// Push the main repository changes
-	if err := executeGitCommand(ctx, rootDir, []string{"push", "origin", "main"}, "Push main branch", logger); err != nil {
-		return err
-	}
-
-	// Push the main repository tag
-	if err := executeGitCommand(ctx, rootDir, []string{"push", "origin", finalParentVersion}, "Push release tag", logger); err != nil {
-		return err
+		// Only commit if there are staged changes
+		if status.IsDirty {
+			// Commit the submodule updates
+			commitMsg := createReleaseCommitMessage(versions, hasChanges)
+			if err := executeGitCommand(ctx, rootDir, []string{"commit", "-m", commitMsg}, "Commit release", logger); err != nil {
+				return err
+			}
+		} else {
+			displayInfo("No changes to commit after staging submodules")
+		}
 	}
 
 	// Count actually released modules
@@ -222,7 +210,36 @@ func runRelease(cmd *cobra.Command, args []string) error {
 			releasedCount++
 		}
 	}
-	displayFinalSuccess(finalParentVersion, releasedCount)
+
+	// Handle parent repository updates unless skipped
+	var finalParentVersion string
+	if !releaseSkipParent {
+		// Recalculate parent version to handle same-day releases
+		finalParentVersion = determineParentVersion(rootDir, versions, hasChanges)
+		if finalParentVersion != parentVersion {
+			displayInfo(fmt.Sprintf("Adjusted parent version: %s → %s (same-day release)", parentVersion, finalParentVersion))
+		}
+
+		// Tag the main repository
+		if err := executeGitCommand(ctx, rootDir, []string{"tag", "-a", finalParentVersion, "-m", fmt.Sprintf("Release %s", finalParentVersion)}, "Tag main repository", logger); err != nil {
+			return err
+		}
+
+		// Push the main repository changes
+		if err := executeGitCommand(ctx, rootDir, []string{"push", "origin", "main"}, "Push main branch", logger); err != nil {
+			return err
+		}
+
+		// Push the main repository tag
+		if err := executeGitCommand(ctx, rootDir, []string{"push", "origin", finalParentVersion}, "Push release tag", logger); err != nil {
+			return err
+		}
+		
+		displayFinalSuccess(finalParentVersion, releasedCount)
+	} else {
+		displayInfo("Skipping parent repository updates (--skip-parent flag)")
+		displaySuccess(fmt.Sprintf("Released %d module(s) successfully", releasedCount))
+	}
 
 	return nil
 }
@@ -316,7 +333,7 @@ func autoCommitEcosystemChanges(ctx context.Context, rootDir string, hasChanges 
 	return nil
 }
 
-func runPreflightChecks(ctx context.Context, rootDir, version string, logger *logrus.Logger) error {
+func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces []string, logger *logrus.Logger) error {
 	displaySection("🔍 Pre-flight Checks")
 
 	// Check main repository status
@@ -325,8 +342,8 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, logger *lo
 		return fmt.Errorf("failed to get main repository status: %w", err)
 	}
 
-	// Collect submodule statuses
-	type submoduleStatus struct {
+	// Collect workspace statuses
+	type workspaceStatus struct {
 		Path       string
 		Branch     string
 		Dirty      bool
@@ -334,7 +351,7 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, logger *lo
 		Error      error
 	}
 
-	var submoduleStatuses []submoduleStatus
+	var workspaceStatuses []workspaceStatus
 
 	// Create a map for filtering repositories if specified
 	repoFilter := make(map[string]bool)
@@ -344,53 +361,34 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, logger *lo
 		}
 	}
 
-	// Get submodule statuses
-	cmdBuilder := command.NewSafeBuilder()
-	cmd, err := cmdBuilder.Build(ctx, "git", "submodule", "foreach", "--quiet", "echo $sm_path")
-	if err != nil {
-		return fmt.Errorf("failed to build submodule list command: %w", err)
-	}
-
-	execCmd := cmd.Exec()
-	execCmd.Dir = rootDir
-	output, err := execCmd.Output()
-	if err != nil {
-		return fmt.Errorf("failed to list submodules: %w", err)
-	}
-
-	// Parse submodule paths
-	submodulePaths := strings.Split(strings.TrimSpace(string(output)), "\n")
-	if len(submodulePaths) == 1 && submodulePaths[0] == "" {
-		submodulePaths = []string{}
-	}
-
-	// Check each submodule
-	for _, smPath := range submodulePaths {
-		if smPath == "" {
-			continue
+	// Check each workspace
+	for _, wsPath := range workspaces {
+		// Get relative path from root
+		relPath, err := filepath.Rel(rootDir, wsPath)
+		if err != nil {
+			relPath = wsPath
 		}
 
-		repoName := filepath.Base(smPath)
+		repoName := filepath.Base(wsPath)
 
 		// Skip if not in the filter list (when filter is specified)
 		if len(repoFilter) > 0 && !repoFilter[repoName] {
 			continue
 		}
 
-		smFullPath := filepath.Join(rootDir, smPath)
-		smStatus := submoduleStatus{Path: smPath}
+		wsStatus := workspaceStatus{Path: relPath}
 
-		// Get submodule git status
-		status, err := git.GetStatus(smFullPath)
+		// Get workspace git status
+		status, err := git.GetStatus(wsPath)
 		if err != nil {
-			smStatus.Error = err
+			wsStatus.Error = err
 		} else {
-			smStatus.Branch = status.Branch
-			smStatus.Dirty = status.IsDirty
-			smStatus.AheadCount = status.AheadCount
+			wsStatus.Branch = status.Branch
+			wsStatus.Dirty = status.IsDirty
+			wsStatus.AheadCount = status.AheadCount
 		}
 
-		submoduleStatuses = append(submoduleStatuses, smStatus)
+		workspaceStatuses = append(workspaceStatuses, wsStatus)
 	}
 
 	// Prepare table data
@@ -439,29 +437,29 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, logger *lo
 		strings.Join(displayIssues, ", "),
 	})
 
-	// Submodules
+	// Workspaces
 	hasIssues := len(mainIssues) > 0
-	for _, sm := range submoduleStatuses {
+	for _, ws := range workspaceStatuses {
 		issues := []string{}
 		statusStr := "✓ Clean"
-		branch := sm.Branch
+		branch := ws.Branch
 
-		if sm.Error != nil {
+		if ws.Error != nil {
 			issues = append(issues, "error checking status")
 			statusStr = "? Error"
 			branch = "unknown"
 		} else {
-			if sm.Dirty {
+			if ws.Dirty {
 				issues = append(issues, "uncommitted changes")
 				statusStr = "✗ Dirty"
 			}
-			if sm.Branch != "main" {
+			if ws.Branch != "main" {
 				issues = append(issues, "not on main branch")
 			}
-			if sm.AheadCount > 0 {
+			if ws.AheadCount > 0 {
 				// Only add as issue if we're not going to push
 				if !releasePush {
-					issues = append(issues, fmt.Sprintf("ahead of remote by %d commits", sm.AheadCount))
+					issues = append(issues, fmt.Sprintf("ahead of remote by %d commits", ws.AheadCount))
 				}
 			}
 		}
@@ -472,12 +470,12 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, logger *lo
 
 		// Add ahead info even if not an issue
 		displayIssues := issues
-		if releasePush && sm.AheadCount > 0 && len(issues) == 0 {
-			displayIssues = []string{fmt.Sprintf("ahead of remote by %d commits (will push)", sm.AheadCount)}
+		if releasePush && ws.AheadCount > 0 && len(issues) == 0 {
+			displayIssues = []string{fmt.Sprintf("ahead of remote by %d commits (will push)", ws.AheadCount)}
 		}
 
 		tableRows = append(tableRows, []string{
-			sm.Path,
+			ws.Path,
 			branch,
 			statusStr,
 			strings.Join(displayIssues, ", "),
@@ -514,7 +512,7 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, logger *lo
 	return nil
 }
 
-func pushRepositories(ctx context.Context, rootDir string, hasChanges map[string]bool, logger *logrus.Logger) error {
+func pushRepositories(ctx context.Context, rootDir string, workspaces []string, hasChanges map[string]bool, logger *logrus.Logger) error {
 	displaySection("📤 Pushing Repositories")
 
 	// Create a map for filtering repositories if specified
@@ -531,48 +529,28 @@ func pushRepositories(ctx context.Context, rootDir string, hasChanges map[string
 		return fmt.Errorf("failed to push main repository: %w", err)
 	}
 
-	// Get list of submodules
-	cmd := command.NewSafeBuilder()
-	listCmd, err := cmd.Build(ctx, "git", "submodule", "status")
-	if err != nil {
-		return fmt.Errorf("failed to build git command: %w", err)
-	}
-
-	execCmd := listCmd.Exec()
-	execCmd.Dir = rootDir
-	output, err := execCmd.Output()
-	if err != nil {
-		return fmt.Errorf("failed to list submodules: %w", err)
-	}
-
-	// Process each submodule
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	for _, line := range lines {
-		if line == "" {
-			continue
+	// Process each workspace
+	for _, wsPath := range workspaces {
+		// Get relative path from root
+		relPath, err := filepath.Rel(rootDir, wsPath)
+		if err != nil {
+			relPath = wsPath
 		}
 
-		// Parse submodule path from status output
-		parts := strings.Fields(line)
-		if len(parts) < 2 {
-			continue
-		}
-		smPath := parts[1]
-		repoName := filepath.Base(smPath)
+		repoName := filepath.Base(wsPath)
 
 		// Skip if not in the filter list (when filter is specified)
 		if len(repoFilter) > 0 && !repoFilter[repoName] {
 			continue
 		}
 
-		// Push submodule
-		smFullPath := filepath.Join(rootDir, smPath)
-		displayProgress(fmt.Sprintf("Pushing %s...", smPath))
+		// Push workspace
+		displayProgress(fmt.Sprintf("Pushing %s...", relPath))
 
-		if err := executeGitCommand(ctx, smFullPath, []string{"push", "origin", "main"},
-			fmt.Sprintf("Push %s", smPath), logger); err != nil {
+		if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", "main"},
+			fmt.Sprintf("Push %s", relPath), logger); err != nil {
 			// Only warn on push failures, don't fail the entire process
-			logger.WithFields(logrus.Fields{"path": smPath, "error": err}).Warn("Failed to push submodule")
+			logger.WithFields(logrus.Fields{"path": relPath, "error": err}).Warn("Failed to push workspace")
 		}
 	}
 
@@ -700,7 +678,7 @@ func boolToString(b bool) string {
 	return "false"
 }
 
-func calculateNextVersions(ctx context.Context, rootDir string, major, minor, patch []string, logger *logrus.Logger) (map[string]string, map[string]string, map[string]bool, error) {
+func calculateNextVersions(ctx context.Context, rootDir string, workspaces []string, major, minor, patch []string, logger *logrus.Logger) (map[string]string, map[string]string, map[string]bool, error) {
 	versions := make(map[string]string)
 	currentVersions := make(map[string]string)
 	hasChanges := make(map[string]bool)
@@ -725,50 +703,24 @@ func calculateNextVersions(ctx context.Context, rootDir string, major, minor, pa
 		bumpTypes[repo] = "patch"
 	}
 
-	// Get list of submodules
-	cmd := command.NewSafeBuilder()
-	listCmd, err := cmd.Build(ctx, "git", "submodule", "status")
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to build git command: %w", err)
-	}
-
-	execCmd := listCmd.Exec()
-	execCmd.Dir = rootDir
-	output, err := execCmd.Output()
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to list submodules: %w", err)
-	}
-
-	// Process each submodule
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-
-		// Parse submodule path
-		parts := strings.Fields(line)
-		if len(parts) < 2 {
-			continue
-		}
-		smPath := parts[1]
-		repoName := filepath.Base(smPath)
+	// Process each workspace
+	for _, wsPath := range workspaces {
+		repoName := filepath.Base(wsPath)
 
 		// Skip if not in the filter list (when filter is specified)
 		if len(repoFilter) > 0 && !repoFilter[repoName] {
 			continue
 		}
 
-		smFullPath := filepath.Join(rootDir, smPath)
-
 		// Get latest tag
-		tagCmd, err := cmd.Build(ctx, "git", "describe", "--tags", "--abbrev=0")
+		cmdBuilder := command.NewSafeBuilder()
+		tagCmd, err := cmdBuilder.Build(ctx, "git", "describe", "--tags", "--abbrev=0")
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("failed to build git command: %w", err)
 		}
 
 		execCmd := tagCmd.Exec()
-		execCmd.Dir = smFullPath
+		execCmd.Dir = wsPath
 		tagOutput, err := execCmd.Output()
 
 		var currentVersion *semver.Version
@@ -790,13 +742,13 @@ func calculateNextVersions(ctx context.Context, rootDir string, major, minor, pa
 			}
 
 			// Check if there are commits since the last tag
-			commitCountCmd, err := cmd.Build(ctx, "git", "rev-list", "--count", currentTag+"..HEAD")
+			commitCountCmd, err := cmdBuilder.Build(ctx, "git", "rev-list", "--count", currentTag+"..HEAD")
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("failed to build git command: %w", err)
 			}
 
 			execCmd := commitCountCmd.Exec()
-			execCmd.Dir = smFullPath
+			execCmd.Dir = wsPath
 			countOutput, err := execCmd.Output()
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("failed to count commits for %s: %w", repoName, err)
@@ -805,13 +757,13 @@ func calculateNextVersions(ctx context.Context, rootDir string, major, minor, pa
 			commitCount := strings.TrimSpace(string(countOutput))
 			if commitCount == "0" && !releaseForceIncrement {
 				// Check if current commit already has the tag
-				tagCheckCmd, err := cmd.Build(ctx, "git", "describe", "--exact-match", "--tags", "HEAD")
+				tagCheckCmd, err := cmdBuilder.Build(ctx, "git", "describe", "--exact-match", "--tags", "HEAD")
 				if err != nil {
 					return nil, nil, nil, fmt.Errorf("failed to build git command: %w", err)
 				}
 
 				execCmd := tagCheckCmd.Exec()
-				execCmd.Dir = smFullPath
+				execCmd.Dir = wsPath
 				tagCheckOutput, err := execCmd.Output()
 
 				if err == nil && strings.TrimSpace(string(tagCheckOutput)) == currentTag {
@@ -924,8 +876,13 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 				continue
 			}
 
-			smPath := repoName
-			smFullPath := filepath.Join(rootDir, smPath)
+			// Get the node from the graph to get the directory path
+			node, ok := graph.GetNode(repoName)
+			if !ok {
+				return fmt.Errorf("node not found in graph: %s", repoName)
+			}
+			
+			wsPath := node.Dir
 
 			logger.WithFields(logrus.Fields{
 				"repo":    repoName,
@@ -934,31 +891,31 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 
 			// Update dependencies if this is not the first level (skip in dry-run mode)
 			if levelIndex > 0 && !releaseDryRun {
-				if err := updateGoDependencies(ctx, smFullPath, versions, graph, logger); err != nil {
+				if err := updateDependencies(ctx, wsPath, versions, graph, logger); err != nil {
 					return fmt.Errorf("failed to update dependencies for %s: %w", repoName, err)
 				}
 			}
 
 			// Generate and commit changelog
 			if !releaseDryRun {
-				changelogCmd := exec.CommandContext(ctx, "grove", "release", "changelog", smFullPath, "--version", version)
+				changelogCmd := exec.CommandContext(ctx, "grove", "release", "changelog", wsPath, "--version", version)
 				if err := changelogCmd.Run(); err != nil {
 					// Log a warning but don't fail the release if changelog fails
 					logger.WithError(err).Warnf("Failed to generate changelog for %s", repoName)
 				} else {
 					// Commit the changelog if it was modified
-					status, _ := git.GetStatus(smFullPath)
+					status, _ := git.GetStatus(wsPath)
 					if status.IsDirty {
 						displayInfo(fmt.Sprintf("Committing CHANGELOG.md for %s", repoName))
-						if err := executeGitCommand(ctx, smFullPath, []string{"add", "CHANGELOG.md"}, "Stage changelog", logger); err != nil {
+						if err := executeGitCommand(ctx, wsPath, []string{"add", "CHANGELOG.md"}, "Stage changelog", logger); err != nil {
 							logger.WithError(err).Warnf("Failed to stage changelog for %s", repoName)
 						} else {
 							commitMsg := fmt.Sprintf("docs(changelog): update CHANGELOG.md for %s", version)
-							if err := executeGitCommand(ctx, smFullPath, []string{"commit", "-m", commitMsg}, "Commit changelog", logger); err != nil {
+							if err := executeGitCommand(ctx, wsPath, []string{"commit", "-m", commitMsg}, "Commit changelog", logger); err != nil {
 								logger.WithError(err).Warnf("Failed to commit changelog for %s", repoName)
 							} else {
 								// Push the changelog commit to remote
-								if err := executeGitCommand(ctx, smFullPath, []string{"push", "origin", "HEAD:main"}, 
+								if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", "HEAD:main"}, 
 									fmt.Sprintf("Push changelog for %s", repoName), logger); err != nil {
 									logger.WithError(err).Warnf("Failed to push changelog commit for %s", repoName)
 								}
@@ -969,13 +926,13 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 			}
 
 			// Tag the module
-			if err := executeGitCommand(ctx, smFullPath, []string{"tag", "-a", version, "-m", fmt.Sprintf("Release %s", version)},
+			if err := executeGitCommand(ctx, wsPath, []string{"tag", "-a", version, "-m", fmt.Sprintf("Release %s", version)},
 				fmt.Sprintf("Tag %s", repoName), logger); err != nil {
 				return err
 			}
 
 			// Push the tag
-			if err := executeGitCommand(ctx, smFullPath, []string{"push", "origin", version},
+			if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", version},
 				fmt.Sprintf("Push tag for %s", repoName), logger); err != nil {
 				return err
 			}
@@ -1003,6 +960,123 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 	return nil
 }
 
+func updateDependencies(ctx context.Context, modulePath string, releasedVersions map[string]string, graph *depsgraph.Graph, logger *logrus.Logger) error {
+	// Load grove.yml to get project type
+	groveYmlPath := filepath.Join(modulePath, "grove.yml")
+	cfg, err := config.Load(groveYmlPath)
+	if err != nil {
+		// If no grove.yml, assume Go project for backward compatibility
+		return updateGoDependencies(ctx, modulePath, releasedVersions, graph, logger)
+	}
+	
+	// Get project type
+	var projectTypeStr string
+	if err := cfg.UnmarshalExtension("type", &projectTypeStr); err != nil || projectTypeStr == "" {
+		// Default to Go for backward compatibility
+		projectTypeStr = string(project.TypeGo)
+	}
+	
+	projectType := project.Type(projectTypeStr)
+	
+	// Get appropriate handler
+	registry := project.NewRegistry()
+	handler, err := registry.Get(projectType)
+	if err != nil {
+		logger.WithError(err).Warnf("No handler for project type %s, skipping dependency update", projectType)
+		return nil
+	}
+	
+	// Parse current dependencies
+	deps, err := handler.ParseDependencies(modulePath)
+	if err != nil {
+		logger.WithError(err).Warnf("Failed to parse dependencies for %s", filepath.Base(modulePath))
+		return nil
+	}
+	
+	// Track if we made any updates
+	hasUpdates := false
+	
+	// Check each dependency
+	for _, dep := range deps {
+		if !dep.Workspace {
+			continue
+		}
+		
+		// Find the workspace name for this dependency
+		var depWorkspaceName string
+		if projectType == project.TypeGo {
+			// For Go projects, map module path to workspace name
+			for name, node := range graph.GetAllNodes() {
+				if node.Path == dep.Name {
+					depWorkspaceName = name
+					break
+				}
+			}
+		} else {
+			// For other project types, dependency name should match workspace name
+			depWorkspaceName = dep.Name
+		}
+		
+		if depWorkspaceName == "" {
+			continue
+		}
+		
+		// Check if this dependency has a new version
+		newVersion, hasNewVersion := releasedVersions[depWorkspaceName]
+		if !hasNewVersion {
+			continue
+		}
+		
+		logger.WithFields(logrus.Fields{
+			"dep": dep.Name,
+			"old": dep.Version,
+			"new": newVersion,
+		}).Info("Updating dependency")
+		
+		// Update to new version
+		dep.Version = newVersion
+		if err := handler.UpdateDependency(modulePath, dep); err != nil {
+			return fmt.Errorf("failed to update %s: %w", dep.Name, err)
+		}
+		
+		hasUpdates = true
+	}
+	
+	if hasUpdates {
+		// Check for changes
+		status, err := git.GetStatus(modulePath)
+		if err != nil {
+			return fmt.Errorf("failed to get git status: %w", err)
+		}
+		
+		if status.IsDirty {
+			// Commit the dependency updates
+			commitFiles := []string{}
+			if projectType == project.TypeGo {
+				commitFiles = []string{"go.mod", "go.sum"}
+			} else if projectType == project.TypeMaturin {
+				commitFiles = []string{"pyproject.toml"}
+			}
+			
+			if len(commitFiles) > 0 {
+				if err := executeGitCommand(ctx, modulePath, append([]string{"add"}, commitFiles...),
+					"Stage dependency updates", logger); err != nil {
+					return err
+				}
+				
+				commitMsg := "chore(deps): bump dependencies"
+				if err := executeGitCommand(ctx, modulePath, []string{"commit", "-m", commitMsg},
+					"Commit dependency updates", logger); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	
+	return nil
+}
+
+// Keep the original function for backward compatibility
 func updateGoDependencies(ctx context.Context, modulePath string, releasedVersions map[string]string, graph *depsgraph.Graph, logger *logrus.Logger) error {
 	goModPath := filepath.Join(modulePath, "go.mod")
 

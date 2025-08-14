@@ -63,13 +63,19 @@ func (c *Creator) Create(opts CreateOptions) error {
 	}
 	state.localRepoCreated = true
 
-	// Phase 2.5: Add to go.work temporarily for local verification
-	if err := c.updateGoWork(opts); err != nil {
-		c.rollback(state, opts)
-		return fmt.Errorf("failed to update go.work: %w", err)
+	// Phase 2.5: Detect project type early
+	repoPath := filepath.Join(".", opts.Name)
+	projectType := c.detectProjectType(repoPath)
+	
+	// Phase 2.6: Add to go.work temporarily for Go projects only
+	if projectType == "go" {
+		if err := c.updateGoWork(opts); err != nil {
+			c.rollback(state, opts)
+			return fmt.Errorf("failed to update go.work: %w", err)
+		}
 	}
 
-	// Phase 2.6: Local verification
+	// Phase 2.7: Local verification
 	c.logger.Info("Running local verification...")
 	if err := c.verifyLocal(opts); err != nil {
 		c.rollback(state, opts)
@@ -305,61 +311,113 @@ func (c *Creator) generateFromExternalTemplate(opts CreateOptions, data template
 func (c *Creator) verifyLocal(opts CreateOptions) error {
 	repoPath := filepath.Join(".", opts.Name)
 
-	// Note: We don't set global git config here because:
-	// 1. It affects all git operations globally
-	// 2. The GOPRIVATE and GOPROXY settings handle private modules for Go
-	// 3. Users should configure their own git authentication
+	// Determine project type based on project files
+	projectType := c.detectProjectType(repoPath)
+	c.logger.WithField("type", projectType).Info("Detected project type")
 
-	// Run go mod tidy first to resolve dependencies
-	c.logger.Info("Resolving dependencies...")
-	tidyCmd := exec.Command("go", "mod", "tidy")
-	tidyCmd.Dir = repoPath
-	tidyCmd.Env = append(os.Environ(),
-		"GOPRIVATE=github.com/mattsolo1/*",
-		"GOPROXY=direct",
-	)
-	if output, err := tidyCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("go mod tidy failed: %w\nOutput: %s", err, string(output))
+	// Handle language-specific dependency resolution
+	switch projectType {
+	case "go":
+		// Run go mod tidy first to resolve dependencies
+		c.logger.Info("Resolving dependencies...")
+		tidyCmd := exec.Command("go", "mod", "tidy")
+		tidyCmd.Dir = repoPath
+		tidyCmd.Env = append(os.Environ(),
+			"GOPRIVATE=github.com/mattsolo1/*",
+			"GOPROXY=direct",
+		)
+		if output, err := tidyCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("go mod tidy failed: %w\nOutput: %s", err, string(output))
+		}
+
+		// Run go mod download
+		c.logger.Info("Downloading dependencies...")
+		modCmd := exec.Command("go", "mod", "download")
+		modCmd.Dir = repoPath
+		modCmd.Env = append(os.Environ(),
+			"GOPRIVATE=github.com/mattsolo1/*",
+			"GOPROXY=direct",
+		)
+		if err := modCmd.Run(); err != nil {
+			return fmt.Errorf("go mod download failed: %w", err)
+		}
+		
+	case "maturin":
+		// For Python/Maturin projects, check if uv is available
+		c.logger.Info("Checking for uv (Python package manager)...")
+		if _, err := exec.LookPath("uv"); err != nil {
+			c.logger.Warn("uv not found. Please install uv for faster Python package management: https://github.com/astral-sh/uv")
+			c.logger.Info("Continuing with standard Python tools...")
+		}
+		// The Makefile will handle the actual setup
+		c.logger.Info("Python environment setup will be handled by Makefile")
+		
+	default:
+		c.logger.Info("No language-specific dependency resolution needed")
 	}
 
-	// Run go mod download
-	c.logger.Info("Downloading dependencies...")
-	modCmd := exec.Command("go", "mod", "download")
-	modCmd.Dir = repoPath
-	modCmd.Env = append(os.Environ(),
-		"GOPRIVATE=github.com/mattsolo1/*",
-		"GOPROXY=direct",
-	)
-	if err := modCmd.Run(); err != nil {
-		return fmt.Errorf("go mod download failed: %w", err)
-	}
+	// Run make-based verification (works for all project types)
+	// Check if Makefile exists first
+	makefilePath := filepath.Join(repoPath, "Makefile")
+	if _, err := os.Stat(makefilePath); err == nil {
+		// Build the project
+		c.logger.Info("Building project...")
+		buildCmd := exec.Command("make", "build")
+		buildCmd.Dir = repoPath
+		if output, err := buildCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("make build failed: %w\nOutput: %s", err, string(output))
+		}
 
-	// Build the binary
-	c.logger.Info("Building binary...")
-	buildCmd := exec.Command("make", "build")
-	buildCmd.Dir = repoPath
-	if output, err := buildCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("make build failed: %w\nOutput: %s", err, string(output))
-	}
+		// Run tests if available
+		c.logger.Info("Running tests...")
+		testCmd := exec.Command("make", "test")
+		testCmd.Dir = repoPath
+		if output, err := testCmd.CombinedOutput(); err != nil {
+			// Don't fail if test target doesn't exist
+			if !strings.Contains(string(output), "No rule to make target") {
+				return fmt.Errorf("make test failed: %w\nOutput: %s", err, string(output))
+			}
+			c.logger.Warn("No test target found, skipping tests")
+		}
 
-	// Run tests
-	c.logger.Info("Running tests...")
-	testCmd := exec.Command("make", "test")
-	testCmd.Dir = repoPath
-	if output, err := testCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("make test failed: %w\nOutput: %s", err, string(output))
-	}
-
-	// Run e2e tests
-	c.logger.Info("Running e2e tests...")
-	e2eCmd := exec.Command("make", "test-e2e")
-	e2eCmd.Dir = repoPath
-	if output, err := e2eCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("make test-e2e failed: %w\nOutput: %s", err, string(output))
+		// Run e2e tests if available
+		c.logger.Info("Running e2e tests...")
+		e2eCmd := exec.Command("make", "test-e2e")
+		e2eCmd.Dir = repoPath
+		if output, err := e2eCmd.CombinedOutput(); err != nil {
+			// Don't fail if test-e2e target doesn't exist
+			if !strings.Contains(string(output), "No rule to make target") {
+				return fmt.Errorf("make test-e2e failed: %w\nOutput: %s", err, string(output))
+			}
+			c.logger.Warn("No test-e2e target found, skipping e2e tests")
+		}
+	} else {
+		c.logger.Warn("No Makefile found, skipping build verification")
 	}
 
 	c.logger.Info("✅ Local verification passed")
 	return nil
+}
+
+// detectProjectType determines the project type based on project files
+func (c *Creator) detectProjectType(repoPath string) string {
+	// Check for go.mod
+	if _, err := os.Stat(filepath.Join(repoPath, "go.mod")); err == nil {
+		return "go"
+	}
+	
+	// Check for pyproject.toml (Maturin/Python projects)
+	if _, err := os.Stat(filepath.Join(repoPath, "pyproject.toml")); err == nil {
+		return "maturin"
+	}
+	
+	// Check for package.json (Node projects)
+	if _, err := os.Stat(filepath.Join(repoPath, "package.json")); err == nil {
+		return "node"
+	}
+	
+	// Default to unknown
+	return "unknown"
 }
 
 func (c *Creator) createGitHubRepo(opts CreateOptions) error {
@@ -538,9 +596,16 @@ func (c *Creator) updateGoWork(opts CreateOptions) error {
 func (c *Creator) stageEcosystemChanges(opts CreateOptions) error {
 	c.logger.Info("Staging ecosystem changes...")
 
+	// Always stage Makefile
 	filesToStage := []string{
 		"Makefile",
-		"go.work",
+	}
+	
+	// Only stage go.work if this is a Go project
+	repoPath := filepath.Join(".", opts.Name)
+	projectType := c.detectProjectType(repoPath)
+	if projectType == "go" {
+		filesToStage = append(filesToStage, "go.work")
 	}
 
 	if !opts.SkipGitHub {
