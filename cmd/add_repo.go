@@ -48,8 +48,9 @@ Example:
 }
 
 var templateAliases = map[string]string{
-	"go": "/Users/solom4/Code/grove-ecosystem/grove-project-tmpl-go", // For now, use absolute path
-	// Future: "maturin", "react-ts", etc.
+	"go":       "/Users/solom4/Code/grove-ecosystem/grove-project-tmpl-go",       // For now, use absolute path
+	"maturin":  "/Users/solom4/Code/grove-ecosystem/grove-project-tmpl-maturin",  // Python/Rust template
+	"react-ts": "/Users/solom4/Code/grove-ecosystem/grove-project-tmpl-react-ts", // React TypeScript template
 }
 
 func resolveTemplate(spec string) string {

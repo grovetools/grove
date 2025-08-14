@@ -352,6 +352,15 @@ func (c *Creator) verifyLocal(opts CreateOptions) error {
 		// The Makefile will handle the actual setup
 		c.logger.Info("Python environment setup will be handled by Makefile")
 		
+	case "node":
+		// For Node.js projects, run npm install
+		c.logger.Info("Installing Node.js dependencies...")
+		setupCmd := exec.Command("make", "setup")
+		setupCmd.Dir = repoPath
+		if output, err := setupCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("make setup failed: %w\nOutput: %s", err, string(output))
+		}
+		
 	default:
 		c.logger.Info("No language-specific dependency resolution needed")
 	}
