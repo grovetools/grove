@@ -26,7 +26,7 @@ func AddRepoDryRunScenario() *harness.Scenario {
 					ecosystemDir := ctx.NewDir("ecosystem")
 					
 					// Create minimal files
-					fs.WriteString(filepath.Join(ecosystemDir, "grove.yml"), "name: grove-ecosystem\n")
+					fs.WriteString(filepath.Join(ecosystemDir, "grove.yml"), "name: grove-ecosystem\nworkspaces:\n  - \"grove-*\"\n")
 					fs.WriteString(filepath.Join(ecosystemDir, "go.work"), "go 1.24.4\n")
 					fs.WriteString(filepath.Join(ecosystemDir, "Makefile"), 
 						"PACKAGES = grove-core\n# GROVE-META:ADD-REPO:PACKAGES\n\nBINARIES = grove\n# GROVE-META:ADD-REPO:BINARIES\n")
@@ -94,7 +94,7 @@ func AddRepoWithGitHubScenario() *harness.Scenario {
 					ecosystemDir := ctx.NewDir("ecosystem")
 					
 					// Minimal setup
-					fs.WriteString(filepath.Join(ecosystemDir, "grove.yml"), "name: grove-ecosystem\n")
+					fs.WriteString(filepath.Join(ecosystemDir, "grove.yml"), "name: grove-ecosystem\nworkspaces:\n  - \"grove-*\"\n")
 					fs.WriteString(filepath.Join(ecosystemDir, "go.work"), "go 1.24.4\n")
 					fs.WriteString(filepath.Join(ecosystemDir, "Makefile"), 
 						"PACKAGES = grove-core\n# GROVE-META:ADD-REPO:PACKAGES\n\nBINARIES = grove\n# GROVE-META:ADD-REPO:BINARIES\n")
@@ -204,7 +204,7 @@ func AddRepoSkipGitHubScenario() *harness.Scenario {
 					ecosystemDir := ctx.NewDir("ecosystem")
 					
 					// Minimal setup
-					fs.WriteString(filepath.Join(ecosystemDir, "grove.yml"), "name: grove-ecosystem\n")
+					fs.WriteString(filepath.Join(ecosystemDir, "grove.yml"), "name: grove-ecosystem\nworkspaces:\n  - \"grove-*\"\n")
 					fs.WriteString(filepath.Join(ecosystemDir, "go.work"), "go 1.24.4\n")
 					fs.WriteString(filepath.Join(ecosystemDir, "Makefile"), 
 						"PACKAGES = grove-core\n# GROVE-META:ADD-REPO:PACKAGES\n\nBINARIES = grove\n# GROVE-META:ADD-REPO:BINARIES\n")
