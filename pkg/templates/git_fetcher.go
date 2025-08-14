@@ -30,13 +30,39 @@ func (f *GitFetcher) Fetch(url string) (string, error) {
 	// Create a subdirectory for the clone
 	cloneDir := filepath.Join(f.tempDir, "repo")
 	
+	// Convert GitHub shorthand to full URL if needed
+	repoURL := url
+	if isGitHubShorthand(url) {
+		// Try using gh CLI first for GitHub repos
+		if err := f.fetchWithGH(url, cloneDir); err == nil {
+			return f.findTemplateDir(cloneDir)
+		}
+		// Fall back to HTTPS URL
+		repoURL = fmt.Sprintf("https://github.com/%s.git", url)
+	}
+	
 	// Clone the repository
-	cmd := exec.Command("git", "clone", "--depth", "1", url, cloneDir)
+	cmd := exec.Command("git", "clone", "--depth", "1", repoURL, cloneDir)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to clone repository: %w\nOutput: %s", err, string(output))
 	}
 	
+	return f.findTemplateDir(cloneDir)
+}
+
+// fetchWithGH tries to clone using gh CLI
+func (f *GitFetcher) fetchWithGH(repo string, cloneDir string) error {
+	cmd := exec.Command("gh", "repo", "clone", repo, cloneDir, "--", "--depth", "1")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gh clone failed: %w\nOutput: %s", err, string(output))
+	}
+	return nil
+}
+
+// findTemplateDir looks for the template directory within the cloned repo
+func (f *GitFetcher) findTemplateDir(cloneDir string) (string, error) {
 	// Check if template subdirectory exists
 	templateDir := filepath.Join(cloneDir, "template")
 	if info, err := os.Stat(templateDir); err == nil && info.IsDir() {
@@ -61,5 +87,12 @@ func IsGitURL(s string) bool {
 		strings.HasPrefix(s, "http://") || 
 		strings.HasPrefix(s, "git://") || 
 		strings.HasPrefix(s, "git@") ||
-		strings.Contains(s, ".git")
+		strings.Contains(s, ".git") ||
+		isGitHubShorthand(s)
+}
+
+// isGitHubShorthand checks if a string is in the format "owner/repo"
+func isGitHubShorthand(s string) bool {
+	parts := strings.Split(s, "/")
+	return len(parts) == 2 && !strings.Contains(parts[0], ".") && !strings.Contains(s, "\\")
 }

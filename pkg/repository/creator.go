@@ -11,6 +11,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/mattsolo1/grove-meta/pkg/gh"
 	"github.com/mattsolo1/grove-meta/pkg/templates"
+	"github.com/mattsolo1/grove-meta/pkg/workspace"
 )
 
 type Creator struct {
@@ -139,9 +140,6 @@ func (c *Creator) validate(opts CreateOptions) error {
 	c.logger.Info("Validating repository configuration...")
 
 	// Validate repository name
-	if !strings.HasPrefix(opts.Name, "grove-") {
-		return fmt.Errorf("repository name must start with 'grove-' prefix")
-	}
 	if !isValidRepoName(opts.Name) {
 		return fmt.Errorf("invalid repository name: must only contain lowercase letters, numbers, and hyphens")
 	}
@@ -218,9 +216,14 @@ func (c *Creator) generateSkeleton(opts CreateOptions) error {
 func (c *Creator) generateFromExternalTemplate(opts CreateOptions, data templates.TemplateData) error {
 	c.logger.Infof("Using external template from: %s", opts.TemplatePath)
 
+	// Find the grove root directory
+	rootDir, err := workspace.FindRoot("")
+	if err != nil {
+		return fmt.Errorf("failed to find grove root: %w", err)
+	}
+
 	var fetcher templates.Fetcher
 	var templateDir string
-	var err error
 
 	// Determine which fetcher to use based on the template path
 	if templates.IsGitURL(opts.TemplatePath) {
@@ -259,15 +262,16 @@ func (c *Creator) generateFromExternalTemplate(opts CreateOptions, data template
 	// Create renderer
 	renderer := templates.NewRenderer()
 
-	// Render template to target directory
-	if err := renderer.Render(templateDir, opts.Name, data); err != nil {
+	// Render template to target directory in the grove root
+	targetPath := filepath.Join(rootDir, opts.Name)
+	if err := renderer.Render(templateDir, targetPath, data); err != nil {
 		return fmt.Errorf("failed to render template: %w", err)
 	}
 
 	// Format Go files (if any)
 	c.logger.Info("Formatting Go files...")
 	fmtCmd := exec.Command("gofmt", "-w", ".")
-	fmtCmd.Dir = opts.Name
+	fmtCmd.Dir = targetPath
 	if err := fmtCmd.Run(); err != nil {
 		// Don't fail if gofmt isn't available, just warn
 		c.logger.Warnf("Failed to format Go files: %v", err)
@@ -276,21 +280,21 @@ func (c *Creator) generateFromExternalTemplate(opts CreateOptions, data template
 	// Initialize git repository
 	c.logger.Info("Initializing git repository...")
 	gitInit := exec.Command("git", "init")
-	gitInit.Dir = opts.Name
+	gitInit.Dir = targetPath
 	if err := gitInit.Run(); err != nil {
 		return fmt.Errorf("failed to initialize git: %w", err)
 	}
 
 	// Add all files
 	gitAdd := exec.Command("git", "add", ".")
-	gitAdd.Dir = opts.Name
+	gitAdd.Dir = targetPath
 	if err := gitAdd.Run(); err != nil {
 		return fmt.Errorf("failed to add files: %w", err)
 	}
 
 	// Create initial commit
 	gitCommit := exec.Command("git", "commit", "-m", "feat: initial repository setup\n\nCreated new Grove repository with:\n- Standard project structure\n- CLI framework with version command\n- Testing setup (unit and e2e)\n- CI/CD workflows\n- Documentation templates")
-	gitCommit.Dir = opts.Name
+	gitCommit.Dir = targetPath
 	if err := gitCommit.Run(); err != nil {
 		return fmt.Errorf("failed to create initial commit: %w", err)
 	}
@@ -298,7 +302,7 @@ func (c *Creator) generateFromExternalTemplate(opts CreateOptions, data template
 	// Install git hooks
 	c.logger.Info("Installing git hooks...")
 	hooksCmd := exec.Command("grove", "git-hooks", "install")
-	hooksCmd.Dir = opts.Name
+	hooksCmd.Dir = targetPath
 	if output, err := hooksCmd.CombinedOutput(); err != nil {
 		// Don't fail if hooks can't be installed, just warn
 		c.logger.Warnf("Failed to install git hooks: %v\nOutput: %s", err, string(output))
@@ -593,13 +597,23 @@ func (c *Creator) addToEcosystem(opts CreateOptions) error {
 }
 
 func (c *Creator) updateMakefile(opts CreateOptions) error {
-	// This will be implemented in the ecosystem integration file
-	return updateRootMakefile(opts.Name, opts.Alias)
+	// Makefile updates are no longer needed - grove.yml workspace discovery handles this
+	return nil
 }
 
 func (c *Creator) updateGoWork(opts CreateOptions) error {
-	// This will be implemented in the ecosystem integration file
+	// Only update go.work for Go-based templates
+	if !isGoTemplate(opts.TemplatePath) {
+		c.logger.Info("Skipping go.work update for non-Go template")
+		return nil
+	}
 	return updateGoWork(opts.Name)
+}
+
+// isGoTemplate checks if the template is Go-based
+func isGoTemplate(templatePath string) bool {
+	// Check if it's the default "go" template or a path containing "go"
+	return templatePath == "go" || strings.Contains(templatePath, "tmpl-go")
 }
 
 func (c *Creator) stageEcosystemChanges(opts CreateOptions) error {

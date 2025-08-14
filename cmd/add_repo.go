@@ -29,10 +29,17 @@ func newAddRepoCmd() *cobra.Command {
 		Long: `Create a new Grove repository with idiomatic structure, GitHub integration,
 and automatic addition to grove-ecosystem as a submodule.
 
-The repository name must start with 'grove-' prefix.
-
-Example:
-  grove meta add-repo grove-analyzer --alias az --description "Code analysis tool"`,
+Examples:
+  grove add-repo analyzer --alias az --description "Code analysis tool"
+  grove add-repo fizzbuzz --alias fizz --description "Fizzbuzz implementation"
+  
+  # Use different templates:
+  grove add-repo myrust --template maturin --alias mr
+  grove add-repo myapp --template react-ts --alias ma
+  
+  # Use GitHub repository as template:
+  grove add-repo mytool --template mattsolo1/grove-project-tmpl-rust --alias mt
+  grove add-repo mylib --template https://github.com/user/template-repo.git`,
 		Args: cobra.ExactArgs(1),
 		RunE: runAddRepo,
 	}
@@ -42,7 +49,7 @@ Example:
 	cmd.Flags().BoolVar(&addRepoSkipGitHub, "skip-github", false, "Skip GitHub repository creation")
 	cmd.Flags().BoolVar(&addRepoDryRun, "dry-run", false, "Preview operations without executing")
 	cmd.Flags().BoolVar(&addRepoStageChanges, "stage-ecosystem", false, "Stage ecosystem changes in git")
-	cmd.Flags().StringVar(&addRepoTemplate, "template", "go", "Template to use (go, or path/URL to custom template)")
+	cmd.Flags().StringVar(&addRepoTemplate, "template", "go", "Template to use (go, maturin, react-ts, path/URL, or GitHub repo like 'owner/repo')")
 
 	return cmd
 }
@@ -65,10 +72,6 @@ func runAddRepo(cmd *cobra.Command, args []string) error {
 
 	repoName := args[0]
 
-	// Validate repo name
-	if !strings.HasPrefix(repoName, "grove-") {
-		return fmt.Errorf("repository name must start with 'grove-' prefix")
-	}
 
 	// Derive alias if not provided
 	if addRepoAlias == "" {
