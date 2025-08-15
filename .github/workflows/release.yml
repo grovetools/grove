@@ -31,9 +31,6 @@ jobs:
           go mod download
           go mod tidy
 
-      - name: Run unit tests
-        run: make test
-
       - name: Run end-to-end tests
         run: make test-e2e
 

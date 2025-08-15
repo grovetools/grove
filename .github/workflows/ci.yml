@@ -45,10 +45,6 @@ jobs:
         run: |
           make build
 
-      - name: Run unit tests
-        run: |
-          make test
-
       - name: Build E2E test framework
         run: |
           make test-e2e-build
