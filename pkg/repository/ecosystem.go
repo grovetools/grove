@@ -307,3 +307,186 @@ func getEcosystemRoot() (string, error) {
 	
 	return "", fmt.Errorf("grove-ecosystem root not found")
 }
+
+// extractMakefileList extracts a space-separated list of items from Makefile lines
+// starting from the given index. It handles multi-line lists with backslashes.
+func extractMakefileList(lines []string, startIdx int) []string {
+	if startIdx >= len(lines) {
+		return []string{}
+	}
+	
+	// Extract the value after the equals sign
+	firstLine := lines[startIdx]
+	parts := strings.SplitN(firstLine, "=", 2)
+	if len(parts) < 2 {
+		return []string{}
+	}
+	
+	var items []string
+	currentLine := strings.TrimSpace(parts[1])
+	
+	// Check if line ends with backslash (continues on next line)
+	for i := startIdx; i < len(lines); i++ {
+		if i == startIdx {
+			// First line already processed
+			if strings.HasSuffix(currentLine, "\\") {
+				currentLine = strings.TrimSuffix(currentLine, "\\")
+			}
+		} else {
+			// Subsequent lines
+			currentLine = strings.TrimSpace(lines[i])
+			if strings.HasSuffix(currentLine, "\\") {
+				currentLine = strings.TrimSuffix(currentLine, "\\")
+			}
+		}
+		
+		// Split by whitespace and add non-empty items
+		for _, item := range strings.Fields(currentLine) {
+			item = strings.TrimSpace(item)
+			if item != "" && item != "\\" {
+				items = append(items, item)
+			}
+		}
+		
+		// Check if this line continues to the next
+		if i < len(lines)-1 && strings.HasSuffix(strings.TrimSpace(lines[i]), "\\") {
+			continue
+		} else {
+			break
+		}
+	}
+	
+	// Remove duplicates while preserving order
+	seen := make(map[string]bool)
+	var unique []string
+	for _, item := range items {
+		if !seen[item] {
+			seen[item] = true
+			unique = append(unique, item)
+		}
+	}
+	
+	// Sort for consistent output
+	sort.Strings(unique)
+	
+	return unique
+}
+
+// updateRootMakefile updates the root Makefile to include a new repository
+func updateRootMakefile(repoName, binaryAlias string) error {
+	// Find the grove root
+	rootDir, err := workspace.FindRoot("")
+	if err != nil {
+		return fmt.Errorf("failed to find grove root: %w", err)
+	}
+	
+	makefilePath := filepath.Join(rootDir, "Makefile")
+	
+	// Read the current Makefile
+	content, err := os.ReadFile(makefilePath)
+	if err != nil {
+		return fmt.Errorf("failed to read Makefile: %w", err)
+	}
+	
+	lines := strings.Split(string(content), "\n")
+	
+	// Look for the package and binary hooks
+	packageHookFound := false
+	binaryHookFound := false
+	packageHookIdx := -1
+	binaryHookIdx := -1
+	
+	for i, line := range lines {
+		if strings.Contains(line, "# GROVE-META:ADD-REPO:PACKAGES") {
+			packageHookFound = true
+			packageHookIdx = i
+		}
+		if strings.Contains(line, "# GROVE-META:ADD-REPO:BINARIES") {
+			binaryHookFound = true
+			binaryHookIdx = i
+		}
+	}
+	
+	if !packageHookFound {
+		return fmt.Errorf("PACKAGES hook not found in Makefile")
+	}
+	if !binaryHookFound {
+		return fmt.Errorf("BINARIES hook not found in Makefile")
+	}
+	
+	// Find the PACKAGES line before the hook
+	packagesIdx := -1
+	for i := packageHookIdx - 1; i >= 0; i-- {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), "PACKAGES") {
+			packagesIdx = i
+			break
+		}
+	}
+	
+	if packagesIdx == -1 {
+		return fmt.Errorf("PACKAGES variable not found before hook")
+	}
+	
+	// Extract current packages
+	packages := extractMakefileList(lines, packagesIdx)
+	
+	// Check if package already exists
+	alreadyExists := false
+	for _, pkg := range packages {
+		if pkg == repoName {
+			alreadyExists = true
+			break
+		}
+	}
+	
+	if !alreadyExists {
+		// Add the new package
+		packages = append(packages, repoName)
+		sort.Strings(packages)
+		
+		// Update the PACKAGES line
+		lines[packagesIdx] = fmt.Sprintf("PACKAGES = %s", strings.Join(packages, " "))
+	}
+	
+	// Find the BINARIES line before the hook
+	binariesIdx := -1
+	for i := binaryHookIdx - 1; i >= 0; i-- {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), "BINARIES") {
+			binariesIdx = i
+			break
+		}
+	}
+	
+	if binariesIdx == -1 {
+		return fmt.Errorf("BINARIES variable not found before hook")
+	}
+	
+	// Extract current binaries
+	binaries := extractMakefileList(lines, binariesIdx)
+	
+	// Check if binary already exists
+	binaryExists := false
+	for _, bin := range binaries {
+		if bin == binaryAlias {
+			binaryExists = true
+			break
+		}
+	}
+	
+	if !binaryExists && binaryAlias != "" {
+		// Add the new binary
+		binaries = append(binaries, binaryAlias)
+		sort.Strings(binaries)
+		
+		// Update the BINARIES line
+		lines[binariesIdx] = fmt.Sprintf("BINARIES = %s", strings.Join(binaries, " "))
+	}
+	
+	// Write the updated Makefile
+	updatedContent := strings.Join(lines, "\n")
+	if err := os.WriteFile(makefilePath, []byte(updatedContent), 0644); err != nil {
+		return fmt.Errorf("failed to write Makefile: %w", err)
+	}
+	
+	return nil
+}
