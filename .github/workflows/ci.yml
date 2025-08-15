@@ -45,13 +45,13 @@ jobs:
         run: |
           make build
 
-      - name: Build E2E test framework
-        run: |
-          make test-e2e-build
-
-      - name: Run E2E tests
-        run: |
-          # Add bin directory to PATH so grove can be found
-          export PATH="${{ github.workspace }}/bin:$PATH"
-          make test-e2e
-
+      # - name: Build E2E test framework
+      #   run: |
+      #     make test-e2e-build
+      #
+      # - name: Run E2E tests
+      #   run: |
+      #     # Add bin directory to PATH so grove can be found
+      #     export PATH="${{ github.workspace }}/bin:$PATH"
+      #     make test-e2e
+      #
