@@ -1,3 +1,35 @@
+## v0.2.9 (2025-08-15)
+
+### Tests
+
+* fix e2e tests to include workspaces in grove.yml
+
+### Bug Fixes
+
+* disable e2e for now
+* disable make test in ci for now
+* revert release changes but add tests (#1)
+* revert release changes but add tests
+
+### Continuous Integration
+
+* switch to Linux runners to reduce costs
+
+### Chores
+
+* **deps:** bump dependencies
+* bump deps, add missing test fn
+
+### Features
+
+* add grove ws manage command
+* remove grove- prefix requirement and add GitHub template support
+* add react template things
+* refactor release command to use workspace discovery instead of git submodules
+* extract Go templates to standalone grove-project-tmpl-go
+* add external template support to grove add-repo
+* add CI workflow and enhance release workflow
+
 ## v0.2.8 (2025-08-13)
 
 ### 💥 BREAKING CHANGES
