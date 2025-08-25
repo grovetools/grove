@@ -1,3 +1,31 @@
+## v0.2.10 (2025-08-25)
+
+### Continuous Integration
+
+* add Git LFS disable to release workflow
+
+### Chores
+
+* bump dependencies
+
+### Features
+
+* improve sync-deps commit messages with version details
+* add --sync-deps flag to sync dependencies between release levels
+* add outdated dependency detection to release process
+* implement parallel releases and improve workflow monitoring
+* increase CI workflow timeout to 10 minutes
+* add --with-deps flag to grove release command
+* add deps tree command for visualizing dependency graph
+
+### Bug Fixes
+
+* improve workflow run detection and increase find timeout
+* skip release for dependencies with unchanged versions
+* only consider repos being released when calculating dependency levels
+* wait for CI workflows to complete before proceeding with downstream releases
+* make it optional to update grove ecosystem monorepo
+
 ## v0.2.9 (2025-08-15)
 
 ### Tests
