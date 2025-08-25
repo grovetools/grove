@@ -214,20 +214,25 @@ func WaitForReleaseWorkflow(ctx context.Context, repoPath, versionTag string) er
 	defer cancel()
 
 	// First, we need to find the workflow run triggered by our tag push
-	// GitHub Actions may have a small delay, so we'll poll for a short period
+	// GitHub Actions may have a delay, so we'll poll for up to 3 minutes
 	var runID string
-	findTimeout := time.After(60 * time.Second)
+	findTimeout := time.After(3 * time.Minute)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+	
+	attemptCount := 0
 
 	for {
 		select {
 		case <-watchCtx.Done():
 			return watchCtx.Err()
 		case <-findTimeout:
-			return fmt.Errorf("timeout waiting for workflow run to appear for tag %s", versionTag)
+			return fmt.Errorf("timeout after 3 minutes waiting for workflow run to appear for tag %s (tried %d times)", versionTag, attemptCount)
 		case <-ticker.C:
+			attemptCount++
+			
 			// Try to find the workflow run
+			// First try with the tag as branch
 			cmd := exec.CommandContext(watchCtx, "gh", "run", "list", 
 				"--repo", slug,
 				"--event", "push",
@@ -238,6 +243,9 @@ func WaitForReleaseWorkflow(ctx context.Context, repoPath, versionTag string) er
 			output, err := cmd.Output()
 			if err != nil {
 				// Not found yet, continue polling
+				if attemptCount%4 == 0 { // Log every 20 seconds
+					fmt.Printf("Still waiting for workflow run to appear for %s (attempt %d)...\n", versionTag, attemptCount)
+				}
 				continue
 			}
 
@@ -245,12 +253,50 @@ func WaitForReleaseWorkflow(ctx context.Context, repoPath, versionTag string) er
 				DatabaseID int64 `json:"databaseId"`
 			}
 			if err := json.Unmarshal(output, &runs); err != nil {
+				if attemptCount%4 == 0 { // Log every 20 seconds
+					fmt.Printf("Failed to parse workflow run data (attempt %d): %v\n", attemptCount, err)
+				}
 				continue
 			}
 
 			if len(runs) > 0 {
 				runID = fmt.Sprintf("%d", runs[0].DatabaseID)
+				fmt.Printf("Found workflow run %s for %s\n", runID, versionTag)
 				break
+			}
+			
+			// If not found with branch filter, try without it (broader search)
+			if attemptCount > 2 { // After 10 seconds, try broader search
+				cmd = exec.CommandContext(watchCtx, "gh", "run", "list", 
+					"--repo", slug,
+					"--limit", "10",
+					"--json", "databaseId,headBranch,event")
+				
+				output, err = cmd.Output()
+				if err == nil {
+					var allRuns []struct {
+						DatabaseID int64  `json:"databaseId"`
+						HeadBranch string `json:"headBranch"`
+						Event      string `json:"event"`
+					}
+					if err := json.Unmarshal(output, &allRuns); err == nil {
+						// Look for our tag in the results
+						for _, run := range allRuns {
+							if run.HeadBranch == versionTag || run.HeadBranch == "refs/tags/"+versionTag {
+								runID = fmt.Sprintf("%d", run.DatabaseID)
+								fmt.Printf("Found workflow run %s for %s (broader search)\n", runID, versionTag)
+								break
+							}
+						}
+						if runID != "" {
+							break
+						}
+					}
+				}
+			}
+			
+			if attemptCount%4 == 0 { // Log every 20 seconds
+				fmt.Printf("No workflow runs found yet for tag %s (attempt %d)...\n", versionTag, attemptCount)
 			}
 		}
 	}
