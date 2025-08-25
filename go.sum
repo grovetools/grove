@@ -70,8 +70,8 @@ github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWE
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/mattn/go-runewidth v0.0.16 h1:E5ScNMtiwvlvB5paMFdw9p4kSQzbXFikJ5SQO6TULQc=
 github.com/mattn/go-runewidth v0.0.16/go.mod h1:Jdepj2loyihRzMpdS35Xk/zdY8IAYHsh153qUoGf23w=
-github.com/mattsolo1/grove-core v0.2.11 h1:vmvR64KUIbAI36ZbEboVr0ganwTfit06eK7HuT+ftUA=
-github.com/mattsolo1/grove-core v0.2.11/go.mod h1:jCZmYXEo3os2MXGH79K7c5xDtuM+/GooNyD96twXMgM=
+github.com/mattsolo1/grove-core v0.2.12 h1:vRJS+yeJBRUNErkh66mSbuaBbS4r53tTTdvV6O5Z4Ww=
+github.com/mattsolo1/grove-core v0.2.12/go.mod h1:jCZmYXEo3os2MXGH79K7c5xDtuM+/GooNyD96twXMgM=
 github.com/mattsolo1/grove-tend v0.2.8 h1:LEL1d+8gjD+XWqaABltTuVlxhHB4JcOprL21ABQ2nGU=
 github.com/mattsolo1/grove-tend v0.2.8/go.mod h1:dgmEbwaFGzXChr+m69obyZeFvNvcBCGb6TIA7LlrK0s=
 github.com/mitchellh/mapstructure v1.5.0 h1:jeMsZIYE/09sWLaz43PL7Gy6RuMjD2eJVyuac5Z2hdY=

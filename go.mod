@@ -5,7 +5,7 @@ go 1.24.4
 require (
 	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/mattsolo1/grove-core v0.2.11
+	github.com/mattsolo1/grove-core v0.2.12
 	github.com/mattsolo1/grove-tend v0.2.8
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/sirupsen/logrus v1.9.3
