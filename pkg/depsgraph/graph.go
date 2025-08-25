@@ -61,18 +61,44 @@ func BuildGraph(rootDir string, workspaces []string) (*Graph, error) {
 // TopologicalSort performs a topological sort of the graph using Kahn's algorithm
 // Returns modules grouped by levels that can be released in parallel
 func (g *Graph) TopologicalSort() ([][]string, error) {
-	// If graph is empty, return empty result
-	if len(g.nodes) == 0 {
+	return g.TopologicalSortWithFilter(nil)
+}
+
+// TopologicalSortWithFilter performs a topological sort on a subset of nodes
+// If nodesToConsider is nil, sorts the entire graph
+// If nodesToConsider is provided, only considers dependencies within that set
+func (g *Graph) TopologicalSortWithFilter(nodesToConsider map[string]bool) ([][]string, error) {
+	// Determine which nodes to process
+	var nodesToProcess map[string]bool
+	if nodesToConsider == nil {
+		// Process all nodes
+		nodesToProcess = make(map[string]bool)
+		for name := range g.nodes {
+			nodesToProcess[name] = true
+		}
+	} else {
+		nodesToProcess = nodesToConsider
+	}
+
+	// If no nodes to process, return empty result
+	if len(nodesToProcess) == 0 {
 		return [][]string{}, nil
 	}
 
 	// Calculate in-degrees (number of dependencies each node has)
+	// Only count dependencies that are also in nodesToProcess
 	inDegree := make(map[string]int)
-	for name := range g.nodes {
-		inDegree[name] = len(g.edges[name])
+	for name := range nodesToProcess {
+		count := 0
+		for _, dep := range g.edges[name] {
+			if nodesToProcess[dep] {
+				count++
+			}
+		}
+		inDegree[name] = count
 	}
 
-	// Find all nodes with no dependencies
+	// Find all nodes with no dependencies (within the considered set)
 	var queue []string
 	for name, degree := range inDegree {
 		if degree == 0 {
@@ -97,9 +123,12 @@ func (g *Graph) TopologicalSort() ([][]string, error) {
 			// For each module that depends on the current node
 			if dependents, ok := g.revEdges[node]; ok {
 				for _, dep := range dependents {
-					inDegree[dep]--
-					if inDegree[dep] == 0 {
-						nextQueue = append(nextQueue, dep)
+					// Only process if dependent is in our set
+					if nodesToProcess[dep] {
+						inDegree[dep]--
+						if inDegree[dep] == 0 {
+							nextQueue = append(nextQueue, dep)
+						}
 					}
 				}
 			}
@@ -107,9 +136,9 @@ func (g *Graph) TopologicalSort() ([][]string, error) {
 		queue = nextQueue
 	}
 
-	// Check for cycles
-	if processed != len(g.nodes) {
-		return nil, fmt.Errorf("dependency cycle detected: processed %d nodes out of %d", processed, len(g.nodes))
+	// Check for cycles (only within the nodes we're processing)
+	if processed != len(nodesToProcess) {
+		return nil, fmt.Errorf("dependency cycle detected: processed %d nodes out of %d", processed, len(nodesToProcess))
 	}
 
 	return result, nil

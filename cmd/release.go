@@ -113,16 +113,24 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to build dependency graph: %w", err)
 	}
 
-	// Get topologically sorted release order
-	releaseLevels, err := graph.TopologicalSort()
-	if err != nil {
-		return fmt.Errorf("failed to sort dependencies: %w", err)
-	}
-
-	// Calculate versions for all workspaces
+	// Calculate versions for all workspaces first to know which repos have changes
 	versions, currentVersions, hasChanges, err := calculateNextVersions(ctx, rootDir, workspaces, releaseMajor, releaseMinor, releasePatch, logger)
 	if err != nil {
 		return fmt.Errorf("failed to calculate versions: %w", err)
+	}
+
+	// Create a map of nodes to release (only those with changes)
+	nodesToRelease := make(map[string]bool)
+	for repo, changes := range hasChanges {
+		if changes {
+			nodesToRelease[repo] = true
+		}
+	}
+
+	// Get topologically sorted release order for only the repos being released
+	releaseLevels, err := graph.TopologicalSortWithFilter(nodesToRelease)
+	if err != nil {
+		return fmt.Errorf("failed to sort dependencies: %w", err)
 	}
 
 	// Check if any repos have changes
