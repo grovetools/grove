@@ -204,6 +204,11 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Check for outdated Grove dependencies and warn user
+	if err := checkForOutdatedDependencies(ctx, rootDir, workspaces, logger); err != nil {
+		displayWarning("Failed to check for outdated dependencies: " + err.Error())
+	}
+
 	// Push repositories to remote if requested
 	if releasePush {
 		if err := pushRepositories(ctx, rootDir, workspaces, hasChanges, logger); err != nil {
@@ -1755,4 +1760,78 @@ func createReleaseCommitMessage(versions map[string]string, hasChanges map[strin
 	}
 
 	return fmt.Sprintf("chore: release components (%s)", strings.Join(updates, ", "))
+}
+
+func checkForOutdatedDependencies(ctx context.Context, rootDir string, workspaces []string, logger *logrus.Logger) error {
+	outdatedDeps := make(map[string]map[string]string) // workspace -> dep -> current version
+	
+	for _, ws := range workspaces {
+		// Skip the root workspace
+		if ws == rootDir {
+			continue
+		}
+		
+		wsName := filepath.Base(ws)
+		goModPath := filepath.Join(ws, "go.mod")
+		goModContent, err := os.ReadFile(goModPath)
+		if err != nil {
+			continue
+		}
+
+		// Parse current Grove dependencies
+		lines := strings.Split(string(goModContent), "\n")
+		inRequire := false
+		
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "require (" {
+				inRequire = true
+				continue
+			}
+			if inRequire && line == ")" {
+				break
+			}
+			
+			if inRequire || strings.HasPrefix(line, "require ") {
+				if strings.Contains(line, "github.com/mattsolo1/") {
+					parts := strings.Fields(line)
+					if len(parts) >= 2 {
+						dep := parts[0]
+						if strings.HasPrefix(dep, "github.com/mattsolo1/") {
+							currentVersion := parts[1]
+							
+							// Get latest version
+							latestVersion, err := getLatestModuleVersion(dep)
+							if err != nil {
+								continue // Skip if we can't get latest version
+							}
+							
+							// Check if outdated
+							if currentVersion != latestVersion {
+								if outdatedDeps[wsName] == nil {
+									outdatedDeps[wsName] = make(map[string]string)
+								}
+								outdatedDeps[wsName][dep] = fmt.Sprintf("%s → %s", currentVersion, latestVersion)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	// Display warnings for outdated dependencies
+	if len(outdatedDeps) > 0 {
+		displayWarning("⚠️  Outdated Grove dependencies detected:")
+		for wsName, deps := range outdatedDeps {
+			fmt.Printf("  📦 %s:\n", wsName)
+			for dep, versions := range deps {
+				depName := filepath.Base(dep) // Extract just the repo name
+				fmt.Printf("    • %s: %s\n", depName, versions)
+			}
+		}
+		fmt.Printf("\n💡 Consider running `grove deps sync --commit --push` before releasing\n\n")
+	}
+	
+	return nil
 }
