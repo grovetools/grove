@@ -209,6 +209,10 @@ func WaitForReleaseWorkflow(ctx context.Context, repoPath, versionTag string) er
 		return fmt.Errorf("failed to get repository slug: %w", err)
 	}
 
+	// Create a context with 10-minute timeout for the entire operation
+	watchCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
 	// First, we need to find the workflow run triggered by our tag push
 	// GitHub Actions may have a small delay, so we'll poll for a short period
 	var runID string
@@ -218,13 +222,13 @@ func WaitForReleaseWorkflow(ctx context.Context, repoPath, versionTag string) er
 
 	for {
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-watchCtx.Done():
+			return watchCtx.Err()
 		case <-findTimeout:
 			return fmt.Errorf("timeout waiting for workflow run to appear for tag %s", versionTag)
 		case <-ticker.C:
 			// Try to find the workflow run
-			cmd := exec.CommandContext(ctx, "gh", "run", "list", 
+			cmd := exec.CommandContext(watchCtx, "gh", "run", "list", 
 				"--repo", slug,
 				"--event", "push",
 				"--branch", versionTag,
@@ -253,12 +257,16 @@ func WaitForReleaseWorkflow(ctx context.Context, repoPath, versionTag string) er
 
 	// Now watch the workflow run until it completes
 	// The --exit-status flag makes gh exit with non-zero status if the workflow fails
-	cmd := exec.CommandContext(ctx, "gh", "run", "watch", runID,
+	cmd := exec.CommandContext(watchCtx, "gh", "run", "watch", runID,
 		"--repo", slug,
 		"--exit-status")
 
 	// Execute the command which will stream the CI logs and wait for completion
 	if err := cmd.Run(); err != nil {
+		// Check if it's a context timeout
+		if watchCtx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("timeout after 10 minutes waiting for CI workflow to complete for %s@%s", slug, versionTag)
+		}
 		// Check if it's a workflow failure vs other error
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return fmt.Errorf("CI workflow failed for %s@%s (exit code: %d)", slug, versionTag, exitErr.ExitCode())

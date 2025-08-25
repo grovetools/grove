@@ -1049,8 +1049,8 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 
 			// Wait for CI workflow to complete (skip in dry-run mode)
 			if !releaseDryRun {
-				logger.Infof("Waiting for CI release of %s@%s to complete...", repoName, version)
-				displayInfo(fmt.Sprintf("Waiting for CI release of %s@%s to complete...", repoName, version))
+				logger.Infof("Waiting for CI release of %s@%s to complete (timeout: 10 minutes)...", repoName, version)
+				displayInfo(fmt.Sprintf("Waiting for CI release of %s@%s to complete (timeout: 10 minutes)...", repoName, version))
 				
 				if err := gh.WaitForReleaseWorkflow(ctx, wsPath, version); err != nil {
 					// This is a critical failure. Stop the entire release process.
