@@ -40,6 +40,7 @@ var (
 	releaseYes            bool
 	releaseSkipParent     bool
 	releaseWithDeps       bool
+	releaseSyncDeps       bool
 )
 
 func init() {
@@ -78,6 +79,7 @@ Examples:
 	cmd.Flags().BoolVar(&releasePush, "push", false, "Push all repositories to remote before tagging")
 	cmd.Flags().StringSliceVar(&releaseRepos, "repos", []string{}, "Only release specified repositories (e.g., grove-meta,grove-core)")
 	cmd.Flags().BoolVar(&releaseWithDeps, "with-deps", false, "Include all dependencies of specified repositories in the release")
+	cmd.Flags().BoolVar(&releaseSyncDeps, "sync-deps", false, "Sync Grove dependencies to latest versions between levels")
 	cmd.Flags().StringSliceVar(&releaseMajor, "major", []string{}, "Repositories to receive major version bump")
 	cmd.Flags().StringSliceVar(&releaseMinor, "minor", []string{}, "Repositories to receive minor version bump")
 	cmd.Flags().StringSliceVar(&releasePatch, "patch", []string{}, "Repositories to receive patch version bump (default for all)")
@@ -1121,6 +1123,33 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 				return err
 			}
 		}
+		
+		// After releasing this level, sync dependencies for the next levels if requested
+		if releaseSyncDeps && levelIndex < len(releaseLevels)-1 && !releaseDryRun {
+			logger.Info("Syncing Grove dependencies to latest versions before next level...")
+			displayInfo("🔄 Syncing Grove dependencies to latest versions...")
+			
+			// Collect repositories in the next levels that need syncing
+			var reposToSync []string
+			for nextLevel := levelIndex + 1; nextLevel < len(releaseLevels); nextLevel++ {
+				for _, repo := range releaseLevels[nextLevel] {
+					// Only sync repos that will be released
+					if changes, ok := hasChanges[repo]; ok && changes {
+						reposToSync = append(reposToSync, repo)
+					}
+				}
+			}
+			
+			if len(reposToSync) > 0 {
+				// Run dependency sync for these repositories
+				if err := syncDependenciesForRepos(ctx, rootDir, reposToSync, graph, logger); err != nil {
+					logger.WithError(err).Warn("Failed to sync dependencies, continuing anyway")
+					displayWarning("Failed to sync some dependencies: " + err.Error())
+				} else {
+					displaySuccess("Dependencies synced successfully")
+				}
+			}
+		}
 	}
 
 	displaySuccess("All modules released successfully")
@@ -1831,6 +1860,141 @@ func checkForOutdatedDependencies(ctx context.Context, rootDir string, workspace
 			}
 		}
 		fmt.Printf("\n💡 Consider running `grove deps sync --commit --push` before releasing\n\n")
+	}
+	
+	return nil
+}
+
+func syncDependenciesForRepos(ctx context.Context, rootDir string, repos []string, graph *depsgraph.Graph, logger *logrus.Logger) error {
+	// Map repo names to workspace paths
+	repoPaths := make(map[string]string)
+	for _, repo := range repos {
+		if node, exists := graph.GetNode(repo); exists {
+			repoPaths[repo] = node.Dir
+		}
+	}
+	
+	// Track all unique Grove dependencies that need updating
+	uniqueDeps := make(map[string]bool)
+	
+	// Scan each repository for Grove dependencies
+	for repo, wsPath := range repoPaths {
+		goModPath := filepath.Join(wsPath, "go.mod")
+		goModContent, err := os.ReadFile(goModPath)
+		if err != nil {
+			logger.WithError(err).Warnf("Failed to read go.mod for %s", repo)
+			continue
+		}
+		
+		// Parse dependencies
+		lines := strings.Split(string(goModContent), "\n")
+		inRequire := false
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "require (" {
+				inRequire = true
+				continue
+			}
+			if inRequire && line == ")" {
+				break
+			}
+			
+			if inRequire || strings.HasPrefix(line, "require ") {
+				if strings.Contains(line, "github.com/mattsolo1/") {
+					parts := strings.Fields(line)
+					if len(parts) >= 1 {
+						dep := parts[0]
+						if strings.HasPrefix(dep, "github.com/mattsolo1/") {
+							uniqueDeps[dep] = true
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	// Get latest versions for all dependencies
+	depVersions := make(map[string]string)
+	for dep := range uniqueDeps {
+		version, err := getLatestModuleVersion(dep)
+		if err != nil {
+			logger.WithError(err).Warnf("Failed to get latest version for %s", dep)
+			continue
+		}
+		depVersions[dep] = version
+	}
+	
+	// Update each repository
+	var updateErrors []error
+	for repo, wsPath := range repoPaths {
+		logger.WithField("repo", repo).Info("Syncing dependencies")
+		
+		// Update each dependency
+		for dep, version := range depVersions {
+			cmd := exec.CommandContext(ctx, "go", "get", fmt.Sprintf("%s@%s", dep, version))
+			cmd.Dir = wsPath
+			cmd.Env = append(os.Environ(),
+				"GOPRIVATE=github.com/mattsolo1/*",
+				"GOPROXY=direct",
+			)
+			
+			if output, err := cmd.CombinedOutput(); err != nil {
+				logger.WithError(err).WithField("output", string(output)).
+					Warnf("Failed to update %s in %s", dep, repo)
+				updateErrors = append(updateErrors, fmt.Errorf("%s: %w", repo, err))
+			}
+		}
+		
+		// Run go mod tidy
+		cmd := exec.CommandContext(ctx, "go", "mod", "tidy")
+		cmd.Dir = wsPath
+		cmd.Env = append(os.Environ(),
+			"GOPRIVATE=github.com/mattsolo1/*",
+			"GOPROXY=direct",
+		)
+		
+		if output, err := cmd.CombinedOutput(); err != nil {
+			logger.WithError(err).WithField("output", string(output)).
+				Warnf("go mod tidy failed for %s", repo)
+			updateErrors = append(updateErrors, fmt.Errorf("%s: go mod tidy: %w", repo, err))
+		}
+		
+		// Check for changes and commit
+		status, err := git.GetStatus(wsPath)
+		if err != nil {
+			logger.WithError(err).Warnf("Failed to get git status for %s", repo)
+			continue
+		}
+		
+		if status.IsDirty {
+			// Stage go.mod and go.sum
+			if err := executeGitCommand(ctx, wsPath, []string{"add", "go.mod", "go.sum"},
+				"Stage dependency sync", logger); err != nil {
+				logger.WithError(err).Warnf("Failed to stage changes for %s", repo)
+				continue
+			}
+			
+			// Commit
+			commitMsg := "chore(deps): sync Grove dependencies to latest versions"
+			if err := executeGitCommand(ctx, wsPath, []string{"commit", "-m", commitMsg},
+				"Commit dependency sync", logger); err != nil {
+				logger.WithError(err).Warnf("Failed to commit changes for %s", repo)
+				continue
+			}
+			
+			// Push
+			if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", "HEAD:main"},
+				"Push dependency sync", logger); err != nil {
+				logger.WithError(err).Warnf("Failed to push changes for %s", repo)
+				continue
+			}
+			
+			logger.WithField("repo", repo).Info("Dependencies synced and pushed")
+		}
+	}
+	
+	if len(updateErrors) > 0 {
+		return fmt.Errorf("some repositories failed to sync: %d errors", len(updateErrors))
 	}
 	
 	return nil
