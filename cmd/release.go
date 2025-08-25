@@ -38,6 +38,7 @@ var (
 	releasePatch          []string
 	releaseYes            bool
 	releaseSkipParent     bool
+	releaseWithDeps       bool
 )
 
 func init() {
@@ -75,6 +76,7 @@ Examples:
 	cmd.Flags().BoolVar(&releaseForceIncrement, "force-increment", false, "Force version increment even if current commit has a tag")
 	cmd.Flags().BoolVar(&releasePush, "push", false, "Push all repositories to remote before tagging")
 	cmd.Flags().StringSliceVar(&releaseRepos, "repos", []string{}, "Only release specified repositories (e.g., grove-meta,grove-core)")
+	cmd.Flags().BoolVar(&releaseWithDeps, "with-deps", false, "Include all dependencies of specified repositories in the release")
 	cmd.Flags().StringSliceVar(&releaseMajor, "major", []string{}, "Repositories to receive major version bump")
 	cmd.Flags().StringSliceVar(&releaseMinor, "minor", []string{}, "Repositories to receive minor version bump")
 	cmd.Flags().StringSliceVar(&releasePatch, "patch", []string{}, "Repositories to receive patch version bump (default for all)")
@@ -113,10 +115,42 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to build dependency graph: %w", err)
 	}
 
+	// Track which repos were auto-included due to dependencies
+	var autoDependencies map[string]bool
+
+	// If specific repos are requested with dependencies, expand the list
+	if len(releaseRepos) > 0 && releaseWithDeps {
+		expandedRepos, autoDeps := expandReposWithDependencies(releaseRepos, graph)
+		autoDependencies = autoDeps
+		
+		// Log the expansion
+		originalCount := len(releaseRepos)
+		displayInfo(fmt.Sprintf("Expanded from %d to %d repositories", originalCount, len(expandedRepos)))
+		if len(autoDeps) > 0 {
+			displayInfo(fmt.Sprintf("Auto-including %d dependencies", len(autoDeps)))
+			for dep := range autoDeps {
+				logger.WithField("repo", dep).Info("Auto-including dependency")
+			}
+		}
+		
+		// Update releaseRepos with the expanded list
+		releaseRepos = expandedRepos
+	}
+
 	// Calculate versions for all workspaces first to know which repos have changes
 	versions, currentVersions, hasChanges, err := calculateNextVersions(ctx, rootDir, workspaces, releaseMajor, releaseMinor, releasePatch, logger)
 	if err != nil {
 		return fmt.Errorf("failed to calculate versions: %w", err)
+	}
+	
+	// If using --with-deps, force include auto-dependencies even if they don't have changes
+	if releaseWithDeps && autoDependencies != nil {
+		for dep := range autoDependencies {
+			if !hasChanges[dep] {
+				hasChanges[dep] = true
+				logger.WithField("repo", dep).Info("Force including dependency without changes")
+			}
+		}
 	}
 
 	// Create a map of nodes to release (only those with changes)
@@ -154,7 +188,7 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	}
 
 	// Display proposed versions and get confirmation
-	if !displayAndConfirmVersionsWithOrder(rootDir, versions, currentVersions, hasChanges, releaseLevels, graph, parentVersion, logger) {
+	if !displayAndConfirmVersionsWithOrder(rootDir, versions, currentVersions, hasChanges, releaseLevels, graph, parentVersion, autoDependencies, logger) {
 		logger.Info("Release cancelled by user")
 		return nil
 	}
@@ -687,6 +721,57 @@ func boolToString(b bool) string {
 	return "false"
 }
 
+// expandReposWithDependencies expands the list of repositories to include all their dependencies
+func expandReposWithDependencies(repos []string, graph *depsgraph.Graph) ([]string, map[string]bool) {
+	expanded := make(map[string]bool)
+	autoDeps := make(map[string]bool) // Track which were auto-added
+	
+	// Helper function to recursively add dependencies
+	var addDeps func(repo string)
+	addDeps = func(repo string) {
+		// Skip if already processed
+		if expanded[repo] {
+			return
+		}
+		expanded[repo] = true
+		
+		// Get the node to access its dependencies
+		node, exists := graph.GetNode(repo)
+		if !exists {
+			return
+		}
+		
+		// Find Grove dependencies
+		for _, dep := range node.Deps {
+			// Check if this is a Grove dependency by looking for matching nodes
+			for name, n := range graph.GetAllNodes() {
+				if n.Path == dep {
+					// This is a Grove dependency
+					if !expanded[name] {
+						autoDeps[name] = true
+					}
+					addDeps(name)
+					break
+				}
+			}
+		}
+	}
+	
+	// Process each explicitly requested repo
+	for _, repo := range repos {
+		expanded[repo] = false // false means explicitly requested
+		addDeps(repo)
+	}
+	
+	// Convert map to slice
+	var result []string
+	for repo := range expanded {
+		result = append(result, repo)
+	}
+	
+	return result, autoDeps
+}
+
 func calculateNextVersions(ctx context.Context, rootDir string, workspaces []string, major, minor, patch []string, logger *logrus.Logger) (map[string]string, map[string]string, map[string]bool, error) {
 	versions := make(map[string]string)
 	currentVersions := make(map[string]string)
@@ -1208,7 +1293,7 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 	return nil
 }
 
-func displayAndConfirmVersionsWithOrder(rootDir string, versions map[string]string, currentVersions map[string]string, hasChanges map[string]bool, releaseLevels [][]string, graph *depsgraph.Graph, parentVersion string, logger *logrus.Logger) bool {
+func displayAndConfirmVersionsWithOrder(rootDir string, versions map[string]string, currentVersions map[string]string, hasChanges map[string]bool, releaseLevels [][]string, graph *depsgraph.Graph, parentVersion string, autoDependencies map[string]bool, logger *logrus.Logger) bool {
 	displaySection("📊 Proposed Versions")
 
 	// Create separate lists for repos with and without changes
@@ -1290,9 +1375,16 @@ func displayAndConfirmVersionsWithOrder(rootDir string, versions map[string]stri
 		}
 		proposed := versions[repo]
 		increment := getVersionIncrement(current, proposed)
+		
+		// Add indicator if this was auto-included as a dependency
+		repoDisplay := repo
+		if autoDependencies != nil && autoDependencies[repo] {
+			repoDisplay = repo + " (auto)"
+		}
+		
 		// Pre-style the proposed version
 		styledProposed := releaseHighlightStyle.Render(proposed)
-		rows = append(rows, []string{repo, current, styledProposed, increment})
+		rows = append(rows, []string{repoDisplay, current, styledProposed, increment})
 	}
 
 	// Then add repos without changes
@@ -1339,6 +1431,14 @@ func displayAndConfirmVersionsWithOrder(rootDir string, versions map[string]stri
 	displayReleaseSummary(releaseLevels, versions, currentVersions, hasChanges)
 
 	fmt.Printf("\n%d repositories will be released.\n", changeCount)
+	
+	// Show auto-included dependencies info
+	if autoDependencies != nil && len(autoDependencies) > 0 {
+		fmt.Printf("\nNote: %d repositories were auto-included as dependencies (marked with 'auto').\n", len(autoDependencies))
+		if releaseWithDeps {
+			fmt.Println("Use --repos without --with-deps to release only the specified repositories.")
+		}
+	}
 
 	// Check if parent version needs adjustment
 	checkCmd := exec.Command("git", "tag", "-l", parentVersion)
