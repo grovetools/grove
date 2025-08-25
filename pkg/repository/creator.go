@@ -112,11 +112,19 @@ func (c *Creator) Create(opts CreateOptions) error {
 		return err
 	}
 
-	// Wait for CI to complete if GitHub repo was created
+	// Wait for CI to complete if GitHub repo was created and .github directory exists
 	if !opts.SkipGitHub {
-		if err := c.waitForCI(opts); err != nil {
-			c.logger.Warnf("Could not monitor CI build: %v", err)
-			c.logger.Infof("Repository created successfully. Check CI status at: https://github.com/mattsolo1/%s/actions", opts.Name)
+		githubDir := filepath.Join(opts.Name, ".github")
+		if _, err := os.Stat(githubDir); err == nil {
+			// .github directory exists, wait for CI
+			if err := c.waitForCI(opts); err != nil {
+				c.logger.Warnf("Could not monitor CI build: %v", err)
+				c.logger.Infof("Repository created successfully. Check CI status at: https://github.com/mattsolo1/%s/actions", opts.Name)
+			}
+		} else {
+			// No .github directory, skip CI monitoring
+			c.logger.Info("No .github directory found, skipping CI monitoring")
+			c.logger.Infof("Repository created successfully at: https://github.com/mattsolo1/%s", opts.Name)
 		}
 	}
 

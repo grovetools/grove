@@ -1088,17 +1088,26 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 
 				// Wait for CI workflow to complete (skip in dry-run mode)
 				if !releaseDryRun {
-					logger.Infof("Waiting for CI release of %s@%s to complete (timeout: 60 minutes)...", repo, version)
-					displayInfo(fmt.Sprintf("Waiting for CI release of %s@%s to complete (timeout: 60 minutes)...", repo, version))
-					
-					if err := gh.WaitForReleaseWorkflow(ctx, wsPath, version); err != nil {
-						// This is a critical failure
-						errChan <- fmt.Errorf("release workflow for %s@%s failed: %w", repo, version, err)
-						return
+					// Check if the project has a .github directory with workflows
+					githubDir := filepath.Join(wsPath, ".github")
+					if _, err := os.Stat(githubDir); err == nil {
+						// .github directory exists, wait for workflows
+						logger.Infof("Waiting for CI release of %s@%s to complete (timeout: 60 minutes)...", repo, version)
+						displayInfo(fmt.Sprintf("Waiting for CI release of %s@%s to complete (timeout: 60 minutes)...", repo, version))
+						
+						if err := gh.WaitForReleaseWorkflow(ctx, wsPath, version); err != nil {
+							// This is a critical failure
+							errChan <- fmt.Errorf("release workflow for %s@%s failed: %w", repo, version, err)
+							return
+						}
+						
+						logger.Infof("✅ CI release for %s@%s successful.", repo, version)
+						displayInfo(fmt.Sprintf("✅ CI release for %s@%s successful.", repo, version))
+					} else {
+						// No .github directory, skip CI workflow monitoring
+						logger.Infof("No .github directory found for %s, skipping CI workflow monitoring", repo)
+						displayInfo(fmt.Sprintf("No .github directory found for %s, skipping CI workflow monitoring", repo))
 					}
-					
-					logger.Infof("✅ CI release for %s@%s successful.", repo, version)
-					displayInfo(fmt.Sprintf("✅ CI release for %s@%s successful.", repo, version))
 
 					// Now wait for module to be available on the proxy
 					displayInfo(fmt.Sprintf("Waiting for %s@%s to be available...", node.Path, version))
