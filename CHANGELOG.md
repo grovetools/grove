@@ -1,3 +1,9 @@
+## v0.2.11 (2025-08-25)
+
+### Features
+
+* skip CI workflow monitoring for projects without .github directory
+
 ## v0.2.10 (2025-08-25)
 
 ### Continuous Integration
