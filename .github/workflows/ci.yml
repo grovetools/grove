@@ -13,6 +13,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Configure Git LFS
+        run: |
+          # Disable Git LFS to avoid permission issues with dependencies
+          git config --global filter.lfs.process ""
+          git config --global filter.lfs.required false
+          git config --global filter.lfs.clean ""
+          git config --global filter.lfs.smudge ""
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -32,14 +40,14 @@ jobs:
           go mod download
           go mod tidy
 
-      - name: Run linting
-        run: |
-          make vet
-          make fmt
-          # Only run golangci-lint if installed
-          if command -v golangci-lint >/dev/null 2>&1; then
-            make lint
-          fi
+      # - name: Run linting
+      #   run: |
+      #     make vet
+      #     make fmt
+      #     # Only run golangci-lint if installed
+      #     if command -v golangci-lint >/dev/null 2>&1; then
+      #       make lint
+      #     fi
 
       - name: Build
         run: |

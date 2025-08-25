@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Masterminds/semver/v3"
@@ -955,7 +956,8 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 	for levelIndex, level := range releaseLevels {
 		logger.WithField("level", levelIndex).Info("Processing release level")
 
-		// Process all modules in this level
+		// Collect repositories that need releasing at this level
+		var reposToRelease []string
 		for _, repoName := range level {
 			// Skip if no changes
 			if changes, ok := hasChanges[repoName]; !ok || !changes {
@@ -970,19 +972,6 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 				continue
 			}
 
-			// Get the node from the graph to get the directory path
-			node, ok := graph.GetNode(repoName)
-			if !ok {
-				return fmt.Errorf("node not found in graph: %s", repoName)
-			}
-			
-			wsPath := node.Dir
-
-			logger.WithFields(logrus.Fields{
-				"repo":    repoName,
-				"version": version,
-			}).Info("Releasing module")
-			
 			// Check if the version is actually changing
 			currentVersion := currentVersions[repoName]
 			if currentVersion == version {
@@ -993,81 +982,138 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 				continue
 			}
 
-			// Update dependencies if this is not the first level (skip in dry-run mode)
-			if levelIndex > 0 && !releaseDryRun {
-				if err := updateDependencies(ctx, wsPath, versions, graph, logger); err != nil {
-					return fmt.Errorf("failed to update dependencies for %s: %w", repoName, err)
-				}
-			}
+			reposToRelease = append(reposToRelease, repoName)
+		}
 
-			// Generate and commit changelog
-			if !releaseDryRun {
-				changelogCmd := exec.CommandContext(ctx, "grove", "release", "changelog", wsPath, "--version", version)
-				if err := changelogCmd.Run(); err != nil {
-					// Log a warning but don't fail the release if changelog fails
-					logger.WithError(err).Warnf("Failed to generate changelog for %s", repoName)
-				} else {
-					// Commit the changelog if it was modified
-					status, _ := git.GetStatus(wsPath)
-					if status.IsDirty {
-						displayInfo(fmt.Sprintf("Committing CHANGELOG.md for %s", repoName))
-						if err := executeGitCommand(ctx, wsPath, []string{"add", "CHANGELOG.md"}, "Stage changelog", logger); err != nil {
-							logger.WithError(err).Warnf("Failed to stage changelog for %s", repoName)
-						} else {
-							commitMsg := fmt.Sprintf("docs(changelog): update CHANGELOG.md for %s", version)
-							if err := executeGitCommand(ctx, wsPath, []string{"commit", "-m", commitMsg}, "Commit changelog", logger); err != nil {
-								logger.WithError(err).Warnf("Failed to commit changelog for %s", repoName)
+		if len(reposToRelease) == 0 {
+			logger.WithField("level", levelIndex).Info("No repositories to release at this level")
+			continue
+		}
+
+		// Process all repositories at this level in parallel
+		if len(reposToRelease) > 1 {
+			logger.WithFields(logrus.Fields{
+				"level": levelIndex,
+				"count": len(reposToRelease),
+				"repos": strings.Join(reposToRelease, ", "),
+			}).Info("Releasing repositories in parallel")
+			displayInfo(fmt.Sprintf("🚀 Releasing %d repositories in parallel: %s", len(reposToRelease), strings.Join(reposToRelease, ", ")))
+		} else {
+			logger.WithFields(logrus.Fields{
+				"level": levelIndex,
+				"repo":  reposToRelease[0],
+			}).Info("Releasing repository")
+		}
+
+		// Use goroutines to release repositories in parallel
+		var wg sync.WaitGroup
+		errChan := make(chan error, len(reposToRelease))
+		
+		for _, repoName := range reposToRelease {
+			wg.Add(1)
+			go func(repo string) {
+				defer wg.Done()
+				
+				version := versions[repo]
+				node, ok := graph.GetNode(repo)
+				if !ok {
+					errChan <- fmt.Errorf("node not found in graph: %s", repo)
+					return
+				}
+				
+				wsPath := node.Dir
+
+				logger.WithFields(logrus.Fields{
+					"repo":    repo,
+					"version": version,
+				}).Info("Releasing module")
+
+				// Update dependencies if this is not the first level (skip in dry-run mode)
+				if levelIndex > 0 && !releaseDryRun {
+					if err := updateDependencies(ctx, wsPath, versions, graph, logger); err != nil {
+						errChan <- fmt.Errorf("failed to update dependencies for %s: %w", repo, err)
+						return
+					}
+				}
+
+				// Generate and commit changelog
+				if !releaseDryRun {
+					changelogCmd := exec.CommandContext(ctx, "grove", "release", "changelog", wsPath, "--version", version)
+					if err := changelogCmd.Run(); err != nil {
+						// Log a warning but don't fail the release if changelog fails
+						logger.WithError(err).Warnf("Failed to generate changelog for %s", repo)
+					} else {
+						// Commit the changelog if it was modified
+						status, _ := git.GetStatus(wsPath)
+						if status.IsDirty {
+							displayInfo(fmt.Sprintf("Committing CHANGELOG.md for %s", repo))
+							if err := executeGitCommand(ctx, wsPath, []string{"add", "CHANGELOG.md"}, "Stage changelog", logger); err != nil {
+								logger.WithError(err).Warnf("Failed to stage changelog for %s", repo)
 							} else {
-								// Push the changelog commit to remote
-								if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", "HEAD:main"}, 
-									fmt.Sprintf("Push changelog for %s", repoName), logger); err != nil {
-									logger.WithError(err).Warnf("Failed to push changelog commit for %s", repoName)
+								commitMsg := fmt.Sprintf("docs(changelog): update CHANGELOG.md for %s", version)
+								if err := executeGitCommand(ctx, wsPath, []string{"commit", "-m", commitMsg}, "Commit changelog", logger); err != nil {
+									logger.WithError(err).Warnf("Failed to commit changelog for %s", repo)
+								} else {
+									// Push the changelog commit to remote
+									if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", "HEAD:main"}, 
+										fmt.Sprintf("Push changelog for %s", repo), logger); err != nil {
+										logger.WithError(err).Warnf("Failed to push changelog commit for %s", repo)
+									}
 								}
 							}
 						}
 					}
 				}
-			}
 
-			// Tag the module
-			if err := executeGitCommand(ctx, wsPath, []string{"tag", "-a", version, "-m", fmt.Sprintf("Release %s", version)},
-				fmt.Sprintf("Tag %s", repoName), logger); err != nil {
-				return err
-			}
-
-			// Push the tag
-			if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", version},
-				fmt.Sprintf("Push tag for %s", repoName), logger); err != nil {
-				return err
-			}
-
-			// Get module path for waiting
-			node, exists := graph.GetNode(repoName)
-			if !exists {
-				return fmt.Errorf("node not found in graph: %s", repoName)
-			}
-
-			// Wait for CI workflow to complete (skip in dry-run mode)
-			if !releaseDryRun {
-				logger.Infof("Waiting for CI release of %s@%s to complete (timeout: 10 minutes)...", repoName, version)
-				displayInfo(fmt.Sprintf("Waiting for CI release of %s@%s to complete (timeout: 10 minutes)...", repoName, version))
-				
-				if err := gh.WaitForReleaseWorkflow(ctx, wsPath, version); err != nil {
-					// This is a critical failure. Stop the entire release process.
-					return fmt.Errorf("release workflow for %s@%s failed: %w", repoName, version, err)
-				}
-				
-				logger.Infof("✅ CI release for %s@%s successful.", repoName, version)
-				displayInfo(fmt.Sprintf("✅ CI release for %s@%s successful.", repoName, version))
-
-				// Now wait for module to be available on the proxy
-				displayInfo(fmt.Sprintf("Waiting for %s@%s to be available...", node.Path, version))
-
-				if err := release.WaitForModuleAvailability(ctx, node.Path, version); err != nil {
-					return fmt.Errorf("failed waiting for %s@%s: %w", node.Path, version, err)
+				// Tag the module
+				if err := executeGitCommand(ctx, wsPath, []string{"tag", "-a", version, "-m", fmt.Sprintf("Release %s", version)},
+					fmt.Sprintf("Tag %s", repo), logger); err != nil {
+					errChan <- err
+					return
 				}
 
-				displayComplete(fmt.Sprintf("%s successfully released", repoName))
+				// Push the tag
+				if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", version},
+					fmt.Sprintf("Push tag for %s", repo), logger); err != nil {
+					errChan <- err
+					return
+				}
+
+				// Wait for CI workflow to complete (skip in dry-run mode)
+				if !releaseDryRun {
+					logger.Infof("Waiting for CI release of %s@%s to complete (timeout: 60 minutes)...", repo, version)
+					displayInfo(fmt.Sprintf("Waiting for CI release of %s@%s to complete (timeout: 60 minutes)...", repo, version))
+					
+					if err := gh.WaitForReleaseWorkflow(ctx, wsPath, version); err != nil {
+						// This is a critical failure
+						errChan <- fmt.Errorf("release workflow for %s@%s failed: %w", repo, version, err)
+						return
+					}
+					
+					logger.Infof("✅ CI release for %s@%s successful.", repo, version)
+					displayInfo(fmt.Sprintf("✅ CI release for %s@%s successful.", repo, version))
+
+					// Now wait for module to be available on the proxy
+					displayInfo(fmt.Sprintf("Waiting for %s@%s to be available...", node.Path, version))
+
+					if err := release.WaitForModuleAvailability(ctx, node.Path, version); err != nil {
+						errChan <- fmt.Errorf("failed waiting for %s@%s: %w", node.Path, version, err)
+						return
+					}
+
+					displayComplete(fmt.Sprintf("%s successfully released", repo))
+				}
+			}(repoName)
+		}
+
+		// Wait for all goroutines to complete
+		wg.Wait()
+		close(errChan)
+
+		// Check for errors
+		for err := range errChan {
+			if err != nil {
+				return err
 			}
 		}
 	}
