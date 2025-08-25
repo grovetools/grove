@@ -1865,6 +1865,33 @@ func checkForOutdatedDependencies(ctx context.Context, rootDir string, workspace
 	return nil
 }
 
+// extractCurrentVersions parses go.mod content and returns a map of module -> version
+func extractCurrentVersions(goModContent string) map[string]string {
+	versions := make(map[string]string)
+	lines := strings.Split(goModContent, "\n")
+	inRequire := false
+	
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "require (" {
+			inRequire = true
+			continue
+		}
+		if inRequire && line == ")" {
+			break
+		}
+		
+		if inRequire || strings.HasPrefix(line, "require ") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 && strings.HasPrefix(parts[0], "github.com/mattsolo1/") {
+				versions[parts[0]] = parts[1]
+			}
+		}
+	}
+	
+	return versions
+}
+
 func syncDependenciesForRepos(ctx context.Context, rootDir string, repos []string, graph *depsgraph.Graph, logger *logrus.Logger) error {
 	// Map repo names to workspace paths
 	repoPaths := make(map[string]string)
@@ -1929,8 +1956,22 @@ func syncDependenciesForRepos(ctx context.Context, rootDir string, repos []strin
 	for repo, wsPath := range repoPaths {
 		logger.WithField("repo", repo).Info("Syncing dependencies")
 		
+		// Track what actually changed for better commit messages
+		versionChanges := make(map[string]string)
+		
+		// Get current versions before updating
+		goModPath := filepath.Join(wsPath, "go.mod")
+		beforeContent, _ := os.ReadFile(goModPath)
+		currentVersions := extractCurrentVersions(string(beforeContent))
+		
 		// Update each dependency
 		for dep, version := range depVersions {
+			// Check if this update would actually change anything
+			depName := filepath.Base(dep)
+			if currentVersion, exists := currentVersions[dep]; exists && currentVersion != version {
+				versionChanges[depName] = fmt.Sprintf("%s → %s", currentVersion, version)
+			}
+			
 			cmd := exec.CommandContext(ctx, "go", "get", fmt.Sprintf("%s@%s", dep, version))
 			cmd.Dir = wsPath
 			cmd.Env = append(os.Environ(),
@@ -1974,8 +2015,14 @@ func syncDependenciesForRepos(ctx context.Context, rootDir string, repos []strin
 				continue
 			}
 			
-			// Commit
-			commitMsg := "chore(deps): sync Grove dependencies to latest versions"
+			// Build detailed commit message
+			commitMsg := "chore(deps): sync Grove dependencies to latest versions\n\n"
+			if len(versionChanges) > 0 {
+				for depName, change := range versionChanges {
+					commitMsg += fmt.Sprintf("- %s: %s\n", depName, change)
+				}
+			}
+			
 			if err := executeGitCommand(ctx, wsPath, []string{"commit", "-m", commitMsg},
 				"Commit dependency sync", logger); err != nil {
 				logger.WithError(err).Warnf("Failed to commit changes for %s", repo)
