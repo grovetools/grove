@@ -6,9 +6,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-meta/pkg/depsgraph"
 	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
@@ -22,6 +24,7 @@ func newDepsCmd() *cobra.Command {
 
 	cmd.AddCommand(newDepsBumpCmd())
 	cmd.AddCommand(newDepsSyncCmd())
+	cmd.AddCommand(newDepsTreeCmd())
 	return cmd
 }
 
@@ -509,4 +512,223 @@ func runDepsSync(commit, push bool) error {
 
 	fmt.Println("\nAll Grove dependencies synchronized successfully!")
 	return nil
+}
+
+func newDepsTreeCmd() *cobra.Command {
+	var showVersions bool
+	var showExternal bool
+	var filterRepos []string
+
+	cmd := &cobra.Command{
+		Use:   "tree [repo]",
+		Short: "Display dependency tree visualization",
+		Long: `Display a tree visualization of dependencies in the Grove ecosystem.
+
+Without arguments, shows the complete dependency graph for all repositories.
+With a repository name, shows dependencies for that specific repository.
+
+Examples:
+  grove deps tree                  # Show complete dependency graph
+  grove deps tree grove-meta       # Show dependencies of grove-meta
+  grove deps tree --versions       # Include version information
+  grove deps tree --external       # Include external (non-Grove) dependencies`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var focusRepo string
+			if len(args) > 0 {
+				focusRepo = args[0]
+			}
+			return runDepsTree(focusRepo, showVersions, showExternal, filterRepos)
+		},
+	}
+
+	cmd.Flags().BoolVar(&showVersions, "versions", false, "Show version information")
+	cmd.Flags().BoolVar(&showExternal, "external", false, "Include external dependencies")
+	cmd.Flags().StringSliceVar(&filterRepos, "filter", []string{}, "Filter to specific repositories")
+
+	return cmd
+}
+
+func runDepsTree(focusRepo string, showVersions, showExternal bool, filterRepos []string) error {
+	// Find workspace root
+	rootDir, err := workspace.FindRoot("")
+	if err != nil {
+		return fmt.Errorf("failed to find workspace root: %w", err)
+	}
+
+	// Discover all workspaces
+	workspaces, err := workspace.Discover(rootDir)
+	if err != nil {
+		return fmt.Errorf("failed to discover workspaces: %w", err)
+	}
+
+	// Build dependency graph
+	fmt.Println("Building dependency graph...")
+	graph, err := depsgraph.BuildGraph(rootDir, workspaces)
+	if err != nil {
+		return fmt.Errorf("failed to build dependency graph: %w", err)
+	}
+
+	// If focusing on a specific repo, ensure it exists
+	if focusRepo != "" {
+		if _, exists := graph.GetNode(focusRepo); !exists {
+			return fmt.Errorf("repository '%s' not found", focusRepo)
+		}
+	}
+
+	fmt.Println()
+
+	// Display the tree
+	if focusRepo != "" {
+		// Show dependencies for a specific repository
+		displayRepoTree(graph, focusRepo, showVersions, showExternal)
+	} else {
+		// Show complete dependency graph
+		displayFullTree(graph, showVersions, showExternal, filterRepos)
+	}
+
+	return nil
+}
+
+func displayRepoTree(graph *depsgraph.Graph, repoName string, showVersions, showExternal bool) {
+	node, _ := graph.GetNode(repoName)
+	fmt.Printf("%s\n", repoName)
+	
+	deps := graph.GetDependencies(repoName)
+	if len(deps) == 0 {
+		fmt.Println("└── (no dependencies)")
+		return
+	}
+
+	// Sort dependencies for consistent output
+	sort.Strings(deps)
+
+	// Print each dependency with tree characters
+	for i, dep := range deps {
+		isLast := i == len(deps)-1
+		prefix := "├── "
+		if isLast {
+			prefix = "└── "
+		}
+
+		// Check if it's a Grove dependency
+		isGrove := false
+		for _, n := range graph.GetAllNodes() {
+			if n.Path == dep {
+				isGrove = true
+				break
+			}
+		}
+
+		if !isGrove && !showExternal {
+			continue
+		}
+
+		// Format the dependency name
+		depDisplay := dep
+		if isGrove {
+			// Find the short name
+			for name, n := range graph.GetAllNodes() {
+				if n.Path == dep {
+					depDisplay = name
+					break
+				}
+			}
+		}
+
+		fmt.Printf("%s%s", prefix, depDisplay)
+		if showVersions && node != nil {
+			// Could enhance this to show actual versions from go.mod
+			fmt.Printf(" (%s)", node.Version)
+		}
+		fmt.Println()
+	}
+}
+
+func displayFullTree(graph *depsgraph.Graph, showVersions, showExternal bool, filterRepos []string) {
+	// Get topologically sorted levels
+	levels, err := graph.TopologicalSort()
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+
+	// Create filter map if needed
+	filterMap := make(map[string]bool)
+	if len(filterRepos) > 0 {
+		for _, repo := range filterRepos {
+			filterMap[repo] = true
+		}
+	}
+
+	fmt.Println("Dependency Tree (by levels):")
+	fmt.Println("===========================")
+	
+	for i, level := range levels {
+		fmt.Printf("\nLevel %d (no dependencies on later levels):\n", i+1)
+		
+		// Sort repos in level for consistent output
+		sort.Strings(level)
+		
+		for _, repo := range level {
+			// Apply filter if specified
+			if len(filterMap) > 0 && !filterMap[repo] {
+				continue
+			}
+
+			fmt.Printf("  %s\n", repo)
+			
+			// Show dependencies
+			deps := graph.GetDependencies(repo)
+			if len(deps) > 0 {
+				for j, dep := range deps {
+					isLast := j == len(deps)-1
+					prefix := "  ├── "
+					if isLast {
+						prefix = "  └── "
+					}
+
+					// Check if it's a Grove dependency
+					isGrove := false
+					depName := dep
+					for name, n := range graph.GetAllNodes() {
+						if n.Path == dep {
+							isGrove = true
+							depName = name
+							break
+						}
+					}
+
+					if !isGrove && !showExternal {
+						continue
+					}
+
+					fmt.Printf("%s%s", prefix, depName)
+					
+					// Show which level this dependency is in
+					if isGrove {
+						for levelIdx, levelRepos := range levels {
+							for _, levelRepo := range levelRepos {
+								if levelRepo == depName {
+									if levelIdx < i {
+										fmt.Printf(" (Level %d)", levelIdx+1)
+									}
+									break
+								}
+							}
+						}
+					} else {
+						fmt.Printf(" (external)")
+					}
+					fmt.Println()
+				}
+			} else {
+				fmt.Println("  └── (no dependencies)")
+			}
+		}
+	}
+	
+	// Show summary
+	fmt.Printf("\nTotal repositories: %d\n", len(graph.GetAllNodes()))
+	fmt.Printf("Dependency levels: %d\n", len(levels))
 }
