@@ -28,6 +28,7 @@ type CreateOptions struct {
 	DryRun      bool
 	StageChanges bool
 	TemplatePath string
+	UpdateEcosystem bool
 }
 
 type creationState struct {
@@ -119,16 +120,18 @@ func (c *Creator) Create(opts CreateOptions) error {
 		}
 	}
 
-	// Phase 5: Add to ecosystem
-	if err := c.addToEcosystem(opts); err != nil {
-		c.rollback(state, opts)
-		return fmt.Errorf("failed to add repository to ecosystem: %w\n\nNote: The grove-ecosystem may have been partially modified.\nYou can clean up with: git reset --hard", err)
-	}
+	// Phase 5: Add to ecosystem (only if requested)
+	if opts.UpdateEcosystem {
+		if err := c.addToEcosystem(opts); err != nil {
+			c.rollback(state, opts)
+			return fmt.Errorf("failed to add repository to ecosystem: %w\n\nNote: The grove-ecosystem may have been partially modified.\nYou can clean up with: git reset --hard", err)
+		}
 
-	// Phase 6: Stage changes (only if requested)
-	if opts.StageChanges {
-		if err := c.stageEcosystemChanges(opts); err != nil {
-			return fmt.Errorf("failed to stage ecosystem changes: %w\n\nNote: The grove-ecosystem has been modified but changes were not staged.\nYou can:\n  - Stage manually: git add Makefile go.work .gitmodules %s\n  - Or reset: git reset --hard", err, opts.Name)
+		// Phase 6: Stage changes (only if requested)
+		if opts.StageChanges {
+			if err := c.stageEcosystemChanges(opts); err != nil {
+				return fmt.Errorf("failed to stage ecosystem changes: %w\n\nNote: The grove-ecosystem has been modified but changes were not staged.\nYou can:\n  - Stage manually: git add Makefile go.work .gitmodules %s\n  - Or reset: git reset --hard", err, opts.Name)
+			}
 		}
 	}
 
@@ -664,7 +667,7 @@ func (c *Creator) showSummary(opts CreateOptions) error {
 	fmt.Println("\nNEXT STEPS")
 	fmt.Println("----------")
 	
-	if opts.StageChanges {
+	if opts.UpdateEcosystem && opts.StageChanges {
 		fmt.Println("1. Review the staged changes in the ecosystem repo:")
 		fmt.Println("   > git status")
 		fmt.Println("   (You should see a modified Makefile, go.work, .gitmodules, and a new submodule entry)")
@@ -744,14 +747,18 @@ func (c *Creator) dryRun(opts CreateOptions) error {
 		c.logger.Info("  gh run watch")
 	}
 
-	c.logger.Info("\nEcosystem integration:")
-	c.logger.Infof("  git submodule add git@github.com:mattsolo1/%s.git", opts.Name)
-	c.logger.Infof("  Update Makefile: Add %s to PACKAGES", opts.Name)
-	c.logger.Infof("  Update Makefile: Add %s to BINARIES", opts.Alias)
-	c.logger.Infof("  Update go.work: Add use (./%s)", opts.Name)
-	
-	if opts.StageChanges {
-		c.logger.Infof("  git add Makefile go.work .gitmodules %s", opts.Name)
+	if opts.UpdateEcosystem {
+		c.logger.Info("\nEcosystem integration:")
+		c.logger.Infof("  git submodule add git@github.com:mattsolo1/%s.git", opts.Name)
+		c.logger.Infof("  Update Makefile: Add %s to PACKAGES", opts.Name)
+		c.logger.Infof("  Update Makefile: Add %s to BINARIES", opts.Alias)
+		c.logger.Infof("  Update go.work: Add use (./%s)", opts.Name)
+		
+		if opts.StageChanges {
+			c.logger.Infof("  git add Makefile go.work .gitmodules %s", opts.Name)
+		}
+	} else {
+		c.logger.Info("\nEcosystem integration: SKIPPED (use --update-ecosystem flag to enable)")
 	}
 
 	return nil

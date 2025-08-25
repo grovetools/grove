@@ -16,6 +16,7 @@ var (
 	addRepoDryRun       bool
 	addRepoStageChanges bool
 	addRepoTemplate     string
+	addRepoUpdateEcosystem bool
 )
 
 func init() {
@@ -26,12 +27,17 @@ func newAddRepoCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add-repo <repo-name>",
 		Short: "Create a new Grove repository with standard structure",
-		Long: `Create a new Grove repository with idiomatic structure, GitHub integration,
-and automatic addition to grove-ecosystem as a submodule.
+		Long: `Create a new Grove repository with idiomatic structure and optional GitHub integration.
+
+By default, this creates a standalone repository. Use --update-ecosystem to add it as a
+submodule to grove-ecosystem.
 
 Examples:
+  # Create standalone repository:
   grove add-repo analyzer --alias az --description "Code analysis tool"
-  grove add-repo fizzbuzz --alias fizz --description "Fizzbuzz implementation"
+  
+  # Create and add to ecosystem:
+  grove add-repo fizzbuzz --alias fizz --description "Fizzbuzz implementation" --update-ecosystem
   
   # Use different templates:
   grove add-repo myrust --template maturin --alias mr
@@ -50,6 +56,7 @@ Examples:
 	cmd.Flags().BoolVar(&addRepoDryRun, "dry-run", false, "Preview operations without executing")
 	cmd.Flags().BoolVar(&addRepoStageChanges, "stage-ecosystem", false, "Stage ecosystem changes in git")
 	cmd.Flags().StringVar(&addRepoTemplate, "template", "go", "Template to use (go, maturin, react-ts, path/URL, or GitHub repo like 'owner/repo')")
+	cmd.Flags().BoolVar(&addRepoUpdateEcosystem, "update-ecosystem", false, "Add repository to grove-ecosystem as a submodule")
 
 	return cmd
 }
@@ -107,6 +114,7 @@ func runAddRepo(cmd *cobra.Command, args []string) error {
 		DryRun:       addRepoDryRun,
 		StageChanges: addRepoStageChanges,
 		TemplatePath: resolvedTemplate,
+		UpdateEcosystem: addRepoUpdateEcosystem,
 	}
 
 	logger.Infof("Creating new Grove repository: %s (alias: %s)", repoName, addRepoAlias)
