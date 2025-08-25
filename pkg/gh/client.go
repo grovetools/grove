@@ -1,11 +1,13 @@
 package gh
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 )
 
 type GHClient struct{}
@@ -197,5 +199,73 @@ func GetMyPRsStatus(repoPath string) (string, error) {
 	}
 
 	return fmt.Sprintf("%d (%s)", total, strings.Join(parts, ", ")), nil
+}
+
+// WaitForReleaseWorkflow waits for a GitHub Actions workflow triggered by a tag push to complete successfully
+func WaitForReleaseWorkflow(ctx context.Context, repoPath, versionTag string) error {
+	// Get repository slug (owner/repo)
+	slug, err := getRepoSlug(repoPath)
+	if err != nil {
+		return fmt.Errorf("failed to get repository slug: %w", err)
+	}
+
+	// First, we need to find the workflow run triggered by our tag push
+	// GitHub Actions may have a small delay, so we'll poll for a short period
+	var runID string
+	findTimeout := time.After(60 * time.Second)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-findTimeout:
+			return fmt.Errorf("timeout waiting for workflow run to appear for tag %s", versionTag)
+		case <-ticker.C:
+			// Try to find the workflow run
+			cmd := exec.CommandContext(ctx, "gh", "run", "list", 
+				"--repo", slug,
+				"--event", "push",
+				"--branch", versionTag,
+				"--limit", "1",
+				"--json", "databaseId")
+			
+			output, err := cmd.Output()
+			if err != nil {
+				// Not found yet, continue polling
+				continue
+			}
+
+			var runs []struct {
+				DatabaseID int64 `json:"databaseId"`
+			}
+			if err := json.Unmarshal(output, &runs); err != nil {
+				continue
+			}
+
+			if len(runs) > 0 {
+				runID = fmt.Sprintf("%d", runs[0].DatabaseID)
+				break
+			}
+		}
+	}
+
+	// Now watch the workflow run until it completes
+	// The --exit-status flag makes gh exit with non-zero status if the workflow fails
+	cmd := exec.CommandContext(ctx, "gh", "run", "watch", runID,
+		"--repo", slug,
+		"--exit-status")
+
+	// Execute the command which will stream the CI logs and wait for completion
+	if err := cmd.Run(); err != nil {
+		// Check if it's a workflow failure vs other error
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return fmt.Errorf("CI workflow failed for %s@%s (exit code: %d)", slug, versionTag, exitErr.ExitCode())
+		}
+		return fmt.Errorf("failed to watch workflow run: %w", err)
+	}
+
+	return nil
 }
 

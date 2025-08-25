@@ -18,6 +18,7 @@ import (
 	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-meta/pkg/depsgraph"
+	"github.com/mattsolo1/grove-meta/pkg/gh"
 	"github.com/mattsolo1/grove-meta/pkg/project"
 	"github.com/mattsolo1/grove-meta/pkg/release"
 	"github.com/mattsolo1/grove-meta/pkg/workspace"
@@ -943,8 +944,20 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 				return fmt.Errorf("node not found in graph: %s", repoName)
 			}
 
-			// Wait for module to be available (skip in dry-run mode)
+			// Wait for CI workflow to complete (skip in dry-run mode)
 			if !releaseDryRun {
+				logger.Infof("Waiting for CI release of %s@%s to complete...", repoName, version)
+				displayInfo(fmt.Sprintf("Waiting for CI release of %s@%s to complete...", repoName, version))
+				
+				if err := gh.WaitForReleaseWorkflow(ctx, wsPath, version); err != nil {
+					// This is a critical failure. Stop the entire release process.
+					return fmt.Errorf("release workflow for %s@%s failed: %w", repoName, version, err)
+				}
+				
+				logger.Infof("✅ CI release for %s@%s successful.", repoName, version)
+				displayInfo(fmt.Sprintf("✅ CI release for %s@%s successful.", repoName, version))
+
+				// Now wait for module to be available on the proxy
 				displayInfo(fmt.Sprintf("Waiting for %s@%s to be available...", node.Path, version))
 
 				if err := release.WaitForModuleAvailability(ctx, node.Path, version); err != nil {
