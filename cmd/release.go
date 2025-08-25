@@ -211,7 +211,7 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	}
 
 	// Execute dependency-aware release orchestration
-	if err := orchestrateRelease(ctx, rootDir, releaseLevels, versions, hasChanges, graph, logger); err != nil {
+	if err := orchestrateRelease(ctx, rootDir, releaseLevels, versions, currentVersions, hasChanges, graph, logger); err != nil {
 		return fmt.Errorf("failed to orchestrate release: %w", err)
 	}
 
@@ -948,7 +948,7 @@ func getVersionIncrement(current, proposed string) string {
 	return "-"
 }
 
-func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]string, versions map[string]string, hasChanges map[string]bool, graph *depsgraph.Graph, logger *logrus.Logger) error {
+func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]string, versions map[string]string, currentVersions map[string]string, hasChanges map[string]bool, graph *depsgraph.Graph, logger *logrus.Logger) error {
 	displaySection("🎯 Release Orchestration")
 
 	// Process each level of dependencies
@@ -982,6 +982,16 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 				"repo":    repoName,
 				"version": version,
 			}).Info("Releasing module")
+			
+			// Check if the version is actually changing
+			currentVersion := currentVersions[repoName]
+			if currentVersion == version {
+				logger.WithFields(logrus.Fields{
+					"repo":    repoName,
+					"version": version,
+				}).Info("Skipping release - version unchanged")
+				continue
+			}
 
 			// Update dependencies if this is not the first level (skip in dry-run mode)
 			if levelIndex > 0 && !releaseDryRun {
