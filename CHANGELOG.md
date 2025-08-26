@@ -1,3 +1,9 @@
+## v0.2.14 (2025-08-26)
+
+### Bug Fixes
+
+* disable ci e2e for now
+
 ## v0.2.13 (2025-08-26)
 
 ### Bug Fixes
