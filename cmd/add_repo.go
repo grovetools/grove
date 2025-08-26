@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-meta/pkg/repository"
+	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -62,14 +64,20 @@ Examples:
 }
 
 var templateAliases = map[string]string{
-	"go":       "/Users/solom4/Code/grove-ecosystem/grove-project-tmpl-go",       // For now, use absolute path
-	"maturin":  "/Users/solom4/Code/grove-ecosystem/grove-project-tmpl-maturin",  // Python/Rust template
-	"react-ts": "/Users/solom4/Code/grove-ecosystem/grove-project-tmpl-react-ts", // React TypeScript template
+	"go":       "grove-project-tmpl-go",       // Go template
+	"maturin":  "grove-project-tmpl-maturin",  // Python/Rust template  
+	"react-ts": "grove-project-tmpl-react-ts", // React TypeScript template
 }
 
 func resolveTemplate(spec string) string {
 	if alias, ok := templateAliases[spec]; ok {
-		return alias
+		// Find grove ecosystem root and resolve template path relative to it
+		rootDir, err := workspace.FindRoot("")
+		if err != nil {
+			// Fall back to relative path if we can't find root
+			return alias
+		}
+		return filepath.Join(rootDir, alias)
 	}
 	return spec
 }
