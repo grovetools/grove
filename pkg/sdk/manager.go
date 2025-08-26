@@ -55,7 +55,6 @@ var toolRegistry = map[string]ToolInfo{
 	"px":                     {RepoName: "grove-proxy", BinaryName: "px"},
 	"sb":                     {RepoName: "grove-sandbox", BinaryName: "sb"},
 	"tend":                   {RepoName: "grove-tend", BinaryName: "tend"},
-	"tmux":                   {RepoName: "grove-tmux", BinaryName: "gmux"}, // Alias
 }
 
 // Manager handles SDK installation and version management
