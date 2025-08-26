@@ -1109,12 +1109,23 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 						displayInfo(fmt.Sprintf("No .github directory found for %s, skipping CI workflow monitoring", repo))
 					}
 
-					// Now wait for module to be available on the proxy
-					displayInfo(fmt.Sprintf("Waiting for %s@%s to be available...", node.Path, version))
+					// Check if we need to wait for module availability (skip for template projects)
+					needsModuleCheck, err := shouldWaitForModuleAvailability(wsPath)
+					if err != nil {
+						logger.WithError(err).Warnf("Failed to determine if %s needs module availability check, defaulting to check", repo)
+						needsModuleCheck = true
+					}
 
-					if err := release.WaitForModuleAvailability(ctx, node.Path, version); err != nil {
-						errChan <- fmt.Errorf("failed waiting for %s@%s: %w", node.Path, version, err)
-						return
+					if needsModuleCheck {
+						// Now wait for module to be available on the proxy
+						displayInfo(fmt.Sprintf("Waiting for %s@%s to be available...", node.Path, version))
+
+						if err := release.WaitForModuleAvailability(ctx, node.Path, version); err != nil {
+							errChan <- fmt.Errorf("failed waiting for %s@%s: %w", node.Path, version, err)
+							return
+						}
+					} else {
+						displayInfo(fmt.Sprintf("Skipping module availability check for %s (not a Go module)", repo))
 					}
 
 					displayComplete(fmt.Sprintf("%s successfully released", repo))
@@ -2054,4 +2065,37 @@ func syncDependenciesForRepos(ctx context.Context, rootDir string, repos []strin
 	}
 	
 	return nil
+}
+
+// shouldWaitForModuleAvailability determines if a project needs module availability checking
+// Template projects and other non-Go modules should skip this check
+func shouldWaitForModuleAvailability(workspacePath string) (bool, error) {
+	// Load grove.yml to determine project type
+	groveConfigPath := filepath.Join(workspacePath, "grove.yml")
+	cfg, err := config.Load(groveConfigPath)
+	if err != nil {
+		// If no grove.yml, assume it's a Go project for backward compatibility
+		return true, nil
+	}
+	
+	// Get project type from grove.yml
+	var projectTypeStr string
+	if err := cfg.UnmarshalExtension("type", &projectTypeStr); err != nil || projectTypeStr == "" {
+		// Default to Go for backward compatibility
+		return true, nil
+	}
+	
+	projectType := project.Type(projectTypeStr)
+	
+	// Only Go modules need module availability checking
+	// Template, Maturin, and Node projects are not published to Go module proxy
+	switch projectType {
+	case project.TypeGo:
+		return true, nil
+	case project.TypeTemplate, project.TypeMaturin, project.TypeNode:
+		return false, nil
+	default:
+		// Unknown project type, default to checking for safety
+		return true, nil
+	}
 }
