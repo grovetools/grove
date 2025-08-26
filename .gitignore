@@ -3,3 +3,4 @@ grove
 bin/
 
 .grove
+.grove-worktrees
