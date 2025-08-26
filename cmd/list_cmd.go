@@ -12,10 +12,10 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"text/tabwriter"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-meta/pkg/reconciler"
 	"github.com/mattsolo1/grove-meta/pkg/sdk"
@@ -236,23 +236,15 @@ func runList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Output as table with more column padding
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 6, ' ', 0)
+	// Build table headers
+	var headers []string
+	headers = append(headers, "TOOL", "REPOSITORY", "STATUS", "CURRENT VERSION")
 	if checkUpdates {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			headerStyle.Render("TOOL"),
-			headerStyle.Render("REPOSITORY"),
-			headerStyle.Render("STATUS"),
-			headerStyle.Render("CURRENT VERSION"),
-			headerStyle.Render("LATEST"))
-	} else {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-			headerStyle.Render("TOOL"),
-			headerStyle.Render("REPOSITORY"),
-			headerStyle.Render("STATUS"),
-			headerStyle.Render("CURRENT VERSION"))
+		headers = append(headers, "LATEST")
 	}
 
+	// Build rows
+	var rows [][]string
 	for _, info := range toolInfos {
 		currentVersion := "-"
 		displayVersion := ""
@@ -291,8 +283,13 @@ func runList(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Style the current version
-		styledCurrentVersion := versionStyle.Render(currentVersion)
+		// Build row
+		row := []string{
+			toolStyle.Render(info.Name),
+			repoStyle.Render(info.RepoName),
+			statusSymbol,
+			versionStyle.Render(currentVersion),
+		}
 
 		if checkUpdates {
 			// Add release status indicator
@@ -307,22 +304,33 @@ func runList(cmd *cobra.Command, args []string) error {
 				// Update available
 				styledReleaseStatus = updateAvailableStyle.Render(fmt.Sprintf("%s ↑", info.LatestRelease))
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-				toolStyle.Render(info.Name),
-				repoStyle.Render(info.RepoName),
-				statusSymbol,
-				styledCurrentVersion,
-				styledReleaseStatus)
-		} else {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-				toolStyle.Render(info.Name),
-				repoStyle.Render(info.RepoName),
-				statusSymbol,
-				styledCurrentVersion)
+			row = append(row, styledReleaseStatus)
 		}
+
+		rows = append(rows, row)
 	}
 
-	w.Flush()
+	// Create lipgloss table
+	re := lipgloss.NewRenderer(os.Stdout)
+	baseStyle := re.NewStyle().Padding(0, 1)
+	tableHeaderStyle := baseStyle.Copy().Bold(true).Foreground(lipgloss.Color("255"))
+
+	t := table.New().
+		Border(lipgloss.NormalBorder()).
+		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
+		Headers(headers...).
+		Rows(rows...)
+
+	// Apply header styling
+	t.StyleFunc(func(row, col int) lipgloss.Style {
+		if row == 0 {
+			return tableHeaderStyle
+		}
+		// Return minimal style to preserve pre-styled content
+		return lipgloss.NewStyle().Padding(0, 1)
+	})
+
+	fmt.Println(t)
 
 	return nil
 }
