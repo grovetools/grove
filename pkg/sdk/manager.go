@@ -27,23 +27,35 @@ const (
 	GitHubAPI   = "https://api.github.com"
 )
 
-// toolToRepo maps tool names to their repository names
-// This is kept minimal for backward compatibility with existing installations
-var toolToRepo = map[string]string{
-	"grove":                  "grove-meta",
-	"cx":                     "grove-context",
-	"flow":                   "grove-flow",
-	"nb":                     "grove-notebook",
-	"px":                     "grove-proxy",
-	"sb":                     "grove-sandbox",
-	"tend":                   "grove-tend",
-	"canopy":                 "grove-canopy",
-	"nvim":                   "grove-nvim",
-	"tmux":                   "grove-tmux",
-	"project-tmpl-go":        "grove-project-tmpl-go",
-	"project-tmpl-maturin":   "grove-project-tmpl-maturin",
-	"project-tmpl-react-ts":  "grove-project-tmpl-react-ts",
-	"core":                   "grove-core",
+// ToolInfo contains information about a tool
+type ToolInfo struct {
+	RepoName   string
+	BinaryName string
+}
+
+// toolRegistry maps tool names to their repository and binary names
+var toolRegistry = map[string]ToolInfo{
+	"canopy":                 {RepoName: "grove-canopy", BinaryName: "canopy"},
+	"clogs":                  {RepoName: "grove-claude-logs", BinaryName: "clogs"},
+	"core":                   {RepoName: "grove-core", BinaryName: "core"},
+	"cx":                     {RepoName: "grove-context", BinaryName: "cx"},
+	"flow":                   {RepoName: "grove-flow", BinaryName: "flow"},
+	"gemapi":                 {RepoName: "grove-gemini", BinaryName: "gemapi"},
+	"gmux":                   {RepoName: "grove-tmux", BinaryName: "gmux"},
+	"grove":                  {RepoName: "grove-meta", BinaryName: "grove"},
+	"grove-hooks":            {RepoName: "grove-hooks", BinaryName: "hooks"},
+	"hooks":                  {RepoName: "grove-hooks", BinaryName: "hooks"},
+	"nb":                     {RepoName: "grove-notebook", BinaryName: "nb"},
+	"neogrove":               {RepoName: "grove-nvim", BinaryName: "neogrove"},
+	"notify":                 {RepoName: "grove-notifications", BinaryName: "notify"},
+	"nvim":                   {RepoName: "grove-nvim", BinaryName: "neogrove"}, // Alias
+	"project-tmpl-go":        {RepoName: "grove-project-tmpl-go", BinaryName: "project-tmpl-go"},
+	"project-tmpl-maturin":   {RepoName: "grove-project-tmpl-maturin", BinaryName: "project-tmpl-maturin"},
+	"project-tmpl-react-ts":  {RepoName: "grove-project-tmpl-react-ts", BinaryName: "project-tmpl-react-ts"},
+	"px":                     {RepoName: "grove-proxy", BinaryName: "px"},
+	"sb":                     {RepoName: "grove-sandbox", BinaryName: "sb"},
+	"tend":                   {RepoName: "grove-tend", BinaryName: "tend"},
+	"tmux":                   {RepoName: "grove-tmux", BinaryName: "gmux"}, // Alias
 }
 
 // Manager handles SDK installation and version management
@@ -155,18 +167,18 @@ type GitHubRelease struct {
 }
 
 // resolveRepoName resolves a tool name to its repository name
-// It handles both old tool names (keys in toolToRepo) and actual binary names
+// It handles both old tool names (keys in toolRegistry) and actual binary names
 func resolveRepoName(toolName string) (string, error) {
-	// First check if it's a direct key in toolToRepo
-	if repoName, ok := toolToRepo[toolName]; ok {
-		return repoName, nil
+	// First check if it's a direct key in toolRegistry
+	if info, ok := toolRegistry[toolName]; ok {
+		return info.RepoName, nil
 	}
 	
 	// Check if the toolName is already a valid repository name
 	if strings.HasPrefix(toolName, "grove-") {
 		// Verify it's a known repository by checking if it exists as a value
-		for _, repoName := range toolToRepo {
-			if repoName == toolName {
+		for _, info := range toolRegistry {
+			if info.RepoName == toolName {
 				return toolName, nil
 			}
 		}
@@ -176,9 +188,9 @@ func resolveRepoName(toolName string) (string, error) {
 	
 	// Check if adding "grove-" prefix gives us a valid repo
 	expectedRepo := "grove-" + toolName
-	for _, repoName := range toolToRepo {
-		if repoName == expectedRepo {
-			return repoName, nil
+	for _, info := range toolRegistry {
+		if info.RepoName == expectedRepo {
+			return info.RepoName, nil
 		}
 	}
 	
@@ -335,10 +347,10 @@ func (m *Manager) InstallTool(toolName, versionTag string) error {
 		return err
 	}
 
-	// Resolve repository name
-	repoName, err := resolveRepoName(toolName)
-	if err != nil {
-		return err
+	// Get tool info
+	toolInfo, ok := toolRegistry[toolName]
+	if !ok {
+		return fmt.Errorf("unknown tool: %s", toolName)
 	}
 
 	// Get release information
@@ -347,15 +359,15 @@ func (m *Manager) InstallTool(toolName, versionTag string) error {
 		return err
 	}
 
-	// Construct the binary name using repository name (releases are named after repos)
+	// Construct the binary name using the tool's binary name (not repo name)
 	osName := runtime.GOOS
 	archName := runtime.GOARCH
-	binaryName := fmt.Sprintf("%s-%s-%s", repoName, osName, archName)
+	binaryAssetName := fmt.Sprintf("%s-%s-%s", toolInfo.BinaryName, osName, archName)
 
 	// Find the asset URL
 	var downloadURL string
 	for _, asset := range release.Assets {
-		if asset.Name == binaryName {
+		if asset.Name == binaryAssetName {
 			downloadURL = asset.BrowserDownloadURL
 			break
 		}
@@ -507,9 +519,9 @@ func (m *Manager) resetDevLinks() error {
 
 // GetAllTools returns the list of all available tools
 func GetAllTools() []string {
-	// Extract all tool names from the toolToRepo map to ensure consistency
-	tools := make([]string, 0, len(toolToRepo))
-	for tool := range toolToRepo {
+	// Extract all tool names from the toolRegistry map to ensure consistency
+	tools := make([]string, 0, len(toolRegistry))
+	for tool := range toolRegistry {
 		tools = append(tools, tool)
 	}
 	
@@ -521,9 +533,9 @@ func GetAllTools() []string {
 // GetToolToRepoMap returns the tool to repository name mapping
 func GetToolToRepoMap() map[string]string {
 	// Return a copy to prevent external modification
-	result := make(map[string]string, len(toolToRepo))
-	for k, v := range toolToRepo {
-		result[k] = v
+	result := make(map[string]string, len(toolRegistry))
+	for k, v := range toolRegistry {
+		result[k] = v.RepoName
 	}
 	return result
 }
