@@ -15,6 +15,7 @@ func NewRegistry() *Registry {
 	r.Register(TypeGo, NewGoHandler())
 	r.Register(TypeMaturin, NewMaturinHandler())
 	r.Register(TypeNode, NewNodeHandler())
+	r.Register(TypeTemplate, NewTemplateHandler())
 	
 	return r
 }

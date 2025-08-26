@@ -3,9 +3,10 @@ package project
 type Type string
 
 const (
-	TypeGo      Type = "go"
-	TypeMaturin Type = "maturin"
-	TypeNode    Type = "node"
+	TypeGo       Type = "go"
+	TypeMaturin  Type = "maturin"
+	TypeNode     Type = "node"
+	TypeTemplate Type = "template"
 )
 
 // ProjectHandler defines the interface for language-specific operations
