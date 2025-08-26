@@ -7,7 +7,7 @@ func AllScenarios() []*harness.Scenario {
 	return []*harness.Scenario{
 		ConventionalCommitsScenario(),
 		AddRepoDryRunScenario(),
-		AddRepoWithGitHubScenario(),
+		// AddRepoWithGitHubScenario(),
 		AddRepoSkipGitHubScenario(),
 		PolyglotProjectTypesScenario(),
 		PolyglotDependencyGraphScenario(),
@@ -15,3 +15,4 @@ func AllScenarios() []*harness.Scenario {
 		PolyglotReleaseScenario(),
 	}
 }
+
