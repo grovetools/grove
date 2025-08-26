@@ -42,6 +42,14 @@ jobs:
       - name: Run end-to-end tests
         run: make test-e2e
 
+      - name: Extract Release Notes from Changelog
+        id: extract_release_notes
+        run: |
+          # This awk script finds the section for the current tag and prints it,
+          # stopping at the next version tag or end of file.
+          awk '/^## ${{ github.ref_name }}/{flag=1; next} /^## v/{flag=0} flag' CHANGELOG.md > release-notes.md
+          echo "Extracted notes:" ; cat release-notes.md
+
       - name: Create dist directory
         run: mkdir -p dist
 
@@ -59,7 +67,7 @@ jobs:
       - name: Create GitHub Release
         run: |
           gh release create ${{ github.ref_name }} \
-            --generate-notes \
+            --notes-file release-notes.md \
             --draft=false \
             --prerelease=false
         env:
