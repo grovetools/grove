@@ -264,23 +264,14 @@ func runList(cmd *cobra.Command, args []string) error {
 			// For dev versions, show the version
 			displayVersion = info.ActiveVersion
 			currentVersion = displayVersion
-			if len(info.OtherVersions) > 0 {
-				currentVersion = fmt.Sprintf("%s +%d", displayVersion, len(info.OtherVersions))
-			}
 		} else if info.Status == "release" && info.ActiveVersion != "" {
 			// For release versions, show the version
 			displayVersion = info.ActiveVersion
 			currentVersion = displayVersion
-			if len(info.OtherVersions) > 0 {
-				currentVersion = fmt.Sprintf("%s +%d", displayVersion, len(info.OtherVersions))
-			}
 		} else if len(info.OtherVersions) > 0 {
 			// Show the most recent installed version
 			displayVersion = info.OtherVersions[len(info.OtherVersions)-1]
 			currentVersion = fmt.Sprintf("(%s)", displayVersion)
-			if len(info.OtherVersions) > 1 {
-				currentVersion = fmt.Sprintf("(%s +%d)", displayVersion, len(info.OtherVersions)-1)
-			}
 		}
 
 		// Build row
