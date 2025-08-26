@@ -1,3 +1,10 @@
+## v0.2.13 (2025-08-26)
+
+### Bug Fixes
+
+* skip github scenario
+* resolve template paths dynamically to fix CI failures
+
 ## v0.2.12 (2025-08-26)
 
 ### Features
