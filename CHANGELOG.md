@@ -1,3 +1,21 @@
+## v0.2.12 (2025-08-26)
+
+### Features
+
+* add template project handler to resolve maturin bug
+* parse CHANGELOG.md for GitHub release notes
+* implement lipgloss table for grove list command
+* improve grove list and install commands
+
+### Code Refactoring
+
+* remove version count suffix from grove list output
+
+### Bug Fixes
+
+* skip module availability check for non-Go projects
+* add worktrees ti gitignore
+
 ## v0.2.11 (2025-08-25)
 
 ### Features
