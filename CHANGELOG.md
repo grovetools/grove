@@ -1,3 +1,9 @@
+## v0.2.15 (2025-08-26)
+
+### Code Refactoring
+
+* centralize tool registry and remove redundant toolToRepo map
+
 ## v0.2.14 (2025-08-26)
 
 ### Bug Fixes
