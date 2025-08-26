@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-meta/pkg/devlinks"
 	"github.com/mattsolo1/grove-meta/pkg/reconciler"
 	"github.com/mattsolo1/grove-meta/pkg/sdk"
 	"github.com/spf13/cobra"
@@ -46,6 +47,12 @@ Examples:
 
 func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 	logger := cli.GetLogger(cmd)
+
+	// Auto-detect gh CLI if not explicitly set
+	if !useGH && checkGHAuth() {
+		useGH = true
+		logger.Debug("Authenticated 'gh' CLI detected, using it for downloads")
+	}
 
 	// Create SDK manager
 	manager, err := sdk.NewManager()
@@ -107,10 +114,28 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 			if err := manager.UseToolVersion(toolName, version); err != nil {
 				logger.WithError(err).Warnf("Failed to activate %s %s", toolName, version)
 			} else {
+				// Clear any dev link for this tool
+				if err := clearDevLinkForTool(toolName); err != nil {
+					logger.WithError(err).Debugf("Failed to clear dev link for %s", toolName)
+				}
+
 				// Reconcile the symlink
-				tv, _ := sdk.LoadToolVersions(os.Getenv("HOME") + "/.grove")
-				if r, err := reconciler.NewWithToolVersions(tv); err == nil {
-					r.Reconcile(toolName)
+				tv, err := sdk.LoadToolVersions(os.Getenv("HOME") + "/.grove")
+				if err != nil {
+					// Log the error but proceed with an empty config so we don't block the user
+					logger.WithError(err).Warn("Could not load tool versions for reconciliation")
+					tv = &sdk.ToolVersions{Versions: make(map[string]string)}
+				}
+				
+				r, err := reconciler.NewWithToolVersions(tv)
+				if err != nil {
+					logger.WithError(err).Warnf("Could not create reconciler, skipping symlink update for %s", toolName)
+				} else {
+					if err := r.Reconcile(toolName); err != nil {
+						logger.WithError(err).Warnf("Failed to reconcile symlink for %s", toolName)
+					} else {
+						logger.Infof("✅ %s %s is now active", toolName, version)
+					}
 				}
 			}
 		}
@@ -132,6 +157,24 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 		logger.Warn("")
 		logger.Warn("Then restart your terminal or run:")
 		logger.Warn("  source ~/.zshrc  # or ~/.bashrc")
+	}
+
+	return nil
+}
+
+
+// clearDevLinkForTool clears the active dev link for a specific tool
+func clearDevLinkForTool(toolName string) error {
+	config, err := devlinks.LoadConfig()
+	if err != nil {
+		return err
+	}
+
+	// Check if the tool has any dev links
+	if binLinks, exists := config.Binaries[toolName]; exists {
+		// Clear the current active link
+		binLinks.Current = ""
+		return devlinks.SaveConfig(config)
 	}
 
 	return nil

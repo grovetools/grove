@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/mattsolo1/grove-meta/pkg/devlinks"
@@ -27,15 +28,22 @@ const (
 )
 
 // toolToRepo maps tool names to their repository names
+// This is kept minimal for backward compatibility with existing installations
 var toolToRepo = map[string]string{
-	"grove":  "grove-meta",
-	"cx":     "grove-context",
-	"flow":   "grove-flow",
-	"nb":     "grove-notebook",
-	"px":     "grove-proxy",
-	"sb":     "grove-sandbox",
-	"tend":   "grove-tend",
-	"canopy": "grove-canopy",
+	"grove":                  "grove-meta",
+	"cx":                     "grove-context",
+	"flow":                   "grove-flow",
+	"nb":                     "grove-notebook",
+	"px":                     "grove-proxy",
+	"sb":                     "grove-sandbox",
+	"tend":                   "grove-tend",
+	"canopy":                 "grove-canopy",
+	"nvim":                   "grove-nvim",
+	"tmux":                   "grove-tmux",
+	"project-tmpl-go":        "grove-project-tmpl-go",
+	"project-tmpl-maturin":   "grove-project-tmpl-maturin",
+	"project-tmpl-react-ts":  "grove-project-tmpl-react-ts",
+	"core":                   "grove-core",
 }
 
 // Manager handles SDK installation and version management
@@ -146,11 +154,42 @@ type GitHubRelease struct {
 	} `json:"assets"`
 }
 
+// resolveRepoName resolves a tool name to its repository name
+// It handles both old tool names (keys in toolToRepo) and actual binary names
+func resolveRepoName(toolName string) (string, error) {
+	// First check if it's a direct key in toolToRepo
+	if repoName, ok := toolToRepo[toolName]; ok {
+		return repoName, nil
+	}
+	
+	// Check if the toolName is already a valid repository name
+	if strings.HasPrefix(toolName, "grove-") {
+		// Verify it's a known repository by checking if it exists as a value
+		for _, repoName := range toolToRepo {
+			if repoName == toolName {
+				return toolName, nil
+			}
+		}
+		// Even if not in our map, allow it - it might be a new repository
+		return toolName, nil
+	}
+	
+	// Check if adding "grove-" prefix gives us a valid repo
+	expectedRepo := "grove-" + toolName
+	for _, repoName := range toolToRepo {
+		if repoName == expectedRepo {
+			return repoName, nil
+		}
+	}
+	
+	return "", fmt.Errorf("unknown tool: %s", toolName)
+}
+
 // GetLatestVersionTag fetches the latest release tag from GitHub for a specific tool
 func (m *Manager) GetLatestVersionTag(toolName string) (string, error) {
-	repoName, ok := toolToRepo[toolName]
-	if !ok {
-		return "", fmt.Errorf("unknown tool: %s", toolName)
+	repoName, err := resolveRepoName(toolName)
+	if err != nil {
+		return "", err
 	}
 
 	if m.useGH {
@@ -199,9 +238,9 @@ func (m *Manager) getLatestVersionTagWithGH(repoName string) (string, error) {
 
 // GetRelease fetches release information for a specific tool and version
 func (m *Manager) GetRelease(toolName, version string) (*GitHubRelease, error) {
-	repoName, ok := toolToRepo[toolName]
-	if !ok {
-		return nil, fmt.Errorf("unknown tool: %s", toolName)
+	repoName, err := resolveRepoName(toolName)
+	if err != nil {
+		return nil, err
 	}
 
 	if m.useGH {
@@ -296,16 +335,22 @@ func (m *Manager) InstallTool(toolName, versionTag string) error {
 		return err
 	}
 
+	// Resolve repository name
+	repoName, err := resolveRepoName(toolName)
+	if err != nil {
+		return err
+	}
+
 	// Get release information
 	release, err := m.GetRelease(toolName, versionTag)
 	if err != nil {
 		return err
 	}
 
-	// Construct the binary name
+	// Construct the binary name using repository name (releases are named after repos)
 	osName := runtime.GOOS
 	archName := runtime.GOARCH
-	binaryName := fmt.Sprintf("%s-%s-%s", toolName, osName, archName)
+	binaryName := fmt.Sprintf("%s-%s-%s", repoName, osName, archName)
 
 	// Find the asset URL
 	var downloadURL string
@@ -462,14 +507,23 @@ func (m *Manager) resetDevLinks() error {
 
 // GetAllTools returns the list of all available tools
 func GetAllTools() []string {
-	return []string{
-		"grove",
-		"cx",
-		"flow",
-		"nb",
-		"px",
-		"sb",
-		"tend",
-		"canopy",
+	// Extract all tool names from the toolToRepo map to ensure consistency
+	tools := make([]string, 0, len(toolToRepo))
+	for tool := range toolToRepo {
+		tools = append(tools, tool)
 	}
+	
+	// Sort for consistent output
+	sort.Strings(tools)
+	return tools
+}
+
+// GetToolToRepoMap returns the tool to repository name mapping
+func GetToolToRepoMap() map[string]string {
+	// Return a copy to prevent external modification
+	result := make(map[string]string, len(toolToRepo))
+	for k, v := range toolToRepo {
+		result[k] = v
+	}
+	return result
 }
