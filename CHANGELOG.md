@@ -1,3 +1,9 @@
+## v0.2.17 (2025-08-27)
+
+### Bug Fixes
+
+* improve add-repo command
+
 ## v0.2.16 (2025-08-27)
 
 ### Chores
