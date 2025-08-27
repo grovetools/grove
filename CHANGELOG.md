@@ -1,3 +1,10 @@
+## v0.2.16 (2025-08-27)
+
+### Chores
+
+* **deps:** sync Grove dependencies to latest versions
+* remove tmux alias from tool registry
+
 ## v0.2.15 (2025-08-26)
 
 ### Code Refactoring
