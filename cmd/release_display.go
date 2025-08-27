@@ -13,58 +13,58 @@ import (
 var (
 	// Base styles
 	releaseTitleStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("212")).
-		MarginBottom(1)
+				Bold(true).
+				Foreground(lipgloss.Color("212")).
+				MarginBottom(1)
 
 	releaseSectionStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("141")).
-		MarginTop(1).
-		MarginBottom(1)
+				Bold(true).
+				Foreground(lipgloss.Color("141")).
+				MarginTop(1).
+				MarginBottom(1)
 
 	releaseSuccessStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("42"))
+				Bold(true).
+				Foreground(lipgloss.Color("42"))
 
 	releaseWarningStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("214"))
+				Bold(true).
+				Foreground(lipgloss.Color("214"))
 
 	releaseErrorStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("196"))
+				Bold(true).
+				Foreground(lipgloss.Color("196"))
 
 	releaseInfoStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("247"))
+				Foreground(lipgloss.Color("247"))
 
 	releaseHighlightStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("42"))
+				Bold(true).
+				Foreground(lipgloss.Color("42"))
 
 	releaseDimStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240"))
+			Foreground(lipgloss.Color("240"))
 
 	// Box styles for different phases
 	phaseBoxStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Padding(1, 2)
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("240")).
+			Padding(1, 2)
 
 	successBoxStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("42")).
-		Padding(1, 2)
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("42")).
+			Padding(1, 2)
 
 	// Progress indicators
 	spinnerStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("212"))
+			Foreground(lipgloss.Color("212"))
 
 	releaseCheckmarkStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("42"))
+				Foreground(lipgloss.Color("42"))
 
 	crossStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("196"))
+			Foreground(lipgloss.Color("196"))
 )
 
 // Phase display helpers
@@ -235,7 +235,7 @@ func displayReleaseSummary(releaseLevels [][]string, versions map[string]string,
 		if len(reposInLevel) > 0 {
 			levelCount++
 			fmt.Printf("\n%s\n", releaseHighlightStyle.Render(fmt.Sprintf("Level %d (can release in parallel):", levelCount)))
-			
+
 			for _, repo := range reposInLevel {
 				current := currentVersions[repo]
 				if current == "" {
@@ -244,11 +244,11 @@ func displayReleaseSummary(releaseLevels [][]string, versions map[string]string,
 				proposed := versions[repo]
 				increment := getVersionIncrement(current, proposed)
 
-				fmt.Printf("  %s %s: %s → %s (%s)\n", 
+				fmt.Printf("  %s %s: %s → %s (%s)\n",
 					releaseCheckmarkStyle.Render("•"),
-					repo, 
-					releaseDimStyle.Render(current), 
-					releaseHighlightStyle.Render(proposed), 
+					repo,
+					releaseDimStyle.Render(current),
+					releaseHighlightStyle.Render(proposed),
 					releaseInfoStyle.Render(increment))
 			}
 		}

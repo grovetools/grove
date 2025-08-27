@@ -593,7 +593,7 @@ func runDepsTree(focusRepo string, showVersions, showExternal bool, filterRepos 
 func displayRepoTree(graph *depsgraph.Graph, repoName string, showVersions, showExternal bool) {
 	node, _ := graph.GetNode(repoName)
 	fmt.Printf("%s\n", repoName)
-	
+
 	deps := graph.GetDependencies(repoName)
 	if len(deps) == 0 {
 		fmt.Println("└── (no dependencies)")
@@ -663,13 +663,13 @@ func displayFullTree(graph *depsgraph.Graph, showVersions, showExternal bool, fi
 
 	fmt.Println("Dependency Tree (by levels):")
 	fmt.Println("===========================")
-	
+
 	for i, level := range levels {
 		fmt.Printf("\nLevel %d (no dependencies on later levels):\n", i+1)
-		
+
 		// Sort repos in level for consistent output
 		sort.Strings(level)
-		
+
 		for _, repo := range level {
 			// Apply filter if specified
 			if len(filterMap) > 0 && !filterMap[repo] {
@@ -677,7 +677,7 @@ func displayFullTree(graph *depsgraph.Graph, showVersions, showExternal bool, fi
 			}
 
 			fmt.Printf("  %s\n", repo)
-			
+
 			// Show dependencies
 			deps := graph.GetDependencies(repo)
 			if len(deps) > 0 {
@@ -704,7 +704,7 @@ func displayFullTree(graph *depsgraph.Graph, showVersions, showExternal bool, fi
 					}
 
 					fmt.Printf("%s%s", prefix, depName)
-					
+
 					// Show which level this dependency is in
 					if isGrove {
 						for levelIdx, levelRepos := range levels {
@@ -727,7 +727,7 @@ func displayFullTree(graph *depsgraph.Graph, showVersions, showExternal bool, fi
 			}
 		}
 	}
-	
+
 	// Show summary
 	fmt.Printf("\nTotal repositories: %d\n", len(graph.GetAllNodes()))
 	fmt.Printf("Dependency levels: %d\n", len(levels))

@@ -2,7 +2,7 @@ package depsgraph
 
 import (
 	"fmt"
-	
+
 	"github.com/sirupsen/logrus"
 )
 
@@ -53,7 +53,7 @@ func BuildGraph(rootDir string, workspaces []string) (*Graph, error) {
 	// Use the new builder with a default logger
 	logger := logrus.New()
 	logger.SetLevel(logrus.WarnLevel) // Only show warnings and errors
-	
+
 	builder := NewBuilder(workspaces, logger)
 	return builder.Build()
 }

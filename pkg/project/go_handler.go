@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	
+
 	"golang.org/x/mod/modfile"
 )
 
@@ -25,7 +25,7 @@ func (h *GoHandler) HasProjectFile(workspacePath string) bool {
 
 func (h *GoHandler) ParseDependencies(workspacePath string) ([]Dependency, error) {
 	goModPath := filepath.Join(workspacePath, "go.mod")
-	
+
 	data, err := os.ReadFile(goModPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -34,12 +34,12 @@ func (h *GoHandler) ParseDependencies(workspacePath string) ([]Dependency, error
 		}
 		return nil, fmt.Errorf("reading go.mod: %w", err)
 	}
-	
+
 	modFile, err := modfile.Parse(goModPath, data, nil)
 	if err != nil {
 		return nil, fmt.Errorf("parsing go.mod: %w", err)
 	}
-	
+
 	var deps []Dependency
 	for _, req := range modFile.Require {
 		dep := Dependency{
@@ -47,21 +47,21 @@ func (h *GoHandler) ParseDependencies(workspacePath string) ([]Dependency, error
 			Version: req.Mod.Version,
 			Type:    DependencyTypeLibrary,
 		}
-		
+
 		// Check if this is a workspace dependency
 		if strings.HasPrefix(req.Mod.Path, "github.com/mattsolo1/") {
 			dep.Workspace = true
 		}
-		
+
 		deps = append(deps, dep)
 	}
-	
+
 	return deps, nil
 }
 
 func (h *GoHandler) UpdateDependency(workspacePath string, dep Dependency) error {
 	ctx := context.Background()
-	
+
 	// Update to new version using go get
 	cmd := exec.CommandContext(ctx, "go", "get", fmt.Sprintf("%s@%s", dep.Name, dep.Version))
 	cmd.Dir = workspacePath
@@ -69,12 +69,12 @@ func (h *GoHandler) UpdateDependency(workspacePath string, dep Dependency) error
 		"GOPRIVATE=github.com/mattsolo1/*",
 		"GOPROXY=direct",
 	)
-	
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to update %s: %w (output: %s)", dep.Name, err, output)
 	}
-	
+
 	// Run go mod tidy
 	tidyCmd := exec.CommandContext(ctx, "go", "mod", "tidy")
 	tidyCmd.Dir = workspacePath
@@ -82,11 +82,11 @@ func (h *GoHandler) UpdateDependency(workspacePath string, dep Dependency) error
 		"GOPRIVATE=github.com/mattsolo1/*",
 		"GOPROXY=direct",
 	)
-	
+
 	if output, err := tidyCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("go mod tidy failed: %w (output: %s)", err, output)
 	}
-	
+
 	return nil
 }
 
@@ -103,6 +103,6 @@ func (h *GoHandler) SetVersion(workspacePath string, version string) error {
 }
 
 // Leverage Makefile contract
-func (h *GoHandler) GetBuildCommand() string { return "make build" }
-func (h *GoHandler) GetTestCommand() string  { return "make test" }
+func (h *GoHandler) GetBuildCommand() string  { return "make build" }
+func (h *GoHandler) GetTestCommand() string   { return "make test" }
 func (h *GoHandler) GetVerifyCommand() string { return "make verify" }

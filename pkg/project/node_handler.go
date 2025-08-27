@@ -31,6 +31,6 @@ func (h *NodeHandler) SetVersion(workspacePath string, version string) error {
 	return fmt.Errorf("Node.js handler not implemented yet")
 }
 
-func (h *NodeHandler) GetBuildCommand() string { return "make build" }
-func (h *NodeHandler) GetTestCommand() string  { return "make test" }
+func (h *NodeHandler) GetBuildCommand() string  { return "make build" }
+func (h *NodeHandler) GetTestCommand() string   { return "make test" }
 func (h *NodeHandler) GetVerifyCommand() string { return "make verify" }

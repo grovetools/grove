@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	
+
 	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-meta/pkg/project"
 	"github.com/sirupsen/logrus"
@@ -30,11 +30,11 @@ func NewBuilder(workspaces []string, logger *logrus.Logger) *Builder {
 func (b *Builder) Build() (*Graph, error) {
 	graph := NewGraph()
 	modulePathToName := make(map[string]string)
-	
+
 	// First pass: collect all modules and determine their types
 	for _, ws := range b.workspaces {
 		wsName := filepath.Base(ws)
-		
+
 		// Load grove.yml to get project type
 		groveYmlPath := filepath.Join(ws, "grove.yml")
 		cfg, err := config.Load(groveYmlPath)
@@ -42,23 +42,23 @@ func (b *Builder) Build() (*Graph, error) {
 			b.logger.WithError(err).Warnf("Failed to load config for %s, skipping", wsName)
 			continue
 		}
-		
+
 		// Determine project type
 		projectType := b.getProjectType(cfg)
-		
+
 		// Get appropriate handler
 		handler, err := b.projectRegistry.Get(projectType)
 		if err != nil {
 			b.logger.WithError(err).Warnf("No handler for project type %s in %s, skipping", projectType, wsName)
 			continue
 		}
-		
+
 		// Check if this project type has a project file
 		if !handler.HasProjectFile(ws) {
 			b.logger.Debugf("No project file found for %s (type: %s), skipping", wsName, projectType)
 			continue
 		}
-		
+
 		// For Go projects, we need to get the module path
 		var modulePath string
 		if projectType == project.TypeGo {
@@ -67,20 +67,20 @@ func (b *Builder) Build() (*Graph, error) {
 			// In a real implementation, we might extend the handler interface
 			modulePath = b.getGoModulePath(ws)
 		}
-		
+
 		node := &Node{
 			Name: wsName,
 			Path: modulePath, // For Go projects, this is the module path; empty for others
 			Dir:  ws,
 			Deps: []string{},
 		}
-		
+
 		graph.AddNode(node)
 		if modulePath != "" {
 			modulePathToName[modulePath] = wsName
 		}
 	}
-	
+
 	// Second pass: build edges based on dependencies
 	for _, ws := range b.workspaces {
 		wsName := filepath.Base(ws)
@@ -88,33 +88,33 @@ func (b *Builder) Build() (*Graph, error) {
 		if !exists {
 			continue
 		}
-		
+
 		// Load grove.yml to get project type
 		groveYmlPath := filepath.Join(ws, "grove.yml")
 		cfg, err := config.Load(groveYmlPath)
 		if err != nil {
 			continue
 		}
-		
+
 		projectType := b.getProjectType(cfg)
 		handler, err := b.projectRegistry.Get(projectType)
 		if err != nil {
 			continue
 		}
-		
+
 		// Parse dependencies
 		deps, err := handler.ParseDependencies(ws)
 		if err != nil {
 			b.logger.WithError(err).Warnf("Failed to parse dependencies for %s", wsName)
 			continue
 		}
-		
+
 		// Add edges for workspace dependencies
 		for _, dep := range deps {
 			if !dep.Workspace {
 				continue
 			}
-			
+
 			// For Go projects, use module path mapping
 			if projectType == project.TypeGo {
 				if depName, ok := modulePathToName[dep.Name]; ok {
@@ -131,7 +131,7 @@ func (b *Builder) Build() (*Graph, error) {
 			}
 		}
 	}
-	
+
 	return graph, nil
 }
 
@@ -142,7 +142,7 @@ func (b *Builder) getProjectType(cfg *config.Config) project.Type {
 	if err := cfg.UnmarshalExtension("type", &typeStr); err == nil && typeStr != "" {
 		return project.Type(typeStr)
 	}
-	
+
 	// Default to Go for backward compatibility
 	return project.TypeGo
 }
@@ -157,13 +157,13 @@ func (b *Builder) getGoModulePath(workspacePath string) string {
 	if err != nil {
 		return ""
 	}
-	
+
 	lines := strings.Split(string(data), "\n")
 	for _, line := range lines {
 		if strings.HasPrefix(line, "module ") {
 			return strings.TrimSpace(strings.TrimPrefix(line, "module "))
 		}
 	}
-	
+
 	return ""
 }

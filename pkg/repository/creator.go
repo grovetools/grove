@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"github.com/mattsolo1/grove-meta/pkg/gh"
 	"github.com/mattsolo1/grove-meta/pkg/templates"
 	"github.com/mattsolo1/grove-meta/pkg/workspace"
+	"github.com/sirupsen/logrus"
 )
 
 type Creator struct {
@@ -21,20 +21,20 @@ type Creator struct {
 }
 
 type CreateOptions struct {
-	Name        string
-	Alias       string
-	Description string
-	SkipGitHub  bool
-	DryRun      bool
+	Name         string
+	Alias        string
+	Description  string
+	SkipGitHub   bool
+	DryRun       bool
 	StageChanges bool
 	TemplatePath string
-	UpdateEcosystem bool
+	Ecosystem    bool
 }
 
 type creationState struct {
-	localRepoCreated  bool
-	githubRepoCreated bool
-	tagCreated        bool
+	localRepoCreated     bool
+	githubRepoCreated    bool
+	originalGoWorkContent []byte
 }
 
 func NewCreator(logger *logrus.Logger) *Creator {
@@ -48,6 +48,7 @@ func NewCreator(logger *logrus.Logger) *Creator {
 func (c *Creator) Create(opts CreateOptions) error {
 	// Phase 1: Validation
 	if err := c.validate(opts); err != nil {
+		c.logger.Errorf("Validation failed: %v", err)
 		return err
 	}
 
@@ -56,65 +57,97 @@ func (c *Creator) Create(opts CreateOptions) error {
 		return c.dryRun(opts)
 	}
 
+	// Determine target path based on mode
+	var targetPath string
+	if opts.Ecosystem {
+		// In ecosystem mode, we'll use the current directory as the root
+		// (grove.yml will be created in validate if it doesn't exist)
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("failed to get current directory: %w", err)
+		}
+		targetPath = filepath.Join(cwd, opts.Name)
+	} else {
+		// Standalone mode - create in current directory
+		targetPath = filepath.Join(".", opts.Name)
+	}
+
+	// Check if directory already exists
+	if _, err := os.Stat(targetPath); err == nil {
+		return fmt.Errorf("directory %s already exists", targetPath)
+	}
+
 	// Track state for rollback
 	state := &creationState{}
 
 	// Phase 2: Generate local skeleton
-	if err := c.generateSkeleton(opts); err != nil {
-		return err
+	if err := c.generateSkeleton(opts, targetPath); err != nil {
+		// Since generateSkeleton creates the directory, we need to mark it as created
+		// for rollback to clean it up
+		state.localRepoCreated = true
+		c.rollback(state, opts, targetPath)
+		return fmt.Errorf("failed to generate skeleton: %w", err)
 	}
 	state.localRepoCreated = true
 
 	// Phase 2.5: Detect project type early
-	repoPath := filepath.Join(".", opts.Name)
-	projectType := c.detectProjectType(repoPath)
-	
-	// Phase 2.6: Add to go.work temporarily for Go projects only
-	if projectType == "go" {
+	projectType := c.detectProjectType(targetPath)
+
+	// Phase 2.6: Add to go.work temporarily for Go projects only (in ecosystem mode)
+	if projectType == "go" && opts.Ecosystem {
+		// Snapshot go.work before modifying it
+		rootDir, err := workspace.FindRoot("")
+		if err == nil {
+			goWorkPath := filepath.Join(rootDir, "go.work")
+			if content, err := os.ReadFile(goWorkPath); err == nil {
+				state.originalGoWorkContent = content
+			}
+		}
+		
 		if err := c.updateGoWork(opts); err != nil {
-			c.rollback(state, opts)
+			c.rollback(state, opts, targetPath)
 			return fmt.Errorf("failed to update go.work: %w", err)
 		}
 	}
 
 	// Phase 2.7: Local verification
 	c.logger.Info("Running local verification...")
-	if err := c.verifyLocal(opts); err != nil {
-		c.rollback(state, opts)
+	if err := c.verifyLocal(opts, targetPath); err != nil {
+		c.rollback(state, opts, targetPath)
 		return fmt.Errorf("local verification failed: %w", err)
 	}
 
 	// Phase 3: GitHub operations
 	if !opts.SkipGitHub {
 		// Create repo first
-		if err := c.createGitHubRepo(opts); err != nil {
-			c.rollback(state, opts)
+		if err := c.createGitHubRepo(opts, targetPath); err != nil {
+			c.rollback(state, opts, targetPath)
 			return err
 		}
 		state.githubRepoCreated = true
 
 		// Set up secrets BEFORE pushing
-		if err := c.setupSecrets(opts); err != nil {
-			c.rollback(state, opts)
+		if err := c.setupSecrets(opts, targetPath); err != nil {
+			c.rollback(state, opts, targetPath)
 			return err
 		}
 
 		// Now push the code
-		if err := c.pushToGitHub(opts); err != nil {
-			c.rollback(state, opts)
+		if err := c.pushToGitHub(opts, targetPath); err != nil {
+			c.rollback(state, opts, targetPath)
 			return err
 		}
 	}
 
 	// Phase 4: Initial release
-	if err := c.createInitialRelease(opts); err != nil {
-		c.rollback(state, opts)
+	if err := c.createInitialRelease(opts, targetPath); err != nil {
+		c.rollback(state, opts, targetPath)
 		return err
 	}
 
 	// Wait for CI to complete if GitHub repo was created and .github directory exists
 	if !opts.SkipGitHub {
-		githubDir := filepath.Join(opts.Name, ".github")
+		githubDir := filepath.Join(targetPath, ".github")
 		if _, err := os.Stat(githubDir); err == nil {
 			// .github directory exists, wait for CI
 			if err := c.waitForCI(opts); err != nil {
@@ -129,22 +162,25 @@ func (c *Creator) Create(opts CreateOptions) error {
 	}
 
 	// Phase 5: Add to ecosystem (only if requested)
-	if opts.UpdateEcosystem {
+	if opts.Ecosystem {
 		if err := c.addToEcosystem(opts); err != nil {
-			c.rollback(state, opts)
+			c.rollback(state, opts, targetPath)
 			return fmt.Errorf("failed to add repository to ecosystem: %w\n\nNote: The grove-ecosystem may have been partially modified.\nYou can clean up with: git reset --hard", err)
 		}
 
 		// Phase 6: Stage changes (only if requested)
 		if opts.StageChanges {
-			if err := c.stageEcosystemChanges(opts); err != nil {
-				return fmt.Errorf("failed to stage ecosystem changes: %w\n\nNote: The grove-ecosystem has been modified but changes were not staged.\nYou can:\n  - Stage manually: git add Makefile go.work .gitmodules %s\n  - Or reset: git reset --hard", err, opts.Name)
+			if err := c.stageEcosystemChanges(opts, targetPath); err != nil {
+				// At this point the repo has been created successfully, so we just warn about staging
+				c.logger.Warnf("Failed to stage ecosystem changes: %v", err)
+				c.logger.Infof("The grove-ecosystem has been modified but changes were not staged.")
+				c.logger.Infof("You can stage manually: git add Makefile go.work .gitmodules %s", opts.Name)
 			}
 		}
 	}
 
 	// Phase 7: Final summary
-	return c.showSummary(opts)
+	return c.showSummary(opts, targetPath)
 }
 
 func (c *Creator) validate(opts CreateOptions) error {
@@ -160,19 +196,16 @@ func (c *Creator) validate(opts CreateOptions) error {
 		return fmt.Errorf("binary alias cannot be empty")
 	}
 
-	// Check for alias conflicts
-	if err := checkBinaryAliasConflict(opts.Alias); err != nil {
-		return err
-	}
-
-	// Check if directory already exists
-	if _, err := os.Stat(opts.Name); err == nil {
-		return fmt.Errorf("directory %s already exists", opts.Name)
-	}
-
-	// Check if we're in grove-ecosystem root
-	if _, err := os.Stat("grove.yml"); err != nil {
-		return fmt.Errorf("must be run from grove-ecosystem root directory")
+	// Check if we're in grove-ecosystem root (only if ecosystem mode)
+	if opts.Ecosystem {
+		if _, err := os.Stat("grove.yml"); err != nil {
+			// grove.yml doesn't exist - tell user to initialize first
+			return fmt.Errorf("no grove.yml found in the current directory.\n\nTo create a new Grove ecosystem, run:\n  grove ws init\n\nOr to create a standalone repository without an ecosystem:\n  grove add-repo %s --alias %s (without --ecosystem flag)", opts.Name, opts.Alias)
+		}
+		// Check for alias conflicts in existing ecosystem
+		if err := checkBinaryAliasConflict(opts.Alias); err != nil {
+			return err
+		}
 	}
 
 	// Check dependencies
@@ -206,8 +239,18 @@ func (c *Creator) validate(opts CreateOptions) error {
 	return nil
 }
 
-func (c *Creator) generateSkeleton(opts CreateOptions) error {
+func (c *Creator) generateSkeleton(opts CreateOptions, targetPath string) error {
 	c.logger.Info("Generating repository skeleton...")
+
+	// Determine module path based on mode
+	var modulePath string
+	if opts.Ecosystem {
+		// In ecosystem mode, it's part of grove-meta
+		modulePath = fmt.Sprintf("github.com/mattsolo1/grove-meta/%s", opts.Name)
+	} else {
+		// In standalone mode, it's its own module
+		modulePath = fmt.Sprintf("github.com/mattsolo1/%s", opts.Name)
+	}
 
 	// Get latest versions
 	data := templates.TemplateData{
@@ -215,23 +258,18 @@ func (c *Creator) generateSkeleton(opts CreateOptions) error {
 		BinaryAlias:      opts.Alias,
 		BinaryAliasUpper: strings.ToUpper(opts.Alias),
 		Description:      opts.Description,
-		GoVersion:        "1.24.4",
+		GoVersion:        "1.24",
 		CoreVersion:      c.getLatestVersion("grove-core"),
 		TendVersion:      c.getLatestVersion("grove-tend"),
+		ModulePath:       modulePath,
 	}
 
 	// Always use external template (TemplatePath defaults to "go" which resolves to the Go template)
-	return c.generateFromExternalTemplate(opts, data)
+	return c.generateFromExternalTemplate(opts, data, targetPath)
 }
 
-func (c *Creator) generateFromExternalTemplate(opts CreateOptions, data templates.TemplateData) error {
+func (c *Creator) generateFromExternalTemplate(opts CreateOptions, data templates.TemplateData, targetPath string) error {
 	c.logger.Infof("Using external template from: %s", opts.TemplatePath)
-
-	// Find the grove root directory
-	rootDir, err := workspace.FindRoot("")
-	if err != nil {
-		return fmt.Errorf("failed to find grove root: %w", err)
-	}
 
 	var fetcher templates.Fetcher
 	var templateDir string
@@ -245,11 +283,11 @@ func (c *Creator) generateFromExternalTemplate(opts CreateOptions, data template
 		}
 		fetcher = gitFetcher
 		defer func() {
-			if err := fetcher.Cleanup(); err != nil {
-				c.logger.Warnf("Failed to cleanup fetcher: %v", err)
+			if cleanupErr := fetcher.Cleanup(); cleanupErr != nil {
+				c.logger.Warnf("Failed to cleanup fetcher: %v", cleanupErr)
 			}
 		}()
-		
+
 		templateDir, err = fetcher.Fetch(opts.TemplatePath)
 		if err != nil {
 			return fmt.Errorf("failed to fetch template: %w", err)
@@ -259,11 +297,12 @@ func (c *Creator) generateFromExternalTemplate(opts CreateOptions, data template
 		localFetcher := templates.NewLocalFetcher()
 		fetcher = localFetcher
 		defer func() {
-			if err := fetcher.Cleanup(); err != nil {
-				c.logger.Warnf("Failed to cleanup fetcher: %v", err)
+			if cleanupErr := fetcher.Cleanup(); cleanupErr != nil {
+				c.logger.Warnf("Failed to cleanup fetcher: %v", cleanupErr)
 			}
 		}()
-		
+
+		var err error
 		templateDir, err = fetcher.Fetch(opts.TemplatePath)
 		if err != nil {
 			return fmt.Errorf("failed to fetch template: %w", err)
@@ -273,8 +312,7 @@ func (c *Creator) generateFromExternalTemplate(opts CreateOptions, data template
 	// Create renderer
 	renderer := templates.NewRenderer()
 
-	// Render template to target directory in the grove root
-	targetPath := filepath.Join(rootDir, opts.Name)
+	// Render template to target directory
 	if err := renderer.Render(templateDir, targetPath, data); err != nil {
 		return fmt.Errorf("failed to render template: %w", err)
 	}
@@ -323,11 +361,9 @@ func (c *Creator) generateFromExternalTemplate(opts CreateOptions, data template
 	return nil
 }
 
-func (c *Creator) verifyLocal(opts CreateOptions) error {
-	repoPath := filepath.Join(".", opts.Name)
-
+func (c *Creator) verifyLocal(opts CreateOptions, targetPath string) error {
 	// Determine project type based on project files
-	projectType := c.detectProjectType(repoPath)
+	projectType := c.detectProjectType(targetPath)
 	c.logger.WithField("type", projectType).Info("Detected project type")
 
 	// Handle language-specific dependency resolution
@@ -336,7 +372,7 @@ func (c *Creator) verifyLocal(opts CreateOptions) error {
 		// Run go mod tidy first to resolve dependencies
 		c.logger.Info("Resolving dependencies...")
 		tidyCmd := exec.Command("go", "mod", "tidy")
-		tidyCmd.Dir = repoPath
+		tidyCmd.Dir = targetPath
 		tidyCmd.Env = append(os.Environ(),
 			"GOPRIVATE=github.com/mattsolo1/*",
 			"GOPROXY=direct",
@@ -348,7 +384,7 @@ func (c *Creator) verifyLocal(opts CreateOptions) error {
 		// Run go mod download
 		c.logger.Info("Downloading dependencies...")
 		modCmd := exec.Command("go", "mod", "download")
-		modCmd.Dir = repoPath
+		modCmd.Dir = targetPath
 		modCmd.Env = append(os.Environ(),
 			"GOPRIVATE=github.com/mattsolo1/*",
 			"GOPROXY=direct",
@@ -356,7 +392,7 @@ func (c *Creator) verifyLocal(opts CreateOptions) error {
 		if err := modCmd.Run(); err != nil {
 			return fmt.Errorf("go mod download failed: %w", err)
 		}
-		
+
 	case "maturin":
 		// For Python/Maturin projects, check if uv is available
 		c.logger.Info("Checking for uv (Python package manager)...")
@@ -366,28 +402,28 @@ func (c *Creator) verifyLocal(opts CreateOptions) error {
 		}
 		// The Makefile will handle the actual setup
 		c.logger.Info("Python environment setup will be handled by Makefile")
-		
+
 	case "node":
 		// For Node.js projects, run npm install
 		c.logger.Info("Installing Node.js dependencies...")
 		setupCmd := exec.Command("make", "setup")
-		setupCmd.Dir = repoPath
+		setupCmd.Dir = targetPath
 		if output, err := setupCmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("make setup failed: %w\nOutput: %s", err, string(output))
 		}
-		
+
 	default:
 		c.logger.Info("No language-specific dependency resolution needed")
 	}
 
 	// Run make-based verification (works for all project types)
 	// Check if Makefile exists first
-	makefilePath := filepath.Join(repoPath, "Makefile")
+	makefilePath := filepath.Join(targetPath, "Makefile")
 	if _, err := os.Stat(makefilePath); err == nil {
 		// Build the project
 		c.logger.Info("Building project...")
 		buildCmd := exec.Command("make", "build")
-		buildCmd.Dir = repoPath
+		buildCmd.Dir = targetPath
 		if output, err := buildCmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("make build failed: %w\nOutput: %s", err, string(output))
 		}
@@ -395,7 +431,7 @@ func (c *Creator) verifyLocal(opts CreateOptions) error {
 		// Run tests if available
 		c.logger.Info("Running tests...")
 		testCmd := exec.Command("make", "test")
-		testCmd.Dir = repoPath
+		testCmd.Dir = targetPath
 		if output, err := testCmd.CombinedOutput(); err != nil {
 			// Don't fail if test target doesn't exist
 			if !strings.Contains(string(output), "No rule to make target") {
@@ -407,7 +443,7 @@ func (c *Creator) verifyLocal(opts CreateOptions) error {
 		// Run e2e tests if available
 		c.logger.Info("Running e2e tests...")
 		e2eCmd := exec.Command("make", "test-e2e")
-		e2eCmd.Dir = repoPath
+		e2eCmd.Dir = targetPath
 		if output, err := e2eCmd.CombinedOutput(); err != nil {
 			// Don't fail if test-e2e target doesn't exist
 			if !strings.Contains(string(output), "No rule to make target") {
@@ -424,27 +460,27 @@ func (c *Creator) verifyLocal(opts CreateOptions) error {
 }
 
 // detectProjectType determines the project type based on project files
-func (c *Creator) detectProjectType(repoPath string) string {
+func (c *Creator) detectProjectType(targetPath string) string {
 	// Check for go.mod
-	if _, err := os.Stat(filepath.Join(repoPath, "go.mod")); err == nil {
+	if _, err := os.Stat(filepath.Join(targetPath, "go.mod")); err == nil {
 		return "go"
 	}
-	
+
 	// Check for pyproject.toml (Maturin/Python projects)
-	if _, err := os.Stat(filepath.Join(repoPath, "pyproject.toml")); err == nil {
+	if _, err := os.Stat(filepath.Join(targetPath, "pyproject.toml")); err == nil {
 		return "maturin"
 	}
-	
+
 	// Check for package.json (Node projects)
-	if _, err := os.Stat(filepath.Join(repoPath, "package.json")); err == nil {
+	if _, err := os.Stat(filepath.Join(targetPath, "package.json")); err == nil {
 		return "node"
 	}
-	
+
 	// Default to unknown
 	return "unknown"
 }
 
-func (c *Creator) createGitHubRepo(opts CreateOptions) error {
+func (c *Creator) createGitHubRepo(opts CreateOptions, targetPath string) error {
 	c.logger.Info("Creating GitHub repository...")
 
 	// Create the repository without pushing
@@ -453,7 +489,7 @@ func (c *Creator) createGitHubRepo(opts CreateOptions) error {
 		"--private",
 		"--source=.",
 		"--remote=origin")
-	createCmd.Dir = opts.Name
+	createCmd.Dir = targetPath
 
 	if output, err := createCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to create GitHub repository: %w\nOutput: %s", err, string(output))
@@ -461,9 +497,9 @@ func (c *Creator) createGitHubRepo(opts CreateOptions) error {
 
 	// Ensure the remote URL is clean (no embedded tokens)
 	c.logger.Info("Ensuring clean remote URL...")
-	setUrlCmd := exec.Command("git", "remote", "set-url", "origin", 
+	setUrlCmd := exec.Command("git", "remote", "set-url", "origin",
 		fmt.Sprintf("https://github.com/mattsolo1/%s.git", opts.Name))
-	setUrlCmd.Dir = opts.Name
+	setUrlCmd.Dir = targetPath
 	if err := setUrlCmd.Run(); err != nil {
 		c.logger.Warnf("Failed to set clean remote URL: %v", err)
 	}
@@ -472,10 +508,10 @@ func (c *Creator) createGitHubRepo(opts CreateOptions) error {
 	return nil
 }
 
-func (c *Creator) pushToGitHub(opts CreateOptions) error {
+func (c *Creator) pushToGitHub(opts CreateOptions, targetPath string) error {
 	c.logger.Info("Pushing to GitHub...")
 	pushCmd := exec.Command("git", "push", "-u", "origin", "main")
-	pushCmd.Dir = opts.Name
+	pushCmd.Dir = targetPath
 	if output, err := pushCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to push to GitHub: %w\nOutput: %s", err, string(output))
 	}
@@ -484,7 +520,7 @@ func (c *Creator) pushToGitHub(opts CreateOptions) error {
 	return nil
 }
 
-func (c *Creator) setupSecrets(opts CreateOptions) error {
+func (c *Creator) setupSecrets(opts CreateOptions, targetPath string) error {
 	c.logger.Info("Setting up repository secrets...")
 
 	// We already validated GROVE_PAT exists in the validate phase
@@ -492,7 +528,7 @@ func (c *Creator) setupSecrets(opts CreateOptions) error {
 
 	// Set the secret
 	secretCmd := exec.Command("gh", "secret", "set", "GROVE_PAT", "--body", grovePAT)
-	secretCmd.Dir = opts.Name
+	secretCmd.Dir = targetPath
 
 	if err := secretCmd.Run(); err != nil {
 		return fmt.Errorf("failed to set GROVE_PAT secret: %w", err)
@@ -502,12 +538,12 @@ func (c *Creator) setupSecrets(opts CreateOptions) error {
 	return nil
 }
 
-func (c *Creator) createInitialRelease(opts CreateOptions) error {
+func (c *Creator) createInitialRelease(opts CreateOptions, targetPath string) error {
 	c.logger.Info("Creating initial release v0.0.1...")
 
 	// Create tag
 	tagCmd := exec.Command("git", "tag", "v0.0.1", "-m", "Initial release")
-	tagCmd.Dir = opts.Name
+	tagCmd.Dir = targetPath
 	if err := tagCmd.Run(); err != nil {
 		return fmt.Errorf("failed to create tag: %w", err)
 	}
@@ -515,7 +551,7 @@ func (c *Creator) createInitialRelease(opts CreateOptions) error {
 	if !opts.SkipGitHub {
 		// Push tag
 		pushCmd := exec.Command("git", "push", "origin", "v0.0.1")
-		pushCmd.Dir = opts.Name
+		pushCmd.Dir = targetPath
 		if err := pushCmd.Run(); err != nil {
 			return fmt.Errorf("failed to push tag: %w", err)
 		}
@@ -547,7 +583,7 @@ func (c *Creator) waitForCI(opts CreateOptions) error {
 	runID := strings.TrimSpace(string(output))
 	if runID == "" {
 		c.logger.Warn("No release workflow found yet, it may still be starting...")
-		return nil  // Don't fail, just continue
+		return nil // Don't fail, just continue
 	}
 
 	// Watch the workflow
@@ -567,31 +603,38 @@ func (c *Creator) waitForCI(opts CreateOptions) error {
 func (c *Creator) addToEcosystem(opts CreateOptions) error {
 	c.logger.Info("Adding repository to grove-ecosystem...")
 
-	if !opts.SkipGitHub {
-		// Check if submodule already exists
-		checkCmd := exec.Command("git", "submodule", "status", opts.Name)
-		if err := checkCmd.Run(); err == nil {
-			c.logger.Warnf("Submodule %s already exists, updating it...", opts.Name)
-			
-			// Update the submodule URL in case it changed
+	// Always add as submodule in ecosystem mode
+	// Check if submodule already exists
+	checkCmd := exec.Command("git", "submodule", "status", opts.Name)
+	if err := checkCmd.Run(); err == nil {
+		c.logger.Warnf("Submodule %s already exists, updating it...", opts.Name)
+
+		// Update the submodule URL in case it changed (only if GitHub is enabled)
+		if !opts.SkipGitHub {
 			updateUrlCmd := exec.Command("git", "submodule", "set-url", opts.Name,
 				fmt.Sprintf("git@github.com:mattsolo1/%s.git", opts.Name))
 			if err := updateUrlCmd.Run(); err != nil {
 				c.logger.Warnf("Failed to update submodule URL: %v", err)
 			}
+		}
+	} else {
+		// Add as submodule only if it doesn't exist
+		// Use local path if SkipGitHub is true, otherwise use GitHub URL
+		var submoduleUrl string
+		if opts.SkipGitHub {
+			submoduleUrl = "./" + opts.Name
 		} else {
-			// Add as submodule only if it doesn't exist
-			submoduleCmd := exec.Command("git", "submodule", "add",
-				fmt.Sprintf("git@github.com:mattsolo1/%s.git", opts.Name),
-				opts.Name)
+			submoduleUrl = fmt.Sprintf("git@github.com:mattsolo1/%s.git", opts.Name)
+		}
+		
+		submoduleCmd := exec.Command("git", "submodule", "add", submoduleUrl, opts.Name)
 
-			if output, err := submoduleCmd.CombinedOutput(); err != nil {
-				// Check if it's the "already exists" error
-				if strings.Contains(string(output), "already exists in the index") {
-					c.logger.Warn("Submodule already in index, continuing...")
-				} else {
-					return fmt.Errorf("failed to add submodule: %w\nOutput: %s", err, string(output))
-				}
+		if output, err := submoduleCmd.CombinedOutput(); err != nil {
+			// Check if it's the "already exists" error
+			if strings.Contains(string(output), "already exists in the index") {
+				c.logger.Warn("Submodule already in index, continuing...")
+			} else {
+				return fmt.Errorf("failed to add submodule: %w\nOutput: %s", err, string(output))
 			}
 		}
 	}
@@ -623,21 +666,20 @@ func (c *Creator) updateGoWork(opts CreateOptions) error {
 
 // isGoTemplate checks if the template is Go-based
 func isGoTemplate(templatePath string) bool {
-	// Check if it's the default "go" template or a path containing "go"
-	return templatePath == "go" || strings.Contains(templatePath, "tmpl-go")
+	// Check if it's the default "go" template or a path containing grove-project-tmpl-go
+	return templatePath == "go" || strings.HasSuffix(templatePath, "grove-project-tmpl-go")
 }
 
-func (c *Creator) stageEcosystemChanges(opts CreateOptions) error {
+func (c *Creator) stageEcosystemChanges(opts CreateOptions, targetPath string) error {
 	c.logger.Info("Staging ecosystem changes...")
 
 	// Always stage Makefile
 	filesToStage := []string{
 		"Makefile",
 	}
-	
+
 	// Only stage go.work if this is a Go project
-	repoPath := filepath.Join(".", opts.Name)
-	projectType := c.detectProjectType(repoPath)
+	projectType := c.detectProjectType(targetPath)
 	if projectType == "go" {
 		filesToStage = append(filesToStage, "go.work")
 	}
@@ -658,40 +700,49 @@ func (c *Creator) stageEcosystemChanges(opts CreateOptions) error {
 	return nil
 }
 
-func (c *Creator) showSummary(opts CreateOptions) error {
+func (c *Creator) showSummary(opts CreateOptions, targetPath string) error {
 	fmt.Println("\n✅ All operations completed successfully!")
 	fmt.Println("\nSUMMARY")
 	fmt.Println("-------")
-	fmt.Printf("- Local repository created at: ./%s\n", opts.Name)
+	fmt.Printf("- Local repository created at: %s\n", targetPath)
 
 	if !opts.SkipGitHub {
 		fmt.Printf("- GitHub repository created:  https://github.com/mattsolo1/%s\n", opts.Name)
 		fmt.Println("- Initial release v0.0.1 pushed and CI is running.")
 	}
 
-	fmt.Println("- Submodule added to grove-ecosystem.")
-	fmt.Println("- Root Makefile and go.work have been updated.")
+	if opts.Ecosystem {
+		fmt.Println("- Submodule added to grove-ecosystem.")
+		fmt.Println("- Root Makefile and go.work have been updated.")
+	}
 
 	fmt.Println("\nNEXT STEPS")
 	fmt.Println("----------")
-	
-	if opts.UpdateEcosystem && opts.StageChanges {
-		fmt.Println("1. Review the staged changes in the ecosystem repo:")
-		fmt.Println("   > git status")
-		fmt.Println("   (You should see a modified Makefile, go.work, .gitmodules, and a new submodule entry)")
-		fmt.Println("")
-		fmt.Printf("2. Commit the integration to the main branch:\n")
-		fmt.Printf("   > git commit -m \"feat: add %s to the ecosystem\"\n", opts.Name)
-		fmt.Println("")
-		fmt.Printf("3. Start developing your new tool:\n")
-		fmt.Printf("   > cd %s\n", opts.Name)
-		fmt.Printf("   > grove install %s\n", opts.Alias)
+
+	if opts.Ecosystem {
+		if opts.StageChanges {
+			fmt.Println("1. Review the staged changes in the ecosystem repo:")
+			fmt.Println("   > git status")
+			fmt.Println("   (You should see a modified Makefile, go.work, .gitmodules, and a new submodule entry)")
+			fmt.Println("")
+			fmt.Printf("2. Commit the integration to the main branch:\n")
+			fmt.Printf("   > git commit -m \"feat: add %s to the ecosystem\"\n", opts.Name)
+			fmt.Println("")
+			fmt.Printf("3. Start developing your new tool:\n")
+			fmt.Printf("   > cd %s\n", opts.Name)
+			fmt.Printf("   > grove install %s\n", opts.Alias)
+		} else {
+			fmt.Println("1. Stage and commit the ecosystem changes:")
+			fmt.Println("   > git add Makefile go.work .gitmodules " + opts.Name)
+			fmt.Printf("   > git commit -m \"feat: add %s to the ecosystem\"\n", opts.Name)
+			fmt.Println("")
+			fmt.Printf("2. Start developing your new tool:\n")
+			fmt.Printf("   > cd %s\n", opts.Name)
+			fmt.Printf("   > grove install %s\n", opts.Alias)
+		}
 	} else {
-		fmt.Println("1. Stage and commit the ecosystem changes:")
-		fmt.Println("   > git add Makefile go.work .gitmodules " + opts.Name)
-		fmt.Printf("   > git commit -m \"feat: add %s to the ecosystem\"\n", opts.Name)
-		fmt.Println("")
-		fmt.Printf("2. Start developing your new tool:\n")
+		// Standalone mode
+		fmt.Printf("1. Start developing your new tool:\n")
 		fmt.Printf("   > cd %s\n", opts.Name)
 		fmt.Printf("   > grove install %s\n", opts.Alias)
 	}
@@ -699,7 +750,7 @@ func (c *Creator) showSummary(opts CreateOptions) error {
 	return nil
 }
 
-func (c *Creator) rollback(state *creationState, opts CreateOptions) {
+func (c *Creator) rollback(state *creationState, opts CreateOptions, targetPath string) {
 	c.logger.Warn("Error occurred, rolling back changes...")
 
 	if state.githubRepoCreated && !opts.SkipGitHub {
@@ -710,23 +761,37 @@ func (c *Creator) rollback(state *creationState, opts CreateOptions) {
 
 	if state.localRepoCreated {
 		c.logger.Info("Removing local directory...")
-		if err := os.RemoveAll(opts.Name); err != nil {
+		if err := os.RemoveAll(targetPath); err != nil {
 			c.logger.Errorf("Failed to remove directory: %v", err)
 		}
 
-		// Also remove from go.work if it was added
-		c.logger.Info("Removing from go.work...")
-		eco := &Ecosystem{logger: c.logger}
-		if err := eco.removeFromGoWork(opts.Name); err != nil {
-			c.logger.Errorf("Failed to remove from go.work: %v", err)
+		// Restore go.work if we have a snapshot
+		if opts.Ecosystem && state.originalGoWorkContent != nil {
+			c.logger.Info("Restoring go.work from snapshot...")
+			rootDir, err := workspace.FindRoot("")
+			if err == nil {
+				goWorkPath := filepath.Join(rootDir, "go.work")
+				if err := os.WriteFile(goWorkPath, state.originalGoWorkContent, 0644); err != nil {
+					c.logger.Errorf("Failed to restore go.work: %v", err)
+				}
+			}
+		} else if opts.Ecosystem {
+			// Fallback to the old removal method if no snapshot
+			c.logger.Info("Removing from go.work...")
+			eco := &Ecosystem{logger: c.logger}
+			if err := eco.removeFromGoWork(opts.Name); err != nil {
+				c.logger.Errorf("Failed to remove from go.work: %v", err)
+			}
 		}
 
-		// Try to remove from git index if it was added as submodule
-		c.logger.Info("Cleaning up git submodule...")
-		rmCmd := exec.Command("git", "rm", "--cached", "-f", opts.Name)
-		if err := rmCmd.Run(); err != nil {
-			// This is okay if it wasn't added
-			c.logger.Debugf("Submodule cleanup: %v", err)
+		// Try to remove from git index if it was added as submodule (only in ecosystem mode)
+		if opts.Ecosystem {
+			c.logger.Info("Cleaning up git submodule...")
+			rmCmd := exec.Command("git", "rm", "--cached", "-f", opts.Name)
+			if err := rmCmd.Run(); err != nil {
+				// This is okay if it wasn't added
+				c.logger.Debugf("Submodule cleanup: %v", err)
+			}
 		}
 	}
 }
@@ -755,18 +820,18 @@ func (c *Creator) dryRun(opts CreateOptions) error {
 		c.logger.Info("  gh run watch")
 	}
 
-	if opts.UpdateEcosystem {
+	if opts.Ecosystem {
 		c.logger.Info("\nEcosystem integration:")
 		c.logger.Infof("  git submodule add git@github.com:mattsolo1/%s.git", opts.Name)
 		c.logger.Infof("  Update Makefile: Add %s to PACKAGES", opts.Name)
 		c.logger.Infof("  Update Makefile: Add %s to BINARIES", opts.Alias)
 		c.logger.Infof("  Update go.work: Add use (./%s)", opts.Name)
-		
+
 		if opts.StageChanges {
 			c.logger.Infof("  git add Makefile go.work .gitmodules %s", opts.Name)
 		}
 	} else {
-		c.logger.Info("\nEcosystem integration: SKIPPED (use --update-ecosystem flag to enable)")
+		c.logger.Info("\nEcosystem integration: SKIPPED (use --ecosystem flag to enable)")
 	}
 
 	return nil
@@ -790,3 +855,4 @@ func (c *Creator) getLatestVersion(repo string) string {
 	}
 	return strings.TrimSpace(string(output))
 }
+

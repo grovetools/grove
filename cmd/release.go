@@ -125,7 +125,7 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	if len(releaseRepos) > 0 && releaseWithDeps {
 		expandedRepos, autoDeps := expandReposWithDependencies(releaseRepos, graph)
 		autoDependencies = autoDeps
-		
+
 		// Log the expansion
 		originalCount := len(releaseRepos)
 		displayInfo(fmt.Sprintf("Expanded from %d to %d repositories", originalCount, len(expandedRepos)))
@@ -135,7 +135,7 @@ func runRelease(cmd *cobra.Command, args []string) error {
 				logger.WithField("repo", dep).Info("Auto-including dependency")
 			}
 		}
-		
+
 		// Update releaseRepos with the expanded list
 		releaseRepos = expandedRepos
 	}
@@ -145,7 +145,7 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to calculate versions: %w", err)
 	}
-	
+
 	// If using --with-deps, force include auto-dependencies even if they don't have changes
 	if releaseWithDeps && autoDependencies != nil {
 		for dep := range autoDependencies {
@@ -285,7 +285,7 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		if err := executeGitCommand(ctx, rootDir, []string{"push", "origin", finalParentVersion}, "Push release tag", logger); err != nil {
 			return err
 		}
-		
+
 		displayFinalSuccess(finalParentVersion, releasedCount)
 	} else {
 		displayInfo("Skipping parent repository updates (--skip-parent flag)")
@@ -733,7 +733,7 @@ func boolToString(b bool) string {
 func expandReposWithDependencies(repos []string, graph *depsgraph.Graph) ([]string, map[string]bool) {
 	expanded := make(map[string]bool)
 	autoDeps := make(map[string]bool) // Track which were auto-added
-	
+
 	// Helper function to recursively add dependencies
 	var addDeps func(repo string)
 	addDeps = func(repo string) {
@@ -742,13 +742,13 @@ func expandReposWithDependencies(repos []string, graph *depsgraph.Graph) ([]stri
 			return
 		}
 		expanded[repo] = true
-		
+
 		// Get the node to access its dependencies
 		node, exists := graph.GetNode(repo)
 		if !exists {
 			return
 		}
-		
+
 		// Find Grove dependencies
 		for _, dep := range node.Deps {
 			// Check if this is a Grove dependency by looking for matching nodes
@@ -764,19 +764,19 @@ func expandReposWithDependencies(repos []string, graph *depsgraph.Graph) ([]stri
 			}
 		}
 	}
-	
+
 	// Process each explicitly requested repo
 	for _, repo := range repos {
 		expanded[repo] = false // false means explicitly requested
 		addDeps(repo)
 	}
-	
+
 	// Convert map to slice
 	var result []string
 	for repo := range expanded {
 		result = append(result, repo)
 	}
-	
+
 	return result, autoDeps
 }
 
@@ -1015,19 +1015,19 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 		// Use goroutines to release repositories in parallel
 		var wg sync.WaitGroup
 		errChan := make(chan error, len(reposToRelease))
-		
+
 		for _, repoName := range reposToRelease {
 			wg.Add(1)
 			go func(repo string) {
 				defer wg.Done()
-				
+
 				version := versions[repo]
 				node, ok := graph.GetNode(repo)
 				if !ok {
 					errChan <- fmt.Errorf("node not found in graph: %s", repo)
 					return
 				}
-				
+
 				wsPath := node.Dir
 
 				logger.WithFields(logrus.Fields{
@@ -1062,7 +1062,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 									logger.WithError(err).Warnf("Failed to commit changelog for %s", repo)
 								} else {
 									// Push the changelog commit to remote
-									if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", "HEAD:main"}, 
+									if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", "HEAD:main"},
 										fmt.Sprintf("Push changelog for %s", repo), logger); err != nil {
 										logger.WithError(err).Warnf("Failed to push changelog commit for %s", repo)
 									}
@@ -1094,13 +1094,13 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 						// .github directory exists, wait for workflows
 						logger.Infof("Waiting for CI release of %s@%s to complete (timeout: 60 minutes)...", repo, version)
 						displayInfo(fmt.Sprintf("Waiting for CI release of %s@%s to complete (timeout: 60 minutes)...", repo, version))
-						
+
 						if err := gh.WaitForReleaseWorkflow(ctx, wsPath, version); err != nil {
 							// This is a critical failure
 							errChan <- fmt.Errorf("release workflow for %s@%s failed: %w", repo, version, err)
 							return
 						}
-						
+
 						logger.Infof("✅ CI release for %s@%s successful.", repo, version)
 						displayInfo(fmt.Sprintf("✅ CI release for %s@%s successful.", repo, version))
 					} else {
@@ -1143,12 +1143,12 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 				return err
 			}
 		}
-		
+
 		// After releasing this level, sync dependencies for the next levels if requested
 		if releaseSyncDeps && levelIndex < len(releaseLevels)-1 && !releaseDryRun {
 			logger.Info("Syncing Grove dependencies to latest versions before next level...")
 			displayInfo("🔄 Syncing Grove dependencies to latest versions...")
-			
+
 			// Collect repositories in the next levels that need syncing
 			var reposToSync []string
 			for nextLevel := levelIndex + 1; nextLevel < len(releaseLevels); nextLevel++ {
@@ -1159,7 +1159,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 					}
 				}
 			}
-			
+
 			if len(reposToSync) > 0 {
 				// Run dependency sync for these repositories
 				if err := syncDependenciesForRepos(ctx, rootDir, reposToSync, graph, logger); err != nil {
@@ -1184,16 +1184,16 @@ func updateDependencies(ctx context.Context, modulePath string, releasedVersions
 		// If no grove.yml, assume Go project for backward compatibility
 		return updateGoDependencies(ctx, modulePath, releasedVersions, graph, logger)
 	}
-	
+
 	// Get project type
 	var projectTypeStr string
 	if err := cfg.UnmarshalExtension("type", &projectTypeStr); err != nil || projectTypeStr == "" {
 		// Default to Go for backward compatibility
 		projectTypeStr = string(project.TypeGo)
 	}
-	
+
 	projectType := project.Type(projectTypeStr)
-	
+
 	// Get appropriate handler
 	registry := project.NewRegistry()
 	handler, err := registry.Get(projectType)
@@ -1201,23 +1201,23 @@ func updateDependencies(ctx context.Context, modulePath string, releasedVersions
 		logger.WithError(err).Warnf("No handler for project type %s, skipping dependency update", projectType)
 		return nil
 	}
-	
+
 	// Parse current dependencies
 	deps, err := handler.ParseDependencies(modulePath)
 	if err != nil {
 		logger.WithError(err).Warnf("Failed to parse dependencies for %s", filepath.Base(modulePath))
 		return nil
 	}
-	
+
 	// Track if we made any updates
 	hasUpdates := false
-	
+
 	// Check each dependency
 	for _, dep := range deps {
 		if !dep.Workspace {
 			continue
 		}
-		
+
 		// Find the workspace name for this dependency
 		var depWorkspaceName string
 		if projectType == project.TypeGo {
@@ -1232,39 +1232,39 @@ func updateDependencies(ctx context.Context, modulePath string, releasedVersions
 			// For other project types, dependency name should match workspace name
 			depWorkspaceName = dep.Name
 		}
-		
+
 		if depWorkspaceName == "" {
 			continue
 		}
-		
+
 		// Check if this dependency has a new version
 		newVersion, hasNewVersion := releasedVersions[depWorkspaceName]
 		if !hasNewVersion {
 			continue
 		}
-		
+
 		logger.WithFields(logrus.Fields{
 			"dep": dep.Name,
 			"old": dep.Version,
 			"new": newVersion,
 		}).Info("Updating dependency")
-		
+
 		// Update to new version
 		dep.Version = newVersion
 		if err := handler.UpdateDependency(modulePath, dep); err != nil {
 			return fmt.Errorf("failed to update %s: %w", dep.Name, err)
 		}
-		
+
 		hasUpdates = true
 	}
-	
+
 	if hasUpdates {
 		// Check for changes
 		status, err := git.GetStatus(modulePath)
 		if err != nil {
 			return fmt.Errorf("failed to get git status: %w", err)
 		}
-		
+
 		if status.IsDirty {
 			// Commit the dependency updates
 			commitFiles := []string{}
@@ -1273,13 +1273,13 @@ func updateDependencies(ctx context.Context, modulePath string, releasedVersions
 			} else if projectType == project.TypeMaturin {
 				commitFiles = []string{"pyproject.toml"}
 			}
-			
+
 			if len(commitFiles) > 0 {
 				if err := executeGitCommand(ctx, modulePath, append([]string{"add"}, commitFiles...),
 					"Stage dependency updates", logger); err != nil {
 					return err
 				}
-				
+
 				commitMsg := "chore(deps): bump dependencies"
 				if err := executeGitCommand(ctx, modulePath, []string{"commit", "-m", commitMsg},
 					"Commit dependency updates", logger); err != nil {
@@ -1288,7 +1288,7 @@ func updateDependencies(ctx context.Context, modulePath string, releasedVersions
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -1438,7 +1438,6 @@ func displayAndConfirmVersionsWithOrder(rootDir string, versions map[string]stri
 		return false
 	}
 
-
 	// Prepare rows
 	var rows [][]string
 
@@ -1485,13 +1484,13 @@ func displayAndConfirmVersionsWithOrder(rootDir string, versions map[string]stri
 		}
 		proposed := versions[repo]
 		increment := getVersionIncrement(current, proposed)
-		
+
 		// Add indicator if this was auto-included as a dependency
 		repoDisplay := repo
 		if autoDependencies != nil && autoDependencies[repo] {
 			repoDisplay = repo + " (auto)"
 		}
-		
+
 		// Pre-style the proposed version
 		styledProposed := releaseHighlightStyle.Render(proposed)
 		rows = append(rows, []string{repoDisplay, current, styledProposed, increment})
@@ -1541,7 +1540,7 @@ func displayAndConfirmVersionsWithOrder(rootDir string, versions map[string]stri
 	displayReleaseSummary(releaseLevels, versions, currentVersions, hasChanges)
 
 	fmt.Printf("\n%d repositories will be released.\n", changeCount)
-	
+
 	// Show auto-included dependencies info
 	if autoDependencies != nil && len(autoDependencies) > 0 {
 		fmt.Printf("\nNote: %d repositories were auto-included as dependencies (marked with 'auto').\n", len(autoDependencies))
@@ -1611,7 +1610,6 @@ func displayAndConfirmVersions(versions map[string]string, currentVersions map[s
 
 	// Count repos with changes
 	changeCount := len(reposWithChanges)
-
 
 	// Prepare rows
 	var rows [][]string
@@ -1813,13 +1811,13 @@ func createReleaseCommitMessage(versions map[string]string, hasChanges map[strin
 
 func checkForOutdatedDependencies(ctx context.Context, rootDir string, workspaces []string, logger *logrus.Logger) error {
 	outdatedDeps := make(map[string]map[string]string) // workspace -> dep -> current version
-	
+
 	for _, ws := range workspaces {
 		// Skip the root workspace
 		if ws == rootDir {
 			continue
 		}
-		
+
 		wsName := filepath.Base(ws)
 		goModPath := filepath.Join(ws, "go.mod")
 		goModContent, err := os.ReadFile(goModPath)
@@ -1830,7 +1828,7 @@ func checkForOutdatedDependencies(ctx context.Context, rootDir string, workspace
 		// Parse current Grove dependencies
 		lines := strings.Split(string(goModContent), "\n")
 		inRequire := false
-		
+
 		for _, line := range lines {
 			line = strings.TrimSpace(line)
 			if line == "require (" {
@@ -1840,7 +1838,7 @@ func checkForOutdatedDependencies(ctx context.Context, rootDir string, workspace
 			if inRequire && line == ")" {
 				break
 			}
-			
+
 			if inRequire || strings.HasPrefix(line, "require ") {
 				if strings.Contains(line, "github.com/mattsolo1/") {
 					parts := strings.Fields(line)
@@ -1848,13 +1846,13 @@ func checkForOutdatedDependencies(ctx context.Context, rootDir string, workspace
 						dep := parts[0]
 						if strings.HasPrefix(dep, "github.com/mattsolo1/") {
 							currentVersion := parts[1]
-							
+
 							// Get latest version
 							latestVersion, err := getLatestModuleVersion(dep)
 							if err != nil {
 								continue // Skip if we can't get latest version
 							}
-							
+
 							// Check if outdated
 							if currentVersion != latestVersion {
 								if outdatedDeps[wsName] == nil {
@@ -1868,7 +1866,7 @@ func checkForOutdatedDependencies(ctx context.Context, rootDir string, workspace
 			}
 		}
 	}
-	
+
 	// Display warnings for outdated dependencies
 	if len(outdatedDeps) > 0 {
 		displayWarning("⚠️  Outdated Grove dependencies detected:")
@@ -1881,7 +1879,7 @@ func checkForOutdatedDependencies(ctx context.Context, rootDir string, workspace
 		}
 		fmt.Printf("\n💡 Consider running `grove deps sync --commit --push` before releasing\n\n")
 	}
-	
+
 	return nil
 }
 
@@ -1890,7 +1888,7 @@ func extractCurrentVersions(goModContent string) map[string]string {
 	versions := make(map[string]string)
 	lines := strings.Split(goModContent, "\n")
 	inRequire := false
-	
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "require (" {
@@ -1900,7 +1898,7 @@ func extractCurrentVersions(goModContent string) map[string]string {
 		if inRequire && line == ")" {
 			break
 		}
-		
+
 		if inRequire || strings.HasPrefix(line, "require ") {
 			parts := strings.Fields(line)
 			if len(parts) >= 2 && strings.HasPrefix(parts[0], "github.com/mattsolo1/") {
@@ -1908,7 +1906,7 @@ func extractCurrentVersions(goModContent string) map[string]string {
 			}
 		}
 	}
-	
+
 	return versions
 }
 
@@ -1920,10 +1918,10 @@ func syncDependenciesForRepos(ctx context.Context, rootDir string, repos []strin
 			repoPaths[repo] = node.Dir
 		}
 	}
-	
+
 	// Track all unique Grove dependencies that need updating
 	uniqueDeps := make(map[string]bool)
-	
+
 	// Scan each repository for Grove dependencies
 	for repo, wsPath := range repoPaths {
 		goModPath := filepath.Join(wsPath, "go.mod")
@@ -1932,7 +1930,7 @@ func syncDependenciesForRepos(ctx context.Context, rootDir string, repos []strin
 			logger.WithError(err).Warnf("Failed to read go.mod for %s", repo)
 			continue
 		}
-		
+
 		// Parse dependencies
 		lines := strings.Split(string(goModContent), "\n")
 		inRequire := false
@@ -1945,7 +1943,7 @@ func syncDependenciesForRepos(ctx context.Context, rootDir string, repos []strin
 			if inRequire && line == ")" {
 				break
 			}
-			
+
 			if inRequire || strings.HasPrefix(line, "require ") {
 				if strings.Contains(line, "github.com/mattsolo1/") {
 					parts := strings.Fields(line)
@@ -1959,7 +1957,7 @@ func syncDependenciesForRepos(ctx context.Context, rootDir string, repos []strin
 			}
 		}
 	}
-	
+
 	// Get latest versions for all dependencies
 	depVersions := make(map[string]string)
 	for dep := range uniqueDeps {
@@ -1970,20 +1968,20 @@ func syncDependenciesForRepos(ctx context.Context, rootDir string, repos []strin
 		}
 		depVersions[dep] = version
 	}
-	
+
 	// Update each repository
 	var updateErrors []error
 	for repo, wsPath := range repoPaths {
 		logger.WithField("repo", repo).Info("Syncing dependencies")
-		
+
 		// Track what actually changed for better commit messages
 		versionChanges := make(map[string]string)
-		
+
 		// Get current versions before updating
 		goModPath := filepath.Join(wsPath, "go.mod")
 		beforeContent, _ := os.ReadFile(goModPath)
 		currentVersions := extractCurrentVersions(string(beforeContent))
-		
+
 		// Update each dependency
 		for dep, version := range depVersions {
 			// Check if this update would actually change anything
@@ -1991,21 +1989,21 @@ func syncDependenciesForRepos(ctx context.Context, rootDir string, repos []strin
 			if currentVersion, exists := currentVersions[dep]; exists && currentVersion != version {
 				versionChanges[depName] = fmt.Sprintf("%s → %s", currentVersion, version)
 			}
-			
+
 			cmd := exec.CommandContext(ctx, "go", "get", fmt.Sprintf("%s@%s", dep, version))
 			cmd.Dir = wsPath
 			cmd.Env = append(os.Environ(),
 				"GOPRIVATE=github.com/mattsolo1/*",
 				"GOPROXY=direct",
 			)
-			
+
 			if output, err := cmd.CombinedOutput(); err != nil {
 				logger.WithError(err).WithField("output", string(output)).
 					Warnf("Failed to update %s in %s", dep, repo)
 				updateErrors = append(updateErrors, fmt.Errorf("%s: %w", repo, err))
 			}
 		}
-		
+
 		// Run go mod tidy
 		cmd := exec.CommandContext(ctx, "go", "mod", "tidy")
 		cmd.Dir = wsPath
@@ -2013,20 +2011,20 @@ func syncDependenciesForRepos(ctx context.Context, rootDir string, repos []strin
 			"GOPRIVATE=github.com/mattsolo1/*",
 			"GOPROXY=direct",
 		)
-		
+
 		if output, err := cmd.CombinedOutput(); err != nil {
 			logger.WithError(err).WithField("output", string(output)).
 				Warnf("go mod tidy failed for %s", repo)
 			updateErrors = append(updateErrors, fmt.Errorf("%s: go mod tidy: %w", repo, err))
 		}
-		
+
 		// Check for changes and commit
 		status, err := git.GetStatus(wsPath)
 		if err != nil {
 			logger.WithError(err).Warnf("Failed to get git status for %s", repo)
 			continue
 		}
-		
+
 		if status.IsDirty {
 			// Stage go.mod and go.sum
 			if err := executeGitCommand(ctx, wsPath, []string{"add", "go.mod", "go.sum"},
@@ -2034,7 +2032,7 @@ func syncDependenciesForRepos(ctx context.Context, rootDir string, repos []strin
 				logger.WithError(err).Warnf("Failed to stage changes for %s", repo)
 				continue
 			}
-			
+
 			// Build detailed commit message
 			commitMsg := "chore(deps): sync Grove dependencies to latest versions\n\n"
 			if len(versionChanges) > 0 {
@@ -2042,28 +2040,28 @@ func syncDependenciesForRepos(ctx context.Context, rootDir string, repos []strin
 					commitMsg += fmt.Sprintf("- %s: %s\n", depName, change)
 				}
 			}
-			
+
 			if err := executeGitCommand(ctx, wsPath, []string{"commit", "-m", commitMsg},
 				"Commit dependency sync", logger); err != nil {
 				logger.WithError(err).Warnf("Failed to commit changes for %s", repo)
 				continue
 			}
-			
+
 			// Push
 			if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", "HEAD:main"},
 				"Push dependency sync", logger); err != nil {
 				logger.WithError(err).Warnf("Failed to push changes for %s", repo)
 				continue
 			}
-			
+
 			logger.WithField("repo", repo).Info("Dependencies synced and pushed")
 		}
 	}
-	
+
 	if len(updateErrors) > 0 {
 		return fmt.Errorf("some repositories failed to sync: %d errors", len(updateErrors))
 	}
-	
+
 	return nil
 }
 
@@ -2077,16 +2075,16 @@ func shouldWaitForModuleAvailability(workspacePath string) (bool, error) {
 		// If no grove.yml, assume it's a Go project for backward compatibility
 		return true, nil
 	}
-	
+
 	// Get project type from grove.yml
 	var projectTypeStr string
 	if err := cfg.UnmarshalExtension("type", &projectTypeStr); err != nil || projectTypeStr == "" {
 		// Default to Go for backward compatibility
 		return true, nil
 	}
-	
+
 	projectType := project.Type(projectTypeStr)
-	
+
 	// Only Go modules need module availability checking
 	// Template, Maturin, and Node projects are not published to Go module proxy
 	switch projectType {

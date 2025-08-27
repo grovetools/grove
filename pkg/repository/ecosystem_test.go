@@ -9,11 +9,11 @@ import (
 
 func TestUpdateGoWork(t *testing.T) {
 	tests := []struct {
-		name          string
-		initialWork   string
-		repoName      string
-		expectedWork  string
-		expectError   bool
+		name         string
+		initialWork  string
+		repoName     string
+		expectedWork string
+		expectError  bool
 	}{
 		{
 			name: "add to existing use block",
@@ -161,7 +161,7 @@ func TestExtractMakefileList(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := extractMakefileList(tt.lines, tt.startIdx)
-			
+
 			if len(result) != len(tt.expected) {
 				t.Errorf("extractMakefileList() length = %d, want %d", len(result), len(tt.expected))
 				return

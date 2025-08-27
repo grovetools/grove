@@ -19,7 +19,7 @@ func NewGitFetcher() (*GitFetcher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp directory: %w", err)
 	}
-	
+
 	return &GitFetcher{
 		tempDir: tempDir,
 	}, nil
@@ -29,7 +29,7 @@ func NewGitFetcher() (*GitFetcher, error) {
 func (f *GitFetcher) Fetch(url string) (string, error) {
 	// Create a subdirectory for the clone
 	cloneDir := filepath.Join(f.tempDir, "repo")
-	
+
 	// Convert GitHub shorthand to full URL if needed
 	repoURL := url
 	if isGitHubShorthand(url) {
@@ -40,14 +40,14 @@ func (f *GitFetcher) Fetch(url string) (string, error) {
 		// Fall back to HTTPS URL
 		repoURL = fmt.Sprintf("https://github.com/%s.git", url)
 	}
-	
+
 	// Clone the repository
 	cmd := exec.Command("git", "clone", "--depth", "1", repoURL, cloneDir)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to clone repository: %w\nOutput: %s", err, string(output))
 	}
-	
+
 	return f.findTemplateDir(cloneDir)
 }
 
@@ -68,7 +68,7 @@ func (f *GitFetcher) findTemplateDir(cloneDir string) (string, error) {
 	if info, err := os.Stat(templateDir); err == nil && info.IsDir() {
 		return templateDir, nil
 	}
-	
+
 	// If no template subdirectory, use the root of the cloned repo
 	return cloneDir, nil
 }
@@ -83,9 +83,9 @@ func (f *GitFetcher) Cleanup() error {
 
 // IsGitURL checks if a string looks like a Git URL
 func IsGitURL(s string) bool {
-	return strings.HasPrefix(s, "https://") || 
-		strings.HasPrefix(s, "http://") || 
-		strings.HasPrefix(s, "git://") || 
+	return strings.HasPrefix(s, "https://") ||
+		strings.HasPrefix(s, "http://") ||
+		strings.HasPrefix(s, "git://") ||
 		strings.HasPrefix(s, "git@") ||
 		strings.Contains(s, ".git") ||
 		isGitHubShorthand(s)

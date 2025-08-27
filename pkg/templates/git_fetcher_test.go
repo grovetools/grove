@@ -11,17 +11,17 @@ func TestGitFetcher_Cleanup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create GitFetcher: %v", err)
 	}
-	
+
 	// Verify temp directory exists
 	if _, err := os.Stat(fetcher.tempDir); os.IsNotExist(err) {
 		t.Error("Temp directory should exist after creation")
 	}
-	
+
 	// Clean up
 	if err := fetcher.Cleanup(); err != nil {
 		t.Errorf("Cleanup failed: %v", err)
 	}
-	
+
 	// Verify temp directory is removed
 	if _, err := os.Stat(fetcher.tempDir); !os.IsNotExist(err) {
 		t.Error("Temp directory should be removed after cleanup")
@@ -70,7 +70,7 @@ func TestIsGitURL(t *testing.T) {
 			expected: false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := IsGitURL(tt.url)
@@ -88,15 +88,15 @@ func TestGitFetcher_Fetch_TempDirHandling(t *testing.T) {
 		t.Fatalf("Failed to create GitFetcher: %v", err)
 	}
 	defer fetcher.Cleanup()
-	
+
 	// Create a fake "cloned" structure in the temp dir to simulate success
 	cloneDir := filepath.Join(fetcher.tempDir, "repo")
 	templateDir := filepath.Join(cloneDir, "template")
-	
+
 	if err := os.MkdirAll(templateDir, 0755); err != nil {
 		t.Fatalf("Failed to create test directories: %v", err)
 	}
-	
+
 	// Verify the structure exists
 	if _, err := os.Stat(templateDir); os.IsNotExist(err) {
 		t.Error("Template directory should exist")

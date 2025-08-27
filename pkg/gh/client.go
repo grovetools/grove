@@ -14,19 +14,19 @@ import (
 
 var (
 	waitingStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("75")).
-		Bold(true)
-	
+			Foreground(lipgloss.Color("75")).
+			Bold(true)
+
 	successStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("10")).
-		Bold(true)
-	
+			Foreground(lipgloss.Color("10")).
+			Bold(true)
+
 	warningStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("11")).
-		Bold(true)
-	
+			Foreground(lipgloss.Color("11")).
+			Bold(true)
+
 	infoStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("12"))
+			Foreground(lipgloss.Color("12"))
 )
 
 type GHClient struct{}
@@ -245,16 +245,16 @@ func waitForBothWorkflows(ctx context.Context, slug, versionTag string) error {
 	if parts := strings.Split(slug, "/"); len(parts) == 2 {
 		repoName = parts[1]
 	}
-	
+
 	fmt.Printf("%s\n", waitingStyle.Render("⏳ Waiting for workflows to complete for "+repoName+"@"+versionTag+"..."))
-	
+
 	// Step 1: Check for and wait for CI workflow completion first
 	// CI workflows run on push to main branch, which happens before tagging
 	if err := waitForCIWorkflow(ctx, slug, repoName); err != nil {
 		fmt.Printf("%s\n", warningStyle.Render("⚠️  CI workflow check failed: "+err.Error()))
 		// Don't fail the entire process for CI issues, but log it
 	}
-	
+
 	// Step 2: Wait for the release workflow triggered by the tag
 	fmt.Printf("%s\n", infoStyle.Render("🚀 Now waiting for release workflow for "+repoName+"@"+versionTag+"..."))
 	return waitForReleaseWorkflow(ctx, slug, repoName, versionTag)
@@ -263,12 +263,12 @@ func waitForBothWorkflows(ctx context.Context, slug, versionTag string) error {
 // waitForCIWorkflow checks for recent CI workflows and waits for them to complete
 func waitForCIWorkflow(ctx context.Context, slug, repoName string) error {
 	// Look for recent CI workflows (last 5 runs)
-	cmd := exec.CommandContext(ctx, "gh", "run", "list", 
+	cmd := exec.CommandContext(ctx, "gh", "run", "list",
 		"--repo", slug,
 		"--workflow", "CI",
 		"--limit", "5",
 		"--json", "databaseId,status,conclusion,createdAt")
-	
+
 	output, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("failed to list CI workflows: %w", err)
@@ -280,11 +280,11 @@ func waitForCIWorkflow(ctx context.Context, slug, repoName string) error {
 		Conclusion string `json:"conclusion"`
 		CreatedAt  string `json:"createdAt"`
 	}
-	
+
 	if err := json.Unmarshal(output, &runs); err != nil {
 		return fmt.Errorf("failed to parse CI workflow data: %w", err)
 	}
-	
+
 	// Find the most recent CI workflow that's still running
 	var runningCIID string
 	for _, run := range runs {
@@ -294,7 +294,7 @@ func waitForCIWorkflow(ctx context.Context, slug, repoName string) error {
 			break
 		}
 	}
-	
+
 	// If no running CI workflow, check if the most recent one failed
 	if runningCIID == "" && len(runs) > 0 {
 		latest := runs[0]
@@ -310,13 +310,13 @@ func waitForCIWorkflow(ctx context.Context, slug, repoName string) error {
 		fmt.Printf("%s\n", infoStyle.Render("ℹ️  No actively running CI workflow found for "+repoName))
 		return nil
 	}
-	
+
 	if runningCIID != "" {
 		// Wait for the CI workflow to complete
 		cmd = exec.CommandContext(ctx, "gh", "run", "watch", runningCIID,
 			"--repo", slug,
 			"--exit-status")
-		
+
 		if err := cmd.Run(); err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				return fmt.Errorf("CI workflow %s failed (exit code: %d)", runningCIID, exitErr.ExitCode())
@@ -325,7 +325,7 @@ func waitForCIWorkflow(ctx context.Context, slug, repoName string) error {
 		}
 		fmt.Printf("%s\n", successStyle.Render("✅ CI workflow for "+repoName+" completed successfully"))
 	}
-	
+
 	return nil
 }
 
@@ -336,7 +336,7 @@ func waitForReleaseWorkflow(ctx context.Context, slug, repoName, versionTag stri
 	findTimeout := time.After(30 * time.Minute)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
-	
+
 	attemptCount := 0
 
 	for {
@@ -347,14 +347,14 @@ func waitForReleaseWorkflow(ctx context.Context, slug, repoName, versionTag stri
 			return fmt.Errorf("timeout after 30 minutes waiting for release workflow to appear for tag %s (tried %d times)", versionTag, attemptCount)
 		case <-ticker.C:
 			attemptCount++
-			
+
 			// Look for release workflow runs triggered by our tag
-			cmd := exec.CommandContext(ctx, "gh", "run", "list", 
+			cmd := exec.CommandContext(ctx, "gh", "run", "list",
 				"--repo", slug,
 				"--workflow", "Release",
 				"--limit", "10",
 				"--json", "databaseId,headBranch,event,workflowName")
-			
+
 			output, err := cmd.Output()
 			if err != nil {
 				if attemptCount%4 == 0 { // Log every 20 seconds
@@ -369,7 +369,7 @@ func waitForReleaseWorkflow(ctx context.Context, slug, repoName, versionTag stri
 				Event        string `json:"event"`
 				WorkflowName string `json:"workflowName"`
 			}
-			
+
 			if err := json.Unmarshal(output, &runs); err != nil {
 				if attemptCount%4 == 0 {
 					fmt.Printf("%s\n", warningStyle.Render("⚠️  Failed to parse release workflow data for "+repoName+"@"+versionTag+" (attempt "+fmt.Sprintf("%d", attemptCount)+"): "+err.Error()))
@@ -379,18 +379,18 @@ func waitForReleaseWorkflow(ctx context.Context, slug, repoName, versionTag stri
 
 			// Look for our tag in the release workflow runs
 			for _, run := range runs {
-				if (run.HeadBranch == versionTag || run.HeadBranch == "refs/tags/"+versionTag) && 
-				   (run.WorkflowName == "Release" || run.WorkflowName == "release") {
+				if (run.HeadBranch == versionTag || run.HeadBranch == "refs/tags/"+versionTag) &&
+					(run.WorkflowName == "Release" || run.WorkflowName == "release") {
 					runID = fmt.Sprintf("%d", run.DatabaseID)
 					fmt.Printf("%s\n", successStyle.Render("🎯 Found release workflow run "+runID+" for "+repoName+"@"+versionTag))
 					goto found // Use goto to break out of both loops
 				}
 			}
-			
+
 			if runID != "" {
 				goto found
 			}
-			
+
 			if attemptCount%4 == 0 { // Log every 20 seconds
 				fmt.Printf("%s\n", waitingStyle.Render("⏳ No release workflow found yet for "+repoName+"@"+versionTag+" (attempt "+fmt.Sprintf("%d", attemptCount)+")..."))
 			}
@@ -417,4 +417,3 @@ found:
 	fmt.Printf("%s\n", successStyle.Render("🎉 Release workflow completed successfully for "+repoName+"@"+versionTag))
 	return nil
 }
-

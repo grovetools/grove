@@ -35,26 +35,26 @@ type ToolInfo struct {
 
 // toolRegistry maps tool names to their repository and binary names
 var toolRegistry = map[string]ToolInfo{
-	"canopy":                 {RepoName: "grove-canopy", BinaryName: "canopy"},
-	"clogs":                  {RepoName: "grove-claude-logs", BinaryName: "clogs"},
-	"core":                   {RepoName: "grove-core", BinaryName: "core"},
-	"cx":                     {RepoName: "grove-context", BinaryName: "cx"},
-	"flow":                   {RepoName: "grove-flow", BinaryName: "flow"},
-	"gemapi":                 {RepoName: "grove-gemini", BinaryName: "gemapi"},
-	"gmux":                   {RepoName: "grove-tmux", BinaryName: "gmux"},
-	"grove":                  {RepoName: "grove-meta", BinaryName: "grove"},
-	"grove-hooks":            {RepoName: "grove-hooks", BinaryName: "hooks"},
-	"hooks":                  {RepoName: "grove-hooks", BinaryName: "hooks"},
-	"nb":                     {RepoName: "grove-notebook", BinaryName: "nb"},
-	"neogrove":               {RepoName: "grove-nvim", BinaryName: "neogrove"},
-	"notify":                 {RepoName: "grove-notifications", BinaryName: "notify"},
-	"nvim":                   {RepoName: "grove-nvim", BinaryName: "neogrove"}, // Alias
-	"project-tmpl-go":        {RepoName: "grove-project-tmpl-go", BinaryName: "project-tmpl-go"},
-	"project-tmpl-maturin":   {RepoName: "grove-project-tmpl-maturin", BinaryName: "project-tmpl-maturin"},
-	"project-tmpl-react-ts":  {RepoName: "grove-project-tmpl-react-ts", BinaryName: "project-tmpl-react-ts"},
-	"px":                     {RepoName: "grove-proxy", BinaryName: "px"},
-	"sb":                     {RepoName: "grove-sandbox", BinaryName: "sb"},
-	"tend":                   {RepoName: "grove-tend", BinaryName: "tend"},
+	"canopy":                {RepoName: "grove-canopy", BinaryName: "canopy"},
+	"clogs":                 {RepoName: "grove-claude-logs", BinaryName: "clogs"},
+	"core":                  {RepoName: "grove-core", BinaryName: "core"},
+	"cx":                    {RepoName: "grove-context", BinaryName: "cx"},
+	"flow":                  {RepoName: "grove-flow", BinaryName: "flow"},
+	"gemapi":                {RepoName: "grove-gemini", BinaryName: "gemapi"},
+	"gmux":                  {RepoName: "grove-tmux", BinaryName: "gmux"},
+	"grove":                 {RepoName: "grove-meta", BinaryName: "grove"},
+	"grove-hooks":           {RepoName: "grove-hooks", BinaryName: "hooks"},
+	"hooks":                 {RepoName: "grove-hooks", BinaryName: "hooks"},
+	"nb":                    {RepoName: "grove-notebook", BinaryName: "nb"},
+	"neogrove":              {RepoName: "grove-nvim", BinaryName: "neogrove"},
+	"notify":                {RepoName: "grove-notifications", BinaryName: "notify"},
+	"nvim":                  {RepoName: "grove-nvim", BinaryName: "neogrove"}, // Alias
+	"project-tmpl-go":       {RepoName: "grove-project-tmpl-go", BinaryName: "project-tmpl-go"},
+	"project-tmpl-maturin":  {RepoName: "grove-project-tmpl-maturin", BinaryName: "project-tmpl-maturin"},
+	"project-tmpl-react-ts": {RepoName: "grove-project-tmpl-react-ts", BinaryName: "project-tmpl-react-ts"},
+	"px":                    {RepoName: "grove-proxy", BinaryName: "px"},
+	"sb":                    {RepoName: "grove-sandbox", BinaryName: "sb"},
+	"tend":                  {RepoName: "grove-tend", BinaryName: "tend"},
 }
 
 // Manager handles SDK installation and version management
@@ -172,7 +172,7 @@ func resolveRepoName(toolName string) (string, error) {
 	if info, ok := toolRegistry[toolName]; ok {
 		return info.RepoName, nil
 	}
-	
+
 	// Check if the toolName is already a valid repository name
 	if strings.HasPrefix(toolName, "grove-") {
 		// Verify it's a known repository by checking if it exists as a value
@@ -184,7 +184,7 @@ func resolveRepoName(toolName string) (string, error) {
 		// Even if not in our map, allow it - it might be a new repository
 		return toolName, nil
 	}
-	
+
 	// Check if adding "grove-" prefix gives us a valid repo
 	expectedRepo := "grove-" + toolName
 	for _, info := range toolRegistry {
@@ -192,7 +192,7 @@ func resolveRepoName(toolName string) (string, error) {
 			return info.RepoName, nil
 		}
 	}
-	
+
 	return "", fmt.Errorf("unknown tool: %s", toolName)
 }
 
@@ -523,7 +523,7 @@ func GetAllTools() []string {
 	for tool := range toolRegistry {
 		tools = append(tools, tool)
 	}
-	
+
 	// Sort for consistent output
 	sort.Strings(tools)
 	return tools

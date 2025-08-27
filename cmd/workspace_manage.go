@@ -24,10 +24,10 @@ This command allows you to:
 			nbCmd.Stdin = os.Stdin
 			nbCmd.Stdout = os.Stdout
 			nbCmd.Stderr = os.Stderr
-			
+
 			return nbCmd.Run()
 		},
 	}
-	
+
 	return cmd
 }

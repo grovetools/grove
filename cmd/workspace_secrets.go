@@ -79,7 +79,7 @@ func newWorkspaceSecretsListCmd() *cobra.Command {
 func runWorkspaceSecretsSet(cmd *cobra.Command, args []string) error {
 	logger := cli.GetLogger(cmd)
 	secretName := args[0]
-	
+
 	// Get secret value
 	var secretValue string
 	if file, _ := cmd.Flags().GetString("file"); file != "" {
@@ -139,7 +139,7 @@ func runWorkspaceSecretsSet(cmd *cobra.Command, args []string) error {
 		go func(wsPath string) {
 			defer wg.Done()
 			wsName := workspace.GetWorkspaceName(wsPath, rootDir)
-			
+
 			// Get the repository URL
 			cmd := exec.Command("git", "config", "--get", "remote.origin.url")
 			cmd.Dir = wsPath
@@ -174,7 +174,7 @@ func runWorkspaceSecretsSet(cmd *cobra.Command, args []string) error {
 			// Set the secret using gh CLI
 			cmd = exec.Command("gh", "secret", "set", secretName, "--body", secretValue, "--repo", fmt.Sprintf("%s/%s", owner, repo))
 			err = cmd.Run()
-			
+
 			resultChan <- result{
 				workspace: wsName,
 				success:   err == nil,
@@ -209,7 +209,7 @@ func runWorkspaceSecretsSet(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println(strings.Repeat("-", 50))
-	fmt.Printf("Summary: %s succeeded, %s failed\n", 
+	fmt.Printf("Summary: %s succeeded, %s failed\n",
 		successStyle.Render(fmt.Sprintf("%d", successCount)),
 		failStyle.Render(fmt.Sprintf("%d", failCount)))
 
@@ -264,7 +264,7 @@ func runWorkspaceSecretsDelete(cmd *cobra.Command, args []string) error {
 		go func(wsPath string) {
 			defer wg.Done()
 			wsName := workspace.GetWorkspaceName(wsPath, rootDir)
-			
+
 			// Get the repository URL
 			cmd := exec.Command("git", "config", "--get", "remote.origin.url")
 			cmd.Dir = wsPath
@@ -299,7 +299,7 @@ func runWorkspaceSecretsDelete(cmd *cobra.Command, args []string) error {
 			// Delete the secret using gh CLI
 			cmd = exec.Command("gh", "secret", "delete", secretName, "--repo", fmt.Sprintf("%s/%s", owner, repo))
 			err = cmd.Run()
-			
+
 			resultChan <- result{
 				workspace: wsName,
 				success:   err == nil,
@@ -334,7 +334,7 @@ func runWorkspaceSecretsDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println(strings.Repeat("-", 50))
-	fmt.Printf("Summary: %s succeeded, %s failed\n", 
+	fmt.Printf("Summary: %s succeeded, %s failed\n",
 		successStyle.Render(fmt.Sprintf("%d", successCount)),
 		failStyle.Render(fmt.Sprintf("%d", failCount)))
 
@@ -365,7 +365,7 @@ func runWorkspaceSecretsList(cmd *cobra.Command, args []string) error {
 	// Process workspaces
 	for _, ws := range workspaces {
 		wsName := workspace.GetWorkspaceName(ws, rootDir)
-		
+
 		// Get the repository URL
 		cmd := exec.Command("git", "config", "--get", "remote.origin.url")
 		cmd.Dir = ws
@@ -417,7 +417,7 @@ func filterWorkspaces(workspaces []string, rootDir string, includePatterns, excl
 
 	for _, ws := range workspaces {
 		wsName := workspace.GetWorkspaceName(ws, rootDir)
-		
+
 		// Check exclude patterns first
 		excluded := false
 		for _, pattern := range excludePatterns {

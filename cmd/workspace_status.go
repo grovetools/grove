@@ -129,7 +129,7 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 			statusInfo := workspaceStatusInfo{
 				Name: wsName,
 			}
-			
+
 			// Determine project type
 			projectType := "go" // default
 			groveYmlPath := filepath.Join(wsPath, "grove.yml")
@@ -301,7 +301,7 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 
 	for _, ws := range statuses {
 		row := []string{ws.Name}
-		
+
 		// Add type column if requested
 		if colMap["type"] {
 			row = append(row, ws.Type)
@@ -494,4 +494,3 @@ func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
-

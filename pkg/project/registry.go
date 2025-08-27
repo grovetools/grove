@@ -10,13 +10,13 @@ func NewRegistry() *Registry {
 	r := &Registry{
 		handlers: make(map[Type]ProjectHandler),
 	}
-	
+
 	// Register default handlers
 	r.Register(TypeGo, NewGoHandler())
 	r.Register(TypeMaturin, NewMaturinHandler())
 	r.Register(TypeNode, NewNodeHandler())
 	r.Register(TypeTemplate, NewTemplateHandler())
-	
+
 	return r
 }
 

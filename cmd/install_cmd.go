@@ -126,7 +126,7 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 					logger.WithError(err).Warn("Could not load tool versions for reconciliation")
 					tv = &sdk.ToolVersions{Versions: make(map[string]string)}
 				}
-				
+
 				r, err := reconciler.NewWithToolVersions(tv)
 				if err != nil {
 					logger.WithError(err).Warnf("Could not create reconciler, skipping symlink update for %s", toolName)
@@ -161,7 +161,6 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 
 	return nil
 }
-
 
 // clearDevLinkForTool clears the active dev link for a specific tool
 func clearDevLinkForTool(toolName string) error {

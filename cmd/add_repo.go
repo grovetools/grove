@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -18,7 +19,7 @@ var (
 	addRepoDryRun       bool
 	addRepoStageChanges bool
 	addRepoTemplate     string
-	addRepoUpdateEcosystem bool
+	addRepoEcosystem    bool
 )
 
 func init() {
@@ -31,15 +32,15 @@ func newAddRepoCmd() *cobra.Command {
 		Short: "Create a new Grove repository with standard structure",
 		Long: `Create a new Grove repository with idiomatic structure and optional GitHub integration.
 
-By default, this creates a standalone repository. Use --update-ecosystem to add it as a
-submodule to grove-ecosystem.
+By default, this creates a standalone repository in the current directory. Use --ecosystem to add it
+to an existing Grove ecosystem (monorepo).
 
 Examples:
   # Create standalone repository:
   grove add-repo analyzer --alias az --description "Code analysis tool"
   
   # Create and add to ecosystem:
-  grove add-repo fizzbuzz --alias fizz --description "Fizzbuzz implementation" --update-ecosystem
+  grove add-repo fizzbuzz --alias fizz --description "Fizzbuzz implementation" --ecosystem
   
   # Use different templates:
   grove add-repo myrust --template maturin --alias mr
@@ -58,27 +59,39 @@ Examples:
 	cmd.Flags().BoolVar(&addRepoDryRun, "dry-run", false, "Preview operations without executing")
 	cmd.Flags().BoolVar(&addRepoStageChanges, "stage-ecosystem", false, "Stage ecosystem changes in git")
 	cmd.Flags().StringVar(&addRepoTemplate, "template", "go", "Template to use (go, maturin, react-ts, path/URL, or GitHub repo like 'owner/repo')")
-	cmd.Flags().BoolVar(&addRepoUpdateEcosystem, "update-ecosystem", false, "Add repository to grove-ecosystem as a submodule")
+	cmd.Flags().BoolVar(&addRepoEcosystem, "ecosystem", false, "Add repository to an existing Grove ecosystem as a submodule")
 
 	return cmd
 }
 
 var templateAliases = map[string]string{
-	"go":       "grove-project-tmpl-go",       // Go template
-	"maturin":  "grove-project-tmpl-maturin",  // Python/Rust template  
-	"react-ts": "grove-project-tmpl-react-ts", // React TypeScript template
+	"go":       "mattsolo1/grove-project-tmpl-go",       // Go template
+	"maturin":  "mattsolo1/grove-project-tmpl-maturin",  // Python/Rust template
+	"react-ts": "mattsolo1/grove-project-tmpl-react-ts", // React TypeScript template
 }
 
-func resolveTemplate(spec string) string {
+func resolveTemplate(spec string, ecosystem bool) string {
+	// Check if it's a template alias
 	if alias, ok := templateAliases[spec]; ok {
-		// Find grove ecosystem root and resolve template path relative to it
-		rootDir, err := workspace.FindRoot("")
-		if err != nil {
-			// Fall back to relative path if we can't find root
-			return alias
+		// Only use local templates when in ecosystem mode
+		if ecosystem {
+			// Try to find grove ecosystem root
+			rootDir, err := workspace.FindRoot("")
+			if err == nil {
+				// We're in an ecosystem - check for local template
+				localTemplateName := strings.TrimPrefix(alias, "mattsolo1/")
+				localPath := filepath.Join(rootDir, localTemplateName)
+				if _, err := os.Stat(localPath); err == nil {
+					// Local template exists, use it
+					return localPath
+				}
+			}
 		}
-		return filepath.Join(rootDir, alias)
+		// In standalone mode or local template doesn't exist
+		// Return the GitHub shorthand
+		return alias
 	}
+	// Not an alias - return as-is (could be a path or URL)
 	return spec
 }
 
@@ -86,7 +99,6 @@ func runAddRepo(cmd *cobra.Command, args []string) error {
 	logger := cli.GetLogger(cmd)
 
 	repoName := args[0]
-
 
 	// Derive alias if not provided
 	if addRepoAlias == "" {
@@ -112,8 +124,8 @@ func runAddRepo(cmd *cobra.Command, args []string) error {
 	creator := repository.NewCreator(logger)
 
 	// Resolve template
-	resolvedTemplate := resolveTemplate(addRepoTemplate)
-	
+	resolvedTemplate := resolveTemplate(addRepoTemplate, addRepoEcosystem)
+
 	opts := repository.CreateOptions{
 		Name:         repoName,
 		Alias:        addRepoAlias,
@@ -122,7 +134,7 @@ func runAddRepo(cmd *cobra.Command, args []string) error {
 		DryRun:       addRepoDryRun,
 		StageChanges: addRepoStageChanges,
 		TemplatePath: resolvedTemplate,
-		UpdateEcosystem: addRepoUpdateEcosystem,
+		Ecosystem:    addRepoEcosystem,
 	}
 
 	logger.Infof("Creating new Grove repository: %s (alias: %s)", repoName, addRepoAlias)

@@ -46,7 +46,7 @@ func (r *Renderer) Render(templateDir, targetDir string, data TemplateData) erro
 		if strings.HasSuffix(path, ".tmpl") {
 			// Remove .tmpl extension from output path
 			outputPath = strings.TrimSuffix(outputPath, ".tmpl")
-			
+
 			// Render the template
 			return r.renderTemplateFile(path, outputPath, data)
 		}

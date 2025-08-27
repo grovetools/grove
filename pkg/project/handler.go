@@ -14,16 +14,16 @@ type ProjectHandler interface {
 	// Dependency management
 	ParseDependencies(workspacePath string) ([]Dependency, error)
 	UpdateDependency(workspacePath string, dep Dependency) error
-	
+
 	// Version management
 	GetVersion(workspacePath string) (string, error)
 	SetVersion(workspacePath string, version string) error
-	
+
 	// Build commands (leverage Makefile contract)
 	GetBuildCommand() string
 	GetTestCommand() string
 	GetVerifyCommand() string
-	
+
 	// Project detection
 	HasProjectFile(workspacePath string) bool
 }

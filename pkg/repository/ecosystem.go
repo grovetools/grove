@@ -25,15 +25,15 @@ func (e *Ecosystem) removeFromGoWork(repoName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to find grove root: %w", err)
 	}
-	
+
 	goWorkPath := filepath.Join(rootDir, "go.work")
-	
+
 	// Check if go.work exists
 	if _, err := os.Stat(goWorkPath); os.IsNotExist(err) {
 		// No go.work file, nothing to remove
 		return nil
 	}
-	
+
 	// Read the current go.work file
 	content, err := os.ReadFile(goWorkPath)
 	if err != nil {
@@ -45,10 +45,10 @@ func (e *Ecosystem) removeFromGoWork(repoName string) error {
 	inUseBlock := false
 	removed := false
 	pathToRemove := "./" + repoName
-	
+
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		
+
 		// Track when we're in the use block
 		if trimmed == "use (" {
 			inUseBlock = true
@@ -60,36 +60,34 @@ func (e *Ecosystem) removeFromGoWork(repoName string) error {
 			newLines = append(newLines, line)
 			continue
 		}
-		
+
 		// Skip the line if it contains the repo we're removing
 		if inUseBlock && strings.Contains(trimmed, pathToRemove) {
 			removed = true
 			continue
 		}
-		
+
 		// Handle single use directive
 		if strings.HasPrefix(trimmed, "use ") && strings.Contains(trimmed, pathToRemove) {
 			removed = true
 			continue
 		}
-		
+
 		newLines = append(newLines, line)
 	}
-	
+
 	if !removed {
 		// Module wasn't in the file, nothing to do
 		return nil
 	}
-	
+
 	// Write the updated content back
 	if err := os.WriteFile(goWorkPath, []byte(strings.Join(newLines, "\n")), 0644); err != nil {
 		return fmt.Errorf("failed to write go.work: %w", err)
 	}
-	
+
 	return nil
 }
-
-
 
 // updateGoWork updates the go.work file to include the new module
 func updateGoWork(repoName string) error {
@@ -98,9 +96,9 @@ func updateGoWork(repoName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to find grove root: %w", err)
 	}
-	
+
 	workPath := filepath.Join(rootDir, "go.work")
-	
+
 	// Check if go.work exists, create it if not
 	content, err := os.ReadFile(workPath)
 	if err != nil {
@@ -115,14 +113,14 @@ func updateGoWork(repoName string) error {
 		}
 		return fmt.Errorf("failed to read go.work: %w", err)
 	}
-	
+
 	// Check if module already exists
 	newModulePath := "./" + repoName
 	if strings.Contains(string(content), newModulePath) {
 		// Module already exists, nothing to do
 		return nil
 	}
-	
+
 	// Parse go.work to find the use directives
 	lines := strings.Split(string(content), "\n")
 	var newLines []string
@@ -130,17 +128,17 @@ func updateGoWork(repoName string) error {
 	useDirectives := []string{}
 	var beforeUse, afterUse []string
 	useBlockStart := -1
-	
+
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		
+
 		if trimmed == "use (" {
 			inUseBlock = true
 			useBlockStart = i
 			beforeUse = lines[:i+1]
 			continue
 		}
-		
+
 		if inUseBlock {
 			if trimmed == ")" {
 				inUseBlock = false
@@ -152,7 +150,7 @@ func updateGoWork(repoName string) error {
 			}
 		}
 	}
-	
+
 	// If we didn't find a use block, look for single use directives
 	if useBlockStart == -1 {
 		for i, line := range lines {
@@ -164,7 +162,7 @@ func updateGoWork(repoName string) error {
 				break
 			}
 		}
-		
+
 		// If still no use directives found, create a new block after "go" directive
 		if len(useDirectives) == 0 {
 			for i, line := range lines {
@@ -177,34 +175,34 @@ func updateGoWork(repoName string) error {
 			}
 		}
 	}
-	
+
 	// Add the new module
 	useDirectives = append(useDirectives, newModulePath)
-	
+
 	// Sort the directives for consistency
 	sort.Strings(useDirectives)
-	
+
 	// Rebuild the file
 	newLines = append(newLines, beforeUse...)
 	if len(beforeUse) > 0 && !strings.HasSuffix(beforeUse[len(beforeUse)-1], "use (") {
 		newLines = append(newLines, "use (")
 	}
-	
+
 	for _, directive := range useDirectives {
 		newLines = append(newLines, fmt.Sprintf("\t%s", directive))
 	}
-	
+
 	if len(afterUse) > 0 && !strings.HasPrefix(afterUse[0], ")") {
 		newLines = append(newLines, ")")
 	}
 	newLines = append(newLines, afterUse...)
-	
+
 	// Write the updated go.work file
 	updatedContent := strings.Join(newLines, "\n")
 	if err := os.WriteFile(workPath, []byte(updatedContent), 0644); err != nil {
 		return fmt.Errorf("failed to write go.work: %w\nThe file may be read-only or you may lack permissions", err)
 	}
-	
+
 	return nil
 }
 
@@ -232,14 +230,14 @@ func deriveAliasFromRepoName(repoName string) string {
 	if len(parts) < 2 {
 		return ""
 	}
-	
+
 	var alias strings.Builder
 	for i := 1; i < len(parts); i++ {
 		if len(parts[i]) > 0 {
 			alias.WriteByte(parts[i][0])
 		}
 	}
-	
+
 	return alias.String()
 }
 
@@ -250,13 +248,13 @@ func checkBinaryAliasConflict(alias string) error {
 	if err != nil {
 		return fmt.Errorf("failed to find grove root: %w", err)
 	}
-	
+
 	// Discover all workspaces
 	workspaces, err := workspace.Discover(rootDir)
 	if err != nil {
 		return fmt.Errorf("failed to discover workspaces: %w", err)
 	}
-	
+
 	// Check each workspace's grove.yml for binary aliases
 	for _, ws := range workspaces {
 		configPath := filepath.Join(ws, "grove.yml")
@@ -264,7 +262,7 @@ func checkBinaryAliasConflict(alias string) error {
 		if err != nil {
 			continue // Skip workspaces with invalid configs
 		}
-		
+
 		// Check if this workspace defines a binary with the same alias
 		// Binary info is stored in Extensions as grove.yml allows custom fields
 		if binaryRaw, ok := cfg.Extensions["binary"]; ok {
@@ -275,7 +273,7 @@ func checkBinaryAliasConflict(alias string) error {
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -286,7 +284,7 @@ func getEcosystemRoot() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	for {
 		// Check if grove.yml exists in this directory
 		if _, err := os.Stat(filepath.Join(dir, "grove.yml")); err == nil {
@@ -295,7 +293,7 @@ func getEcosystemRoot() (string, error) {
 				return dir, nil
 			}
 		}
-		
+
 		// Move up one directory
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -304,7 +302,7 @@ func getEcosystemRoot() (string, error) {
 		}
 		dir = parent
 	}
-	
+
 	return "", fmt.Errorf("grove-ecosystem root not found")
 }
 
@@ -314,17 +312,17 @@ func extractMakefileList(lines []string, startIdx int) []string {
 	if startIdx >= len(lines) {
 		return []string{}
 	}
-	
+
 	// Extract the value after the equals sign
 	firstLine := lines[startIdx]
 	parts := strings.SplitN(firstLine, "=", 2)
 	if len(parts) < 2 {
 		return []string{}
 	}
-	
+
 	var items []string
 	currentLine := strings.TrimSpace(parts[1])
-	
+
 	// Check if line ends with backslash (continues on next line)
 	for i := startIdx; i < len(lines); i++ {
 		if i == startIdx {
@@ -339,7 +337,7 @@ func extractMakefileList(lines []string, startIdx int) []string {
 				currentLine = strings.TrimSuffix(currentLine, "\\")
 			}
 		}
-		
+
 		// Split by whitespace and add non-empty items
 		for _, item := range strings.Fields(currentLine) {
 			item = strings.TrimSpace(item)
@@ -347,7 +345,7 @@ func extractMakefileList(lines []string, startIdx int) []string {
 				items = append(items, item)
 			}
 		}
-		
+
 		// Check if this line continues to the next
 		if i < len(lines)-1 && strings.HasSuffix(strings.TrimSpace(lines[i]), "\\") {
 			continue
@@ -355,7 +353,7 @@ func extractMakefileList(lines []string, startIdx int) []string {
 			break
 		}
 	}
-	
+
 	// Remove duplicates while preserving order
 	seen := make(map[string]bool)
 	var unique []string
@@ -365,10 +363,10 @@ func extractMakefileList(lines []string, startIdx int) []string {
 			unique = append(unique, item)
 		}
 	}
-	
+
 	// Sort for consistent output
 	sort.Strings(unique)
-	
+
 	return unique
 }
 
@@ -379,23 +377,23 @@ func updateRootMakefile(repoName, binaryAlias string) error {
 	if err != nil {
 		return fmt.Errorf("failed to find grove root: %w", err)
 	}
-	
+
 	makefilePath := filepath.Join(rootDir, "Makefile")
-	
+
 	// Read the current Makefile
 	content, err := os.ReadFile(makefilePath)
 	if err != nil {
 		return fmt.Errorf("failed to read Makefile: %w", err)
 	}
-	
+
 	lines := strings.Split(string(content), "\n")
-	
+
 	// Look for the package and binary hooks
 	packageHookFound := false
 	binaryHookFound := false
 	packageHookIdx := -1
 	binaryHookIdx := -1
-	
+
 	for i, line := range lines {
 		if strings.Contains(line, "# GROVE-META:ADD-REPO:PACKAGES") {
 			packageHookFound = true
@@ -406,14 +404,14 @@ func updateRootMakefile(repoName, binaryAlias string) error {
 			binaryHookIdx = i
 		}
 	}
-	
+
 	if !packageHookFound {
 		return fmt.Errorf("PACKAGES hook not found in Makefile")
 	}
 	if !binaryHookFound {
 		return fmt.Errorf("BINARIES hook not found in Makefile")
 	}
-	
+
 	// Find the PACKAGES line before the hook
 	packagesIdx := -1
 	for i := packageHookIdx - 1; i >= 0; i-- {
@@ -422,14 +420,14 @@ func updateRootMakefile(repoName, binaryAlias string) error {
 			break
 		}
 	}
-	
+
 	if packagesIdx == -1 {
 		return fmt.Errorf("PACKAGES variable not found before hook")
 	}
-	
+
 	// Extract current packages
 	packages := extractMakefileList(lines, packagesIdx)
-	
+
 	// Check if package already exists
 	alreadyExists := false
 	for _, pkg := range packages {
@@ -438,16 +436,16 @@ func updateRootMakefile(repoName, binaryAlias string) error {
 			break
 		}
 	}
-	
+
 	if !alreadyExists {
 		// Add the new package
 		packages = append(packages, repoName)
 		sort.Strings(packages)
-		
+
 		// Update the PACKAGES line
 		lines[packagesIdx] = fmt.Sprintf("PACKAGES = %s", strings.Join(packages, " "))
 	}
-	
+
 	// Find the BINARIES line before the hook
 	binariesIdx := -1
 	for i := binaryHookIdx - 1; i >= 0; i-- {
@@ -456,14 +454,14 @@ func updateRootMakefile(repoName, binaryAlias string) error {
 			break
 		}
 	}
-	
+
 	if binariesIdx == -1 {
 		return fmt.Errorf("BINARIES variable not found before hook")
 	}
-	
+
 	// Extract current binaries
 	binaries := extractMakefileList(lines, binariesIdx)
-	
+
 	// Check if binary already exists
 	binaryExists := false
 	for _, bin := range binaries {
@@ -472,21 +470,21 @@ func updateRootMakefile(repoName, binaryAlias string) error {
 			break
 		}
 	}
-	
+
 	if !binaryExists && binaryAlias != "" {
 		// Add the new binary
 		binaries = append(binaries, binaryAlias)
 		sort.Strings(binaries)
-		
+
 		// Update the BINARIES line
 		lines[binariesIdx] = fmt.Sprintf("BINARIES = %s", strings.Join(binaries, " "))
 	}
-	
+
 	// Write the updated Makefile
 	updatedContent := strings.Join(lines, "\n")
 	if err := os.WriteFile(makefilePath, []byte(updatedContent), 0644); err != nil {
 		return fmt.Errorf("failed to write Makefile: %w", err)
 	}
-	
+
 	return nil
 }
