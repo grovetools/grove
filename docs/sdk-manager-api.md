@@ -68,7 +68,7 @@ tools, err := manager.ListTools("v0.2.0")
 ```go
 // Get all available tools
 tools := sdk.GetAllTools()
-// Returns: ["cx", "flow", "nb", "gvm", "px", "sb", "tend", "canopy"]
+// Returns: ["canopy", "cx", "flow", "grove", "nb", "neogrove", "px", "tend"]
 
 // Get repository for a tool
 repo := sdk.GetToolRepo("cx")

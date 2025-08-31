@@ -44,11 +44,9 @@ var toolRegistry = map[string]ToolInfo{
 	"gmux":                  {RepoName: "grove-tmux", BinaryName: "gmux"},
 	"grove":                 {RepoName: "grove-meta", BinaryName: "grove"},
 	"grove-hooks":           {RepoName: "grove-hooks", BinaryName: "hooks"},
-	"hooks":                 {RepoName: "grove-hooks", BinaryName: "hooks"},
 	"nb":                    {RepoName: "grove-notebook", BinaryName: "nb"},
 	"neogrove":              {RepoName: "grove-nvim", BinaryName: "neogrove"},
 	"notify":                {RepoName: "grove-notifications", BinaryName: "notify"},
-	"nvim":                  {RepoName: "grove-nvim", BinaryName: "neogrove"}, // Alias
 	"project-tmpl-go":       {RepoName: "grove-project-tmpl-go", BinaryName: "project-tmpl-go"},
 	"project-tmpl-maturin":  {RepoName: "grove-project-tmpl-maturin", BinaryName: "project-tmpl-maturin"},
 	"project-tmpl-react-ts": {RepoName: "grove-project-tmpl-react-ts", BinaryName: "project-tmpl-react-ts"},
