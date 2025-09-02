@@ -1,3 +1,9 @@
+## v0.2.18 (2025-09-02)
+
+### Chores
+
+* remove nvim and hooks aliases from tool registry
+
 ## v0.2.17 (2025-08-27)
 
 ### Bug Fixes
