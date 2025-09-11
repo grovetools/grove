@@ -20,6 +20,7 @@ var (
 	addRepoStageChanges bool
 	addRepoTemplate     string
 	addRepoEcosystem    bool
+	addRepoPublic       bool
 )
 
 func init() {
@@ -60,6 +61,7 @@ Examples:
 	cmd.Flags().BoolVar(&addRepoStageChanges, "stage-ecosystem", false, "Stage ecosystem changes in git")
 	cmd.Flags().StringVar(&addRepoTemplate, "template", "go", "Template to use (go, maturin, react-ts, path/URL, or GitHub repo like 'owner/repo')")
 	cmd.Flags().BoolVar(&addRepoEcosystem, "ecosystem", false, "Add repository to an existing Grove ecosystem as a submodule")
+	cmd.Flags().BoolVar(&addRepoPublic, "public", false, "Create a public repository and skip private configuration")
 
 	return cmd
 }
@@ -135,6 +137,7 @@ func runAddRepo(cmd *cobra.Command, args []string) error {
 		StageChanges: addRepoStageChanges,
 		TemplatePath: resolvedTemplate,
 		Ecosystem:    addRepoEcosystem,
+		Public:       addRepoPublic,
 	}
 
 	logger.Infof("Creating new Grove repository: %s (alias: %s)", repoName, addRepoAlias)

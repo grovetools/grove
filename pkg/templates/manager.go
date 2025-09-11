@@ -20,6 +20,7 @@ type TemplateData struct {
 	CoreVersion      string
 	TendVersion      string
 	ModulePath       string // Full module path (e.g., github.com/mattsolo1/repo-name)
+	IsPublic         bool
 }
 
 func NewManager() *Manager {

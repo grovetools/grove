@@ -29,6 +29,7 @@ type CreateOptions struct {
 	StageChanges bool
 	TemplatePath string
 	Ecosystem    bool
+	Public       bool
 }
 
 type creationState struct {
@@ -230,9 +231,9 @@ func (c *Creator) validate(opts CreateOptions) error {
 			return fmt.Errorf("repository mattsolo1/%s already exists on GitHub", opts.Name)
 		}
 
-		// Check for GROVE_PAT early
-		if os.Getenv("GROVE_PAT") == "" {
-			return fmt.Errorf("GROVE_PAT environment variable not set. This is required for setting up GitHub Actions secrets")
+		// Check for GROVE_PAT early, but only for private repos
+		if !opts.Public && os.Getenv("GROVE_PAT") == "" {
+			return fmt.Errorf("GROVE_PAT environment variable not set. This is required for setting up GitHub Actions secrets for private repositories. Use --public for public repos.")
 		}
 	}
 
@@ -252,16 +253,21 @@ func (c *Creator) generateSkeleton(opts CreateOptions, targetPath string) error 
 		modulePath = fmt.Sprintf("github.com/mattsolo1/%s", opts.Name)
 	}
 
+	// Sanitize alias for use as environment variable
+	safeAliasUpper := strings.ToUpper(opts.Alias)
+	safeAliasUpper = strings.ReplaceAll(safeAliasUpper, "-", "_")
+
 	// Get latest versions
 	data := templates.TemplateData{
 		RepoName:         opts.Name,
 		BinaryAlias:      opts.Alias,
-		BinaryAliasUpper: strings.ToUpper(opts.Alias),
+		BinaryAliasUpper: safeAliasUpper,
 		Description:      opts.Description,
 		GoVersion:        "1.24",
 		CoreVersion:      c.getLatestVersion("grove-core"),
 		TendVersion:      c.getLatestVersion("grove-tend"),
 		ModulePath:       modulePath,
+		IsPublic:         opts.Public,
 	}
 
 	// Always use external template (TemplatePath defaults to "go" which resolves to the Go template)
@@ -369,14 +375,20 @@ func (c *Creator) verifyLocal(opts CreateOptions, targetPath string) error {
 	// Handle language-specific dependency resolution
 	switch projectType {
 	case "go":
+		// Prepare environment for Go commands
+		goEnv := append(os.Environ(),
+			"GOPRIVATE=github.com/mattsolo1/*",
+			"GOPROXY=direct",
+		)
+		if !opts.Ecosystem {
+			goEnv = append(goEnv, "GOWORK=off")
+		}
+
 		// Run go mod tidy first to resolve dependencies
 		c.logger.Info("Resolving dependencies...")
 		tidyCmd := exec.Command("go", "mod", "tidy")
 		tidyCmd.Dir = targetPath
-		tidyCmd.Env = append(os.Environ(),
-			"GOPRIVATE=github.com/mattsolo1/*",
-			"GOPROXY=direct",
-		)
+		tidyCmd.Env = goEnv
 		if output, err := tidyCmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("go mod tidy failed: %w\nOutput: %s", err, string(output))
 		}
@@ -385,10 +397,7 @@ func (c *Creator) verifyLocal(opts CreateOptions, targetPath string) error {
 		c.logger.Info("Downloading dependencies...")
 		modCmd := exec.Command("go", "mod", "download")
 		modCmd.Dir = targetPath
-		modCmd.Env = append(os.Environ(),
-			"GOPRIVATE=github.com/mattsolo1/*",
-			"GOPROXY=direct",
-		)
+		modCmd.Env = goEnv
 		if err := modCmd.Run(); err != nil {
 			return fmt.Errorf("go mod download failed: %w", err)
 		}
@@ -424,6 +433,9 @@ func (c *Creator) verifyLocal(opts CreateOptions, targetPath string) error {
 		c.logger.Info("Building project...")
 		buildCmd := exec.Command("make", "build")
 		buildCmd.Dir = targetPath
+		if projectType == "go" && !opts.Ecosystem {
+			buildCmd.Env = append(os.Environ(), "GOWORK=off")
+		}
 		if output, err := buildCmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("make build failed: %w\nOutput: %s", err, string(output))
 		}
@@ -432,6 +444,9 @@ func (c *Creator) verifyLocal(opts CreateOptions, targetPath string) error {
 		c.logger.Info("Running tests...")
 		testCmd := exec.Command("make", "test")
 		testCmd.Dir = targetPath
+		if projectType == "go" && !opts.Ecosystem {
+			testCmd.Env = append(os.Environ(), "GOWORK=off")
+		}
 		if output, err := testCmd.CombinedOutput(); err != nil {
 			// Don't fail if test target doesn't exist
 			if !strings.Contains(string(output), "No rule to make target") {
@@ -444,6 +459,9 @@ func (c *Creator) verifyLocal(opts CreateOptions, targetPath string) error {
 		c.logger.Info("Running e2e tests...")
 		e2eCmd := exec.Command("make", "test-e2e")
 		e2eCmd.Dir = targetPath
+		if projectType == "go" && !opts.Ecosystem {
+			e2eCmd.Env = append(os.Environ(), "GOWORK=off")
+		}
 		if output, err := e2eCmd.CombinedOutput(); err != nil {
 			// Don't fail if test-e2e target doesn't exist
 			if !strings.Contains(string(output), "No rule to make target") {
@@ -484,11 +502,14 @@ func (c *Creator) createGitHubRepo(opts CreateOptions, targetPath string) error 
 	c.logger.Info("Creating GitHub repository...")
 
 	// Create the repository without pushing
-	createCmd := exec.Command("gh", "repo", "create",
-		fmt.Sprintf("mattsolo1/%s", opts.Name),
-		"--private",
-		"--source=.",
-		"--remote=origin")
+	createArgs := []string{"repo", "create", fmt.Sprintf("mattsolo1/%s", opts.Name)}
+	if opts.Public {
+		createArgs = append(createArgs, "--public")
+	} else {
+		createArgs = append(createArgs, "--private")
+	}
+	createArgs = append(createArgs, "--source=.", "--remote=origin")
+	createCmd := exec.Command("gh", createArgs...)
 	createCmd.Dir = targetPath
 
 	if output, err := createCmd.CombinedOutput(); err != nil {
@@ -521,6 +542,10 @@ func (c *Creator) pushToGitHub(opts CreateOptions, targetPath string) error {
 }
 
 func (c *Creator) setupSecrets(opts CreateOptions, targetPath string) error {
+	if opts.Public {
+		c.logger.Info("Skipping secret setup for public repository.")
+		return nil
+	}
 	c.logger.Info("Setting up repository secrets...")
 
 	// We already validated GROVE_PAT exists in the validate phase
