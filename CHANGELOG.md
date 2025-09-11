@@ -1,3 +1,9 @@
+## v0.2.19 (2025-09-11)
+
+### Bug Fixes
+
+* make add-repo command more robust and add public repository support
+
 ## v0.2.18 (2025-09-02)
 
 ### Chores
