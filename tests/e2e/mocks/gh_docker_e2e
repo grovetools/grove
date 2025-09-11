@@ -1,0 +1,196 @@
+#!/bin/bash
+# Mock gh CLI for Docker-based E2E tests
+
+set -e
+
+# Log all calls for debugging
+LOG_FILE="/tmp/gh_mock.log"
+echo "[$(date)] gh $@" >> "$LOG_FILE"
+
+COMMAND="$1"
+SUBCOMMAND="$2"
+
+case "$COMMAND" in
+  auth)
+    if [[ "$SUBCOMMAND" == "status" ]]; then
+      exit 0 # Simulate being logged in
+    fi
+    ;;
+  release)
+    case "$SUBCOMMAND" in
+      view)
+        # Parse arguments to extract repo name
+        REPO=""
+        JSON_FIELDS=""
+        TAG=""
+        
+        # Check if first arg after 'view' is a tag or flag
+        if [[ "$3" != "--"* ]]; then
+          TAG="$3"
+          shift 3
+        else
+          shift 2
+        fi
+        
+        # Parse remaining arguments
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --repo)
+              REPO="$2"
+              shift 2
+              ;;
+            --json)
+              JSON_FIELDS="$2"
+              shift 2
+              ;;
+            *)
+              shift
+              ;;
+          esac
+        done
+        
+        # Extract repo name like 'grove-meta' from 'mattsolo1/grove-meta'
+        REPO_NAME=$(basename "$REPO")
+
+        if [[ "$JSON_FIELDS" == *"assets"* ]]; then
+            # Mock assets response for tool installation
+            # Map repo names to binary names
+            BINARY_NAME="$REPO_NAME"
+            case "$REPO_NAME" in
+              grove-meta)
+                BINARY_NAME="grove"
+                ;;
+              grove-context)
+                BINARY_NAME="cx"
+                ;;
+              grove-flow)
+                BINARY_NAME="flow"
+                ;;
+              grove-notebook)
+                BINARY_NAME="nb"
+                ;;
+            esac
+            
+            cat <<EOF
+{
+  "tagName": "v0.0.1-test",
+  "assets": [
+    {
+      "name": "${BINARY_NAME}-linux-amd64",
+      "url": "http://localhost:8000/releases/${REPO}/releases/download/v0.0.1-test/${BINARY_NAME}-linux-amd64"
+    }
+  ]
+}
+EOF
+        else
+            # Default to getting latest tag name
+            echo '{"tagName": "v0.0.1-test"}'
+        fi
+        exit 0
+        ;;
+      download)
+        # gh release download <tag> --repo <repo> --pattern <asset> --dir <dir>
+        # Also handles: gh release download <tag> --repo <repo> --pattern <asset> --output <file> --clobber
+        # Parse arguments
+        TAG="$3"
+        REPO=""
+        PATTERN=""
+        DIR=""
+        OUTPUT=""
+        
+        shift 3
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --repo)
+              REPO="$2"
+              shift 2
+              ;;
+            --pattern)
+              PATTERN="$2"
+              shift 2
+              ;;
+            --dir)
+              DIR="$2"
+              shift 2
+              ;;
+            --output)
+              OUTPUT="$2"
+              shift 2
+              ;;
+            --clobber)
+              shift
+              ;;
+            *)
+              shift
+              ;;
+          esac
+        done
+        
+        echo "Mock gh download: TAG=$TAG REPO=$REPO PATTERN=$PATTERN DIR=$DIR OUTPUT=$OUTPUT" >> "$LOG_FILE"
+        
+        # Extract repo name
+        REPO_NAME=$(basename "$REPO")
+        
+        # Map repo to binary name
+        case "$REPO_NAME" in
+          grove-meta)
+            BINARY_BASE="grove"
+            ;;
+          grove-context)
+            BINARY_BASE="cx"
+            ;;
+          grove-flow)
+            BINARY_BASE="flow"
+            ;;
+          grove-notebook)
+            BINARY_BASE="nb"
+            ;;
+          *)
+            BINARY_BASE=$(echo "$REPO_NAME" | sed 's/grove-//')
+            ;;
+        esac
+        
+        # Determine the source file path
+        # Pattern could be like "cx-linux-arm64" or just the binary name
+        if [[ "$PATTERN" == *"-linux-"* ]]; then
+          SOURCE="/tmp/web/releases/${REPO}/releases/download/${TAG}/${PATTERN}"
+        else
+          # Try to guess the full asset name based on current architecture
+          ARCH=$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')
+          SOURCE="/tmp/web/releases/${REPO}/releases/download/${TAG}/${PATTERN}-linux-${ARCH}"
+        fi
+        
+        # Determine target path
+        if [[ -n "$OUTPUT" ]]; then
+          TARGET="$OUTPUT"
+          mkdir -p "$(dirname "$TARGET")"
+        elif [[ -n "$DIR" ]]; then
+          TARGET="${DIR}/${PATTERN}"
+          mkdir -p "$DIR"
+        else
+          echo "Mock gh: No output location specified" >> "$LOG_FILE"
+          exit 1
+        fi
+        
+        echo "Mock download: copying $SOURCE to $TARGET" >> "$LOG_FILE"
+        
+        if [[ -f "$SOURCE" ]]; then
+          cp "$SOURCE" "$TARGET"
+          chmod +x "$TARGET"
+          echo "Mock download successful: $SOURCE -> $TARGET" >> "$LOG_FILE"
+        else
+          echo "Mock download: file not found: $SOURCE" >> "$LOG_FILE"
+          # Create a mock binary as fallback
+          echo "#!/bin/bash" > "$TARGET"
+          echo "echo 'Mock $BINARY_BASE binary v0.0.1-test'" >> "$TARGET"
+          chmod +x "$TARGET"
+          echo "Mock download: created fallback binary at $TARGET" >> "$LOG_FILE"
+        fi
+        exit 0
+        ;;
+    esac
+    ;;
+esac
+
+echo "Mock gh: Unhandled command: $@" >> "$LOG_FILE"
+exit 1

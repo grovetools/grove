@@ -100,6 +100,13 @@ test-e2e: build test-e2e-build
 	@echo "Running E2E tests..."
 	@PATH="$(abspath $(BIN_DIR)):$$PATH" $(BIN_DIR)/$(E2E_BINARY_NAME) run $(ARGS)
 
+# Run Docker-based E2E tests
+test-e2e-docker: build-all
+	@echo "Building Docker E2E test image..."
+	@docker build -t grove-e2e-test -f Dockerfile.e2e .
+	@echo "Running Docker E2E tests..."
+	@docker run --rm grove-e2e-test
+
 # Show available targets
 help:
 	@echo "Available targets:"

@@ -1,0 +1,34 @@
+# Use a Go image to get necessary tools like git, curl, python
+FROM golang:1.23-bookworm
+
+# Set the working directory inside the container
+WORKDIR /app
+
+# Install jq for easier JSON parsing in mock scripts
+RUN apt-get update && apt-get install -y jq
+
+# Copy the entire repository context into the container
+COPY . .
+
+# Try to copy the appropriate architecture binary from dist
+# Docker will automatically select the right one based on the container architecture
+RUN mkdir -p /app/bin && \
+    if [ "$(uname -m)" = "aarch64" ]; then \
+      if [ -f /app/dist/grove-linux-arm64 ]; then \
+        cp /app/dist/grove-linux-arm64 /app/bin/grove && chmod +x /app/bin/grove; \
+      else \
+        cp /app/tests/e2e/mocks/grove_mock /app/bin/grove && chmod +x /app/bin/grove; \
+      fi \
+    else \
+      if [ -f /app/dist/grove-linux-amd64 ]; then \
+        cp /app/dist/grove-linux-amd64 /app/bin/grove && chmod +x /app/bin/grove; \
+      else \
+        cp /app/tests/e2e/mocks/grove_mock /app/bin/grove && chmod +x /app/bin/grove; \
+      fi \
+    fi
+
+# Make the test runner script executable
+RUN chmod +x /app/tests/e2e/docker_test.sh || true
+
+# Set the entrypoint to our test runner script
+ENTRYPOINT ["/app/tests/e2e/docker_test.sh"]

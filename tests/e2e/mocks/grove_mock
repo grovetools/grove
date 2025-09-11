@@ -1,0 +1,142 @@
+#!/bin/bash
+# Mock grove CLI for Docker E2E tests
+
+case "$1" in
+  version|--version|-v)
+    echo "grove version v0.0.1-test"
+    ;;
+  list-available)
+    echo "Available Grove tools:"
+    echo "  cx         - Grove Context tool"
+    echo "  flow       - Grove Flow workflow tool"
+    echo "  nb         - Grove Notebook tool"
+    ;;
+  list)
+    # Show installed tools
+    if [ -d "$HOME/.grove/bin" ]; then
+      echo "Installed Grove tools:"
+      for tool in $HOME/.grove/bin/*; do
+        if [ -f "$tool" ] && [ "$(basename "$tool")" != "grove" ]; then
+          echo "  $(basename "$tool")"
+        fi
+      done
+    fi
+    ;;
+  install)
+    shift
+    # Mock install command
+    mkdir -p "$HOME/.grove/versions/v0.0.1-test/bin"
+    for tool in "$@"; do
+      echo "Installing $tool..."
+      case "$tool" in
+        cx|flow|nb)
+          # Create versioned binary
+          tool_repo="grove-$tool"
+          [ "$tool" = "cx" ] && tool_repo="grove-context"
+          [ "$tool" = "nb" ] && tool_repo="grove-notebook"
+          
+          arch=$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')
+          src="/tmp/web/releases/mattsolo1/${tool_repo}/releases/download/v0.0.1-test/${tool}-linux-${arch}"
+          
+          if [ -f "$src" ]; then
+            cp "$src" "$HOME/.grove/versions/v0.0.1-test/bin/${tool}"
+          else
+            echo "#!/bin/bash" > "$HOME/.grove/versions/v0.0.1-test/bin/${tool}"
+            echo "echo 'Mock $tool v0.0.1-test'" >> "$HOME/.grove/versions/v0.0.1-test/bin/${tool}"
+          fi
+          chmod +x "$HOME/.grove/versions/v0.0.1-test/bin/${tool}"
+          
+          # Create symlink
+          ln -sf "../versions/v0.0.1-test/bin/${tool}" "$HOME/.grove/bin/${tool}"
+          echo "✓ Installed $tool v0.0.1-test"
+          ;;
+        *)
+          echo "Unknown tool: $tool"
+          exit 1
+          ;;
+      esac
+    done
+    ;;
+  install-all)
+    $0 install cx flow nb
+    ;;
+  ws)
+    if [ "$2" = "init" ]; then
+      echo "Initializing Grove workspace..."
+      cat > grove.yml << 'GROVE_YML'
+name: my-ecosystem
+description: Test ecosystem
+repos: []
+GROVE_YML
+      cat > go.work << 'GO_WORK'
+go 1.23
+
+use (
+	.
+)
+GO_WORK
+      echo "✓ Workspace initialized"
+    fi
+    ;;
+  add-repo)
+    repo_name="$2"
+    shift 2
+    echo "Adding repository: $repo_name"
+    
+    # Parse flags
+    alias=""
+    ecosystem=false
+    skip_github=false
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --alias) alias="$2"; shift 2 ;;
+        --ecosystem) ecosystem=true; shift ;;
+        --skip-github) skip_github=true; shift ;;
+        *) shift ;;
+      esac
+    done
+    
+    # Create repo directory
+    mkdir -p "$repo_name"
+    
+    # Create grove.yml
+    cat > "$repo_name/grove.yml" << GROVE_YML
+name: $repo_name
+alias: ${alias:-$repo_name}
+description: Generated tool
+GROVE_YML
+    
+    # Create go.mod
+    cat > "$repo_name/go.mod" << GO_MOD
+module github.com/test/$repo_name
+
+go 1.23
+GO_MOD
+    
+    # Create Makefile
+    cat > "$repo_name/Makefile" << 'MAKEFILE'
+build:
+	go build -o bin/$(shell basename $(CURDIR)) .
+MAKEFILE
+    
+    # Create main.go
+    cat > "$repo_name/main.go" << 'MAIN_GO'
+package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("Hello from generated tool")
+}
+MAIN_GO
+    
+    # Update go.work
+    echo "use ./$repo_name" >> go.work
+    
+    echo "✓ Repository $repo_name created"
+    ;;
+  *)
+    echo "grove v0.0.1-test - Grove ecosystem management tool"
+    echo "Usage: grove [command] [args]"
+    ;;
+esac
