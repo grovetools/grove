@@ -1,6 +1,8 @@
 # Grove
 
-Grove is the meta-CLI and package manager for the Grove ecosystem. It provides a unified entry point for installing and managing Grove tools, as well as orchestrating operations across the entire ecosystem.
+<img src="https://github.com/user-attachments/assets/0304dd2b-7d67-42c8-9e0e-7a7c131f97ca" width="50%" />
+
+This repository holds the meta-CLI and package manager for the Grove ecosystem. It provides a unified entry point for installing and managing Grove tools, as well as orchestrating operations across the entire ecosystem.
 
 ## Installation
 
