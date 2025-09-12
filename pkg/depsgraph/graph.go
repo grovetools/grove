@@ -2,6 +2,8 @@ package depsgraph
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 )
@@ -138,7 +140,15 @@ func (g *Graph) TopologicalSortWithFilter(nodesToConsider map[string]bool) ([][]
 
 	// Check for cycles (only within the nodes we're processing)
 	if processed != len(nodesToProcess) {
-		return nil, fmt.Errorf("dependency cycle detected: processed %d nodes out of %d", processed, len(nodesToProcess))
+		// Identify nodes in the cycle
+		var cycleNodes []string
+		for name, degree := range inDegree {
+			if degree > 0 {
+				cycleNodes = append(cycleNodes, name)
+			}
+		}
+		sort.Strings(cycleNodes)
+		return nil, fmt.Errorf("dependency cycle detected among modules: [%s]", strings.Join(cycleNodes, ", "))
 	}
 
 	return result, nil
