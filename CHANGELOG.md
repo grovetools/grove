@@ -1,3 +1,9 @@
+## v0.2.20 (2025-09-12)
+
+### Bug Fixes
+
+* better error when cyclic dep detected
+
 ## v0.2.19 (2025-09-11)
 
 ### Bug Fixes
