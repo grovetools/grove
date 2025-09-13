@@ -1,3 +1,9 @@
+## v0.2.21 (2025-09-13)
+
+### Chores
+
+* update Grove dependencies to latest versions
+
 ## v0.2.20 (2025-09-12)
 
 ### Bug Fixes
