@@ -1,11 +1,16 @@
 # Use a Go image to get necessary tools like git, curl, python
-FROM golang:1.23-bookworm
+FROM golang:1.24-bookworm
 
 # Set the working directory inside the container
 WORKDIR /app
 
-# Install jq for easier JSON parsing in mock scripts
-RUN apt-get update && apt-get install -y jq
+# Install jq and the official GitHub CLI
+RUN apt-get update && apt-get install -y jq \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && apt-get update \
+    && apt-get install -y gh
 
 # Copy the entire repository context into the container
 COPY . .
@@ -28,7 +33,7 @@ RUN mkdir -p /app/bin && \
     fi
 
 # Make the test runner script executable
-RUN chmod +x /app/tests/e2e/docker_test.sh || true
+RUN chmod +x /app/tests/e2e/docker_test.sh
 
 # Set the entrypoint to our test runner script
 ENTRYPOINT ["/app/tests/e2e/docker_test.sh"]

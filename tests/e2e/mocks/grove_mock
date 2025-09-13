@@ -3,7 +3,7 @@
 
 case "$1" in
   version|--version|-v)
-    echo "grove version v0.0.1-test"
+    echo "Mock grove binary v0.0.1-test"
     ;;
   list-available)
     echo "Available Grove tools:"

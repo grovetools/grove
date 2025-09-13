@@ -105,7 +105,13 @@ test-e2e-docker: build-all
 	@echo "Building Docker E2E test image..."
 	@docker build -t grove-e2e-test -f Dockerfile.e2e .
 	@echo "Running Docker E2E tests..."
-	@docker run --rm grove-e2e-test
+	@if [ -n "$$GITHUB_TOKEN" ]; then \
+		echo "Running in LIVE mode with GitHub token..."; \
+		docker run --rm -e TEST_MODE=live -e GITHUB_TOKEN="$$GITHUB_TOKEN" grove-e2e-test; \
+	else \
+		echo "Running in MOCK mode..."; \
+		docker run --rm -e TEST_MODE=mock grove-e2e-test; \
+	fi
 
 # Show available targets
 help:
