@@ -25,6 +25,7 @@ These commands are distinct from 'grove version' which manages official releases
 	cmd.AddCommand(newDevListBinsCmd())
 	cmd.AddCommand(newDevCwdCmd())
 	cmd.AddCommand(newDevResetCmd())
+	cmd.AddCommand(newDevTuiCmd())
 
 	return cmd
 }
