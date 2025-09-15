@@ -10,10 +10,12 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
@@ -34,6 +36,7 @@ type toolItem struct {
 	latestRelease string
 	devLinks      []string // available dev links
 	worktrees     []worktreeInfo
+	latestLoaded  bool // whether latest release has been fetched
 }
 
 type worktreeInfo struct {
@@ -128,21 +131,25 @@ var keys = keyMap{
 }
 
 type model struct {
-	tools         []toolItem
-	keys          keyMap
-	manager       *sdk.Manager
-	reconciler    *reconciler.Reconciler
-	devConfig     *devlinks.Config
-	groveHome     string
-	statusMessage string
-	err           error
-	mode          string // "table" or "worktree-select"
-	selectedIndex int
-	selectedTool  *toolItem
-	worktreeList  list.Model
-	showHelp      bool
-	width         int
-	height        int
+	tools             []toolItem
+	keys              keyMap
+	manager           *sdk.Manager
+	reconciler        *reconciler.Reconciler
+	devConfig         *devlinks.Config
+	groveHome         string
+	statusMessage     string
+	err               error
+	mode              string // "table" or "worktree-select"
+	selectedIndex     int
+	selectedTool      *toolItem
+	worktreeList      list.Model
+	showHelp          bool
+	width             int
+	height            int
+	loading           bool
+	spinner           spinner.Model
+	versionCache      map[string]string // cache for dev binary versions
+	versionCacheMutex sync.RWMutex
 }
 
 func initialModel() (*model, error) {
@@ -178,6 +185,11 @@ func initialModel() (*model, error) {
 		return nil, fmt.Errorf("failed to load dev config: %w", err)
 	}
 
+	// Create spinner
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+
 	m := &model{
 		keys:          keys,
 		manager:       manager,
@@ -187,17 +199,24 @@ func initialModel() (*model, error) {
 		mode:          "table",
 		selectedIndex: 0,
 		showHelp:      false,
-	}
-
-	// Load tools
-	if err := m.loadTools(); err != nil {
-		return nil, err
+		loading:       true,
+		spinner:       s,
+		versionCache:  make(map[string]string),
 	}
 
 	return m, nil
 }
 
-func (m *model) loadTools() error {
+func (m *model) Init() tea.Cmd {
+	// Start with spinner and load tools quickly
+	return tea.Batch(
+		m.spinner.Tick,
+		m.loadToolsQuickly,
+	)
+}
+
+// loadToolsQuickly loads tools without fetching latest releases or dev versions
+func (m *model) loadToolsQuickly() tea.Msg {
 	// Get available tools from workspace discovery and SDK
 	toolMap := make(map[string]string) // toolName -> repoName
 
@@ -227,9 +246,10 @@ func (m *model) loadTools() error {
 	var tools []toolItem
 	for toolName, repoName := range toolMap {
 		tool := toolItem{
-			name:     toolName,
-			repoName: repoName,
-			status:   "not installed",
+			name:         toolName,
+			repoName:     repoName,
+			status:       "not installed",
+			latestLoaded: false,
 		}
 
 		// Get effective source from reconciler
@@ -238,20 +258,13 @@ func (m *model) loadTools() error {
 		if source == "dev" {
 			tool.status = "dev"
 			tool.activeVersion = version
-			// Try to get actual dev version
-			if binInfo, exists := m.devConfig.Binaries[toolName]; exists && binInfo.Current != "" {
-				if linkInfo, exists := binInfo.Links[binInfo.Current]; exists {
-					if devVersion := getTUIDevBinaryVersion(linkInfo.Path); devVersion != "" {
-						tool.activeVersion = devVersion
-					}
-				}
-			}
+			// Don't fetch dev version here - will do lazily
 		} else if source == "release" {
 			tool.status = "release"
 			tool.activeVersion = version
 		}
 
-		// Get available dev links
+		// Get available dev links (quick)
 		if binInfo, exists := m.devConfig.Binaries[toolName]; exists {
 			for alias := range binInfo.Links {
 				tool.devLinks = append(tool.devLinks, alias)
@@ -259,15 +272,8 @@ func (m *model) loadTools() error {
 			sort.Strings(tool.devLinks)
 		}
 
-		// Get latest release
-		latestVersion, _ := m.manager.GetLatestVersionTag(repoName)
-		if latestVersion == "" {
-			latestVersion, _ = m.manager.GetLatestVersionTag(toolName)
-		}
-		tool.latestRelease = latestVersion
-
-		// Discover worktrees for this tool
-		tool.worktrees = m.discoverWorktrees(toolName, repoName)
+		// Discover worktrees (quick - just check directories)
+		tool.worktrees = m.discoverWorktreesQuick(toolName, repoName)
 
 		tools = append(tools, tool)
 	}
@@ -278,67 +284,89 @@ func (m *model) loadTools() error {
 	})
 
 	m.tools = tools
-	return nil
+	m.loading = false
+
+	// Start fetching latest releases in background
+	return m.fetchLatestReleasesInBackground()
 }
 
-func (m *model) discoverWorktrees(toolName, repoName string) []worktreeInfo {
+// discoverWorktreesQuick quickly discovers worktrees without checking binaries
+func (m *model) discoverWorktreesQuick(toolName, repoName string) []worktreeInfo {
 	var worktrees []worktreeInfo
 
-	// Check for .grove-worktrees directory
-	home := os.Getenv("HOME")
-	worktreesDir := filepath.Join(home, ".grove-worktrees")
-	
-	// Try both the repo name and variations
-	repoPatterns := []string{
-		repoName,
-		"grove-" + toolName,
-		toolName,
-	}
-
-	for _, pattern := range repoPatterns {
-		repoWorktreesDir := filepath.Join(worktreesDir, pattern)
-		if entries, err := os.ReadDir(repoWorktreesDir); err == nil {
-			for _, entry := range entries {
-				if entry.IsDir() {
-					wtPath := filepath.Join(repoWorktreesDir, entry.Name())
-					// Check if this worktree has the binary
-					binPath := filepath.Join(wtPath, "bin", toolName)
-					if _, err := os.Stat(binPath); err == nil {
-						worktrees = append(worktrees, worktreeInfo{
-							name: entry.Name(),
-							path: wtPath,
-						})
-					}
-				}
-			}
-		}
-	}
-
-	// Also check existing dev links
+	// Check existing dev links first (these are known to work)
 	if binInfo, exists := m.devConfig.Binaries[toolName]; exists {
 		for alias, linkInfo := range binInfo.Links {
-			// Check if this is already in worktrees
-			found := false
-			for _, wt := range worktrees {
-				if wt.path == linkInfo.WorktreePath {
-					found = true
-					break
-				}
-			}
-			if !found {
-				worktrees = append(worktrees, worktreeInfo{
-					name: alias,
-					path: linkInfo.WorktreePath,
-				})
-			}
+			worktrees = append(worktrees, worktreeInfo{
+				name: alias,
+				path: linkInfo.WorktreePath,
+			})
 		}
 	}
 
 	return worktrees
 }
 
-func (m *model) Init() tea.Cmd {
-	return nil
+// fetchLatestReleasesInBackground fetches latest releases asynchronously
+func (m *model) fetchLatestReleasesInBackground() tea.Cmd {
+	return func() tea.Msg {
+		// Fetch latest releases in parallel with limited concurrency
+		sem := make(chan struct{}, 5) // Limit to 5 concurrent requests
+		var wg sync.WaitGroup
+		
+		for i := range m.tools {
+			if m.tools[i].latestLoaded {
+				continue
+			}
+			
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				
+				// Get latest release
+				latestVersion, _ := m.manager.GetLatestVersionTag(m.tools[idx].repoName)
+				if latestVersion == "" {
+					latestVersion, _ = m.manager.GetLatestVersionTag(m.tools[idx].name)
+				}
+				m.tools[idx].latestRelease = latestVersion
+				m.tools[idx].latestLoaded = true
+			}(i)
+		}
+		
+		wg.Wait()
+		return latestReleasesLoadedMsg{}
+	}
+}
+
+// Message types
+type latestReleasesLoadedMsg struct{}
+type devVersionLoadedMsg struct {
+	toolName string
+	version  string
+}
+
+func (m *model) loadDevVersion(toolName string, binaryPath string) tea.Cmd {
+	return func() tea.Msg {
+		// Check cache first
+		m.versionCacheMutex.RLock()
+		if cached, exists := m.versionCache[binaryPath]; exists {
+			m.versionCacheMutex.RUnlock()
+			return devVersionLoadedMsg{toolName: toolName, version: cached}
+		}
+		m.versionCacheMutex.RUnlock()
+
+		// Get version
+		version := getTUIDevBinaryVersion(binaryPath)
+		
+		// Cache it
+		m.versionCacheMutex.Lock()
+		m.versionCache[binaryPath] = version
+		m.versionCacheMutex.Unlock()
+		
+		return devVersionLoadedMsg{toolName: toolName, version: version}
+	}
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -369,11 +397,33 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case key.Matches(msg, keys.Up):
 				if m.selectedIndex > 0 {
 					m.selectedIndex--
+					// Load dev version if needed
+					if m.selectedIndex < len(m.tools) && m.tools[m.selectedIndex].status == "dev" {
+						tool := &m.tools[m.selectedIndex]
+						if binInfo, exists := m.devConfig.Binaries[tool.name]; exists && binInfo.Current != "" {
+							if linkInfo, exists := binInfo.Links[binInfo.Current]; exists {
+								if tool.activeVersion == binInfo.Current { // Not yet loaded
+									return m, m.loadDevVersion(tool.name, linkInfo.Path)
+								}
+							}
+						}
+					}
 				}
 				return m, nil
 			case key.Matches(msg, keys.Down):
 				if m.selectedIndex < len(m.tools)-1 {
 					m.selectedIndex++
+					// Load dev version if needed
+					if m.selectedIndex < len(m.tools) && m.tools[m.selectedIndex].status == "dev" {
+						tool := &m.tools[m.selectedIndex]
+						if binInfo, exists := m.devConfig.Binaries[tool.name]; exists && binInfo.Current != "" {
+							if linkInfo, exists := binInfo.Links[binInfo.Current]; exists {
+								if tool.activeVersion == binInfo.Current { // Not yet loaded
+									return m, m.loadDevVersion(tool.name, linkInfo.Path)
+								}
+							}
+						}
+					}
 				}
 				return m, nil
 			case key.Matches(msg, keys.Help):
@@ -395,12 +445,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.resetToRelease(tool)
 				}
 			case key.Matches(msg, keys.Refresh):
-				if err := m.loadTools(); err != nil {
-					m.statusMessage = fmt.Sprintf("Error refreshing: %v", err)
-				} else {
-					m.statusMessage = "Refreshed tool list"
-				}
-				return m, nil
+				m.loading = true
+				m.versionCache = make(map[string]string) // Clear cache
+				return m, tea.Batch(
+					m.spinner.Tick,
+					m.loadToolsQuickly,
+				)
 			}
 		}
 
@@ -413,16 +463,38 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case statusMsg:
-		m.statusMessage = string(msg)
-		// Refresh the tools after an action
-		if err := m.loadTools(); err == nil {
-			// Keep selection in bounds
-			if m.selectedIndex >= len(m.tools) {
-				m.selectedIndex = len(m.tools) - 1
+	case spinner.TickMsg:
+		if m.loading {
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+
+	case latestReleasesLoadedMsg:
+		// Latest releases have been loaded, no need to do anything special
+		return m, nil
+
+	case devVersionLoadedMsg:
+		// Update the tool with the loaded version
+		for i := range m.tools {
+			if m.tools[i].name == msg.toolName {
+				if msg.version != "" {
+					m.tools[i].activeVersion = msg.version
+				}
+				break
 			}
 		}
 		return m, nil
+
+	case statusMsg:
+		m.statusMessage = string(msg)
+		// Refresh the tools after an action
+		m.loading = true
+		return m, tea.Batch(
+			m.spinner.Tick,
+			m.loadToolsQuickly,
+		)
 
 	case errMsg:
 		m.err = msg.err
@@ -442,6 +514,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *model) View() string {
 	if m.err != nil {
 		return fmt.Sprintf("Error: %v\n\nPress q to quit.", m.err)
+	}
+
+	if m.loading && len(m.tools) == 0 {
+		return fmt.Sprintf("\n %s Loading tools...\n", m.spinner.View())
 	}
 
 	if m.mode == "worktree-select" {
@@ -479,7 +555,9 @@ func (m *model) View() string {
 		// Add release status indicator
 		releaseStatus := tool.latestRelease
 		styledReleaseStatus := ""
-		if releaseStatus == "" {
+		if !tool.latestLoaded {
+			styledReleaseStatus = "..."
+		} else if releaseStatus == "" {
 			styledReleaseStatus = "-"
 		} else if displayVersion != "" && displayVersion == tool.latestRelease {
 			styledReleaseStatus = fmt.Sprintf("%s ✓", tool.latestRelease)
@@ -516,7 +594,9 @@ func (m *model) View() string {
 			
 			row[3] = tuiVersionStyle.Render(currentVersion)
 			
-			if releaseStatus == "" {
+			if !tool.latestLoaded {
+				row[4] = tuiHelpStyle.Render("...")
+			} else if releaseStatus == "" {
 				row[4] = tuiNotInstalledStyle.Render("-")
 			} else if displayVersion != "" && displayVersion == tool.latestRelease {
 				row[4] = tuiUpToDateStyle.Render(styledReleaseStatus)
@@ -614,6 +694,9 @@ func (m *model) installLatest(tool *toolItem) tea.Cmd {
 
 func (m *model) showWorktreeSelect(tool *toolItem) tea.Cmd {
 	return func() tea.Msg {
+		// Do full worktree discovery now
+		tool.worktrees = m.discoverWorktreesFull(tool.name, tool.repoName)
+		
 		if len(tool.worktrees) == 0 {
 			return statusMsg(fmt.Sprintf("No worktrees found for %s", tool.name))
 		}
@@ -635,6 +718,63 @@ func (m *model) showWorktreeSelect(tool *toolItem) tea.Cmd {
 
 		return nil
 	}
+}
+
+// discoverWorktreesFull does a full worktree discovery including checking for binaries
+func (m *model) discoverWorktreesFull(toolName, repoName string) []worktreeInfo {
+	var worktrees []worktreeInfo
+
+	// Check for .grove-worktrees directory
+	home := os.Getenv("HOME")
+	worktreesDir := filepath.Join(home, ".grove-worktrees")
+	
+	// Try both the repo name and variations
+	repoPatterns := []string{
+		repoName,
+		"grove-" + toolName,
+		toolName,
+	}
+
+	for _, pattern := range repoPatterns {
+		repoWorktreesDir := filepath.Join(worktreesDir, pattern)
+		if entries, err := os.ReadDir(repoWorktreesDir); err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					wtPath := filepath.Join(repoWorktreesDir, entry.Name())
+					// Check if this worktree has the binary
+					binPath := filepath.Join(wtPath, "bin", toolName)
+					if _, err := os.Stat(binPath); err == nil {
+						worktrees = append(worktrees, worktreeInfo{
+							name: entry.Name(),
+							path: wtPath,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// Also check existing dev links
+	if binInfo, exists := m.devConfig.Binaries[toolName]; exists {
+		for alias, linkInfo := range binInfo.Links {
+			// Check if this is already in worktrees
+			found := false
+			for _, wt := range worktrees {
+				if wt.path == linkInfo.WorktreePath {
+					found = true
+					break
+				}
+			}
+			if !found {
+				worktrees = append(worktrees, worktreeInfo{
+					name: alias,
+					path: linkInfo.WorktreePath,
+				})
+			}
+		}
+	}
+
+	return worktrees
 }
 
 func (m *model) setDevVersion(tool *toolItem, worktree worktreeInfo) tea.Cmd {
@@ -730,7 +870,7 @@ func getTUIDevBinaryVersion(binaryPath string) string {
 	}
 
 	// Set a timeout for the version command
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second) // Reduced timeout
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, binaryPath, "version")
