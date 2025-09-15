@@ -23,6 +23,8 @@ These commands are distinct from 'grove version' which manages official releases
 	cmd.AddCommand(newDevUnlinkCmd())
 	cmd.AddCommand(newDevPruneCmd())
 	cmd.AddCommand(newDevListBinsCmd())
+	cmd.AddCommand(newDevCwdCmd())
+	cmd.AddCommand(newDevResetCmd())
 
 	return cmd
 }
