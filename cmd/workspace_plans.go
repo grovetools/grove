@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 	"github.com/mattsolo1/grove-meta/pkg/aggregator"
 	"github.com/spf13/cobra"
 )
@@ -39,6 +41,10 @@ var (
 				Foreground(lipgloss.Color("196")).
 				Bold(true)
 
+	planStatusReviewStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("12")).
+				Bold(true)
+
 	planMetaStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("245"))
 
@@ -52,6 +58,8 @@ var (
 	noPlansStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("242")).
 			Italic(true)
+
+	plansTableView bool
 )
 
 // Plan represents a simplified version of a flow plan
@@ -71,6 +79,8 @@ func NewWorkspacePlansCmd() *cobra.Command {
 		Long:  "Display plans (from flow plans) for each workspace in the monorepo",
 		RunE:  runWorkspacePlans,
 	}
+
+	cmd.Flags().BoolVar(&plansTableView, "table", false, "Show all plans in a single table ordered by date")
 
 	return cmd
 }
@@ -124,6 +134,10 @@ func runWorkspacePlans(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 
+		if plansTableView {
+			return renderPlansTable(results)
+		}
+
 		// Sort workspace names for consistent output
 		var workspaceNames []string
 		hasAnyPlans := false
@@ -133,7 +147,7 @@ func runWorkspacePlans(cmd *cobra.Command, args []string) error {
 				hasAnyPlans = true
 			}
 		}
-		sortStrings(workspaceNames)
+		sort.Strings(workspaceNames)
 
 		if !hasAnyPlans {
 			fmt.Println(noPlansStyle.Render("No plans found in any workspace."))
@@ -178,19 +192,40 @@ func formatPlan(plan Plan) string {
 		title = planTitleStyle.Render("(untitled)")
 	}
 
-	// Format status with appropriate style
+	// Format status with grove-flow consistent icons
 	var statusStr string
+	statusDisplay := plan.Status
+	
 	switch strings.ToLower(plan.Status) {
 	case "pending", "pending_user":
-		statusStr = planStatusPendingStyle.Render("⏳ " + plan.Status)
+		statusStr = planStatusPendingStyle.Render("⏳ " + statusDisplay)
+	case "pending_llm":
+		statusStr = planStatusRunningStyle.Render("🤖 " + statusDisplay)
 	case "running", "in_progress":
-		statusStr = planStatusRunningStyle.Render("🔄 " + plan.Status)
+		statusStr = planStatusRunningStyle.Render("⚡ " + statusDisplay)
 	case "completed", "done":
-		statusStr = planStatusCompletedStyle.Render("✅ " + plan.Status)
-	case "failed", "error":
-		statusStr = planStatusFailedStyle.Render("❌ " + plan.Status)
+		statusStr = planStatusCompletedStyle.Render("✓ " + statusDisplay)
+	case "failed", "error", "blocked":
+		statusStr = planStatusFailedStyle.Render("✗ " + statusDisplay)
+	case "needs_review":
+		statusStr = planStatusReviewStyle.Render("👁 " + statusDisplay)
 	default:
-		statusStr = planMetaStyle.Render(plan.Status)
+		// Handle composite statuses (e.g., "1 completed, 2 pending")
+		if strings.Contains(plan.Status, "blocked") {
+			statusStr = planStatusFailedStyle.Render("🚫 " + statusDisplay)
+		} else if strings.Contains(plan.Status, "completed") && strings.Contains(plan.Status, "pending") {
+			statusStr = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("220")).
+				Render("🚧 " + statusDisplay)
+		} else if strings.Contains(plan.Status, "running") {
+			statusStr = planStatusRunningStyle.Render("⚡ " + statusDisplay)
+		} else if strings.Contains(plan.Status, "completed") {
+			statusStr = planStatusCompletedStyle.Render("✓ " + statusDisplay)
+		} else if strings.Contains(plan.Status, "pending") {
+			statusStr = planStatusPendingStyle.Render("⏳ " + statusDisplay)
+		} else {
+			statusStr = planMetaStyle.Render(statusDisplay)
+		}
 	}
 
 	// Format metadata
@@ -208,4 +243,190 @@ func formatPlan(plan Plan) string {
 
 	meta := planMetaStyle.Render(idStr)
 	return fmt.Sprintf("%s %s\n%s", title, statusStr, meta)
+}
+
+func renderPlansTable(results map[string][]Plan) error {
+	// Collect all plans with workspace info
+	type planWithWorkspace struct {
+		Plan      Plan
+		Workspace string
+	}
+
+	var allPlans []planWithWorkspace
+	for wsName, plans := range results {
+		for _, plan := range plans {
+			allPlans = append(allPlans, planWithWorkspace{
+				Plan:      plan,
+				Workspace: wsName,
+			})
+		}
+	}
+
+	if len(allPlans) == 0 {
+		fmt.Println(noPlansStyle.Render("No plans found in any workspace."))
+		return nil
+	}
+
+	// Sort by UpdatedAt descending (most recent first)
+	sort.Slice(allPlans, func(i, j int) bool {
+		// If one has zero time, put it at the end
+		if allPlans[i].Plan.UpdatedAt.IsZero() && !allPlans[j].Plan.UpdatedAt.IsZero() {
+			return false
+		}
+		if !allPlans[i].Plan.UpdatedAt.IsZero() && allPlans[j].Plan.UpdatedAt.IsZero() {
+			return true
+		}
+		return allPlans[i].Plan.UpdatedAt.After(allPlans[j].Plan.UpdatedAt)
+	})
+
+	// Define column-specific styles
+	workspaceStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("141")).
+		Bold(true)
+	
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("255"))
+	
+	timeStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("243"))
+
+	// Create table with enhanced styling
+	t := table.New().
+		Border(lipgloss.RoundedBorder()).
+		BorderStyle(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("81"))).
+		Headers("WORKSPACE", "TITLE", "STATUS", "UPDATED").
+		Width(120).
+		StyleFunc(func(row, col int) lipgloss.Style {
+			if row == 0 {
+				// Header row - left align instead of center
+				return lipgloss.NewStyle().
+					Foreground(lipgloss.Color("81")).
+					Bold(true).
+					Align(lipgloss.Left).
+					Padding(0, 1)
+			}
+			
+			// Data rows - apply column-specific styles with consistent alignment
+			baseStyle := lipgloss.NewStyle().
+				Align(lipgloss.Left).
+				Padding(0, 1)
+			
+			switch col {
+			case 0: // Workspace column
+				return workspaceStyle.Copy().
+					Align(lipgloss.Left).
+					Padding(0, 1)
+			case 1: // Title column
+				return titleStyle.Copy().
+					Align(lipgloss.Left).
+					Padding(0, 1)
+			case 2: // Status column - already styled
+				return baseStyle
+			case 3: // Time column
+				return timeStyle.Copy().
+					Align(lipgloss.Left).
+					Padding(0, 1)
+			default:
+				return baseStyle
+			}
+		})
+
+	// Add rows
+	for _, pw := range allPlans {
+		plan := pw.Plan
+
+		// Format time with enhanced styling
+		timeStr := ""
+		if !plan.UpdatedAt.IsZero() {
+			baseTime := formatTimeAgo(plan.UpdatedAt)
+			// Highlight recently active plans (within last hour)
+			if time.Since(plan.UpdatedAt) < time.Hour {
+				timeStr = "● " + baseTime
+			} else if time.Since(plan.UpdatedAt) < 24*time.Hour {
+				// Highlight plans updated today
+				timeStr = "◦ " + baseTime
+			} else {
+				timeStr = baseTime
+			}
+		} else {
+			timeStr = "-"
+		}
+
+		// Format status with grove-flow consistent icons and colors
+		statusStr := ""
+		statusDisplay := plan.Status
+		
+		switch strings.ToLower(plan.Status) {
+		case "pending", "pending_user":
+			statusStr = planStatusPendingStyle.Render("⏳ " + statusDisplay)
+		case "pending_llm":
+			statusStr = planStatusRunningStyle.Render("🤖 " + statusDisplay)
+		case "running", "in_progress":
+			statusStr = planStatusRunningStyle.Render("⚡ " + statusDisplay)
+		case "completed", "done":
+			statusStr = planStatusCompletedStyle.Render("✓ " + statusDisplay)
+		case "failed", "error", "blocked":
+			statusStr = planStatusFailedStyle.Render("✗ " + statusDisplay)
+		case "needs_review":
+			statusStr = planStatusReviewStyle.Render("👁 " + statusDisplay)
+		default:
+			// Handle composite statuses (e.g., "1 completed, 2 pending")
+			if strings.Contains(plan.Status, "blocked") {
+				statusStr = planStatusFailedStyle.Render("🚫 " + statusDisplay)
+			} else if strings.Contains(plan.Status, "completed") && strings.Contains(plan.Status, "pending") {
+				statusStr = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("220")).
+					Render("🚧 " + statusDisplay)
+			} else if strings.Contains(plan.Status, "running") {
+				statusStr = planStatusRunningStyle.Render("⚡ " + statusDisplay)
+			} else if strings.Contains(plan.Status, "completed") {
+				statusStr = planStatusCompletedStyle.Render("✓ " + statusDisplay)
+			} else if strings.Contains(plan.Status, "pending") {
+				statusStr = planStatusPendingStyle.Render("⏳ " + statusDisplay)
+			} else {
+				statusStr = planMetaStyle.Render(statusDisplay)
+			}
+		}
+
+		// Format title - use ID if title is empty, truncate if too long
+		titleStr := plan.Title
+		if titleStr == "" {
+			// Use ID as fallback if no title
+			titleStr = plan.ID
+			if len(titleStr) > 30 {
+				titleStr = titleStr[:27] + "..."
+			}
+		} else if len(titleStr) > 40 {
+			titleStr = titleStr[:37] + "..."
+		}
+
+		// Add the row to the table (trim any extra spaces)
+		t.Row(
+			strings.TrimSpace(pw.Workspace),
+			strings.TrimSpace(titleStr),
+			statusStr,  // Don't trim statusStr as it has styled content
+			strings.TrimSpace(timeStr),
+		)
+	}
+
+	// Add a title above the table
+	tableTitle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("81")).
+		MarginBottom(1).
+		Render(fmt.Sprintf("📋 Flow Plans Across All Workspaces (%d total)", len(allPlans)))
+	
+	// Add a legend below the table
+	legendStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("243")).
+		MarginTop(1)
+	
+	legend := legendStyle.Render(
+		"Legend: ✓ Completed  ⚡ Running  ✗ Failed  🚫 Blocked  👁 Review  ⏳ Pending  🤖 LLM  🚧 Mixed  ● Recent (< 1hr)")
+	
+	fmt.Println(tableTitle)
+	fmt.Println(t)
+	fmt.Println(legend)
+	return nil
 }
