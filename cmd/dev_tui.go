@@ -1,16 +1,22 @@
 package cmd
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-meta/pkg/devlinks"
 	"github.com/mattsolo1/grove-meta/pkg/reconciler"
@@ -19,7 +25,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Tool item for the list
+// Tool item for the table
 type toolItem struct {
 	name          string
 	repoName      string
@@ -35,38 +41,58 @@ type worktreeInfo struct {
 	path string
 }
 
-func (i toolItem) Title() string { return i.name }
-func (i toolItem) Description() string {
-	status := ""
-	switch i.status {
-	case "dev":
-		status = fmt.Sprintf("◆ dev: %s", i.activeVersion)
-	case "release":
-		status = fmt.Sprintf("● release: %s", i.activeVersion)
-	default:
-		status = "○ not installed"
-	}
-	
-	if i.latestRelease != "" && i.activeVersion != i.latestRelease {
-		status += fmt.Sprintf(" (latest: %s)", i.latestRelease)
-	}
-	return status
-}
-func (i toolItem) FilterValue() string { return i.name }
+func (w worktreeInfo) Title() string       { return w.name }
+func (w worktreeInfo) Description() string { return w.path }
+func (w worktreeInfo) FilterValue() string { return w.name }
+
+// Define styles to match grove list
+var (
+	// Status styles
+	tuiDevStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF79C6")).Bold(true)
+	tuiReleaseStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B")).Bold(true)
+	tuiNotInstalledStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4"))
+
+	// Version styles
+	tuiVersionStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("#F8F8F2"))
+	tuiUpdateAvailableStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB86C"))
+	tuiUpToDateStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B"))
+
+	// Tool name style
+	tuiToolStyle = lipgloss.NewStyle().Bold(true)
+
+	// Repository style
+	tuiRepoStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8BE9FD"))
+
+	// Selection style
+	tuiSelectedStyle = lipgloss.NewStyle().Background(lipgloss.Color("#44475A")).Bold(true)
+
+	// Help style
+	tuiHelpStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4"))
+)
 
 // Custom key bindings
 type keyMap struct {
-	Install    key.Binding
-	SetDev     key.Binding
-	Reset      key.Binding
-	Refresh    key.Binding
-	Help       key.Binding
-	Quit       key.Binding
-	Enter      key.Binding
-	Back       key.Binding
+	Up      key.Binding
+	Down    key.Binding
+	Install key.Binding
+	SetDev  key.Binding
+	Reset   key.Binding
+	Refresh key.Binding
+	Help    key.Binding
+	Quit    key.Binding
+	Enter   key.Binding
+	Back    key.Binding
 }
 
 var keys = keyMap{
+	Up: key.NewBinding(
+		key.WithKeys("up", "k"),
+		key.WithHelp("↑/k", "up"),
+	),
+	Down: key.NewBinding(
+		key.WithKeys("down", "j"),
+		key.WithHelp("↓/j", "down"),
+	),
 	Install: key.NewBinding(
 		key.WithKeys("i"),
 		key.WithHelp("i", "install latest"),
@@ -102,7 +128,6 @@ var keys = keyMap{
 }
 
 type model struct {
-	list          list.Model
 	tools         []toolItem
 	keys          keyMap
 	manager       *sdk.Manager
@@ -111,9 +136,13 @@ type model struct {
 	groveHome     string
 	statusMessage string
 	err           error
-	mode          string // "list" or "worktree-select"
+	mode          string // "table" or "worktree-select"
+	selectedIndex int
 	selectedTool  *toolItem
 	worktreeList  list.Model
+	showHelp      bool
+	width         int
+	height        int
 }
 
 func initialModel() (*model, error) {
@@ -150,52 +179,20 @@ func initialModel() (*model, error) {
 	}
 
 	m := &model{
-		keys:       keys,
-		manager:    manager,
-		reconciler: r,
-		devConfig:  devConfig,
-		groveHome:  groveHome,
-		mode:       "list",
+		keys:          keys,
+		manager:       manager,
+		reconciler:    r,
+		devConfig:     devConfig,
+		groveHome:     groveHome,
+		mode:          "table",
+		selectedIndex: 0,
+		showHelp:      false,
 	}
 
 	// Load tools
 	if err := m.loadTools(); err != nil {
 		return nil, err
 	}
-
-	// Setup list
-	items := make([]list.Item, len(m.tools))
-	for i, tool := range m.tools {
-		items[i] = tool
-	}
-
-	const defaultWidth = 80
-	const listHeight = 20
-
-	l := list.New(items, list.NewDefaultDelegate(), defaultWidth, listHeight)
-	l.Title = "Grove Dev Manager"
-	l.SetShowStatusBar(true)
-	l.SetFilteringEnabled(true)
-	l.Styles.Title = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#BD93F9")).
-		MarginLeft(2)
-	l.Styles.PaginationStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6272A4")).
-		PaddingLeft(4)
-	l.Styles.HelpStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6272A4")).
-		PaddingLeft(4).
-		PaddingBottom(1)
-	l.AdditionalShortHelpKeys = func() []key.Binding {
-		return []key.Binding{
-			keys.Install,
-			keys.SetDev,
-			keys.Reset,
-		}
-	}
-
-	m.list = l
 
 	return m, nil
 }
@@ -241,6 +238,14 @@ func (m *model) loadTools() error {
 		if source == "dev" {
 			tool.status = "dev"
 			tool.activeVersion = version
+			// Try to get actual dev version
+			if binInfo, exists := m.devConfig.Binaries[toolName]; exists && binInfo.Current != "" {
+				if linkInfo, exists := binInfo.Links[binInfo.Current]; exists {
+					if devVersion := getTUIDevBinaryVersion(linkInfo.Path); devVersion != "" {
+						tool.activeVersion = devVersion
+					}
+				}
+			}
 		} else if source == "release" {
 			tool.status = "release"
 			tool.activeVersion = version
@@ -342,7 +347,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mode == "worktree-select" {
 			switch {
 			case key.Matches(msg, keys.Back):
-				m.mode = "list"
+				m.mode = "table"
 				m.selectedTool = nil
 				return m, nil
 			case key.Matches(msg, keys.Enter):
@@ -357,31 +362,42 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 		} else {
-			// List mode
+			// Table mode
 			switch {
 			case key.Matches(msg, keys.Quit):
 				return m, tea.Quit
+			case key.Matches(msg, keys.Up):
+				if m.selectedIndex > 0 {
+					m.selectedIndex--
+				}
+				return m, nil
+			case key.Matches(msg, keys.Down):
+				if m.selectedIndex < len(m.tools)-1 {
+					m.selectedIndex++
+				}
+				return m, nil
+			case key.Matches(msg, keys.Help):
+				m.showHelp = !m.showHelp
+				return m, nil
 			case key.Matches(msg, keys.Install):
-				if i, ok := m.list.SelectedItem().(toolItem); ok {
-					return m, m.installLatest(&i)
+				if m.selectedIndex < len(m.tools) {
+					tool := &m.tools[m.selectedIndex]
+					return m, m.installLatest(tool)
 				}
 			case key.Matches(msg, keys.SetDev):
-				if i, ok := m.list.SelectedItem().(toolItem); ok {
-					return m, m.showWorktreeSelect(&i)
+				if m.selectedIndex < len(m.tools) {
+					tool := &m.tools[m.selectedIndex]
+					return m, m.showWorktreeSelect(tool)
 				}
 			case key.Matches(msg, keys.Reset):
-				if i, ok := m.list.SelectedItem().(toolItem); ok {
-					return m, m.resetToRelease(&i)
+				if m.selectedIndex < len(m.tools) {
+					tool := &m.tools[m.selectedIndex]
+					return m, m.resetToRelease(tool)
 				}
 			case key.Matches(msg, keys.Refresh):
 				if err := m.loadTools(); err != nil {
 					m.statusMessage = fmt.Sprintf("Error refreshing: %v", err)
 				} else {
-					items := make([]list.Item, len(m.tools))
-					for i, tool := range m.tools {
-						items[i] = tool
-					}
-					m.list.SetItems(items)
 					m.statusMessage = "Refreshed tool list"
 				}
 				return m, nil
@@ -389,8 +405,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.WindowSizeMsg:
-		m.list.SetWidth(msg.Width)
-		m.list.SetHeight(msg.Height - 2)
+		m.width = msg.Width
+		m.height = msg.Height
 		if m.worktreeList.Width() > 0 {
 			m.worktreeList.SetWidth(msg.Width)
 			m.worktreeList.SetHeight(msg.Height - 2)
@@ -401,11 +417,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMessage = string(msg)
 		// Refresh the tools after an action
 		if err := m.loadTools(); err == nil {
-			items := make([]list.Item, len(m.tools))
-			for i, tool := range m.tools {
-				items[i] = tool
+			// Keep selection in bounds
+			if m.selectedIndex >= len(m.tools) {
+				m.selectedIndex = len(m.tools) - 1
 			}
-			m.list.SetItems(items)
 		}
 		return m, nil
 
@@ -421,9 +436,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
-	return m, cmd
+	return m, nil
 }
 
 func (m *model) View() string {
@@ -435,7 +448,133 @@ func (m *model) View() string {
 		return m.worktreeList.View() + "\n" + m.statusMessage
 	}
 
-	return m.list.View() + "\n" + m.statusMessage
+	// Build table view
+	headers := []string{"TOOL", "REPOSITORY", "STATUS", "CURRENT VERSION", "LATEST"}
+
+	// Build rows
+	var rows [][]string
+	for i, tool := range m.tools {
+		currentVersion := "-"
+		displayVersion := ""
+		statusSymbol := ""
+
+		// Determine status symbol with styling
+		switch tool.status {
+		case "dev":
+			statusSymbol = "◆ dev"
+		case "release":
+			statusSymbol = "● release"
+		default:
+			statusSymbol = "○ not installed"
+		}
+
+		if tool.status == "dev" && tool.activeVersion != "" {
+			displayVersion = tool.activeVersion
+			currentVersion = displayVersion
+		} else if tool.status == "release" && tool.activeVersion != "" {
+			displayVersion = tool.activeVersion
+			currentVersion = displayVersion
+		}
+
+		// Add release status indicator
+		releaseStatus := tool.latestRelease
+		styledReleaseStatus := ""
+		if releaseStatus == "" {
+			styledReleaseStatus = "-"
+		} else if displayVersion != "" && displayVersion == tool.latestRelease {
+			styledReleaseStatus = fmt.Sprintf("%s ✓", tool.latestRelease)
+		} else if tool.latestRelease != "" {
+			styledReleaseStatus = fmt.Sprintf("%s ↑", tool.latestRelease)
+		}
+
+		row := []string{
+			tool.name,
+			tool.repoName,
+			statusSymbol,
+			currentVersion,
+			styledReleaseStatus,
+		}
+
+		// Apply selection highlighting
+		if i == m.selectedIndex {
+			for j := range row {
+				row[j] = tuiSelectedStyle.Render(row[j])
+			}
+		} else {
+			// Apply normal styling
+			row[0] = tuiToolStyle.Render(row[0])
+			row[1] = tuiRepoStyle.Render(row[1])
+			
+			switch tool.status {
+			case "dev":
+				row[2] = tuiDevStyle.Render(statusSymbol)
+			case "release":
+				row[2] = tuiReleaseStyle.Render(statusSymbol)
+			default:
+				row[2] = tuiNotInstalledStyle.Render(statusSymbol)
+			}
+			
+			row[3] = tuiVersionStyle.Render(currentVersion)
+			
+			if releaseStatus == "" {
+				row[4] = tuiNotInstalledStyle.Render("-")
+			} else if displayVersion != "" && displayVersion == tool.latestRelease {
+				row[4] = tuiUpToDateStyle.Render(styledReleaseStatus)
+			} else if tool.latestRelease != "" {
+				row[4] = tuiUpdateAvailableStyle.Render(styledReleaseStatus)
+			}
+		}
+
+		rows = append(rows, row)
+	}
+
+	// Create lipgloss table
+	re := lipgloss.NewRenderer(os.Stdout)
+	baseStyle := re.NewStyle().Padding(0, 1)
+	tableHeaderStyle := baseStyle.Copy().Bold(true).Foreground(lipgloss.Color("255"))
+
+	t := table.New().
+		Border(lipgloss.NormalBorder()).
+		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
+		Headers(headers...).
+		Rows(rows...)
+
+	// Apply header styling
+	t.StyleFunc(func(row, col int) lipgloss.Style {
+		if row == 0 {
+			return tableHeaderStyle
+		}
+		// Return minimal style to preserve pre-styled content
+		return lipgloss.NewStyle().Padding(0, 1)
+	})
+
+	// Build full view
+	var view strings.Builder
+	view.WriteString(t.String())
+	view.WriteString("\n\n")
+
+	// Add help line
+	if m.showHelp {
+		helpText := []string{
+			"Navigation: ↑/k up • ↓/j down",
+			"Actions: i install • d set dev • r reset",
+			"Other: R refresh • ? toggle help • q quit",
+		}
+		for _, line := range helpText {
+			view.WriteString(tuiHelpStyle.Render(line))
+			view.WriteString("\n")
+		}
+	} else {
+		view.WriteString(tuiHelpStyle.Render("Press ? for help • q to quit"))
+	}
+
+	// Add status message if any
+	if m.statusMessage != "" {
+		view.WriteString("\n")
+		view.WriteString(m.statusMessage)
+	}
+
+	return view.String()
 }
 
 // Commands
@@ -498,10 +637,6 @@ func (m *model) showWorktreeSelect(tool *toolItem) tea.Cmd {
 	}
 }
 
-func (w worktreeInfo) Title() string       { return w.name }
-func (w worktreeInfo) Description() string { return w.path }
-func (w worktreeInfo) FilterValue() string { return w.name }
-
 func (m *model) setDevVersion(tool *toolItem, worktree worktreeInfo) tea.Cmd {
 	return func() tea.Msg {
 		// Discover binaries in the worktree
@@ -548,7 +683,7 @@ func (m *model) setDevVersion(tool *toolItem, worktree worktreeInfo) tea.Cmd {
 			return errMsg{err: fmt.Errorf("failed to activate link: %w", err)}
 		}
 
-		m.mode = "list"
+		m.mode = "table"
 		m.selectedTool = nil
 		return statusMsg(fmt.Sprintf("Set %s to dev version from %s", tool.name, worktree.name))
 	}
@@ -586,6 +721,66 @@ func (m *model) resetToRelease(tool *toolItem) tea.Cmd {
 
 		return statusMsg(fmt.Sprintf("Reset %s to release version %s", tool.name, activeVersion))
 	}
+}
+
+// getTUIDevBinaryVersion attempts to get version from a dev binary
+func getTUIDevBinaryVersion(binaryPath string) string {
+	if binaryPath == "" || !strings.Contains(binaryPath, "/") {
+		return ""
+	}
+
+	// Set a timeout for the version command
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, binaryPath, "version")
+	cmd.Env = append(os.Environ(), "NO_COLOR=1") // Disable color output
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+
+	// Run with timeout
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+
+	output := out.String()
+
+	// Try to extract version from output
+	// First try to find a line starting with "Version:"
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "Version:") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				return parts[1]
+			}
+		}
+	}
+
+	// Fallback to pattern matching
+	// Look for patterns like "Version: main-986ed5d-dirty" or "v0.2.8"
+	versionPatterns := []string{
+		`Version:\s+(\S+)`,
+		`version\s+(\S+)`,
+		`(v\d+\.\d+\.\d+\S*)`,
+		`(main-[a-f0-9]+-?(?:dirty)?)`,
+		`([a-zA-Z]+-[a-f0-9]+-?(?:dirty)?)`, // branch-hash-dirty pattern
+	}
+
+	for _, pattern := range versionPatterns {
+		re := regexp.MustCompile(pattern)
+		matches := re.FindStringSubmatch(output)
+		if len(matches) > 1 {
+			version := matches[1]
+			// Clean up the version string
+			version = strings.TrimSpace(version)
+			return version
+		}
+	}
+
+	return ""
 }
 
 func newDevTuiCmd() *cobra.Command {
