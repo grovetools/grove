@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -50,17 +53,18 @@ var (
 
 // Key bindings for the release TUI
 type releaseKeyMap struct {
-	Up           key.Binding
-	Down         key.Binding
-	Toggle       key.Binding
-	SelectMajor  key.Binding
-	SelectMinor  key.Binding
-	SelectPatch  key.Binding
-	ViewChangelog key.Binding
-	Approve      key.Binding
-	Apply        key.Binding
-	Quit         key.Binding
-	Back         key.Binding
+	Up              key.Binding
+	Down            key.Binding
+	Toggle          key.Binding
+	SelectMajor     key.Binding
+	SelectMinor     key.Binding
+	SelectPatch     key.Binding
+	ViewChangelog   key.Binding
+	GenerateChangelog key.Binding
+	Approve         key.Binding
+	Apply           key.Binding
+	Quit            key.Binding
+	Back            key.Binding
 }
 
 var releaseKeys = releaseKeyMap{
@@ -91,6 +95,10 @@ var releaseKeys = releaseKeyMap{
 	ViewChangelog: key.NewBinding(
 		key.WithKeys("v"),
 		key.WithHelp("v", "view changelog"),
+	),
+	GenerateChangelog: key.NewBinding(
+		key.WithKeys("g"),
+		key.WithHelp("g", "generate changelog (LLM)"),
 	),
 	Approve: key.NewBinding(
 		key.WithKeys("a"),
@@ -130,6 +138,8 @@ type releaseTuiModel struct {
 	err           error
 	applyOutput   string
 	applying      bool
+	generating    bool   // Whether changelog generation is in progress
+	genProgress   string // Progress message for generation
 }
 
 func initialReleaseModel(plan *release.ReleasePlan) releaseTuiModel {
@@ -197,6 +207,28 @@ func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyOutput += msg.text
 		m.viewport.SetContent(m.applyOutput)
 		m.viewport.GotoBottom()
+		return m, nil
+
+	case changelogGeneratedMsg:
+		m.generating = false
+		if msg.err != nil {
+			m.genProgress = fmt.Sprintf("❌ Failed to generate changelog for %s: %v", msg.repoName, msg.err)
+		} else {
+			m.genProgress = fmt.Sprintf("✅ Changelog generated for %s", msg.repoName)
+			// Update the repo's changelog path
+			if repo, ok := m.plan.Repos[msg.repoName]; ok {
+				repo.ChangelogPath = msg.changelogPath
+				// Save the updated plan
+				release.SavePlan(m.plan)
+			}
+		}
+		// Clear progress message after 3 seconds
+		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+			return clearProgressMsg{}
+		})
+	
+	case clearProgressMsg:
+		m.genProgress = ""
 		return m, nil
 	}
 
@@ -268,15 +300,36 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.ViewChangelog):
 		if m.selectedIndex < len(m.repoNames) {
-			m.currentView = viewChangelog
-			// Load changelog content
 			repoName := m.repoNames[m.selectedIndex]
-			if repo, ok := m.plan.Repos[repoName]; ok && repo.ChangelogPath != "" {
-				content, err := os.ReadFile(repo.ChangelogPath)
-				if err != nil {
-					m.viewport.SetContent(fmt.Sprintf("Error loading changelog: %v", err))
-				} else {
-					m.viewport.SetContent(string(content))
+			if repo, ok := m.plan.Repos[repoName]; ok {
+				// Only view if repo has changes
+				if repo.CurrentVersion != repo.NextVersion {
+					m.currentView = viewChangelog
+					// Load changelog content
+					if repo.ChangelogPath != "" {
+						content, err := os.ReadFile(repo.ChangelogPath)
+						if err != nil {
+							m.viewport.SetContent(fmt.Sprintf("Error loading changelog: %v", err))
+						} else {
+							m.viewport.SetContent(string(content))
+						}
+					} else {
+						m.viewport.SetContent("No changelog generated yet. Press 'g' in the main view to generate.")
+					}
+				}
+			}
+		}
+		return m, nil
+
+	case key.Matches(msg, m.keys.GenerateChangelog):
+		if m.selectedIndex < len(m.repoNames) && !m.generating {
+			repoName := m.repoNames[m.selectedIndex]
+			if repo, ok := m.plan.Repos[repoName]; ok {
+				// Only generate for repos with changes
+				if repo.CurrentVersion != repo.NextVersion {
+					m.generating = true
+					m.genProgress = fmt.Sprintf("Generating changelog for %s...", repoName)
+					return m, generateChangelogCmd(m.plan.RootDir, repoName, repo)
 				}
 			}
 		}
@@ -492,6 +545,7 @@ func (m releaseTuiModel) viewTable() string {
 		"↑/↓: navigate",
 		"space: toggle selection",
 		"m/n/p: set major/minor/patch",
+		"g: generate changelog",
 		"v: view changelog",
 	}
 	if allApproved && needsApproval {
@@ -510,7 +564,13 @@ func (m releaseTuiModel) viewTable() string {
 		}
 	}
 
-	return fmt.Sprintf("%s\n\n%s%s%s\n\n%s", header, tableStr, releaseInfo, reasoning, help)
+	// Show generation progress if generating
+	var progress string
+	if m.genProgress != "" {
+		progress = fmt.Sprintf("\n\n%s", m.genProgress)
+	}
+
+	return fmt.Sprintf("%s\n\n%s%s%s%s\n\n%s", header, tableStr, releaseInfo, reasoning, progress, help)
 }
 
 func (m releaseTuiModel) viewChangelog() string {
@@ -573,6 +633,14 @@ type applyProgressMsg struct {
 	text string
 }
 
+type changelogGeneratedMsg struct {
+	repoName      string
+	changelogPath string
+	err           error
+}
+
+type clearProgressMsg struct{}
+
 // Command to apply the release
 func applyRelease(plan *release.ReleasePlan) tea.Cmd {
 	return func() tea.Msg {
@@ -582,6 +650,89 @@ func applyRelease(plan *release.ReleasePlan) tea.Cmd {
 		return applyCompleteMsg{err: err}
 	}
 }
+
+// Command to generate changelog for a specific repository
+func generateChangelogCmd(rootDir, repoName string, repo *release.RepoReleasePlan) tea.Cmd {
+	return func() tea.Msg {
+		// Get repository path
+		wsPath := filepath.Join(rootDir, repoName)
+		
+		// Get last tag
+		lastTag, _ := getLastTag(wsPath)
+		
+		commitRange := "HEAD"
+		if lastTag != "" {
+			commitRange = fmt.Sprintf("%s..HEAD", lastTag)
+		}
+		
+		// Gather git context
+		logCmd := exec.Command("git", "log", commitRange, "--pretty=fuller")
+		logCmd.Dir = wsPath
+		logOutput, err := logCmd.CombinedOutput()
+		if err != nil {
+			return changelogGeneratedMsg{
+				repoName: repoName,
+				err:      fmt.Errorf("failed to get git log: %w", err),
+			}
+		}
+		
+		diffCmd := exec.Command("git", "diff", "--stat", commitRange)
+		diffCmd.Dir = wsPath
+		diffOutput, err := diffCmd.CombinedOutput()
+		if err != nil {
+			return changelogGeneratedMsg{
+				repoName: repoName,
+				err:      fmt.Errorf("failed to get git diff: %w", err),
+			}
+		}
+		
+		gitContext := fmt.Sprintf("GIT LOG:\n%s\n\nGIT DIFF STAT:\n%s", string(logOutput), string(diffOutput))
+		
+		// Generate changelog with LLM
+		result, err := generateChangelogWithLLM(gitContext, repo.NextVersion, wsPath)
+		if err != nil {
+			return changelogGeneratedMsg{
+				repoName: repoName,
+				err:      fmt.Errorf("failed to generate LLM changelog: %w", err),
+			}
+		}
+		
+		// Update version suggestion if provided
+		if result.Suggestion != "" && result.Suggestion != repo.SuggestedBump {
+			repo.SuggestedBump = result.Suggestion
+			repo.SuggestionReasoning = result.Justification
+		}
+		
+		// Save changelog to staging
+		stagingDir, _ := getStagingDirPath()
+		changelogPath := filepath.Join(stagingDir, repoName, "CHANGELOG.md")
+		if err := os.MkdirAll(filepath.Dir(changelogPath), 0755); err != nil {
+			return changelogGeneratedMsg{
+				repoName: repoName,
+				err:      fmt.Errorf("failed to create changelog directory: %w", err),
+			}
+		}
+		
+		if err := os.WriteFile(changelogPath, []byte(result.Changelog), 0644); err != nil {
+			return changelogGeneratedMsg{
+				repoName: repoName,
+				err:      fmt.Errorf("failed to write changelog: %w", err),
+			}
+		}
+		
+		repo.ChangelogPath = changelogPath
+		
+		// Note: We can't save the plan from here as we don't have access to the full plan
+		// The main model will update it when it receives the changelogGeneratedMsg
+		
+		return changelogGeneratedMsg{
+			repoName:      repoName,
+			changelogPath: changelogPath,
+			err:           nil,
+		}
+	}
+}
+
 
 // runReleaseTUI starts the interactive release TUI
 func runReleaseTUI(ctx context.Context) error {
