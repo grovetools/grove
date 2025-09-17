@@ -1,3 +1,28 @@
+## v0.2.22 (2025-09-17)
+
+### Features
+
+* add interactive TUI for Grove dev version management
+* add grove dev cwd and reset commands
+* implement Docker E2E test improvements
+* add --table mode for grove ws plans list
+
+### Performance Improvements
+
+* optimize TUI startup and responsiveness
+
+### Tests
+
+* add Docker-based E2E test infrastructure
+
+### Chores
+
+* bump dependencies
+
+### Code Refactoring
+
+* update TUI to use table view matching grove list
+
 ## v0.2.21 (2025-09-13)
 
 ### Chores
