@@ -371,10 +371,25 @@ func runReleaseApply(ctx context.Context) error {
 	currentVersions := make(map[string]string)
 	hasChanges := make(map[string]bool)
 
+	// Only include selected repos in the release
+	var selectedRepos []string
 	for repo, repoPlan := range plan.Repos {
-		versions[repo] = repoPlan.NextVersion
-		currentVersions[repo] = repoPlan.CurrentVersion
-		hasChanges[repo] = true
+		if repoPlan.Selected {
+			versions[repo] = repoPlan.NextVersion
+			currentVersions[repo] = repoPlan.CurrentVersion
+			hasChanges[repo] = true
+			selectedRepos = append(selectedRepos, repo)
+		} else {
+			// Keep current version for unselected repos
+			currentVersions[repo] = repoPlan.CurrentVersion
+		}
+	}
+	
+	// Display selected repos summary
+	if len(selectedRepos) > 0 {
+		displayInfo(fmt.Sprintf("📦 Releasing %d selected repositories: %s", len(selectedRepos), strings.Join(selectedRepos, ", ")))
+	} else {
+		return fmt.Errorf("no repositories selected for release")
 	}
 
 	// Auto-commit grove-ecosystem changes if needed
@@ -402,7 +417,7 @@ func runReleaseApply(ctx context.Context) error {
 
 	// Copy staged changelogs back to repositories
 	for repo, repoPlan := range plan.Repos {
-		if repoPlan.ChangelogPath != "" && repoPlan.Status == "Approved" {
+		if repoPlan.Selected && repoPlan.ChangelogPath != "" && repoPlan.Status == "Approved" {
 			node, ok := graph.GetNode(repo)
 			if !ok {
 				continue
