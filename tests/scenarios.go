@@ -14,6 +14,7 @@ func AllScenarios() []*harness.Scenario {
 		PolyglotAddRepoScenario(),
 		PolyglotReleaseScenario(),
 		LLMChangelogScenario(),
+		ReleaseTUIScenario(),
 	}
 }
 

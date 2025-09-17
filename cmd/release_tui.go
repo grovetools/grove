@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/mattsolo1/grove-meta/pkg/release"
+	"github.com/spf13/cobra"
 )
 
 // Define styles for the release TUI
@@ -502,5 +503,29 @@ func runReleaseTUI(ctx context.Context) error {
 		return fmt.Errorf("error running TUI: %w", err)
 	}
 	return nil
+}
+
+// newReleaseTuiCmd creates the 'grove release tui' subcommand
+func newReleaseTuiCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "tui",
+		Short: "Launch interactive TUI for release planning",
+		Long: `Launch an interactive Terminal User Interface for release planning.
+
+This command provides an interactive way to:
+- Review repositories with changes
+- See LLM-suggested version bumps with justifications
+- Manually adjust version bump types (major/minor/patch)
+- Preview and approve changelogs
+- Execute the release once all repositories are approved
+
+The release plan is persisted in ~/.grove/release_plan.json and can be
+resumed if interrupted.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			return runReleaseTUI(ctx)
+		},
+	}
+	return cmd
 }
 

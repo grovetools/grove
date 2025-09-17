@@ -1,3 +1,16 @@
+## v0.2.23 (2025-09-17)
+
+### Bug Fixes
+
+- improve git error reporting in release command to show full error messages
+
+### File Changes
+
+```
+ cmd/release.go | 14 +++++++++++---
+ 1 file changed, 11 insertions(+), 3 deletions(-)
+```
+
 ## v0.2.22 (2025-09-17)
 
 ### Features

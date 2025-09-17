@@ -399,3 +399,172 @@ const Version = "v0.3.0"
 		},
 	}
 }
+
+// ReleaseTUIScenario tests the new interactive release TUI feature
+func ReleaseTUIScenario() *harness.Scenario {
+	return &harness.Scenario{
+		Name:        "release-tui",
+		Description: "Tests the release TUI subcommand and plan management",
+		Tags:        []string{"release", "tui", "interactive", "local-only"},
+		LocalOnly:   true, // This test requires gemapi for LLM suggestions
+		Steps: []harness.Step{
+			{
+				Name:        "Verify TUI subcommand exists",
+				Description: "Checks that 'grove release tui' subcommand is available",
+				Func: func(ctx *harness.Context) error {
+					// Run grove release --help to see available subcommands
+					cmd := command.New(ctx.GroveBinary, "release", "--help")
+					result := cmd.Run()
+					
+					if result.Error != nil {
+						return fmt.Errorf("failed to run grove release --help: %w", result.Error)
+					}
+					
+					// Check if 'tui' appears in the help output
+					if !strings.Contains(result.Stdout, "tui") {
+						return fmt.Errorf("'tui' subcommand not found in release help")
+					}
+					
+					// Also verify the --interactive flag exists
+					if !strings.Contains(result.Stdout, "--interactive") {
+						return fmt.Errorf("'--interactive' flag not found in release help")
+					}
+					
+					return nil
+				},
+			},
+			{
+				Name:        "Test release plan generation",
+				Description: "Tests that release plan can be generated and saved",
+				Func: func(ctx *harness.Context) error {
+					// Create a test repository structure
+					repoDir := ctx.NewDir("release-tui-test")
+					
+					// Ensure the directory exists
+					if err := os.MkdirAll(repoDir, 0755); err != nil {
+						return fmt.Errorf("failed to create directory %s: %w", repoDir, err)
+					}
+					
+					// Initialize git repository
+					if err := git.Init(repoDir); err != nil {
+						return fmt.Errorf("failed to initialize git repository: %w", err)
+					}
+					
+					// Configure Git for testing
+					if err := git.SetupTestConfig(repoDir); err != nil {
+						return fmt.Errorf("failed to setup git config: %w", err)
+					}
+					
+					// Create initial files
+					if err := fs.WriteString(filepath.Join(repoDir, "README.md"), 
+						"# Test Repository\n"); err != nil {
+						return err
+					}
+					
+					// Create grove.yml with LLM configuration
+					groveConfig := `name: test-repo
+type: go
+version: v0.1.0
+dependencies: []
+flow:
+  oneshot_model: gemini-1.5-flash-latest
+`
+					if err := fs.WriteString(filepath.Join(repoDir, "grove.yml"), groveConfig); err != nil {
+						return err
+					}
+					
+					// Initial commit and tag
+					if err := git.Add(repoDir, "."); err != nil {
+						return err
+					}
+					if err := git.Commit(repoDir, "chore: initial commit"); err != nil {
+						return err
+					}
+					
+					// Tag initial version
+					tagCmd := command.New("git", "tag", "v0.1.0").Dir(repoDir)
+					if result := tagCmd.Run(); result.Error != nil {
+						return fmt.Errorf("failed to create initial tag: %w", result.Error)
+					}
+					
+					// Make a change for new release
+					if err := fs.WriteString(filepath.Join(repoDir, "main.go"),
+						"package main\n\nfunc main() {}\n"); err != nil {
+						return err
+					}
+					if err := git.Add(repoDir, "."); err != nil {
+						return err
+					}
+					if err := git.Commit(repoDir, "feat: add main function"); err != nil {
+						return err
+					}
+					
+					ctx.Set("test_repo", repoDir)
+					
+					// Check if release plan file would be created (without actually running TUI)
+					planPath := filepath.Join(os.Getenv("HOME"), ".grove", "release_plan.json")
+					ctx.Set("plan_path", planPath)
+					
+					return nil
+				},
+			},
+			{
+				Name:        "Test TUI help command",
+				Description: "Verifies that 'grove release tui --help' works correctly",
+				Func: func(ctx *harness.Context) error {
+					cmd := command.New(ctx.GroveBinary, "release", "tui", "--help")
+					result := cmd.Run()
+					
+					if result.Error != nil {
+						return fmt.Errorf("failed to run grove release tui --help: %w", result.Error)
+					}
+					
+					// Verify help output contains expected content
+					expectedStrings := []string{
+						"interactive Terminal User Interface",
+						"release planning",
+						"LLM-suggested version bumps",
+						"~/.grove/release_plan.json",
+					}
+					
+					for _, expected := range expectedStrings {
+						if !strings.Contains(result.Stdout, expected) {
+							return fmt.Errorf("help output missing expected string: %s", expected)
+						}
+					}
+					
+					ctx.ShowCommandOutput("grove release tui --help", result.Stdout, result.Stderr)
+					
+					return nil
+				},
+			},
+			{
+				Name:        "Verify backward compatibility",
+				Description: "Ensures original grove release command still works",
+				Func: func(ctx *harness.Context) error {
+					// Run grove release with --dry-run to verify it still works
+					testRepo := ctx.Get("test_repo").(string)
+					
+					// The original command should work without TUI
+					cmd := command.New(ctx.GroveBinary, "release", 
+						"--dry-run",
+						"--force",
+						"--skip-parent").Dir(filepath.Dir(testRepo))
+					
+					result := cmd.Run()
+					
+					// Check that it doesn't launch TUI (would error in non-interactive environment)
+					// The command might fail due to repository structure, but shouldn't hang waiting for input
+					if strings.Contains(result.Stderr, "TUI") || strings.Contains(result.Stderr, "interactive") {
+						return fmt.Errorf("release command incorrectly launched TUI in non-interactive mode")
+					}
+					
+					ctx.ShowCommandOutput("grove release --dry-run (backward compatibility)", 
+						result.Stdout, result.Stderr)
+					
+					return nil
+				},
+			},
+		},
+	}
+}

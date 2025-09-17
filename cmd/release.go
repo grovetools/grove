@@ -42,7 +42,7 @@ var (
 	releaseWithDeps       bool
 	releaseSyncDeps       bool
 	releaseLLMChangelog   bool
-	releaseHeadless       bool // New flag for headless/CI mode
+	releaseInteractive    bool // New flag for interactive TUI mode
 )
 
 func init() {
@@ -53,21 +53,25 @@ func newReleaseCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "release",
 		Short: "Create a new release for the Grove ecosystem",
-		Long: `Create a new release through an interactive TUI or in headless mode.
+		Long: `Create a new release by automatically calculating version bumps for all submodules.
 
 This command will:
-1. Analyze repositories for changes since the last release.
-2. Generate changelogs and suggest version bumps using an LLM.
-3. Launch an interactive TUI to review, modify, and approve the release plan.
-4. Apply the approved plan by tagging, pushing, and monitoring CI workflows.
+1. Calculate the next version for each submodule based on its latest tag
+2. Check that all repositories are clean (unless --force is used)
+3. Display the proposed versions and ask for confirmation
+4. Tag each submodule with its new version (triggers individual releases)
+5. Update submodule references in the parent repository
+6. Create a parent repository tag that documents the release
+7. Push all tags to origin
 
-Use --headless for non-interactive execution suitable for CI/CD.
+By default, all submodules receive a patch version bump. Use flags to specify
+major or minor bumps for specific repositories.
 
 Examples:
-  grove release                                    # Launch interactive TUI
-  grove release --headless                         # Run in headless mode
-  grove release --minor grove-core                 # Minor bump for grove-core
-  grove release --major grove-core --minor grove-meta  # Mixed bumps`,
+  grove release                                    # Patch bump for all
+  grove release --minor grove-core                 # Minor bump for grove-core, patch for others
+  grove release --major grove-core --minor grove-meta  # Mixed bumps
+  grove release --interactive                      # Launch interactive TUI for release planning`,
 		Args: cobra.NoArgs,
 		RunE: runRelease,
 	}
@@ -85,51 +89,23 @@ Examples:
 	cmd.Flags().BoolVar(&releaseYes, "yes", false, "Skip interactive confirmation (for CI/CD)")
 	cmd.Flags().BoolVar(&releaseSkipParent, "skip-parent", false, "Skip parent repository updates (submodules and tagging)")
 	cmd.Flags().BoolVar(&releaseLLMChangelog, "llm-changelog", false, "Generate changelog using an LLM instead of conventional commits")
-	cmd.Flags().BoolVar(&releaseHeadless, "headless", false, "Run non-interactively, using LLM suggestions and auto-approving")
+	cmd.Flags().BoolVar(&releaseInteractive, "interactive", false, "Launch interactive TUI for release planning and approval")
 
 	// Add subcommands
 	cmd.AddCommand(newReleaseChangelogCmd())
+	cmd.AddCommand(newReleaseTuiCmd()) // Add TUI as a subcommand
 
 	return cmd
 }
 
 func runRelease(cmd *cobra.Command, args []string) error {
-	if releaseHeadless {
-		return runReleaseHeadless(cmd, args)
+	// Check if interactive mode is requested
+	if releaseInteractive {
+		ctx := context.Background()
+		return runReleaseTUI(ctx)
 	}
-	// Default to launching the TUI.
-	ctx := context.Background()
-	return runReleaseTUI(ctx)
-}
-
-// runReleaseHeadless runs the release in non-interactive mode
-func runReleaseHeadless(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-	logger := cli.GetLogger(cmd)
-	logger.Info("Running release in headless mode...")
-
-	// Generate the release plan
-	plan, err := runReleasePlan(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to generate release plan: %w", err)
-	}
-
-	// Auto-approve all repos in headless mode
-	for _, repo := range plan.Repos {
-		repo.Status = "Approved"
-	}
-
-	// Save the approved plan
-	if err := release.SavePlan(plan); err != nil {
-		return fmt.Errorf("failed to save release plan: %w", err)
-	}
-
-	// Apply the release plan
-	return runReleaseApply(ctx)
-}
-
-// runReleaseMonolithic is the original monolithic release function (preserved for reference)
-func runReleaseMonolithic(cmd *cobra.Command, args []string) error {
+	
+	// Otherwise, run the original release command
 	ctx := context.Background()
 	logger := cli.GetLogger(cmd)
 
