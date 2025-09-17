@@ -514,8 +514,29 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces
 			branch = "unknown"
 		} else {
 			if ws.Dirty {
-				issues = append(issues, "uncommitted changes")
-				statusStr = "✗ Dirty"
+				// Check if the only uncommitted change is CHANGELOG.md
+				// which might have been pre-generated from the TUI workflow
+				fullPath := filepath.Join(rootDir, ws.Path)
+				diffCmd := exec.Command("git", "diff", "--name-only")
+				diffCmd.Dir = fullPath
+				diffOutput, _ := diffCmd.Output()
+				
+				stagedCmd := exec.Command("git", "diff", "--cached", "--name-only")
+				stagedCmd.Dir = fullPath
+				stagedOutput, _ := stagedCmd.Output()
+				
+				allChanges := strings.TrimSpace(string(diffOutput)) + "\n" + strings.TrimSpace(string(stagedOutput))
+				allChanges = strings.TrimSpace(allChanges)
+				
+				// If the only change is CHANGELOG.md, don't treat it as a blocker
+				if allChanges != "" && allChanges != "CHANGELOG.md" {
+					issues = append(issues, "uncommitted changes")
+					statusStr = "✗ Dirty"
+				} else if allChanges == "CHANGELOG.md" {
+					// Show it's dirty but with a note that it's just the changelog
+					statusStr = "✗ Dirty"
+					// Don't add to issues - it's not a blocker
+				}
 			}
 			if ws.Branch != "main" {
 				issues = append(issues, "not on main branch")
@@ -536,6 +557,12 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces
 		displayIssues := issues
 		if releasePush && ws.AheadCount > 0 && len(issues) == 0 {
 			displayIssues = []string{fmt.Sprintf("ahead of remote by %d commits (will push)", ws.AheadCount)}
+		}
+		
+		// If dirty but only CHANGELOG.md, add a note
+		if statusStr == "✗ Dirty" && len(issues) == 0 {
+			// This means it's only the CHANGELOG.md that's dirty
+			displayIssues = append(displayIssues, "uncommitted CHANGELOG.md (will be committed)")
 		}
 
 		tableRows = append(tableRows, []string{
