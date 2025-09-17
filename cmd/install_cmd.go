@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/mattsolo1/grove-core/cli"
@@ -31,6 +32,7 @@ Use 'all' to install all available tools.
 Examples:
   grove install cx           # Install latest version of cx
   grove install cx@v0.1.0    # Install specific version of cx
+  grove install cx@nightly   # Build and install cx from main branch
   grove install cx nb flow   # Install multiple tools
   grove install all          # Install all available tools
   grove install --use-gh cx  # Use gh CLI for private repo access`,
@@ -72,7 +74,7 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 	tools := args
 	if len(args) == 1 && args[0] == "all" {
 		tools = sdk.GetAllTools()
-		logger.Info("Installing all Grove tools...")
+		fmt.Println(toolNameStyle.Render("Installing all Grove tools..."))
 	}
 
 	// Migration: ensure we're using the new per-tool version system
@@ -91,50 +93,128 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 			version = parts[1]
 		}
 
-		// Get actual version tag if "latest" specified
-		if version == "latest" {
-			latestVersion, err := manager.GetLatestVersionTag(toolName)
+		// Get currently installed version
+		currentVersion, _ := manager.GetToolVersion(toolName)
+
+		// Handle nightly builds
+		if version == "nightly" {
+			fmt.Printf("%s %s from main branch...\n",
+				faintStyle.Render("Building"),
+				toolNameStyle.Render(toolName))
+
+			builtVersion, err := manager.InstallToolFromSource(toolName)
 			if err != nil {
-				logger.WithError(err).Errorf("Failed to get latest version for %s", toolName)
+				fmt.Printf("%s %s: %s\n",
+					errorStyle.Render("✗"),
+					toolNameStyle.Render(toolName),
+					errorStyle.Render(err.Error()))
 				continue
 			}
-			version = latestVersion
+			version = builtVersion
+		} else {
+			// Get actual version tag if "latest" specified
+			if version == "latest" {
+				latestVersion, err := manager.GetLatestVersionTag(toolName)
+				if err != nil {
+					fmt.Printf("%s %s: %s\n",
+						errorStyle.Render("✗"),
+						toolNameStyle.Render(toolName),
+						errorStyle.Render(fmt.Sprintf("Failed to get latest version: %v", err)))
+					continue
+				}
+				version = latestVersion
+
+				// Check if already up-to-date
+				if currentVersion == version {
+					fmt.Printf("%s %s... %s (%s)\n",
+						faintStyle.Render("Checking"),
+						toolNameStyle.Render(toolName),
+						successStyle.Render("already up to date"),
+						versionStyle.Render(version))
+					continue
+				}
+			}
+
+			// Determine if this is an install, update, or reinstall
+			var action string
+			if currentVersion == "" {
+				action = "Installing"
+			} else if currentVersion == version {
+				action = "Reinstalling"
+			} else {
+				action = "Updating"
+			}
+
+			fmt.Printf("%s %s %s...\n",
+				faintStyle.Render(action),
+				toolNameStyle.Render(toolName),
+				versionStyle.Render(version))
+
+			if err := manager.InstallTool(toolName, version); err != nil {
+				// Check for "no binary found" error
+				if strings.Contains(err.Error(), "no binary found") {
+					fmt.Printf("%s %s %s: %s\n",
+						errorStyle.Render("✗"),
+						toolNameStyle.Render(toolName),
+						versionStyle.Render(version),
+						errorStyle.Render(fmt.Sprintf("No binary available for your system (%s/%s)", runtime.GOOS, runtime.GOARCH)))
+				} else {
+					fmt.Printf("%s %s %s: %s\n",
+						errorStyle.Render("✗"),
+						toolNameStyle.Render(toolName),
+						versionStyle.Render(version),
+						errorStyle.Render(err.Error()))
+				}
+				continue
+			}
 		}
 
-		logger.Infof("Installing %s %s...", toolName, version)
-
-		if err := manager.InstallTool(toolName, version); err != nil {
-			logger.WithError(err).Errorf("Failed to install %s", toolName)
-			// Continue with other tools
+		// Auto-activate the installed version
+		if err := manager.UseToolVersion(toolName, version); err != nil {
+			logger.WithError(err).Warnf("Failed to activate %s %s", toolName, version)
 		} else {
-			logger.Infof("✅ Successfully installed %s %s", toolName, version)
+			// Clear any dev link for this tool
+			if err := clearDevLinkForTool(toolName); err != nil {
+				logger.WithError(err).Debugf("Failed to clear dev link for %s", toolName)
+			}
 
-			// Auto-activate the installed version
-			logger.Infof("Activating %s %s...", toolName, version)
-			if err := manager.UseToolVersion(toolName, version); err != nil {
-				logger.WithError(err).Warnf("Failed to activate %s %s", toolName, version)
+			// Reconcile the symlink
+			tv, err := sdk.LoadToolVersions(os.Getenv("HOME") + "/.grove")
+			if err != nil {
+				// Log the error but proceed with an empty config so we don't block the user
+				logger.WithError(err).Warn("Could not load tool versions for reconciliation")
+				tv = &sdk.ToolVersions{Versions: make(map[string]string)}
+			}
+
+			r, err := reconciler.NewWithToolVersions(tv)
+			if err != nil {
+				logger.WithError(err).Warnf("Could not create reconciler, skipping symlink update for %s", toolName)
 			} else {
-				// Clear any dev link for this tool
-				if err := clearDevLinkForTool(toolName); err != nil {
-					logger.WithError(err).Debugf("Failed to clear dev link for %s", toolName)
-				}
-
-				// Reconcile the symlink
-				tv, err := sdk.LoadToolVersions(os.Getenv("HOME") + "/.grove")
-				if err != nil {
-					// Log the error but proceed with an empty config so we don't block the user
-					logger.WithError(err).Warn("Could not load tool versions for reconciliation")
-					tv = &sdk.ToolVersions{Versions: make(map[string]string)}
-				}
-
-				r, err := reconciler.NewWithToolVersions(tv)
-				if err != nil {
-					logger.WithError(err).Warnf("Could not create reconciler, skipping symlink update for %s", toolName)
+				if err := r.Reconcile(toolName); err != nil {
+					logger.WithError(err).Warnf("Failed to reconcile symlink for %s", toolName)
 				} else {
-					if err := r.Reconcile(toolName); err != nil {
-						logger.WithError(err).Warnf("Failed to reconcile symlink for %s", toolName)
+					// Print success message
+					if strings.HasPrefix(version, "nightly-") {
+						fmt.Printf("%s %s %s built from source and is now active\n",
+							successStyle.Render("✅"),
+							toolNameStyle.Render(toolName),
+							versionStyle.Render(version))
+					} else if currentVersion == "" {
+						fmt.Printf("%s %s %s installed and active\n",
+							successStyle.Render("✅"),
+							toolNameStyle.Render(toolName),
+							versionStyle.Render(version))
+					} else if currentVersion == version {
+						fmt.Printf("%s %s %s reinstalled and active\n",
+							successStyle.Render("✅"),
+							toolNameStyle.Render(toolName),
+							versionStyle.Render(version))
 					} else {
-						logger.Infof("✅ %s %s is now active", toolName, version)
+						fmt.Printf("%s %s updated to %s (was %s) and is now active\n",
+							updateStyle.Render("✅"),
+							toolNameStyle.Render(toolName),
+							versionStyle.Render(version),
+							faintStyle.Render(currentVersion))
 					}
 				}
 			}

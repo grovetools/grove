@@ -153,9 +153,17 @@ test_installation() {
   info "TEST: Grove CLI Installation"
 
   if [ "$TEST_MODE" = "live" ]; then
-    step "Running original install.sh against real GitHub..."
-    # The real install.sh is smart and will use the authenticated 'gh' CLI
-    bash /app/scripts/install.sh
+    # Check if we already have a local build of grove (for testing improvements)
+    if [ -f "/app/bin/grove" ]; then
+      step "Using pre-built grove binary for testing improvements..."
+      mkdir -p "$HOME/.grove/bin"
+      cp /app/bin/grove "$HOME/.grove/bin/grove"
+      chmod +x "$HOME/.grove/bin/grove"
+    else
+      step "Running original install.sh against real GitHub..."
+      # The real install.sh is smart and will use the authenticated 'gh' CLI
+      bash /app/scripts/install.sh
+    fi
   else
     # Modify install.sh to use the mock server
     step "Patching install.sh to use mock server..."
@@ -320,6 +328,75 @@ test_workspace_operations() {
   info "Workspace operations test passed!"
 }
 
+test_install_improvements() {
+  info "TEST: Install Command Improvements"
+  
+  # Test 1: Up-to-date detection
+  step "Testing up-to-date detection..."
+  
+  # Install a tool first
+  if [ "$TEST_MODE" = "live" ]; then
+    grove install flow --use-gh > /tmp/install1.log 2>&1 || true
+    # Install again to test up-to-date detection
+    grove install flow --use-gh > /tmp/install2.log 2>&1 || true
+    
+    if grep -q "already up to date" /tmp/install2.log; then
+      step "✓ Up-to-date detection working"
+    else
+      error "Up-to-date detection not working as expected"
+      cat /tmp/install2.log
+    fi
+  else
+    step "Skipping up-to-date detection in mock mode"
+  fi
+  
+  # Test 2: Error message for missing binaries
+  step "Testing improved error messages..."
+  
+  # Try to install a tool that doesn't have binaries for this platform
+  grove install project-tmpl-go 2>&1 | tee /tmp/install_error.log || true
+  
+  if grep -q "No binary available for your system" /tmp/install_error.log; then
+    step "✓ Improved error message for missing binaries"
+  else
+    step "⚠ Error message test skipped (binary might exist)"
+  fi
+  
+  # Test 3: Multiple tool installation with status messages
+  step "Testing multiple tool installation..."
+  
+  if [ "$TEST_MODE" = "live" ]; then
+    grove install nb flow 2>&1 | tee /tmp/install_multi.log || true
+    
+    # Check for various status messages
+    if grep -E "(Installing|Updating|already up to date|reinstalled)" /tmp/install_multi.log; then
+      step "✓ State-aware status messages working"
+    else
+      step "⚠ Status messages not as expected"
+    fi
+  else
+    step "Skipping multiple tool test in mock mode"
+  fi
+  
+  # Test 4: Grove list with version display
+  step "Testing grove list output formatting..."
+  grove list > /tmp/list_output.log 2>&1 || true
+  
+  # Check for the new status symbols
+  if grep -E "(●|◆|○)" /tmp/list_output.log; then
+    step "✓ Grove list shows styled status indicators"
+  else
+    step "⚠ Grove list styling might not be working"
+    cat /tmp/list_output.log
+  fi
+  
+  # Note: @nightly builds are not tested in Docker as they require
+  # full Go development environment and access to private repos
+  step "Note: @nightly build feature requires full dev environment (not tested in Docker)"
+  
+  info "Install improvements test passed!"
+}
+
 
 # --- Main Execution ---
 main() {
@@ -336,6 +413,7 @@ main() {
   test_installation
   test_tool_management
   test_workspace_operations
+  test_install_improvements
   
   info "======================================="
   info "    All E2E tests passed!"

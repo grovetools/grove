@@ -13,10 +13,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	successStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff00")).Bold(true)
-	failStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff4444")).Bold(true)
-)
+// Styles are defined in styles.go
 
 func NewWorkspaceSecretsCmd() *cobra.Command {
 	cmd := &cobra.Command{

@@ -23,21 +23,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Define lipgloss styles
+// Additional list command specific styles
 var (
-	// Status styles
-	devStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF79C6")).Bold(true)
-	releaseStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B")).Bold(true)
-	notInstalledStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4"))
-
-	// Version styles
-	versionStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("#F8F8F2"))
-	updateAvailableStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB86C"))
-	upToDateStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B"))
-
-	// Header style
-	headerStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#BD93F9"))
-
 	// Tool name style
 	toolStyle = lipgloss.NewStyle().Bold(true)
 
@@ -169,7 +156,12 @@ func runList(cmd *cobra.Command, args []string) error {
 				info.ActiveVersion = devVersion
 			}
 		} else if source == "release" {
-			info.Status = "release"
+			// Check if this is a nightly build
+			if strings.HasPrefix(version, "nightly-") {
+				info.Status = "nightly"
+			} else {
+				info.Status = "release"
+			}
 			info.ActiveVersion = version
 			info.ActivePath = path
 		}
@@ -256,6 +248,8 @@ func runList(cmd *cobra.Command, args []string) error {
 			statusSymbol = devStyle.Render("◆ dev")
 		case "release":
 			statusSymbol = releaseStyle.Render("● release")
+		case "nightly":
+			statusSymbol = updateStyle.Render("◆ nightly")
 		default:
 			statusSymbol = notInstalledStyle.Render("○ not installed")
 		}
@@ -264,8 +258,8 @@ func runList(cmd *cobra.Command, args []string) error {
 			// For dev versions, show the version
 			displayVersion = info.ActiveVersion
 			currentVersion = displayVersion
-		} else if info.Status == "release" && info.ActiveVersion != "" {
-			// For release versions, show the version
+		} else if (info.Status == "release" || info.Status == "nightly") && info.ActiveVersion != "" {
+			// For release/nightly versions, show the version
 			displayVersion = info.ActiveVersion
 			currentVersion = displayVersion
 		} else if len(info.OtherVersions) > 0 {

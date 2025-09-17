@@ -20,7 +20,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Color styles using lipgloss
+// Workspace status specific color styles
 var (
 	cleanStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff00")).Bold(true)
 	dirtyStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffaa00")).Bold(true)
@@ -30,7 +30,7 @@ var (
 	aheadStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#95e1d3")).Bold(true)
 	behindStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#f38181")).Bold(true)
 	grayStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#808080"))
-	errorStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff4444")).Bold(true)
+	// errorStyle is defined in styles.go
 )
 
 // Removed init function - command is now added in workspace.go

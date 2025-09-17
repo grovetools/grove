@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/mattsolo1/grove-meta/pkg/devlinks"
+	"github.com/mattsolo1/grove-meta/pkg/workspace"
 )
 
 const (
@@ -392,6 +393,101 @@ func (m *Manager) InstallTool(toolName, versionTag string) error {
 	}
 
 	return nil
+}
+
+// InstallToolFromSource clones and builds a tool from its main branch
+func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
+	// Ensure directories exist
+	if err := m.EnsureDirs(); err != nil {
+		return "", err
+	}
+
+	// Get tool info
+	toolInfo, ok := toolRegistry[toolName]
+	if !ok {
+		return "", fmt.Errorf("unknown tool: %s", toolName)
+	}
+
+	// Create temporary directory for building
+	tempDir, err := os.MkdirTemp("", "grove-build-*")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp directory: %w", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Clone the repository using gh CLI
+	repoSlug := fmt.Sprintf("%s/%s", GitHubOwner, toolInfo.RepoName)
+	cloneCmd := exec.Command("gh", "repo", "clone", repoSlug, tempDir, "--", "--depth=1")
+	if output, err := cloneCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("failed to clone repository: %w\nOutput: %s", err, string(output))
+	}
+
+	// Get the short commit SHA
+	shaCmd := exec.Command("git", "-C", tempDir, "rev-parse", "--short", "HEAD")
+	shaOutput, err := shaCmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get commit SHA: %w", err)
+	}
+	sha := strings.TrimSpace(string(shaOutput))
+	versionTag := fmt.Sprintf("nightly-%s", sha)
+
+	// Build the binary using make
+	buildCmd := exec.Command("make", "build")
+	buildCmd.Dir = tempDir
+	buildCmd.Env = append(os.Environ(), "GOPRIVATE=github.com/mattsolo1/*")
+	if output, err := buildCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("build failed: %w\nOutput: %s", err, string(output))
+	}
+
+	// Discover the built binary using workspace package
+	binaries, err := workspace.DiscoverLocalBinaries(tempDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to discover built binary: %w", err)
+	}
+
+	// Find the binary for this specific tool
+	var binaryPath string
+	for _, binary := range binaries {
+		if binary.Name == toolName {
+			binaryPath = binary.Path
+			break
+		}
+	}
+
+	if binaryPath == "" {
+		return "", fmt.Errorf("could not find built binary for %s", toolName)
+	}
+
+	// Create version directory
+	versionBinDir := filepath.Join(m.baseDir, VersionsDir, versionTag, BinDir)
+	if err := os.MkdirAll(versionBinDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create version directory: %w", err)
+	}
+
+	// Copy the binary to the version directory
+	targetPath := filepath.Join(versionBinDir, toolName)
+	sourceFile, err := os.Open(binaryPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open built binary: %w", err)
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(targetPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to create target binary: %w", err)
+	}
+	defer destFile.Close()
+
+	if _, err := io.Copy(destFile, sourceFile); err != nil {
+		return "", fmt.Errorf("failed to copy binary: %w", err)
+	}
+
+	// Make executable
+	if err := os.Chmod(targetPath, 0755); err != nil {
+		return "", fmt.Errorf("failed to make %s executable: %w", toolName, err)
+	}
+
+	return versionTag, nil
 }
 
 // UseVersion switches to a specific version (DEPRECATED)

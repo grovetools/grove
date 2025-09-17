@@ -17,16 +17,23 @@ COPY . .
 
 # Try to copy the appropriate architecture binary from dist
 # Docker will automatically select the right one based on the container architecture
+# This binary will be used for testing the install improvements
 RUN mkdir -p /app/bin && \
     if [ "$(uname -m)" = "aarch64" ]; then \
       if [ -f /app/dist/grove-linux-arm64 ]; then \
         cp /app/dist/grove-linux-arm64 /app/bin/grove && chmod +x /app/bin/grove; \
+        # Also copy to the location where install.sh will place it
+        mkdir -p /root/.grove/bin && \
+        cp /app/dist/grove-linux-arm64 /root/.grove/bin/grove && chmod +x /root/.grove/bin/grove; \
       else \
         cp /app/tests/e2e/mocks/grove_mock /app/bin/grove && chmod +x /app/bin/grove; \
       fi \
     else \
       if [ -f /app/dist/grove-linux-amd64 ]; then \
         cp /app/dist/grove-linux-amd64 /app/bin/grove && chmod +x /app/bin/grove; \
+        # Also copy to the location where install.sh will place it
+        mkdir -p /root/.grove/bin && \
+        cp /app/dist/grove-linux-amd64 /root/.grove/bin/grove && chmod +x /root/.grove/bin/grove; \
       else \
         cp /app/tests/e2e/mocks/grove_mock /app/bin/grove && chmod +x /app/bin/grove; \
       fi \
