@@ -263,6 +263,7 @@ func runReleasePlan(ctx context.Context) (*release.ReleasePlan, error) {
 			NextVersion:         nextVersion,
 			ChangelogPath:       changelogPath,
 			Status:              status,
+			Selected:            hasRepoChanges, // Auto-select repos with changes
 		}
 	}
 

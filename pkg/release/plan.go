@@ -25,7 +25,8 @@ type RepoReleasePlan struct {
 	SelectedBump        string `json:"selected_bump"`
 	NextVersion         string `json:"next_version"`
 	ChangelogPath       string `json:"changelog_path"` // Path to the staged changelog file
-	Status              string `json:"status"`         // "Pending Review", "Approved"
+	Status              string `json:"status"`         // "Pending Review", "Approved", "-"
+	Selected            bool   `json:"selected"`       // Whether this repo is selected for release
 }
 
 func getPlanPath() (string, error) {

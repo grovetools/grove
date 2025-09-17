@@ -52,6 +52,7 @@ var (
 type releaseKeyMap struct {
 	Up           key.Binding
 	Down         key.Binding
+	Toggle       key.Binding
 	SelectMajor  key.Binding
 	SelectMinor  key.Binding
 	SelectPatch  key.Binding
@@ -70,6 +71,10 @@ var releaseKeys = releaseKeyMap{
 	Down: key.NewBinding(
 		key.WithKeys("down", "j"),
 		key.WithHelp("↓/j", "down"),
+	),
+	Toggle: key.NewBinding(
+		key.WithKeys(" ", "x"),
+		key.WithHelp("space/x", "toggle selection"),
 	),
 	SelectMajor: key.NewBinding(
 		key.WithKeys("m"),
@@ -215,6 +220,22 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case key.Matches(msg, m.keys.Toggle):
+		if m.selectedIndex < len(m.repoNames) {
+			repoName := m.repoNames[m.selectedIndex]
+			if repo, ok := m.plan.Repos[repoName]; ok {
+				// Only allow toggling repos that have changes
+				if repo.CurrentVersion != repo.NextVersion {
+					repo.Selected = !repo.Selected
+					// If deselected, also unapprove
+					if !repo.Selected {
+						repo.Status = "Pending Review"
+					}
+				}
+			}
+		}
+		return m, nil
+
 	case key.Matches(msg, m.keys.SelectMajor):
 		if m.selectedIndex < len(m.repoNames) {
 			repoName := m.repoNames[m.selectedIndex]
@@ -262,15 +283,19 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.Apply):
-		// Check if all repos are approved
+		// Check if all selected repos are approved
 		allApproved := true
+		hasSelection := false
 		for _, repo := range m.plan.Repos {
-			if repo.Status != "Approved" {
-				allApproved = false
-				break
+			if repo.Selected && repo.CurrentVersion != repo.NextVersion {
+				hasSelection = true
+				if repo.Status != "Approved" {
+					allApproved = false
+					break
+				}
 			}
 		}
-		if allApproved {
+		if allApproved && hasSelection {
 			m.currentView = viewApplying
 			m.applying = true
 			m.applyOutput = "🚀 Starting release process...\n\n"
@@ -339,13 +364,13 @@ func (m releaseTuiModel) viewTable() string {
 	t := table.New().
 		Border(lipgloss.NormalBorder()).
 		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4"))).
-		Headers("Repository", "Current", "Proposed", "Increment", "Status")
+		Headers("", "Repository", "Current", "Proposed", "Increment", "Status")
 
-	// Count repositories with changes
-	reposWithChanges := 0
+	// Count selected repositories with changes
+	selectedCount := 0
 	for _, repo := range m.plan.Repos {
-		if repo.NextVersion != repo.CurrentVersion {
-			reposWithChanges++
+		if repo.Selected && repo.NextVersion != repo.CurrentVersion {
+			selectedCount++
 		}
 	}
 
@@ -357,6 +382,7 @@ func (m releaseTuiModel) viewTable() string {
 		}
 		
 		row := []string{
+			"",  // No selection checkbox for parent
 			"grove-ecosystem",
 			m.plan.ParentCurrentVersion,
 			m.plan.ParentVersion,
@@ -367,7 +393,7 @@ func (m releaseTuiModel) viewTable() string {
 		t.Row(row...)
 		
 		// Add separator row
-		t.Row("───────────────", "─────────", "──────────", "───────────", "─────────")
+		t.Row("", "───────────────", "─────────", "──────────", "───────────", "─────────")
 	}
 
 	// Add rows for each repository
@@ -390,7 +416,18 @@ func (m releaseTuiModel) viewTable() string {
 			statusStr = releaseTuiStatusPendingStyle.Render("⏳ Pending")
 		}
 
+		// Selection checkbox
+		checkbox := "[ ]"
+		if repo.Selected {
+			checkbox = "[✓]"
+		}
+		// Only show checkbox for repos with changes
+		if repo.CurrentVersion == repo.NextVersion {
+			checkbox = ""
+		}
+
 		row := []string{
+			checkbox,
 			repoName,
 			repo.CurrentVersion,
 			repo.NextVersion,
@@ -423,7 +460,7 @@ func (m releaseTuiModel) viewTable() string {
 				releaseInfo += ":\n"
 				for _, repo := range level {
 					if repoPlan, ok := m.plan.Repos[repo]; ok {
-						if repoPlan.CurrentVersion != repoPlan.NextVersion {
+						if repoPlan.Selected && repoPlan.CurrentVersion != repoPlan.NextVersion {
 							releaseInfo += fmt.Sprintf("  • %s: %s → %s (%s)\n", 
 								repo, repoPlan.CurrentVersion, repoPlan.NextVersion, repoPlan.SelectedBump)
 						}
@@ -431,7 +468,11 @@ func (m releaseTuiModel) viewTable() string {
 				}
 			}
 		}
-		releaseInfo += fmt.Sprintf("\n%d repositories will be released.\n", reposWithChanges)
+		if selectedCount > 0 {
+			releaseInfo += fmt.Sprintf("\n%d repositories selected for release.\n", selectedCount)
+		} else {
+			releaseInfo += "\nNo repositories selected. Use space to select repositories.\n"
+		}
 	}
 
 	// Check if all approved for help text
@@ -449,6 +490,7 @@ func (m releaseTuiModel) viewTable() string {
 
 	helpItems := []string{
 		"↑/↓: navigate",
+		"space: toggle selection",
 		"m/n/p: set major/minor/patch",
 		"v: view changelog",
 	}
