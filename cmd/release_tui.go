@@ -56,6 +56,7 @@ type releaseKeyMap struct {
 	Up              key.Binding
 	Down            key.Binding
 	Toggle          key.Binding
+	Tab             key.Binding
 	SelectAll       key.Binding
 	DeselectAll     key.Binding
 	SelectMajor     key.Binding
@@ -92,6 +93,10 @@ var releaseKeys = releaseKeyMap{
 	Toggle: key.NewBinding(
 		key.WithKeys(" ", "x"),
 		key.WithHelp("space/x", "toggle selection"),
+	),
+	Tab: key.NewBinding(
+		key.WithKeys("tab"),
+		key.WithHelp("tab", "switch view"),
 	),
 	SelectAll: key.NewBinding(
 		key.WithKeys("ctrl+a"),
@@ -187,6 +192,7 @@ var releaseKeys = releaseKeyMap{
 const (
 	viewTable     = "table"
 	viewChangelog = "changelog"
+	viewSettings  = "settings"
 )
 
 // releaseTuiModel represents the TUI state
@@ -264,6 +270,8 @@ func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateTable(msg)
 		case viewChangelog:
 			return m.updateChangelog(msg)
+		case viewSettings:
+			return m.updateSettings(msg)
 		}
 
 
@@ -375,6 +383,10 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.selectedIndex < len(m.repoNames)-1 {
 			m.selectedIndex++
 		}
+		return m, nil
+
+	case key.Matches(msg, m.keys.Tab):
+		m.currentView = viewSettings
 		return m, nil
 
 	case key.Matches(msg, m.keys.Toggle):
@@ -768,39 +780,6 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case key.Matches(msg, m.keys.ToggleDryRun):
-		m.dryRun = !m.dryRun
-		if m.dryRun {
-			m.genProgress = "🔍 DRY-RUN MODE: Commands will be shown but not executed"
-		} else {
-			m.genProgress = "⚠️ LIVE MODE: Commands will be executed for real"
-		}
-		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
-			return clearProgressMsg{}
-		})
-		
-	case key.Matches(msg, m.keys.TogglePush):
-		m.push = !m.push
-		if m.push {
-			m.genProgress = "🚀 PUSH ENABLED: Will push to remote after release"
-		} else {
-			m.genProgress = "📦 PUSH DISABLED: Changes will stay local"
-		}
-		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
-			return clearProgressMsg{}
-		})
-		
-	case key.Matches(msg, m.keys.ToggleSyncDeps):
-		m.syncDeps = !m.syncDeps
-		if m.syncDeps {
-			m.genProgress = "🔗 SYNC DEPS ENABLED: Will update dependency references"
-		} else {
-			m.genProgress = "⛓️ SYNC DEPS DISABLED: Dependencies unchanged"
-		}
-		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
-			return clearProgressMsg{}
-		})
-
 	case key.Matches(msg, m.keys.Help):
 		m.showHelp = !m.showHelp
 		return m, nil
@@ -848,6 +827,51 @@ func (m releaseTuiModel) updateChangelog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m releaseTuiModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keys.Tab), key.Matches(msg, m.keys.Back):
+		m.currentView = viewTable
+		return m, nil
+
+	case key.Matches(msg, m.keys.Quit):
+		return m, tea.Quit
+
+	case key.Matches(msg, m.keys.ToggleDryRun):
+		m.dryRun = !m.dryRun
+		if m.dryRun {
+			m.genProgress = "🔍 DRY-RUN MODE: Commands will be shown but not executed"
+		} else {
+			m.genProgress = "⚠️ LIVE MODE: Commands will be executed for real"
+		}
+		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+			return clearProgressMsg{}
+		})
+		
+	case key.Matches(msg, m.keys.TogglePush):
+		m.push = !m.push
+		if m.push {
+			m.genProgress = "🚀 PUSH ENABLED: Will push to remote after release"
+		} else {
+			m.genProgress = "📦 PUSH DISABLED: Changes will stay local"
+		}
+		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+			return clearProgressMsg{}
+		})
+		
+	case key.Matches(msg, m.keys.ToggleSyncDeps):
+		m.syncDeps = !m.syncDeps
+		if m.syncDeps {
+			m.genProgress = "🔗 SYNC DEPS ENABLED: Will update dependency references"
+		} else {
+			m.genProgress = "⛓️ SYNC DEPS DISABLED: Dependencies unchanged"
+		}
+		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+			return clearProgressMsg{}
+		})
+	}
+
+	return m, nil
+}
 
 func (m releaseTuiModel) View() string {
 	// Show help overlay if active
@@ -863,6 +887,8 @@ func (m releaseTuiModel) View() string {
 	switch m.currentView {
 	case viewChangelog:
 		return m.viewChangelog()
+	case viewSettings:
+		return m.viewSettings()
 	default:
 		return m.viewTable()
 	}
@@ -905,6 +931,7 @@ func (m releaseTuiModel) renderHelp() string {
 		"",
 		formatPair("↑/↓,j/k", "Navigate repositories"),
 		formatPair("space", "Toggle selection"),
+		formatPair("Tab", "Settings menu"),
 		formatPair("Ctrl+A", "Select all"),
 		formatPair("Ctrl+D", "Deselect all"),
 		formatPair("v", "View changelog"),
@@ -920,24 +947,6 @@ func (m releaseTuiModel) renderHelp() string {
 		lipgloss.NewStyle().Bold(true).Render("Release:"),
 		"",
 		formatPair("a", "Toggle approval"),
-		formatPair("d", fmt.Sprintf("Dry-run (%s)", func() string {
-			if m.dryRun {
-				return "ON"
-			}
-			return "OFF"
-		}())),
-		formatPair("P", fmt.Sprintf("Push (%s)", func() string {
-			if m.push {
-				return "ON"
-			}
-			return "OFF"
-		}())),
-		formatPair("S", fmt.Sprintf("Sync deps (%s)", func() string {
-			if m.syncDeps {
-				return "ON"
-			}
-			return "OFF"
-		}())),
 		formatPair("A", "Apply release"),
 		"",
 		formatPair("?", "Toggle help"),
@@ -1239,6 +1248,61 @@ func (m releaseTuiModel) viewChangelog() string {
 	return fmt.Sprintf("%s\n\n%s\n\n%s", header, m.viewport.View(), help)
 }
 
+func (m releaseTuiModel) viewSettings() string {
+	headerText := "⚙️ Release Settings"
+	header := releaseTuiHeaderStyle.Render(headerText)
+	
+	// Create toggle items with current states
+	toggleStyle := lipgloss.NewStyle().
+		Padding(1, 2).
+		MarginBottom(1)
+	
+	activeStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("42")).
+		Bold(true)
+		
+	inactiveStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("241"))
+	
+	// Build settings list
+	var settings []string
+	
+	// Dry run toggle
+	dryRunState := inactiveStyle.Render("OFF")
+	if m.dryRun {
+		dryRunState = activeStyle.Render("ON")
+	}
+	settings = append(settings, fmt.Sprintf("  [d] Dry Run Mode: %s\n      Preview commands without executing them", dryRunState))
+	
+	// Push toggle
+	pushState := inactiveStyle.Render("OFF")
+	if m.push {
+		pushState = activeStyle.Render("ON")
+	}
+	settings = append(settings, fmt.Sprintf("  [P] Push to Remote: %s\n      Push changes to remote repositories after release", pushState))
+	
+	// Sync deps toggle  
+	syncState := inactiveStyle.Render("OFF")
+	if m.syncDeps {
+		syncState = activeStyle.Render("ON")
+	}
+	settings = append(settings, fmt.Sprintf("  [S] Sync Dependencies: %s\n      Update dependency versions across repositories", syncState))
+	
+	content := toggleStyle.Render(strings.Join(settings, "\n\n"))
+	
+	// Progress message if any
+	progressMsg := ""
+	if m.genProgress != "" {
+		progressMsg = "\n\n" + lipgloss.NewStyle().
+			Foreground(lipgloss.Color("226")).
+			Render(m.genProgress)
+	}
+	
+	help := releaseTuiHelpStyle.Render("tab/esc: back to main • q: quit")
+	
+	// Combine all elements
+	return fmt.Sprintf("%s\n\n%s%s\n\n%s", header, content, progressMsg, help)
+}
 
 // Helper function to calculate next version
 func calculateNextVersion(current, bump string) string {
