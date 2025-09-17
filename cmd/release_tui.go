@@ -568,6 +568,8 @@ func runReleaseTUI(ctx context.Context) error {
 
 // newReleaseTuiCmd creates the 'grove release tui' subcommand
 func newReleaseTuiCmd() *cobra.Command {
+	var forceFresh bool
+	
 	cmd := &cobra.Command{
 		Use:   "tui",
 		Short: "Launch interactive TUI for release planning",
@@ -584,9 +586,21 @@ The release plan is persisted in ~/.grove/release_plan.json and can be
 resumed if interrupted.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
+			
+			// Clear stale plan if requested
+			if forceFresh {
+				fmt.Println("Clearing existing release plan...")
+				if err := release.ClearPlan(); err != nil {
+					return fmt.Errorf("failed to clear plan: %w", err)
+				}
+			}
+			
 			return runReleaseTUI(ctx)
 		},
 	}
+	
+	cmd.Flags().BoolVar(&forceFresh, "fresh", false, "Clear any existing release plan and start fresh")
+	
 	return cmd
 }
 
