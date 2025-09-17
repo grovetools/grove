@@ -1,7 +1,0 @@
-go 1.24.4
-
-use (
-	.
-	/Users/solom4/Code/grove-ecosystem/grove-core
-	/Users/solom4/Code/grove-ecosystem/grove-tend
-)
