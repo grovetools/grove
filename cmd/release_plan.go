@@ -112,12 +112,23 @@ func runReleasePlan(ctx context.Context) (*release.ReleasePlan, error) {
 		return nil, fmt.Errorf("no repositories have changes")
 	}
 
+	// Determine parent repo version
+	parentVersion := ""
+	parentCurrentVersion := ""
+	if !releaseSkipParent {
+		parentVersion = determineParentVersion(rootDir, versions, hasChanges)
+		// Get current parent version
+		parentCurrentVersion = getCurrentParentVersion(rootDir)
+	}
+
 	// Create release plan
 	plan := &release.ReleasePlan{
-		CreatedAt:     time.Now(),
-		Repos:         make(map[string]*release.RepoReleasePlan),
-		ReleaseLevels: releaseLevels,
-		RootDir:       rootDir,
+		CreatedAt:            time.Now(),
+		Repos:                make(map[string]*release.RepoReleasePlan),
+		ReleaseLevels:        releaseLevels,
+		RootDir:              rootDir,
+		ParentVersion:        parentVersion,
+		ParentCurrentVersion: parentCurrentVersion,
 	}
 
 	// Create staging directory
@@ -257,6 +268,19 @@ func getStagingDirPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".grove", "release_staging"), nil
+}
+
+// Helper function to get current parent version
+func getCurrentParentVersion(rootDir string) string {
+	// Try to get the latest tag for the parent repository
+	cmd := exec.Command("git", "describe", "--tags", "--abbrev=0")
+	cmd.Dir = rootDir
+	output, err := cmd.Output()
+	if err != nil {
+		// No tags found
+		return ""
+	}
+	return strings.TrimSpace(string(output))
 }
 
 // Helper function to determine version bump from conventional commits

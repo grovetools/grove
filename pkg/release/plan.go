@@ -9,10 +9,12 @@ import (
 
 // ReleasePlan represents the state of an entire release operation.
 type ReleasePlan struct {
-	CreatedAt     time.Time                   `json:"created_at"`
-	Repos         map[string]*RepoReleasePlan `json:"repos"`          // Keyed by repo name
-	ReleaseLevels [][]string                  `json:"release_levels"` // Topologically sorted repo names for orchestration
-	RootDir       string                      `json:"root_dir"`       // The root of the ecosystem being released
+	CreatedAt            time.Time                   `json:"created_at"`
+	Repos                map[string]*RepoReleasePlan `json:"repos"`                  // Keyed by repo name
+	ReleaseLevels        [][]string                  `json:"release_levels"`         // Topologically sorted repo names for orchestration
+	RootDir              string                      `json:"root_dir"`               // The root of the ecosystem being released
+	ParentVersion        string                      `json:"parent_version"`         // The parent ecosystem version
+	ParentCurrentVersion string                      `json:"parent_current_version"` // Current parent ecosystem version
 }
 
 // RepoReleasePlan holds the plan for a single repository.

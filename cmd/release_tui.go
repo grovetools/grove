@@ -339,34 +339,67 @@ func (m releaseTuiModel) viewTable() string {
 	t := table.New().
 		Border(lipgloss.NormalBorder()).
 		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4"))).
-		Headers("Repository", "Current", "Suggested", "Selected", "Next Version", "Status")
+		Headers("Repository", "Current", "Proposed", "Increment", "Status")
 
-	// Add rows
+	// Count repositories with changes
+	reposWithChanges := 0
+	for _, repo := range m.plan.Repos {
+		if repo.NextVersion != repo.CurrentVersion {
+			reposWithChanges++
+		}
+	}
+
+	// Add parent ecosystem repository first if it exists
+	if m.plan.ParentVersion != "" {
+		incrementType := "date"
+		if m.plan.ParentCurrentVersion != "" && m.plan.ParentCurrentVersion == m.plan.ParentVersion {
+			incrementType = "-"
+		}
+		
+		row := []string{
+			"grove-ecosystem",
+			m.plan.ParentCurrentVersion,
+			m.plan.ParentVersion,
+			incrementType,
+			"-",
+		}
+		
+		t.Row(row...)
+		
+		// Add separator row
+		t.Row("───────────────", "─────────", "──────────", "───────────", "─────────")
+	}
+
+	// Add rows for each repository
 	for i, repoName := range m.repoNames {
 		repo := m.plan.Repos[repoName]
 
+		// Determine increment type
+		incrementType := repo.SelectedBump
+		if repo.CurrentVersion == repo.NextVersion {
+			incrementType = "-"
+		}
+
 		// Format status
 		var statusStr string
-		if repo.Status == "Approved" {
+		if repo.CurrentVersion == repo.NextVersion {
+			statusStr = "-"
+		} else if repo.Status == "Approved" {
 			statusStr = releaseTuiStatusApprovedStyle.Render("✓ Approved")
 		} else {
 			statusStr = releaseTuiStatusPendingStyle.Render("⏳ Pending")
 		}
 
-		// Format suggested bump with reasoning tooltip
-		suggestedStr := releaseTuiSuggestedStyle.Render(repo.SuggestedBump)
-
 		row := []string{
 			repoName,
 			repo.CurrentVersion,
-			suggestedStr,
-			repo.SelectedBump,
 			repo.NextVersion,
+			incrementType,
 			statusStr,
 		}
 
-		// Highlight selected row
-		if i == m.selectedIndex {
+		// Highlight selected row (but not for repos without changes)
+		if i == m.selectedIndex && repo.CurrentVersion != repo.NextVersion {
 			for j, cell := range row {
 				row[j] = releaseTuiSelectedStyle.Render(cell)
 			}
@@ -377,12 +410,40 @@ func (m releaseTuiModel) viewTable() string {
 
 	tableStr := t.Render()
 
+	// Show release order information
+	releaseInfo := ""
+	if len(m.plan.ReleaseLevels) > 0 {
+		releaseInfo = "\n📋 Release Order (by dependency level)\n\n"
+		for i, level := range m.plan.ReleaseLevels {
+			if len(level) > 0 {
+				releaseInfo += fmt.Sprintf("Level %d", i+1)
+				if len(level) > 1 {
+					releaseInfo += " (can release in parallel)"
+				}
+				releaseInfo += ":\n"
+				for _, repo := range level {
+					if repoPlan, ok := m.plan.Repos[repo]; ok {
+						if repoPlan.CurrentVersion != repoPlan.NextVersion {
+							releaseInfo += fmt.Sprintf("  • %s: %s → %s (%s)\n", 
+								repo, repoPlan.CurrentVersion, repoPlan.NextVersion, repoPlan.SelectedBump)
+						}
+					}
+				}
+			}
+		}
+		releaseInfo += fmt.Sprintf("\n%d repositories will be released.\n", reposWithChanges)
+	}
+
 	// Check if all approved for help text
 	allApproved := true
+	needsApproval := false
 	for _, repo := range m.plan.Repos {
-		if repo.Status != "Approved" {
-			allApproved = false
-			break
+		if repo.CurrentVersion != repo.NextVersion {
+			needsApproval = true
+			if repo.Status != "Approved" {
+				allApproved = false
+				break
+			}
 		}
 	}
 
@@ -391,7 +452,7 @@ func (m releaseTuiModel) viewTable() string {
 		"m/n/p: set major/minor/patch",
 		"v: view changelog",
 	}
-	if allApproved {
+	if allApproved && needsApproval {
 		helpItems = append(helpItems, "A: apply release")
 	}
 	helpItems = append(helpItems, "q: quit")
@@ -402,12 +463,12 @@ func (m releaseTuiModel) viewTable() string {
 	var reasoning string
 	if m.selectedIndex < len(m.repoNames) {
 		repo := m.plan.Repos[m.repoNames[m.selectedIndex]]
-		if repo.SuggestionReasoning != "" {
+		if repo.SuggestionReasoning != "" && repo.CurrentVersion != repo.NextVersion {
 			reasoning = fmt.Sprintf("\n💡 %s", repo.SuggestionReasoning)
 		}
 	}
 
-	return fmt.Sprintf("%s\n\n%s%s\n\n%s", header, tableStr, reasoning, help)
+	return fmt.Sprintf("%s\n\n%s%s%s\n\n%s", header, tableStr, releaseInfo, reasoning, help)
 }
 
 func (m releaseTuiModel) viewChangelog() string {
