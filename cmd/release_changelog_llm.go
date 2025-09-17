@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +11,13 @@ import (
 
 	"github.com/mattsolo1/grove-core/config"
 )
+
+// LLMChangelogResult holds the structured response from the LLM.
+type LLMChangelogResult struct {
+	Suggestion    string `json:"suggestion"`    // "major", "minor", or "patch"
+	Justification string `json:"justification"` // A brief reason for the suggestion
+	Changelog     string `json:"changelog"`     // The full markdown changelog
+}
 
 // runLLMChangelog is the main entry point for LLM-based changelog generation.
 func runLLMChangelog(repoPath, newVersion string) error {
@@ -48,10 +56,11 @@ func runLLMChangelog(repoPath, newVersion string) error {
 	context := fmt.Sprintf("GIT LOG:\n%s\n\nGIT DIFF STAT:\n%s", string(logOutput), string(diffOutput))
 
 	// 3. Generate changelog with LLM.
-	changelogContent, err := generateChangelogWithLLM(context, newVersion, repoPath)
+	result, err := generateChangelogWithLLM(context, newVersion, repoPath)
 	if err != nil {
 		return fmt.Errorf("failed to generate changelog with LLM: %w", err)
 	}
+	changelogContent := result.Changelog
 
 	// 4. Prepend to CHANGELOG.md.
 	changelogPath := filepath.Join(repoPath, "CHANGELOG.md")
@@ -83,7 +92,8 @@ type FlowConfig struct {
 }
 
 // generateChangelogWithLLM constructs a prompt and calls gemapi to generate the changelog.
-func generateChangelogWithLLM(context, newVersion, repoPath string) (string, error) {
+// It now returns the new LLMChangelogResult struct.
+func generateChangelogWithLLM(context, newVersion, repoPath string) (*LLMChangelogResult, error) {
 	// Determine the model to use
 	model := "gemini-1.5-flash-latest" // Default model
 
@@ -100,47 +110,48 @@ func generateChangelogWithLLM(context, newVersion, repoPath string) (string, err
 	// Get current date for the changelog entry
 	currentDate := time.Now().Format("2006-01-02")
 
-	// Construct the prompt
-	prompt := fmt.Sprintf(`You are a technical writer responsible for creating release notes.
-Based on the provided git log and diff stat, generate a changelog entry for version **%s**.
+	// Construct the NEW prompt asking for a JSON response
+	prompt := fmt.Sprintf(`You are a technical writer responsible for creating release notes and suggesting semantic version bumps.
+Based on the provided git log and diff stat, analyze the changes and generate a JSON object with three fields: "suggestion", "justification", and "changelog".
 
-**Instructions:**
-1. Format the output in Markdown using the "Keep a Changelog" standard.
+**JSON Schema:**
+{
+  "suggestion": "major|minor|patch",
+  "justification": "A brief, one-sentence explanation for the version bump suggestion.",
+  "changelog": "The full changelog in Markdown format."
+}
+
+**Instructions for Analysis:**
+- **major:** Suggest if there are breaking changes (e.g., commits with "!" like "feat!:", or "BREAKING CHANGE:" in the body).
+- **minor:** Suggest if new features are added without breaking changes (e.g., "feat:" commits).
+- **patch:** Suggest for bug fixes, performance improvements, or chores (e.g., "fix:", "perf:", "chore:").
+
+**Instructions for Changelog:**
+1. Format the changelog in Markdown using the "Keep a Changelog" standard.
 2. Start with a level 2 heading for the version, including the current date: "## %s (%s)"
-3. Categorize changes into the following sections as applicable:
-   - ### 💥 BREAKING CHANGES (only if there are breaking changes mentioned in commits)
-   - ### Features
-   - ### Bug Fixes
-   - ### Performance Improvements
-   - ### Code Refactoring
-   - ### Documentation
-   - ### Chores
-   - ### Tests
-4. Omit any empty sections - only include sections that have changes.
-5. Write clear, concise, and user-friendly descriptions for each change.
-6. At the very end of the entry, include a "### File Changes" section and include the provided git diff stat output in a code block.
-7. Do not include any preamble or explanation before the changelog entry itself. Start directly with the "##" heading.
-8. Use bullet points (- ) for individual changes within each section.
+3. Categorize changes into sections (e.g., ### Features, ### Bug Fixes, ### 💥 BREAKING CHANGES). Omit empty sections.
+4. At the very end, include a "### File Changes" section with the provided git diff stat in a code block.
+5. Do not include any preamble or explanation.
 
 **Context from Git:**
 ---
 %s
 ---
 
-Generate the changelog entry now:`, newVersion, newVersion, currentDate, context)
+Generate the JSON object now:`, newVersion, currentDate, context)
 
 	// Write prompt to a temporary file
 	tmpFile, err := os.CreateTemp("", "grove-changelog-prompt-*.md")
 	if err != nil {
-		return "", fmt.Errorf("failed to create temporary prompt file: %w", err)
+		return nil, fmt.Errorf("failed to create temporary prompt file: %w", err)
 	}
 	defer os.Remove(tmpFile.Name())
 
 	if _, err := tmpFile.WriteString(prompt); err != nil {
-		return "", fmt.Errorf("failed to write to temporary prompt file: %w", err)
+		return nil, fmt.Errorf("failed to write to temporary prompt file: %w", err)
 	}
 	if err := tmpFile.Close(); err != nil {
-		return "", fmt.Errorf("failed to close temporary prompt file: %w", err)
+		return nil, fmt.Errorf("failed to close temporary prompt file: %w", err)
 	}
 
 	// Construct and execute the gemapi command
@@ -151,20 +162,34 @@ Generate the changelog entry now:`, newVersion, newVersion, currentDate, context
 		"--yes",
 	}
 	
-	fmt.Printf("Calling gemapi with model %s...\n", model)
+	fmt.Printf("Calling gemapi with model %s for version suggestion...\n", model)
 	gemapiCmd := exec.Command("gemapi", args...)
 	gemapiCmd.Stderr = os.Stderr // Pipe stderr for progress visibility
 
 	output, err := gemapiCmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("failed to execute 'gemapi request': %w", err)
+		return nil, fmt.Errorf("failed to execute 'gemapi request': %w", err)
+	}
+	
+	// Clean the output to ensure it's valid JSON
+	// LLMs sometimes wrap JSON in ```json ... ``` blocks
+	jsonString := strings.TrimSpace(string(output))
+	if strings.HasPrefix(jsonString, "```json") {
+		jsonString = strings.TrimPrefix(jsonString, "```json")
+		jsonString = strings.TrimSuffix(jsonString, "```")
+		jsonString = strings.TrimSpace(jsonString)
 	}
 
-	// Clean up the output - ensure it ends with a newline
-	result := strings.TrimSpace(string(output))
-	if result != "" {
-		result = result + "\n"
+	// Unmarshal the JSON response
+	var result LLMChangelogResult
+	if err := json.Unmarshal([]byte(jsonString), &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal LLM response into JSON: %w\nResponse:\n%s", err, string(output))
 	}
 
-	return result, nil
+	// Ensure the changelog ends with a newline
+	if result.Changelog != "" && !strings.HasSuffix(result.Changelog, "\n") {
+		result.Changelog = result.Changelog + "\n"
+	}
+
+	return &result, nil
 }
