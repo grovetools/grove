@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -36,8 +37,9 @@ func runLLMChangelog(repoPath, newVersion string) error {
 	}
 
 	// 2. Gather git context.
-	// Get detailed commit log
-	logCmd := exec.Command("git", "log", commitRange, "--pretty=fuller")
+	// Get detailed commit log with prominent commit hashes
+	// Format includes both full and short hash for easy reference
+	logCmd := exec.Command("git", "log", commitRange, "--pretty=format:commit %H (%h)%nAuthor: %an <%ae>%nDate: %ad%nCommit: %cn <%ce>%nCommitDate: %cd%n%n    %s%n%n%b%n")
 	logCmd.Dir = repoPath
 	logOutput, err := logCmd.CombinedOutput()
 	if err != nil {
@@ -91,9 +93,199 @@ type FlowConfig struct {
 	OneshotModel string `yaml:"oneshot_model"`
 }
 
+// promptForRulesEdit checks if a .grove/rules file exists and asks the user if they want to edit it
+// skipPrompt will skip the interactive prompt (useful for TUI mode)
+func promptForRulesEdit(repoPath string, skipPrompt bool) error {
+	rulesPath := filepath.Join(repoPath, ".grove", "rules")
+	
+	// In TUI mode, just ensure the rules file exists but don't prompt
+	if skipPrompt {
+		_, err := os.Stat(rulesPath)
+		if os.IsNotExist(err) {
+			// Create .grove directory if it doesn't exist
+			groveDir := filepath.Join(repoPath, ".grove")
+			if err := os.MkdirAll(groveDir, 0755); err != nil {
+				return fmt.Errorf("failed to create .grove directory: %w", err)
+			}
+			
+			// Create empty rules file with helpful comments
+			content := `# Grove rules file for LLM context
+# Add file paths or patterns here, one per line
+# Examples:
+#   README.md
+#   docs/*.md
+#   src/main.go
+`
+			if err := os.WriteFile(rulesPath, []byte(content), 0644); err != nil {
+				return fmt.Errorf("failed to create rules file: %w", err)
+			}
+			fmt.Printf("Created %s (edit to customize LLM context)\n", rulesPath)
+		}
+		return nil
+	}
+	
+	// Check if rules file exists
+	_, err := os.Stat(rulesPath)
+	if os.IsNotExist(err) {
+		// No rules file, ask if user wants to create one
+		fmt.Printf("\nNo .grove/rules file found in %s\n", filepath.Base(repoPath))
+		fmt.Print("Would you like to:\n")
+		fmt.Print("  1) Auto-populate from files changed since last release\n")
+		fmt.Print("  2) Create empty rules file and edit manually\n")
+		fmt.Print("  3) Skip (no additional context)\n")
+		fmt.Print("Choice [1/2/3]: ")
+		
+		reader := bufio.NewReader(os.Stdin)
+		response, _ := reader.ReadString('\n')
+		response = strings.TrimSpace(response)
+		
+		switch response {
+		case "1":
+			// Auto-populate using cx from-git since
+			if err := autoPopulateRules(repoPath); err != nil {
+				fmt.Printf("Warning: Failed to auto-populate rules: %v\n", err)
+				fmt.Print("Would you like to create and edit manually instead? (y/N): ")
+				response, _ = reader.ReadString('\n')
+				response = strings.TrimSpace(strings.ToLower(response))
+				if response == "y" || response == "yes" {
+					return createAndEditRules(repoPath)
+				}
+			} else {
+				fmt.Print("Would you like to review/edit the auto-populated rules? (y/N): ")
+				response, _ = reader.ReadString('\n')
+				response = strings.TrimSpace(strings.ToLower(response))
+				if response == "y" || response == "yes" {
+					return openInEditor(rulesPath)
+				}
+			}
+		case "2":
+			return createAndEditRules(repoPath)
+		case "3":
+			// Skip
+			return nil
+		default:
+			// Default to skip
+			return nil
+		}
+	} else if err == nil {
+		// Rules file exists, ask if user wants to edit it
+		fmt.Printf("\nFound .grove/rules file in %s\n", filepath.Base(repoPath))
+		fmt.Print("Would you like to:\n")
+		fmt.Print("  1) Update from files changed since last release\n") 
+		fmt.Print("  2) Edit manually\n")
+		fmt.Print("  3) Use as-is\n")
+		fmt.Print("Choice [1/2/3]: ")
+		
+		reader := bufio.NewReader(os.Stdin)
+		response, _ := reader.ReadString('\n')
+		response = strings.TrimSpace(response)
+		
+		switch response {
+		case "1":
+			// Update using cx from-git since
+			if err := autoPopulateRules(repoPath); err != nil {
+				fmt.Printf("Warning: Failed to update rules: %v\n", err)
+			}
+			fmt.Print("Would you like to review/edit the updated rules? (y/N): ")
+			response, _ = reader.ReadString('\n')
+			response = strings.TrimSpace(strings.ToLower(response))
+			if response == "y" || response == "yes" {
+				return openInEditor(rulesPath)
+			}
+		case "2":
+			return openInEditor(rulesPath)
+		case "3":
+			// Use as-is
+			return nil
+		default:
+			// Default to use as-is
+			return nil
+		}
+	}
+	
+	return nil
+}
+
+// createAndEditRules creates a new rules file and opens it in editor
+func createAndEditRules(repoPath string) error {
+	rulesPath := filepath.Join(repoPath, ".grove", "rules")
+	
+	// Create .grove directory if it doesn't exist
+	groveDir := filepath.Join(repoPath, ".grove")
+	if err := os.MkdirAll(groveDir, 0755); err != nil {
+		return fmt.Errorf("failed to create .grove directory: %w", err)
+	}
+	
+	// Create rules file with helpful comments
+	content := `# Grove rules file for LLM context
+# Add file paths or patterns here, one per line
+# Examples:
+#   README.md
+#   docs/*.md
+#   src/main.go
+`
+	if err := os.WriteFile(rulesPath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to create rules file: %w", err)
+	}
+	
+	fmt.Printf("Created %s\n", rulesPath)
+	return openInEditor(rulesPath)
+}
+
+// autoPopulateRules uses cx from-git since to populate the rules file
+func autoPopulateRules(repoPath string) error {
+	// Get the last tag to use as the --since value
+	lastTag, err := getLastTag(repoPath)
+	if err != nil || lastTag == "" {
+		return fmt.Errorf("no previous tag found to use as reference")
+	}
+	
+	fmt.Printf("Auto-populating rules from files changed since %s...\n", lastTag)
+	
+	// Run cx from-git since command
+	cmd := exec.Command("cx", "from-git", "since", "--since", lastTag)
+	cmd.Dir = repoPath
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to run cx from-git since: %w", err)
+	}
+	
+	fmt.Printf("Successfully populated rules file with changed files\n")
+	return nil
+}
+
+// openInEditor opens a file in the user's preferred editor
+func openInEditor(filepath string) error {
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = "vim" // Default to vim if EDITOR is not set
+	}
+	
+	cmd := exec.Command(editor, filepath)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	
+	fmt.Printf("Opening %s in %s...\n", filepath, editor)
+	return cmd.Run()
+}
+
 // generateChangelogWithLLM constructs a prompt and calls gemapi to generate the changelog.
 // It now returns the new LLMChangelogResult struct.
 func generateChangelogWithLLM(context, newVersion, repoPath string) (*LLMChangelogResult, error) {
+	return generateChangelogWithLLMInteractive(context, newVersion, repoPath, false)
+}
+
+// generateChangelogWithLLMInteractive constructs a prompt and calls gemapi to generate the changelog.
+// skipPrompt controls whether to skip interactive prompts (useful for TUI mode).
+func generateChangelogWithLLMInteractive(context, newVersion, repoPath string, skipPrompt bool) (*LLMChangelogResult, error) {
+	// Prompt for rules file editing
+	if err := promptForRulesEdit(repoPath, skipPrompt); err != nil {
+		fmt.Printf("Warning: Failed to handle rules file: %v\n", err)
+		// Continue anyway - rules file is optional
+	}
 	// Determine the model to use
 	model := "gemini-1.5-flash-latest" // Default model
 
@@ -129,9 +321,16 @@ Based on the provided git log and diff stat, analyze the changes and generate a 
 **Instructions for Changelog:**
 1. Format the changelog in Markdown using the "Keep a Changelog" standard.
 2. Start with a level 2 heading for the version, including the current date: "## %s (%s)"
-3. Categorize changes into sections (e.g., ### Features, ### Bug Fixes, ### 💥 BREAKING CHANGES). Omit empty sections.
-4. At the very end, include a "### File Changes" section with the provided git diff stat in a code block.
-5. Do not include any preamble or explanation.
+3. Begin with a summary section that organizes changes into topic-based paragraphs. Each paragraph should focus on a related set of changes (e.g., one for UI improvements, one for new commands, one for bug fixes). Include commit hash citations in parentheses when referencing specific changes. 
+   Example: "The new workspace list command (a1b2c3d) provides convenient access to all discovered workspaces, with support for JSON output (b2c3d4e) for scripting integration."
+   Write one paragraph per major topic or theme. No emojis.
+4. After the summary, categorize changes into sections (e.g., ### Features, ### Bug Fixes, ### BREAKING CHANGES). Omit empty sections. No emojis in section headers.
+5. For each changelog entry, include the short commit hash (first 7 characters) directly at the end without brackets. Format: "Description of change (commit)"
+   Example: "Add workspace list command with JSON output support (a1b2c3d)"
+   GitHub will automatically convert these 7-character hashes into clickable links.
+6. At the very end, include a "### File Changes" section with the provided git diff stat in a code block.
+7. Do not include any preamble or explanation.
+8. Do not use any emojis anywhere in the changelog.
 
 **Context from Git:**
 ---
@@ -162,13 +361,31 @@ Generate the JSON object now:`, newVersion, currentDate, context)
 		"--yes",
 	}
 	
-	fmt.Printf("Calling gemapi with model %s for version suggestion...\n", model)
+	// Create a log file for gemapi output
+	logFile, err := os.CreateTemp("", "grove-gemapi-*.log")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create log file: %w", err)
+	}
+	logPath := logFile.Name()
+	defer logFile.Close()
+	
+	// Only show this message if not in skip prompt mode (i.e., not in TUI)
+	if !skipPrompt {
+		fmt.Printf("Calling gemapi with model %s for version suggestion...\n", model)
+		fmt.Printf("Logging output to: %s\n", logPath)
+	}
+	
 	gemapiCmd := exec.Command("gemapi", args...)
-	gemapiCmd.Stderr = os.Stderr // Pipe stderr for progress visibility
+	gemapiCmd.Dir = repoPath // Set working directory to the repository being analyzed
+	
+	// Redirect stderr to log file to prevent TUI mangling
+	gemapiCmd.Stderr = logFile
 
 	output, err := gemapiCmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute 'gemapi request': %w", err)
+		// Read log file content for error details
+		logContent, _ := os.ReadFile(logPath)
+		return nil, fmt.Errorf("failed to execute 'gemapi request': %w\nLog: %s\nOutput: %s", err, logPath, string(logContent))
 	}
 	
 	// Clean the output to ensure it's valid JSON

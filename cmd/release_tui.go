@@ -59,10 +59,19 @@ type releaseKeyMap struct {
 	SelectMajor     key.Binding
 	SelectMinor     key.Binding
 	SelectPatch     key.Binding
+	ApplySuggestion key.Binding
 	ViewChangelog   key.Binding
+	EditChangelog   key.Binding
+	EditRepoChangelog key.Binding
 	GenerateChangelog key.Binding
+	GenerateAll     key.Binding
+	WriteChangelog  key.Binding
+	EditRules       key.Binding
+	ResetRules      key.Binding
+	ToggleDryRun    key.Binding
 	Approve         key.Binding
 	Apply           key.Binding
+	Help            key.Binding
 	Quit            key.Binding
 	Back            key.Binding
 }
@@ -92,13 +101,45 @@ var releaseKeys = releaseKeyMap{
 		key.WithKeys("p"),
 		key.WithHelp("p", "set patch"),
 	),
+	ApplySuggestion: key.NewBinding(
+		key.WithKeys("s"),
+		key.WithHelp("s", "apply suggestion"),
+	),
 	ViewChangelog: key.NewBinding(
 		key.WithKeys("v"),
 		key.WithHelp("v", "view changelog"),
 	),
+	EditChangelog: key.NewBinding(
+		key.WithKeys("e"),
+		key.WithHelp("e", "edit staged changelog"),
+	),
+	EditRepoChangelog: key.NewBinding(
+		key.WithKeys("E"),
+		key.WithHelp("E", "edit repo CHANGELOG.md"),
+	),
 	GenerateChangelog: key.NewBinding(
 		key.WithKeys("g"),
 		key.WithHelp("g", "generate changelog (LLM)"),
+	),
+	GenerateAll: key.NewBinding(
+		key.WithKeys("G"),
+		key.WithHelp("G", "generate all changelogs"),
+	),
+	WriteChangelog: key.NewBinding(
+		key.WithKeys("w"),
+		key.WithHelp("w", "write changelog to repo"),
+	),
+	EditRules: key.NewBinding(
+		key.WithKeys("r"),
+		key.WithHelp("r", "edit LLM rules"),
+	),
+	ResetRules: key.NewBinding(
+		key.WithKeys("R"),
+		key.WithHelp("R", "reset all rules to *"),
+	),
+	ToggleDryRun: key.NewBinding(
+		key.WithKeys("d"),
+		key.WithHelp("d", "toggle dry-run mode"),
 	),
 	Approve: key.NewBinding(
 		key.WithKeys("a"),
@@ -107,6 +148,10 @@ var releaseKeys = releaseKeyMap{
 	Apply: key.NewBinding(
 		key.WithKeys("A"),
 		key.WithHelp("A", "apply release"),
+	),
+	Help: key.NewBinding(
+		key.WithKeys("?"),
+		key.WithHelp("?", "toggle help"),
 	),
 	Quit: key.NewBinding(
 		key.WithKeys("q", "ctrl+c"),
@@ -122,7 +167,6 @@ var releaseKeys = releaseKeyMap{
 const (
 	viewTable     = "table"
 	viewChangelog = "changelog"
-	viewApplying  = "applying"
 )
 
 // releaseTuiModel represents the TUI state
@@ -138,8 +182,15 @@ type releaseTuiModel struct {
 	err           error
 	applyOutput   string
 	applying      bool
-	generating    bool   // Whether changelog generation is in progress
-	genProgress   string // Progress message for generation
+	generating    bool          // Whether changelog generation is in progress
+	genProgress   string        // Progress message for generation
+	spinner       int           // Spinner animation frame
+	genQueue      []string      // Queue of repos to generate changelogs for
+	genCurrent    string        // Current repo being generated
+	genCompleted  int           // Number of completed generations
+	dryRun        bool          // Whether to run in dry-run mode
+	showHelp      bool          // Whether to show help popup
+	shouldApply   bool          // Flag to indicate we should exit and apply
 }
 
 func initialReleaseModel(plan *release.ReleasePlan) releaseTuiModel {
@@ -167,6 +218,8 @@ func initialReleaseModel(plan *release.ReleasePlan) releaseTuiModel {
 		currentView: viewTable,
 		repoNames:   repoNames,
 		viewport:    viewport.New(80, 20),
+		dryRun:      true, // Start in dry-run mode for safety
+		showHelp:    false,
 	}
 }
 
@@ -189,46 +242,84 @@ func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateTable(msg)
 		case viewChangelog:
 			return m.updateChangelog(msg)
-		case viewApplying:
-			return m.updateApplying(msg)
 		}
 
-	case applyCompleteMsg:
-		m.applying = false
-		if msg.err != nil {
-			m.err = msg.err
-			m.applyOutput += fmt.Sprintf("\n\nError: %v", msg.err)
-		} else {
-			m.applyOutput += "\n\n✅ Release completed successfully!"
-		}
-		return m, nil
-
-	case applyProgressMsg:
-		m.applyOutput += msg.text
-		m.viewport.SetContent(m.applyOutput)
-		m.viewport.GotoBottom()
-		return m, nil
 
 	case changelogGeneratedMsg:
-		m.generating = false
-		if msg.err != nil {
-			m.genProgress = fmt.Sprintf("❌ Failed to generate changelog for %s: %v", msg.repoName, msg.err)
-		} else {
-			m.genProgress = fmt.Sprintf("✅ Changelog generated for %s", msg.repoName)
-			// Update the repo's changelog path
+		// Update the repo with results
+		if msg.err == nil {
 			if repo, ok := m.plan.Repos[msg.repoName]; ok {
 				repo.ChangelogPath = msg.changelogPath
+				repo.ChangelogCommit = msg.changelogCommit // Save the commit hash
+				if msg.suggestion != "" {
+					repo.SuggestedBump = msg.suggestion
+					repo.SuggestionReasoning = msg.suggestionReasoning
+					// Update the selected bump and next version if not already set
+					if repo.SelectedBump == "" {
+						repo.SelectedBump = msg.suggestion
+						repo.NextVersion = calculateNextVersion(repo.CurrentVersion, msg.suggestion)
+					}
+				}
 				// Save the updated plan
 				release.SavePlan(m.plan)
 			}
 		}
-		// Clear progress message after 3 seconds
-		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
-			return clearProgressMsg{}
-		})
+		
+		// Check if we have more in the queue
+		if len(m.genQueue) > 0 {
+			// Remove completed repo from queue
+			for i, name := range m.genQueue {
+				if name == msg.repoName {
+					m.genQueue = append(m.genQueue[:i], m.genQueue[i+1:]...)
+					m.genCompleted++
+					break
+				}
+			}
+			
+			// Process next in queue
+			if len(m.genQueue) > 0 {
+				m.genCurrent = m.genQueue[0]
+				total := m.genCompleted + len(m.genQueue)
+				m.genProgress = fmt.Sprintf("Generating changelog for %s (%d/%d)", m.genCurrent, m.genCompleted+1, total)
+				
+				if repo, ok := m.plan.Repos[m.genCurrent]; ok {
+					return m, generateChangelogCmd(m.plan.RootDir, m.genCurrent, repo)
+				}
+			} else {
+				// All done
+				m.generating = false
+				m.genProgress = fmt.Sprintf("✅ Generated changelogs for %d repositories", m.genCompleted)
+				m.genQueue = nil
+				m.genCurrent = ""
+				m.genCompleted = 0
+				return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+					return clearProgressMsg{}
+				})
+			}
+		} else {
+			// Single generation mode
+			m.generating = false
+			if msg.err != nil {
+				m.genProgress = fmt.Sprintf("❌ Failed to generate changelog for %s: %v", msg.repoName, msg.err)
+			} else {
+				m.genProgress = fmt.Sprintf("✅ Changelog generated for %s", msg.repoName)
+			}
+			// Clear progress message after 3 seconds
+			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+				return clearProgressMsg{}
+			})
+		}
 	
 	case clearProgressMsg:
 		m.genProgress = ""
+		return m, nil
+	
+	case spinnerTickMsg:
+		// Only animate if we're generating
+		if m.generating {
+			m.spinner = (m.spinner + 1) % 4
+			return m, tickSpinner()
+		}
 		return m, nil
 	}
 
@@ -236,6 +327,18 @@ func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle help popup first - only respond to close keys when help is shown
+	if m.showHelp {
+		switch msg.String() {
+		case "?", "q", "esc", "ctrl+c":
+			m.showHelp = false
+			return m, nil
+		default:
+			// Ignore ALL other keys when help is shown, including 'A'
+			return m, nil
+		}
+	}
+	
 	switch {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
@@ -298,6 +401,84 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case key.Matches(msg, m.keys.ApplySuggestion):
+		// Apply the LLM's suggested version bump
+		if m.selectedIndex < len(m.repoNames) {
+			repoName := m.repoNames[m.selectedIndex]
+			if repo, ok := m.plan.Repos[repoName]; ok {
+				// Only apply if there's a suggestion
+				if repo.SuggestedBump != "" {
+					repo.SelectedBump = repo.SuggestedBump
+					repo.NextVersion = calculateNextVersion(repo.CurrentVersion, repo.SuggestedBump)
+					m.genProgress = fmt.Sprintf("✅ Applied %s version bump to %s", 
+						strings.ToUpper(repo.SuggestedBump), repoName)
+					// Save the updated plan
+					release.SavePlan(m.plan)
+					// Clear progress after a moment
+					return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+						return clearProgressMsg{}
+					})
+				} else {
+					m.genProgress = "⚠️ No suggestion available. Generate changelog first with 'g'"
+					return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+						return clearProgressMsg{}
+					})
+				}
+			}
+		}
+		return m, nil
+
+	case key.Matches(msg, m.keys.EditChangelog):
+		// Edit the staged changelog for the selected repository
+		if m.selectedIndex < len(m.repoNames) {
+			repoName := m.repoNames[m.selectedIndex]
+			if repo, ok := m.plan.Repos[repoName]; ok {
+				if repo.ChangelogPath != "" {
+					// Open staged changelog in editor
+					return m, editFileCmd(repo.ChangelogPath)
+				} else {
+					// No staged changelog, try to edit the repo's CHANGELOG.md
+					repoPath := filepath.Join(m.plan.RootDir, repoName)
+					changelogPath := filepath.Join(repoPath, "CHANGELOG.md")
+					
+					// Check if CHANGELOG.md exists
+					if _, err := os.Stat(changelogPath); err == nil {
+						return m, editFileCmd(changelogPath)
+					} else {
+						m.genProgress = "⚠️ No changelog found. Generate one first with 'g'"
+						return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+							return clearProgressMsg{}
+						})
+					}
+				}
+			}
+		}
+		return m, nil
+
+	case key.Matches(msg, m.keys.EditRepoChangelog):
+		// Edit the repository's actual CHANGELOG.md file
+		if m.selectedIndex < len(m.repoNames) {
+			repoName := m.repoNames[m.selectedIndex]
+			repoPath := filepath.Join(m.plan.RootDir, repoName)
+			changelogPath := filepath.Join(repoPath, "CHANGELOG.md")
+			
+			// Check if CHANGELOG.md exists, create if not
+			if _, err := os.Stat(changelogPath); os.IsNotExist(err) {
+				// Create with a basic template
+				template := fmt.Sprintf("# Changelog\n\nAll notable changes to %s will be documented in this file.\n\nThe format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),\nand this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).\n\n", repoName)
+				if err := os.WriteFile(changelogPath, []byte(template), 0644); err != nil {
+					m.genProgress = fmt.Sprintf("❌ Failed to create CHANGELOG.md: %v", err)
+					return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+						return clearProgressMsg{}
+					})
+				}
+			}
+			
+			// Open in editor
+			return m, editFileCmd(changelogPath)
+		}
+		return m, nil
+
 	case key.Matches(msg, m.keys.ViewChangelog):
 		if m.selectedIndex < len(m.repoNames) {
 			repoName := m.repoNames[m.selectedIndex]
@@ -321,6 +502,129 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case key.Matches(msg, m.keys.WriteChangelog):
+		// Write changelog to repository CHANGELOG.md
+		if m.selectedIndex < len(m.repoNames) {
+			repoName := m.repoNames[m.selectedIndex]
+			if repo, ok := m.plan.Repos[repoName]; ok {
+				if repo.ChangelogPath != "" {
+					// Read the staged changelog
+					stagedContent, err := os.ReadFile(repo.ChangelogPath)
+					if err != nil {
+						m.genProgress = fmt.Sprintf("❌ Failed to read staged changelog: %v", err)
+						return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+							return clearProgressMsg{}
+						})
+					}
+					
+					// Write to the repository's CHANGELOG.md
+					repoPath := filepath.Join(m.plan.RootDir, repoName)
+					changelogPath := filepath.Join(repoPath, "CHANGELOG.md")
+					
+					// Read existing content if file exists
+					var existingContent []byte
+					if _, err := os.Stat(changelogPath); err == nil {
+						existingContent, _ = os.ReadFile(changelogPath)
+					}
+					
+					// Prepend new changelog to existing content
+					var newContent []byte
+					if len(existingContent) > 0 {
+						newContent = append(stagedContent, '\n')
+						newContent = append(newContent, existingContent...)
+					} else {
+						newContent = stagedContent
+					}
+					
+					// Write the file
+					if err := os.WriteFile(changelogPath, newContent, 0644); err != nil {
+						m.genProgress = fmt.Sprintf("❌ Failed to write changelog: %v", err)
+					} else {
+						m.genProgress = fmt.Sprintf("✅ Changelog written to %s", changelogPath)
+						
+						// Open in editor for further editing
+						return m, tea.Batch(
+							editFileCmd(changelogPath),
+							tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+								return clearProgressMsg{}
+							}),
+						)
+					}
+					
+					return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+						return clearProgressMsg{}
+					})
+				} else {
+					m.genProgress = "⚠️ No changelog generated yet. Press 'g' to generate first."
+					return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+						return clearProgressMsg{}
+					})
+				}
+			}
+		}
+		return m, nil
+
+	case key.Matches(msg, m.keys.ResetRules):
+		// Reset rules to "*" for all selected repositories
+		resetCount := 0
+		for _, repoName := range m.repoNames {
+			if repo, ok := m.plan.Repos[repoName]; ok {
+				// Only reset for selected repos
+				if repo.Selected {
+					repoPath := filepath.Join(m.plan.RootDir, repoName)
+					rulesPath := filepath.Join(repoPath, ".grove", "rules")
+					
+					// Create .grove directory if it doesn't exist
+					groveDir := filepath.Join(repoPath, ".grove")
+					if err := os.MkdirAll(groveDir, 0755); err != nil {
+						continue
+					}
+					
+					// Write "*" to rules file to include all files
+					content := "# Grove rules - include all repository files\n*\n"
+					if err := os.WriteFile(rulesPath, []byte(content), 0644); err != nil {
+						continue
+					}
+					resetCount++
+				}
+			}
+		}
+		
+		if resetCount > 0 {
+			m.genProgress = fmt.Sprintf("✅ Reset rules to '*' for %d repositories", resetCount)
+		} else {
+			m.genProgress = "⚠️ No repositories selected"
+		}
+		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+			return clearProgressMsg{}
+		})
+
+	case key.Matches(msg, m.keys.EditRules):
+		// Edit rules file for the selected repository
+		if m.selectedIndex < len(m.repoNames) && !m.generating {
+			repoName := m.repoNames[m.selectedIndex]
+			repoPath := filepath.Join(m.plan.RootDir, repoName)
+			rulesPath := filepath.Join(repoPath, ".grove", "rules")
+			
+			// Create rules file if it doesn't exist
+			if _, err := os.Stat(rulesPath); os.IsNotExist(err) {
+				groveDir := filepath.Join(repoPath, ".grove")
+				os.MkdirAll(groveDir, 0755)
+				content := `# Grove rules file for LLM context
+# Add file paths or patterns here, one per line
+# Examples:
+#   README.md
+#   docs/*.md
+#   src/main.go
+`
+				os.WriteFile(rulesPath, []byte(content), 0644)
+			}
+			
+			// Open in editor
+			return m, editRulesCmd(rulesPath)
+		}
+		return m, nil
+
 	case key.Matches(msg, m.keys.GenerateChangelog):
 		if m.selectedIndex < len(m.repoNames) && !m.generating {
 			repoName := m.repoNames[m.selectedIndex]
@@ -328,11 +632,89 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				// Only generate for repos with changes
 				if repo.CurrentVersion != repo.NextVersion {
 					m.generating = true
-					m.genProgress = fmt.Sprintf("Generating changelog for %s...", repoName)
-					return m, generateChangelogCmd(m.plan.RootDir, repoName, repo)
+					m.genProgress = fmt.Sprintf("Generating changelog for %s", repoName)
+					// Start spinner animation
+					return m, tea.Batch(
+						generateChangelogCmd(m.plan.RootDir, repoName, repo),
+						tickSpinner(),
+					)
 				}
 			}
 		}
+		return m, nil
+
+	case key.Matches(msg, m.keys.GenerateAll):
+		if !m.generating {
+			// Build queue of repos that need changelogs
+			var queue []string
+			for _, repoName := range m.repoNames {
+				if repo, ok := m.plan.Repos[repoName]; ok {
+					// Only include selected repos with changes
+					if repo.Selected && repo.CurrentVersion != repo.NextVersion {
+						queue = append(queue, repoName)
+					}
+				}
+			}
+			
+			if len(queue) > 0 {
+				m.generating = true
+				m.genQueue = queue
+				m.genCompleted = 0
+				m.genCurrent = queue[0]
+				m.genProgress = fmt.Sprintf("Generating changelog for %s (%d/%d)", m.genCurrent, 1, len(queue))
+				
+				// Start generating the first one
+				if repo, ok := m.plan.Repos[m.genCurrent]; ok {
+					return m, tea.Batch(
+						generateChangelogCmd(m.plan.RootDir, m.genCurrent, repo),
+						tickSpinner(),
+					)
+				}
+			} else {
+				m.genProgress = "No repositories selected or need changes"
+				return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+					return clearProgressMsg{}
+				})
+			}
+		}
+		return m, nil
+
+	case key.Matches(msg, m.keys.Approve):
+		// Toggle approval status for selected repository
+		if m.selectedIndex < len(m.repoNames) {
+			repoName := m.repoNames[m.selectedIndex]
+			if repo, ok := m.plan.Repos[repoName]; ok {
+				if repo.CurrentVersion != repo.NextVersion {
+					if repo.Status == "Approved" {
+						repo.Status = "Pending Review"
+						m.genProgress = fmt.Sprintf("⏳ Unapproved %s", repoName)
+					} else {
+						repo.Status = "Approved"
+						m.genProgress = fmt.Sprintf("✅ Approved %s for release", repoName)
+					}
+					// Save the updated plan
+					release.SavePlan(m.plan)
+					return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+						return clearProgressMsg{}
+					})
+				}
+			}
+		}
+		return m, nil
+
+	case key.Matches(msg, m.keys.ToggleDryRun):
+		m.dryRun = !m.dryRun
+		if m.dryRun {
+			m.genProgress = "🔍 DRY-RUN MODE: Commands will be shown but not executed"
+		} else {
+			m.genProgress = "⚠️ LIVE MODE: Commands will be executed for real"
+		}
+		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+			return clearProgressMsg{}
+		})
+
+	case key.Matches(msg, m.keys.Help):
+		m.showHelp = !m.showHelp
 		return m, nil
 
 	case key.Matches(msg, m.keys.Apply):
@@ -349,13 +731,12 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if allApproved && hasSelection {
-			m.currentView = viewApplying
-			m.applying = true
-			m.applyOutput = "🚀 Starting release process...\n\n"
-			m.viewport.SetContent(m.applyOutput)
-			// Save the plan before applying
+			// Save the plan and set flag to exit TUI
 			release.SavePlan(m.plan)
-			return m, applyRelease(m.plan)
+			// Set the global dry-run flag
+			releaseDryRun = m.dryRun
+			m.shouldApply = true
+			return m, tea.Quit
 		}
 		return m, nil
 	}
@@ -369,16 +750,6 @@ func (m releaseTuiModel) updateChangelog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.currentView = viewTable
 		return m, nil
 
-	case key.Matches(msg, m.keys.Approve):
-		if m.selectedIndex < len(m.repoNames) {
-			repoName := m.repoNames[m.selectedIndex]
-			if repo, ok := m.plan.Repos[repoName]; ok {
-				repo.Status = "Approved"
-			}
-		}
-		m.currentView = viewTable
-		return m, nil
-
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
 	}
@@ -389,35 +760,147 @@ func (m releaseTuiModel) updateChangelog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m releaseTuiModel) updateApplying(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch {
-	case key.Matches(msg, m.keys.Quit):
-		if !m.applying {
-			return m, tea.Quit
-		}
-	}
-	return m, nil
-}
 
 func (m releaseTuiModel) View() string {
+	// Show help overlay if active
+	if m.showHelp {
+		helpView := m.renderHelp()
+		return lipgloss.NewStyle().
+			Width(m.width).
+			Height(m.height).
+			Align(lipgloss.Center, lipgloss.Center).
+			Render(helpView)
+	}
+	
 	switch m.currentView {
 	case viewChangelog:
 		return m.viewChangelog()
-	case viewApplying:
-		return m.viewApplying()
 	default:
 		return m.viewTable()
 	}
 }
 
+// renderHelp renders the help popup with legend and navigation
+func (m releaseTuiModel) renderHelp() string {
+	// Create styles
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("241")).
+		Padding(2, 3).
+		Width(80).
+		Align(lipgloss.Center)
+	
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FF79C6")).
+		MarginBottom(1)
+	
+	keyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#8BE9FD")).
+		Bold(true)
+	
+	// Format a key-value pair with consistent spacing
+	formatPair := func(key, desc string) string {
+		// Style the key
+		styledKey := keyStyle.Render(key)
+		// Pad to ensure alignment (10 char width for key column)
+		padding := 10 - len(key)
+		if padding < 0 {
+			padding = 0
+		}
+		return fmt.Sprintf("%s%s %s", styledKey, strings.Repeat(" ", padding), desc)
+	}
+	
+	// Left column - Navigation and Version
+	leftLines := []string{
+		lipgloss.NewStyle().Bold(true).Render("Navigation:"),
+		"",
+		formatPair("↑/↓,j/k", "Navigate repositories"),
+		formatPair("space", "Toggle selection"),
+		formatPair("v", "View changelog"),
+		formatPair("q", "Quit"),
+		"",
+		lipgloss.NewStyle().Bold(true).Render("Version Bump:"),
+		"",
+		formatPair("m", "Major version"),
+		formatPair("n", "Minor version"),
+		formatPair("p", "Patch version"),
+		formatPair("s", "Apply LLM suggestion"),
+		"",
+		lipgloss.NewStyle().Bold(true).Render("Release:"),
+		"",
+		formatPair("a", "Toggle approval"),
+		formatPair("d", fmt.Sprintf("Dry-run (%s)", func() string {
+			if m.dryRun {
+				return "ON"
+			}
+			return "OFF"
+		}())),
+		formatPair("A", "Apply release"),
+		"",
+		formatPair("?", "Toggle help"),
+	}
+	
+	// Right column - Changelog and Status
+	rightLines := []string{
+		lipgloss.NewStyle().Bold(true).Render("Changelog:"),
+		"",
+		formatPair("g", "Generate current"),
+		formatPair("G", "Generate selected"),
+		formatPair("e", "Edit staged"),
+		formatPair("E", "Edit CHANGELOG.md"),
+		formatPair("w", "Write to repo"),
+		"",
+		lipgloss.NewStyle().Bold(true).Render("LLM Rules:"),
+		"",
+		formatPair("r", "Edit rules"),
+		formatPair("R", "Reset to '*'"),
+		"",
+		lipgloss.NewStyle().Bold(true).Render("Status:"),
+		"",
+		"✓         Generated",
+		"⚠         Stale (new commits)",
+		"⏳        Pending",
+		"✓         Approved",
+		"[✓]       Selected",
+	}
+	
+	// Ensure both columns have the same number of lines
+	for len(leftLines) < len(rightLines) {
+		leftLines = append(leftLines, "")
+	}
+	for len(rightLines) < len(leftLines) {
+		rightLines = append(rightLines, "")
+	}
+	
+	// Style columns with fixed width
+	leftColumn := lipgloss.NewStyle().Width(35).Render(strings.Join(leftLines, "\n"))
+	rightColumn := lipgloss.NewStyle().Width(35).Render(strings.Join(rightLines, "\n"))
+	
+	// Join columns horizontally
+	columns := lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, rightColumn)
+	
+	// Add title
+	title := titleStyle.Render("🚀 Grove Release Manager - Help")
+	
+	// Combine title and columns
+	content := lipgloss.JoinVertical(lipgloss.Center, title, columns)
+	
+	return boxStyle.Render(content)
+}
+
 func (m releaseTuiModel) viewTable() string {
-	header := releaseTuiHeaderStyle.Render("🚀 Grove Release Manager")
+	headerText := "🚀 Grove Release Manager"
+	if m.dryRun {
+		headerText += " [DRY-RUN MODE]"
+	}
+	header := releaseTuiHeaderStyle.Render(headerText)
 
 	// Create table
 	t := table.New().
 		Border(lipgloss.NormalBorder()).
 		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4"))).
-		Headers("", "Repository", "Current", "Proposed", "Increment", "Status")
+		Headers("", "Repository", "Current", "Proposed", "Increment", "Status", "Changelog")
 
 	// Count selected repositories with changes
 	selectedCount := 0
@@ -441,22 +924,34 @@ func (m releaseTuiModel) viewTable() string {
 			m.plan.ParentVersion,
 			incrementType,
 			"-",
+			"-", // No changelog status for parent
 		}
 		
 		t.Row(row...)
 		
 		// Add separator row
-		t.Row("", "───────────────", "─────────", "──────────", "───────────", "─────────")
+		t.Row("", "───────────────", "─────────", "──────────", "───────────", "─────────", "──────────")
 	}
 
 	// Add rows for each repository
 	for i, repoName := range m.repoNames {
 		repo := m.plan.Repos[repoName]
 
-		// Determine increment type
-		incrementType := repo.SelectedBump
+		// Determine increment type with color styling
+		var incrementType string
 		if repo.CurrentVersion == repo.NextVersion {
 			incrementType = "-"
+		} else {
+			switch strings.ToLower(repo.SelectedBump) {
+			case "major":
+				incrementType = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")).Render(repo.SelectedBump)
+			case "minor":
+				incrementType = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB86C")).Render(repo.SelectedBump)
+			case "patch":
+				incrementType = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B")).Render(repo.SelectedBump)
+			default:
+				incrementType = repo.SelectedBump
+			}
 		}
 
 		// Format status
@@ -479,6 +974,42 @@ func (m releaseTuiModel) viewTable() string {
 			checkbox = ""
 		}
 
+		// Format changelog status
+		var changelogStatus string
+		if repo.CurrentVersion == repo.NextVersion {
+			changelogStatus = "-"
+		} else if repo.ChangelogPath != "" {
+			if _, err := os.Stat(repo.ChangelogPath); err == nil {
+				// Check if the changelog is stale (different commit)
+				if repo.ChangelogCommit != "" {
+					// Get current commit for this repo
+					repoPath := filepath.Join(m.plan.RootDir, repoName)
+					cmd := exec.Command("git", "rev-parse", "HEAD")
+					cmd.Dir = repoPath
+					currentCommitBytes, err := cmd.Output()
+					if err == nil {
+						currentCommit := strings.TrimSpace(string(currentCommitBytes))
+						if currentCommit != repo.ChangelogCommit {
+							// Changelog is stale - generated from different commit
+							changelogStatus = lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Render("⚠ Stale")
+						} else {
+							changelogStatus = releaseTuiStatusApprovedStyle.Render("✓ Generated")
+						}
+					} else {
+						// Couldn't get current commit, assume generated
+						changelogStatus = releaseTuiStatusApprovedStyle.Render("✓ Generated")
+					}
+				} else {
+					// No commit tracked, assume generated (for backwards compat)
+					changelogStatus = releaseTuiStatusApprovedStyle.Render("✓ Generated")
+				}
+			} else {
+				changelogStatus = releaseTuiStatusPendingStyle.Render("⏳ Pending")
+			}
+		} else {
+			changelogStatus = releaseTuiStatusPendingStyle.Render("⏳ Pending")
+		}
+
 		row := []string{
 			checkbox,
 			repoName,
@@ -486,6 +1017,7 @@ func (m releaseTuiModel) viewTable() string {
 			repo.NextVersion,
 			incrementType,
 			statusStr,
+			changelogStatus,
 		}
 
 		// Highlight selected row (but not for repos without changes)
@@ -528,49 +1060,63 @@ func (m releaseTuiModel) viewTable() string {
 		}
 	}
 
-	// Check if all approved for help text
-	allApproved := true
-	needsApproval := false
-	for _, repo := range m.plan.Repos {
-		if repo.CurrentVersion != repo.NextVersion {
-			needsApproval = true
-			if repo.Status != "Approved" {
-				allApproved = false
-				break
-			}
-		}
-	}
 
-	helpItems := []string{
-		"↑/↓: navigate",
-		"space: toggle selection",
-		"m/n/p: set major/minor/patch",
-		"g: generate changelog",
-		"v: view changelog",
+	// Footer with help hint
+	var footer string
+	if m.showHelp {
+		footer = ""
+	} else {
+		footer = releaseTuiHelpStyle.Render("Press ? for help • q to quit")
 	}
-	if allApproved && needsApproval {
-		helpItems = append(helpItems, "A: apply release")
-	}
-	helpItems = append(helpItems, "q: quit")
-
-	help := releaseTuiHelpStyle.Render(strings.Join(helpItems, " • "))
 
 	// Show suggestion reasoning for selected repo
 	var reasoning string
 	if m.selectedIndex < len(m.repoNames) {
 		repo := m.plan.Repos[m.repoNames[m.selectedIndex]]
 		if repo.SuggestionReasoning != "" && repo.CurrentVersion != repo.NextVersion {
-			reasoning = fmt.Sprintf("\n💡 %s", repo.SuggestionReasoning)
+			// Create styled version bump display
+			var bumpType string
+			switch strings.ToLower(repo.SuggestedBump) {
+			case "major":
+				bumpType = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF5555")).Render("MAJOR")
+			case "minor":
+				bumpType = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFB86C")).Render("MINOR")
+			case "patch":
+				bumpType = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#50FA7B")).Render("PATCH")
+			default:
+				bumpType = lipgloss.NewStyle().Bold(true).Render(strings.ToUpper(repo.SuggestedBump))
+			}
+			
+			versionChange := lipgloss.NewStyle().Bold(true).Render(
+				fmt.Sprintf("%s → %s", repo.CurrentVersion, repo.NextVersion),
+			)
+			
+			reasoning = fmt.Sprintf("\n\n💡 Suggested: %s version bump (%s)\n   %s", 
+				bumpType, versionChange, repo.SuggestionReasoning)
 		}
 	}
 
 	// Show generation progress if generating
 	var progress string
 	if m.genProgress != "" {
-		progress = fmt.Sprintf("\n\n%s", m.genProgress)
+		spinnerChars := []string{"⣷", "⣯", "⣟", "⡿", "⢿", "⣻", "⣽", "⣾"}
+		spinner := spinnerChars[m.spinner%len(spinnerChars)]
+		progress = fmt.Sprintf("\n\n%s %s", spinner, m.genProgress)
+		
+		// Show queue status if batch generating
+		if len(m.genQueue) > 0 {
+			remaining := m.genQueue[1:]
+			if len(remaining) > 0 {
+				names := strings.Join(remaining, ", ")
+				if len(names) > 60 {
+					names = names[:57] + "..."
+				}
+				progress += fmt.Sprintf("\n   Queued: %s", names)
+			}
+		}
 	}
 
-	return fmt.Sprintf("%s\n\n%s%s%s%s\n\n%s", header, tableStr, releaseInfo, reasoning, progress, help)
+	return fmt.Sprintf("%s\n\n%s%s%s%s\n\n%s", header, tableStr, releaseInfo, reasoning, progress, footer)
 }
 
 func (m releaseTuiModel) viewChangelog() string {
@@ -581,18 +1127,6 @@ func (m releaseTuiModel) viewChangelog() string {
 	return fmt.Sprintf("%s\n\n%s\n\n%s", header, m.viewport.View(), help)
 }
 
-func (m releaseTuiModel) viewApplying() string {
-	header := releaseTuiHeaderStyle.Render("🔄 Applying Release...")
-
-	var help string
-	if m.applying {
-		help = releaseTuiHelpStyle.Render("Release in progress...")
-	} else {
-		help = releaseTuiHelpStyle.Render("q: quit")
-	}
-
-	return fmt.Sprintf("%s\n\n%s\n\n%s", header, m.viewport.View(), help)
-}
 
 // Helper function to calculate next version
 func calculateNextVersion(current, bump string) string {
@@ -625,30 +1159,53 @@ func calculateNextVersion(current, bump string) string {
 }
 
 // Messages for async operations
-type applyCompleteMsg struct {
-	err error
-}
-
-type applyProgressMsg struct {
-	text string
-}
-
-type changelogGeneratedMsg struct {
-	repoName      string
-	changelogPath string
-	err           error
+type changelogGeneratedMsg struct{
+	repoName            string
+	changelogPath       string
+	changelogCommit     string
+	suggestion          string
+	suggestionReasoning string
+	err                 error
 }
 
 type clearProgressMsg struct{}
+type spinnerTickMsg struct{}
 
-// Command to apply the release
-func applyRelease(plan *release.ReleasePlan) tea.Cmd {
-	return func() tea.Msg {
-		// Execute the release apply
-		ctx := context.Background()
-		err := runReleaseApply(ctx)
-		return applyCompleteMsg{err: err}
+// Command to tick the spinner animation
+func tickSpinner() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+		return spinnerTickMsg{}
+	})
+}
+
+
+// Command to edit rules file in external editor
+func editRulesCmd(rulesPath string) tea.Cmd {
+	return tea.ExecProcess(exec.Command(getEditor(), rulesPath), func(err error) tea.Msg {
+		if err != nil {
+			return fmt.Errorf("failed to edit rules file: %w", err)
+		}
+		return nil
+	})
+}
+
+// Command to edit a file in external editor
+func editFileCmd(filePath string) tea.Cmd {
+	return tea.ExecProcess(exec.Command(getEditor(), filePath), func(err error) tea.Msg {
+		if err != nil {
+			return fmt.Errorf("failed to edit file: %w", err)
+		}
+		return nil
+	})
+}
+
+// Get the user's preferred editor
+func getEditor() string {
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = "vim" // Default to vim if EDITOR is not set
 	}
+	return editor
 }
 
 // Command to generate changelog for a specific repository
@@ -656,6 +1213,18 @@ func generateChangelogCmd(rootDir, repoName string, repo *release.RepoReleasePla
 	return func() tea.Msg {
 		// Get repository path
 		wsPath := filepath.Join(rootDir, repoName)
+		
+		// Get current commit hash
+		commitCmd := exec.Command("git", "rev-parse", "HEAD")
+		commitCmd.Dir = wsPath
+		commitOutput, err := commitCmd.Output()
+		if err != nil {
+			return changelogGeneratedMsg{
+				repoName: repoName,
+				err:      fmt.Errorf("failed to get current commit: %w", err),
+			}
+		}
+		currentCommit := strings.TrimSpace(string(commitOutput))
 		
 		// Get last tag
 		lastTag, _ := getLastTag(wsPath)
@@ -665,8 +1234,9 @@ func generateChangelogCmd(rootDir, repoName string, repo *release.RepoReleasePla
 			commitRange = fmt.Sprintf("%s..HEAD", lastTag)
 		}
 		
-		// Gather git context
-		logCmd := exec.Command("git", "log", commitRange, "--pretty=fuller")
+		// Gather git context with commit hashes
+		// Format includes both full and short hash for easy reference
+		logCmd := exec.Command("git", "log", commitRange, "--pretty=format:commit %H (%h)%nAuthor: %an <%ae>%nDate: %ad%nCommit: %cn <%ce>%nCommitDate: %cd%n%n    %s%n%n%b%n")
 		logCmd.Dir = wsPath
 		logOutput, err := logCmd.CombinedOutput()
 		if err != nil {
@@ -688,19 +1258,13 @@ func generateChangelogCmd(rootDir, repoName string, repo *release.RepoReleasePla
 		
 		gitContext := fmt.Sprintf("GIT LOG:\n%s\n\nGIT DIFF STAT:\n%s", string(logOutput), string(diffOutput))
 		
-		// Generate changelog with LLM
-		result, err := generateChangelogWithLLM(gitContext, repo.NextVersion, wsPath)
+		// Generate changelog with LLM (skip interactive prompts in TUI mode)
+		result, err := generateChangelogWithLLMInteractive(gitContext, repo.NextVersion, wsPath, true)
 		if err != nil {
 			return changelogGeneratedMsg{
 				repoName: repoName,
 				err:      fmt.Errorf("failed to generate LLM changelog: %w", err),
 			}
-		}
-		
-		// Update version suggestion if provided
-		if result.Suggestion != "" && result.Suggestion != repo.SuggestedBump {
-			repo.SuggestedBump = result.Suggestion
-			repo.SuggestionReasoning = result.Justification
 		}
 		
 		// Save changelog to staging
@@ -720,15 +1284,14 @@ func generateChangelogCmd(rootDir, repoName string, repo *release.RepoReleasePla
 			}
 		}
 		
-		repo.ChangelogPath = changelogPath
-		
-		// Note: We can't save the plan from here as we don't have access to the full plan
-		// The main model will update it when it receives the changelogGeneratedMsg
-		
+		// Return the message with all the information including LLM suggestion and commit
 		return changelogGeneratedMsg{
-			repoName:      repoName,
-			changelogPath: changelogPath,
-			err:           nil,
+			repoName:            repoName,
+			changelogPath:       changelogPath,
+			changelogCommit:     currentCommit,
+			suggestion:          result.Suggestion,
+			suggestionReasoning: result.Justification,
+			err:                 nil,
 		}
 	}
 }
@@ -753,9 +1316,18 @@ func runReleaseTUI(ctx context.Context) error {
 
 	// Start the TUI
 	p := tea.NewProgram(initialReleaseModel(plan), tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
+	finalModel, err := p.Run()
+	if err != nil {
 		return fmt.Errorf("error running TUI: %w", err)
 	}
+	
+	// Check if we should apply the release
+	if model, ok := finalModel.(releaseTuiModel); ok && model.shouldApply {
+		// Exit the TUI and run the release in the terminal
+		// runReleaseApply will print its own header
+		return runReleaseApply(ctx)
+	}
+	
 	return nil
 }
 

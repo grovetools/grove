@@ -173,8 +173,9 @@ func runReleasePlan(ctx context.Context) (*release.ReleasePlan, error) {
 				commitRange = fmt.Sprintf("%s..HEAD", lastTag)
 			}
 
-			// Gather git context
-			logCmd := exec.Command("git", "log", commitRange, "--pretty=fuller")
+			// Gather git context with commit hashes
+			// Format includes both full and short hash for easy reference
+			logCmd := exec.Command("git", "log", commitRange, "--pretty=format:commit %H (%h)%nAuthor: %an <%ae>%nDate: %ad%nCommit: %cn <%ce>%nCommitDate: %cd%n%n    %s%n%n%b%n")
 			logCmd.Dir = wsPath
 			logOutput, err := logCmd.CombinedOutput()
 			if err != nil {
