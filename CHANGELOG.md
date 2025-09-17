@@ -1,3 +1,62 @@
+## v0.3.0 (2025-09-17)
+
+This release introduces a new interactive TUI for the `grove release` command, available via the `--interactive` flag or the `tui` subcommand (a0c2886). This interface provides a comprehensive dashboard for planning and executing releases across the ecosystem, showing current versions, proposed bumps, and dependency-ordered release levels (a71afa2, edfbfc0). A key feature is the integration of LLM-powered changelog generation and semantic versioning suggestions directly within the TUI (20dd1aa, 9630dd1). The TUI allows for repository selection (22507ba), bulk selection shortcuts (9a9afbd), and preserves manually generated changelogs to avoid being overwritten (9b7c400).
+
+A dedicated settings view has been added to the release TUI, accessible via the Tab key, which allows for toggling options like dry-run, push, and dependency syncing (c2d1090, 747b3d1). This view is fully navigable with keyboard shortcuts (95094aa). The TUI also includes a detailed help menu, stale changelog detection, and ensures a clean hand-off to the terminal for the final release process to prevent output corruption (5915059).
+
+Beyond the release TUI, this version adds a new `grove workspace list` command to display all discovered workspaces and their Git worktrees, with support for JSON output (7a524cd). The `grove install` command has also been enhanced with more informative, state-aware output and support for installing `@nightly` builds directly from source (4510223). Several bug fixes improve the reliability of the release process, including better git error reporting (786d7a4), correctly handling pre-generated changelogs (8957237), and ensuring only selected repositories are released from the TUI (bad8923).
+
+### Features
+
+- Implement interactive release TUI with LLM version suggestions (20dd1aa)
+- Add LLM-powered changelog generation (9630dd1)
+- Improve release TUI display to match grove release output (a71afa2)
+- Add repository selection toggle to release TUI (22507ba)
+- Add changelog generation to release TUI (1bca421)
+- Improve release TUI with help menu, dry-run mode, and stale changelog detection (5915059)
+- Add select/deselect all shortcuts to release TUI (9a9afbd)
+- Add push and sync-deps toggles to release TUI (747b3d1)
+- Add dedicated settings view accessible via Tab key (c2d1090)
+- Make settings view navigable with arrow keys and hjkl (95094aa)
+- Add workspace list command to display workspaces and worktrees (7a524cd)
+- Improve install command UX with state-aware output and nightly builds (4510223)
+- Add --fresh flag to clear stale release plans (30d7ad7)
+
+### Bug Fixes
+
+- Only release selected repositories from TUI (bad8923)
+- Remove temporary Go workspace files (5f1001f)
+- Allow pre-generated CHANGELOG.md files in pre-flight checks (8957237)
+- Preserve pre-generated changelogs from TUI workflow during release (9b7c400)
+- Include all repositories in release TUI plan (edfbfc0)
+- Preserve backward compatibility for grove release command (a0c2886)
+- Improve git error reporting in release command (786d7a4)
+
+### File Changes
+
+```
+ CHANGELOG.md                     |   13 +
+ Dockerfile.e2e                   |    7 +
+ cmd/install_cmd.go               |  148 +++-
+ cmd/list_cmd.go                  |   28 +-
+ cmd/release.go                   |  177 ++++-
+ cmd/release_changelog.go         |   21 +-
+ cmd/release_changelog_llm.go     |  412 ++++++++++
+ cmd/release_plan.go              |  525 ++++++++++++
+ cmd/release_tui.go               | 1625 ++++++++++++++++++++++++++++++++++++++
+ cmd/styles.go                    |   29 +
+ cmd/workspace.go                 |    1 +
+ cmd/workspace_list.go            |  130 +++
+ cmd/workspace_secrets.go         |    5 +-
+ cmd/workspace_status.go          |    4 +-
+ pkg/release/plan.go              |  103 +++
+ pkg/sdk/manager.go               |   96 +++
+ tests/e2e/docker_test.sh         |   84 +-
+ tests/scenarios.go               |    2 +
+ tests/scenarios_llm_changelog.go |  570 +++++++++++++
+ 19 files changed, 3873 insertions(+), 107 deletions(-)
+```
+
 ## v0.2.23 (2025-09-17)
 
 ### Bug Fixes
