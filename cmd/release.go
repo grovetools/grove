@@ -465,12 +465,7 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces
 	if mainStatus.Branch != "main" {
 		mainIssues = append(mainIssues, "not on main branch")
 	}
-	if mainStatus.HasUpstream && mainStatus.AheadCount > 0 {
-		// Only add as issue if we're not going to push
-		if !releasePush {
-			mainIssues = append(mainIssues, fmt.Sprintf("ahead of remote by %d commits", mainStatus.AheadCount))
-		}
-	}
+	// Don't treat "ahead of remote" as a blocking issue for main repo either
 
 	// For display purposes, still show uncommitted changes
 	displayMainIssues := make([]string, len(mainIssues))
@@ -541,22 +536,24 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces
 			if ws.Branch != "main" {
 				issues = append(issues, "not on main branch")
 			}
-			if ws.AheadCount > 0 {
-				// Only add as issue if we're not going to push
-				if !releasePush {
-					issues = append(issues, fmt.Sprintf("ahead of remote by %d commits", ws.AheadCount))
-				}
-			}
+			// Don't treat "ahead of remote" as a blocking issue
+			// It's just informational - we can still release locally
 		}
 
 		if len(issues) > 0 {
 			hasIssues = true
 		}
 
-		// Add ahead info even if not an issue
-		displayIssues := issues
-		if releasePush && ws.AheadCount > 0 && len(issues) == 0 {
-			displayIssues = []string{fmt.Sprintf("ahead of remote by %d commits (will push)", ws.AheadCount)}
+		// Add ahead info as display-only (not a blocking issue)
+		displayIssues := make([]string, len(issues))
+		copy(displayIssues, issues)
+		
+		if ws.AheadCount > 0 {
+			if releasePush {
+				displayIssues = append(displayIssues, fmt.Sprintf("ahead of remote by %d commits (will push)", ws.AheadCount))
+			} else {
+				displayIssues = append(displayIssues, fmt.Sprintf("ahead of remote by %d commits", ws.AheadCount))
+			}
 		}
 		
 		// If dirty but only CHANGELOG.md, add a note

@@ -71,6 +71,8 @@ type releaseKeyMap struct {
 	EditRules       key.Binding
 	ResetRules      key.Binding
 	ToggleDryRun    key.Binding
+	TogglePush      key.Binding
+	ToggleSyncDeps  key.Binding
 	Approve         key.Binding
 	Apply           key.Binding
 	Help            key.Binding
@@ -151,6 +153,14 @@ var releaseKeys = releaseKeyMap{
 		key.WithKeys("d"),
 		key.WithHelp("d", "toggle dry-run mode"),
 	),
+	TogglePush: key.NewBinding(
+		key.WithKeys("P"),
+		key.WithHelp("P", "toggle push to remote"),
+	),
+	ToggleSyncDeps: key.NewBinding(
+		key.WithKeys("S"),
+		key.WithHelp("S", "toggle sync dependencies"),
+	),
 	Approve: key.NewBinding(
 		key.WithKeys("a"),
 		key.WithHelp("a", "approve"),
@@ -201,6 +211,8 @@ type releaseTuiModel struct {
 	dryRun        bool          // Whether to run in dry-run mode
 	showHelp      bool          // Whether to show help popup
 	shouldApply   bool          // Flag to indicate we should exit and apply
+	push          bool          // Whether to push to remote
+	syncDeps      bool          // Whether to sync dependencies
 }
 
 func initialReleaseModel(plan *release.ReleasePlan) releaseTuiModel {
@@ -766,6 +778,28 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 			return clearProgressMsg{}
 		})
+		
+	case key.Matches(msg, m.keys.TogglePush):
+		m.push = !m.push
+		if m.push {
+			m.genProgress = "🚀 PUSH ENABLED: Will push to remote after release"
+		} else {
+			m.genProgress = "📦 PUSH DISABLED: Changes will stay local"
+		}
+		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+			return clearProgressMsg{}
+		})
+		
+	case key.Matches(msg, m.keys.ToggleSyncDeps):
+		m.syncDeps = !m.syncDeps
+		if m.syncDeps {
+			m.genProgress = "🔗 SYNC DEPS ENABLED: Will update dependency references"
+		} else {
+			m.genProgress = "⛓️ SYNC DEPS DISABLED: Dependencies unchanged"
+		}
+		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+			return clearProgressMsg{}
+		})
 
 	case key.Matches(msg, m.keys.Help):
 		m.showHelp = !m.showHelp
@@ -892,6 +926,18 @@ func (m releaseTuiModel) renderHelp() string {
 			}
 			return "OFF"
 		}())),
+		formatPair("P", fmt.Sprintf("Push (%s)", func() string {
+			if m.push {
+				return "ON"
+			}
+			return "OFF"
+		}())),
+		formatPair("S", fmt.Sprintf("Sync deps (%s)", func() string {
+			if m.syncDeps {
+				return "ON"
+			}
+			return "OFF"
+		}())),
 		formatPair("A", "Apply release"),
 		"",
 		formatPair("?", "Toggle help"),
@@ -947,8 +993,18 @@ func (m releaseTuiModel) renderHelp() string {
 
 func (m releaseTuiModel) viewTable() string {
 	headerText := "🚀 Grove Release Manager"
+	var modes []string
 	if m.dryRun {
-		headerText += " [DRY-RUN MODE]"
+		modes = append(modes, "DRY-RUN")
+	}
+	if m.push {
+		modes = append(modes, "PUSH")
+	}
+	if m.syncDeps {
+		modes = append(modes, "SYNC-DEPS")
+	}
+	if len(modes) > 0 {
+		headerText += " [" + strings.Join(modes, " | ") + "]"
 	}
 	header := releaseTuiHeaderStyle.Render(headerText)
 
@@ -1379,6 +1435,11 @@ func runReleaseTUI(ctx context.Context) error {
 	
 	// Check if we should apply the release
 	if model, ok := finalModel.(releaseTuiModel); ok && model.shouldApply {
+		// Set the global flags from the TUI state
+		releasePush = model.push
+		releaseSyncDeps = model.syncDeps
+		releaseDryRun = model.dryRun
+		
 		// Exit the TUI and run the release in the terminal
 		// runReleaseApply will print its own header
 		return runReleaseApply(ctx)
