@@ -1064,32 +1064,74 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 					}
 				}
 
-				// Generate and commit changelog
+				// Handle changelog - either use existing modifications or generate new
 				if !releaseDryRun {
-					changelogCmdArgs := []string{"release", "changelog", wsPath, "--version", version}
-					if useLLMChangelog {
-						changelogCmdArgs = append(changelogCmdArgs, "--llm")
+					// Check if CHANGELOG.md is already modified (from TUI workflow)
+					// Use git diff to check if the file has changes
+					changelogModified := false
+					
+					// Check using git diff --name-only to see if CHANGELOG.md has changes
+					diffCmd := exec.Command("git", "diff", "--name-only", "CHANGELOG.md")
+					diffCmd.Dir = wsPath
+					if diffOutput, _ := diffCmd.Output(); len(diffOutput) > 0 {
+						changelogModified = true
 					}
-					changelogCmd := exec.CommandContext(ctx, "grove", changelogCmdArgs...)
-					if err := changelogCmd.Run(); err != nil {
-						// Log a warning but don't fail the release if changelog fails
-						logger.WithError(err).Warnf("Failed to generate changelog for %s", repo)
-					} else {
-						// Commit the changelog if it was modified
-						status, _ := git.GetStatus(wsPath)
-						if status.IsDirty {
-							displayInfo(fmt.Sprintf("Committing CHANGELOG.md for %s", repo))
-							if err := executeGitCommand(ctx, wsPath, []string{"add", "CHANGELOG.md"}, "Stage changelog", logger); err != nil {
-								logger.WithError(err).Warnf("Failed to stage changelog for %s", repo)
+					
+					// Also check if it's staged
+					if !changelogModified {
+						diffCmd = exec.Command("git", "diff", "--cached", "--name-only", "CHANGELOG.md")
+						diffCmd.Dir = wsPath
+						if diffOutput, _ := diffCmd.Output(); len(diffOutput) > 0 {
+							changelogModified = true
+						}
+					}
+					
+					if changelogModified {
+						// CHANGELOG.md was already modified (likely from TUI workflow)
+						// Just commit it as-is
+						displayInfo(fmt.Sprintf("Using pre-generated changelog for %s", repo))
+						if err := executeGitCommand(ctx, wsPath, []string{"add", "CHANGELOG.md"}, "Stage changelog", logger); err != nil {
+							logger.WithError(err).Warnf("Failed to stage changelog for %s", repo)
+						} else {
+							commitMsg := fmt.Sprintf("docs(changelog): update CHANGELOG.md for %s", version)
+							if err := executeGitCommand(ctx, wsPath, []string{"commit", "-m", commitMsg}, "Commit changelog", logger); err != nil {
+								logger.WithError(err).Warnf("Failed to commit changelog for %s", repo)
 							} else {
-								commitMsg := fmt.Sprintf("docs(changelog): update CHANGELOG.md for %s", version)
-								if err := executeGitCommand(ctx, wsPath, []string{"commit", "-m", commitMsg}, "Commit changelog", logger); err != nil {
-									logger.WithError(err).Warnf("Failed to commit changelog for %s", repo)
+								// Push the changelog commit to remote
+								if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", "HEAD:main"},
+									fmt.Sprintf("Push changelog for %s", repo), logger); err != nil {
+									logger.WithError(err).Warnf("Failed to push changelog commit for %s", repo)
+								}
+							}
+						}
+					} else {
+						// No existing changelog modifications, generate new one
+						displayInfo(fmt.Sprintf("Generating changelog for %s", repo))
+						changelogCmdArgs := []string{"release", "changelog", wsPath, "--version", version}
+						if useLLMChangelog {
+							changelogCmdArgs = append(changelogCmdArgs, "--llm")
+						}
+						changelogCmd := exec.CommandContext(ctx, "grove", changelogCmdArgs...)
+						if err := changelogCmd.Run(); err != nil {
+							// Log a warning but don't fail the release if changelog fails
+							logger.WithError(err).Warnf("Failed to generate changelog for %s", repo)
+						} else {
+							// Commit the changelog if it was modified
+							status, _ := git.GetStatus(wsPath)
+							if status.IsDirty {
+								displayInfo(fmt.Sprintf("Committing CHANGELOG.md for %s", repo))
+								if err := executeGitCommand(ctx, wsPath, []string{"add", "CHANGELOG.md"}, "Stage changelog", logger); err != nil {
+									logger.WithError(err).Warnf("Failed to stage changelog for %s", repo)
 								} else {
-									// Push the changelog commit to remote
-									if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", "HEAD:main"},
-										fmt.Sprintf("Push changelog for %s", repo), logger); err != nil {
-										logger.WithError(err).Warnf("Failed to push changelog commit for %s", repo)
+									commitMsg := fmt.Sprintf("docs(changelog): update CHANGELOG.md for %s", version)
+									if err := executeGitCommand(ctx, wsPath, []string{"commit", "-m", commitMsg}, "Commit changelog", logger); err != nil {
+										logger.WithError(err).Warnf("Failed to commit changelog for %s", repo)
+									} else {
+										// Push the changelog commit to remote
+										if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", "HEAD:main"},
+											fmt.Sprintf("Push changelog for %s", repo), logger); err != nil {
+											logger.WithError(err).Warnf("Failed to push changelog commit for %s", repo)
+										}
 									}
 								}
 							}
