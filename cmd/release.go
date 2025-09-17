@@ -712,10 +712,18 @@ func executeGitCommand(ctx context.Context, dir string, args []string, descripti
 
 	execCmd := cmd.Exec()
 	execCmd.Dir = dir
-	execCmd.Stdout = os.Stdout
-	execCmd.Stderr = os.Stderr
 
-	if err := execCmd.Run(); err != nil {
+	// Capture combined output to display git's actual error messages
+	output, err := execCmd.CombinedOutput()
+
+	// Always print the output if there's any (preserves existing behavior for successful commands)
+	if len(output) > 0 {
+		fmt.Print(string(output))
+	}
+
+	if err != nil {
+		// The error message from git has already been printed above
+		// Return a wrapped error for proper error handling
 		return fmt.Errorf("git command failed: %w", err)
 	}
 
