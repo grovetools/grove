@@ -41,6 +41,7 @@ var (
 	releaseSkipParent     bool
 	releaseWithDeps       bool
 	releaseSyncDeps       bool
+	releaseLLMChangelog   bool
 )
 
 func init() {
@@ -85,6 +86,7 @@ Examples:
 	cmd.Flags().StringSliceVar(&releasePatch, "patch", []string{}, "Repositories to receive patch version bump (default for all)")
 	cmd.Flags().BoolVar(&releaseYes, "yes", false, "Skip interactive confirmation (for CI/CD)")
 	cmd.Flags().BoolVar(&releaseSkipParent, "skip-parent", false, "Skip parent repository updates (submodules and tagging)")
+	cmd.Flags().BoolVar(&releaseLLMChangelog, "llm-changelog", false, "Generate changelog using an LLM instead of conventional commits")
 
 	// Add subcommands
 	cmd.AddCommand(newReleaseChangelogCmd())
@@ -219,7 +221,7 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	}
 
 	// Execute dependency-aware release orchestration
-	if err := orchestrateRelease(ctx, rootDir, releaseLevels, versions, currentVersions, hasChanges, graph, logger); err != nil {
+	if err := orchestrateRelease(ctx, rootDir, releaseLevels, versions, currentVersions, hasChanges, graph, logger, releaseLLMChangelog); err != nil {
 		return fmt.Errorf("failed to orchestrate release: %w", err)
 	}
 
@@ -964,7 +966,7 @@ func getVersionIncrement(current, proposed string) string {
 	return "-"
 }
 
-func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]string, versions map[string]string, currentVersions map[string]string, hasChanges map[string]bool, graph *depsgraph.Graph, logger *logrus.Logger) error {
+func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]string, versions map[string]string, currentVersions map[string]string, hasChanges map[string]bool, graph *depsgraph.Graph, logger *logrus.Logger, useLLMChangelog bool) error {
 	displaySection("🎯 Release Orchestration")
 
 	// Process each level of dependencies
@@ -1053,7 +1055,11 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 
 				// Generate and commit changelog
 				if !releaseDryRun {
-					changelogCmd := exec.CommandContext(ctx, "grove", "release", "changelog", wsPath, "--version", version)
+					changelogCmdArgs := []string{"release", "changelog", wsPath, "--version", version}
+					if useLLMChangelog {
+						changelogCmdArgs = append(changelogCmdArgs, "--llm")
+					}
+					changelogCmd := exec.CommandContext(ctx, "grove", changelogCmdArgs...)
 					if err := changelogCmd.Run(); err != nil {
 						// Log a warning but don't fail the release if changelog fails
 						logger.WithError(err).Warnf("Failed to generate changelog for %s", repo)

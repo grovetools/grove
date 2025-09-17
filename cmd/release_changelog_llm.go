@@ -1,0 +1,170 @@
+package cmd
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/mattsolo1/grove-core/config"
+)
+
+// runLLMChangelog is the main entry point for LLM-based changelog generation.
+func runLLMChangelog(repoPath, newVersion string) error {
+	// 1. Get the commit range (from last tag to HEAD).
+	lastTag, err := getLastTag(repoPath)
+	if err != nil {
+		fmt.Printf("Warning: could not get last tag for %s, analyzing all commits: %v\n", repoPath, err)
+		lastTag = "" // Will analyze all commits if no tag is found
+	}
+	commitRange := "HEAD"
+	if lastTag != "" {
+		commitRange = fmt.Sprintf("%s..HEAD", lastTag)
+		fmt.Printf("Analyzing commits from %s to HEAD\n", lastTag)
+	} else {
+		fmt.Println("Analyzing all commits (no previous tag found)")
+	}
+
+	// 2. Gather git context.
+	// Get detailed commit log
+	logCmd := exec.Command("git", "log", commitRange, "--pretty=fuller")
+	logCmd.Dir = repoPath
+	logOutput, err := logCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to get git log: %w\n%s", err, string(logOutput))
+	}
+
+	// Get diff statistics
+	diffCmd := exec.Command("git", "diff", "--stat", commitRange)
+	diffCmd.Dir = repoPath
+	diffOutput, err := diffCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to get git diff: %w\n%s", err, string(diffOutput))
+	}
+
+	// Combine context
+	context := fmt.Sprintf("GIT LOG:\n%s\n\nGIT DIFF STAT:\n%s", string(logOutput), string(diffOutput))
+
+	// 3. Generate changelog with LLM.
+	changelogContent, err := generateChangelogWithLLM(context, newVersion, repoPath)
+	if err != nil {
+		return fmt.Errorf("failed to generate changelog with LLM: %w", err)
+	}
+
+	// 4. Prepend to CHANGELOG.md.
+	changelogPath := filepath.Join(repoPath, "CHANGELOG.md")
+	existingContent, _ := os.ReadFile(changelogPath)
+	
+	// Ensure proper spacing between entries
+	newContent := changelogContent
+	if len(existingContent) > 0 {
+		newContent = changelogContent + "\n" + string(existingContent)
+	}
+
+	return os.WriteFile(changelogPath, []byte(newContent), 0644)
+}
+
+// getLastTag finds the most recent git tag in a repository.
+func getLastTag(repoPath string) (string, error) {
+	cmd := exec.Command("git", "describe", "--tags", "--abbrev=0")
+	cmd.Dir = repoPath
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+// FlowConfig defines the structure for the 'flow' section in grove.yml.
+type FlowConfig struct {
+	OneshotModel string `yaml:"oneshot_model"`
+}
+
+// generateChangelogWithLLM constructs a prompt and calls gemapi to generate the changelog.
+func generateChangelogWithLLM(context, newVersion, repoPath string) (string, error) {
+	// Determine the model to use
+	model := "gemini-1.5-flash-latest" // Default model
+
+	// Try to load model from grove.yml configuration
+	coreCfg, err := config.LoadFrom(repoPath)
+	if err == nil {
+		var flowCfg FlowConfig
+		if err := coreCfg.UnmarshalExtension("flow", &flowCfg); err == nil && flowCfg.OneshotModel != "" {
+			model = flowCfg.OneshotModel
+			fmt.Printf("Using model from grove.yml: %s\n", model)
+		}
+	}
+
+	// Get current date for the changelog entry
+	currentDate := time.Now().Format("2006-01-02")
+
+	// Construct the prompt
+	prompt := fmt.Sprintf(`You are a technical writer responsible for creating release notes.
+Based on the provided git log and diff stat, generate a changelog entry for version **%s**.
+
+**Instructions:**
+1. Format the output in Markdown using the "Keep a Changelog" standard.
+2. Start with a level 2 heading for the version, including the current date: "## %s (%s)"
+3. Categorize changes into the following sections as applicable:
+   - ### 💥 BREAKING CHANGES (only if there are breaking changes mentioned in commits)
+   - ### Features
+   - ### Bug Fixes
+   - ### Performance Improvements
+   - ### Code Refactoring
+   - ### Documentation
+   - ### Chores
+   - ### Tests
+4. Omit any empty sections - only include sections that have changes.
+5. Write clear, concise, and user-friendly descriptions for each change.
+6. At the very end of the entry, include a "### File Changes" section and include the provided git diff stat output in a code block.
+7. Do not include any preamble or explanation before the changelog entry itself. Start directly with the "##" heading.
+8. Use bullet points (- ) for individual changes within each section.
+
+**Context from Git:**
+---
+%s
+---
+
+Generate the changelog entry now:`, newVersion, newVersion, currentDate, context)
+
+	// Write prompt to a temporary file
+	tmpFile, err := os.CreateTemp("", "grove-changelog-prompt-*.md")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temporary prompt file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.WriteString(prompt); err != nil {
+		return "", fmt.Errorf("failed to write to temporary prompt file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return "", fmt.Errorf("failed to close temporary prompt file: %w", err)
+	}
+
+	// Construct and execute the gemapi command
+	args := []string{
+		"request",
+		"--model", model,
+		"--file", tmpFile.Name(),
+		"--yes",
+	}
+	
+	fmt.Printf("Calling gemapi with model %s...\n", model)
+	gemapiCmd := exec.Command("gemapi", args...)
+	gemapiCmd.Stderr = os.Stderr // Pipe stderr for progress visibility
+
+	output, err := gemapiCmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to execute 'gemapi request': %w", err)
+	}
+
+	// Clean up the output - ensure it ends with a newline
+	result := strings.TrimSpace(string(output))
+	if result != "" {
+		result = result + "\n"
+	}
+
+	return result, nil
+}

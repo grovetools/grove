@@ -13,6 +13,7 @@ func AllScenarios() []*harness.Scenario {
 		PolyglotDependencyGraphScenario(),
 		PolyglotAddRepoScenario(),
 		PolyglotReleaseScenario(),
+		LLMChangelogScenario(),
 	}
 }
 
