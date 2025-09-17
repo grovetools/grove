@@ -56,6 +56,8 @@ type releaseKeyMap struct {
 	Up              key.Binding
 	Down            key.Binding
 	Toggle          key.Binding
+	SelectAll       key.Binding
+	DeselectAll     key.Binding
 	SelectMajor     key.Binding
 	SelectMinor     key.Binding
 	SelectPatch     key.Binding
@@ -88,6 +90,14 @@ var releaseKeys = releaseKeyMap{
 	Toggle: key.NewBinding(
 		key.WithKeys(" ", "x"),
 		key.WithHelp("space/x", "toggle selection"),
+	),
+	SelectAll: key.NewBinding(
+		key.WithKeys("ctrl+a"),
+		key.WithHelp("ctrl+a", "select all"),
+	),
+	DeselectAll: key.NewBinding(
+		key.WithKeys("ctrl+d"),
+		key.WithHelp("ctrl+d", "deselect all"),
 	),
 	SelectMajor: key.NewBinding(
 		key.WithKeys("m"),
@@ -368,6 +378,50 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
+		}
+		return m, nil
+
+	case key.Matches(msg, m.keys.SelectAll):
+		// Select all repositories that have changes
+		selectedCount := 0
+		for _, repoName := range m.repoNames {
+			if repo, ok := m.plan.Repos[repoName]; ok {
+				// Only select repos that have changes
+				if repo.CurrentVersion != repo.NextVersion {
+					repo.Selected = true
+					selectedCount++
+				}
+			}
+		}
+		if selectedCount > 0 {
+			m.genProgress = fmt.Sprintf("✓ Selected %d repositories", selectedCount)
+			// Save the updated plan
+			release.SavePlan(m.plan)
+			return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+				return clearProgressMsg{}
+			})
+		}
+		return m, nil
+
+	case key.Matches(msg, m.keys.DeselectAll):
+		// Deselect all repositories
+		deselectedCount := 0
+		for _, repoName := range m.repoNames {
+			if repo, ok := m.plan.Repos[repoName]; ok {
+				if repo.Selected {
+					repo.Selected = false
+					repo.Status = "Pending Review" // Also unapprove
+					deselectedCount++
+				}
+			}
+		}
+		if deselectedCount > 0 {
+			m.genProgress = fmt.Sprintf("✓ Deselected %d repositories", deselectedCount)
+			// Save the updated plan
+			release.SavePlan(m.plan)
+			return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+				return clearProgressMsg{}
+			})
 		}
 		return m, nil
 
@@ -817,6 +871,8 @@ func (m releaseTuiModel) renderHelp() string {
 		"",
 		formatPair("↑/↓,j/k", "Navigate repositories"),
 		formatPair("space", "Toggle selection"),
+		formatPair("Ctrl+A", "Select all"),
+		formatPair("Ctrl+D", "Deselect all"),
 		formatPair("v", "View changelog"),
 		formatPair("q", "Quit"),
 		"",
