@@ -140,14 +140,10 @@ func runReleasePlan(ctx context.Context) (*release.ReleasePlan, error) {
 		return nil, fmt.Errorf("failed to create staging directory: %w", err)
 	}
 
-	// Process each repository that has changes
-	for repo, changes := range hasChanges {
-		if !changes {
-			continue
-		}
-
-		currentVersion := currentVersions[repo]
+	// Process ALL repositories (including those without changes for display)
+	for repo, currentVersion := range currentVersions {
 		nextVersion := versions[repo]
+		hasRepoChanges := hasChanges[repo]
 
 		// Get repository path
 		node, ok := graph.GetNode(repo)
@@ -161,7 +157,8 @@ func runReleasePlan(ctx context.Context) (*release.ReleasePlan, error) {
 		var suggestedBump, suggestionReasoning string
 		changelogContent := ""
 
-		if releaseLLMChangelog {
+		// Only generate changelog for repos with changes
+		if hasRepoChanges && releaseLLMChangelog {
 			displayInfo(fmt.Sprintf("Generating LLM changelog for %s...", repo))
 
 			// Get commit range
@@ -205,11 +202,15 @@ func runReleasePlan(ctx context.Context) (*release.ReleasePlan, error) {
 				suggestionReasoning = result.Justification
 				changelogContent = result.Changelog
 			}
-		} else {
-			// Use conventional commits analysis
+		} else if hasRepoChanges {
+			// Use conventional commits analysis for repos with changes
 			lastTag, _ := getLastTag(wsPath)
 			suggestedBump = determineVersionBumpFromCommits(wsPath, lastTag)
 			suggestionReasoning = "Based on conventional commit analysis"
+		} else {
+			// No changes - keep current version
+			suggestedBump = "-"
+			suggestionReasoning = "No changes since last release"
 		}
 
 		// If no bump was determined, default to patch
@@ -217,14 +218,16 @@ func runReleasePlan(ctx context.Context) (*release.ReleasePlan, error) {
 			suggestedBump = "patch"
 		}
 
-		// Check if user has specified a bump for this repo
+		// Check if user has specified a bump for this repo (only for repos with changes)
 		selectedBump := suggestedBump
-		if contains(releaseMajor, repo) {
-			selectedBump = "major"
-		} else if contains(releaseMinor, repo) {
-			selectedBump = "minor"
-		} else if contains(releasePatch, repo) {
-			selectedBump = "patch"
+		if hasRepoChanges {
+			if contains(releaseMajor, repo) {
+				selectedBump = "major"
+			} else if contains(releaseMinor, repo) {
+				selectedBump = "minor"
+			} else if contains(releasePatch, repo) {
+				selectedBump = "patch"
+			}
 		}
 
 		// Save changelog to staging
@@ -240,6 +243,17 @@ func runReleasePlan(ctx context.Context) (*release.ReleasePlan, error) {
 			}
 		}
 
+		// Set default status
+		status := "Pending Review"
+		if !hasRepoChanges {
+			status = "-" // No changes, no review needed
+		}
+		
+		// For repos without changes, nextVersion should be same as current
+		if !hasRepoChanges {
+			nextVersion = currentVersion
+		}
+
 		// Add repo to plan
 		plan.Repos[repo] = &release.RepoReleasePlan{
 			CurrentVersion:      currentVersion,
@@ -248,7 +262,7 @@ func runReleasePlan(ctx context.Context) (*release.ReleasePlan, error) {
 			SelectedBump:        selectedBump,
 			NextVersion:         nextVersion,
 			ChangelogPath:       changelogPath,
-			Status:              "Pending Review",
+			Status:              status,
 		}
 	}
 
