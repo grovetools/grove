@@ -15,6 +15,7 @@ func AllScenarios() []*harness.Scenario {
 		PolyglotReleaseScenario(),
 		LLMChangelogScenario(),
 		ReleaseTUIScenario(),
+		ReleaseTUISelectionScenario(),
 	}
 }
 
