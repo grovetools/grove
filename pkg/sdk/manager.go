@@ -40,6 +40,7 @@ var toolRegistry = map[string]ToolInfo{
 	"clogs":                 {RepoName: "grove-claude-logs", BinaryName: "clogs"},
 	"core":                  {RepoName: "grove-core", BinaryName: "core"},
 	"cx":                    {RepoName: "grove-context", BinaryName: "cx"},
+	"docgen":                {RepoName: "grove-docgen", BinaryName: "docgen"},
 	"flow":                  {RepoName: "grove-flow", BinaryName: "flow"},
 	"gemapi":                {RepoName: "grove-gemini", BinaryName: "gemapi"},
 	"gmux":                  {RepoName: "grove-tmux", BinaryName: "gmux"},
