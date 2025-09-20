@@ -28,6 +28,17 @@ type RepoReleasePlan struct {
 	ChangelogCommit     string `json:"changelog_commit"` // Git commit hash when changelog was generated
 	Status              string `json:"status"`           // "Pending Review", "Approved", "-"
 	Selected            bool   `json:"selected"`         // Whether this repo is selected for release
+	
+	// Git status information
+	Branch              string `json:"branch,omitempty"`
+	IsDirty             bool   `json:"is_dirty,omitempty"`
+	HasUpstream         bool   `json:"has_upstream,omitempty"`
+	AheadCount          int    `json:"ahead_count,omitempty"`   // Commits ahead of upstream
+	BehindCount         int    `json:"behind_count,omitempty"`  // Commits behind upstream
+	ModifiedCount       int    `json:"modified_count,omitempty"`
+	StagedCount         int    `json:"staged_count,omitempty"`
+	UntrackedCount      int    `json:"untracked_count,omitempty"`
+	CommitsSinceLastTag int    `json:"commits_since_last_tag,omitempty"`
 }
 
 func getPlanPath() (string, error) {

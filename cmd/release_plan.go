@@ -69,9 +69,15 @@ func runReleasePlan(ctx context.Context) (*release.ReleasePlan, error) {
 	}
 
 	// Calculate versions for all workspaces
-	versions, currentVersions, hasChanges, err := calculateNextVersions(ctx, rootDir, workspaces, releaseMajor, releaseMinor, releasePatch, logger)
+	versions, currentVersions, commitsSinceTag, err := calculateNextVersions(ctx, rootDir, workspaces, releaseMajor, releaseMinor, releasePatch, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate versions: %w", err)
+	}
+
+	// Derive hasChanges map from commitsSinceTag
+	hasChanges := make(map[string]bool)
+	for repo, count := range commitsSinceTag {
+		hasChanges[repo] = count > 0
 	}
 
 	// If using --with-deps, force include auto-dependencies even if they don't have changes
@@ -79,6 +85,7 @@ func runReleasePlan(ctx context.Context) (*release.ReleasePlan, error) {
 		for dep := range autoDependencies {
 			if !hasChanges[dep] {
 				hasChanges[dep] = true
+				commitsSinceTag[dep] = 0  // Mark as included but no commits
 				logger.WithField("repo", dep).Info("Force including dependency without changes")
 			}
 		}
@@ -255,7 +262,15 @@ func runReleasePlan(ctx context.Context) (*release.ReleasePlan, error) {
 			nextVersion = currentVersion
 		}
 
-		// Add repo to plan
+		// Get Git status for the repository
+		gitStatus, err := git.GetStatus(wsPath)
+		if err != nil {
+			logger.WithField("repo", repo).WithError(err).Warn("Failed to get git status")
+			// Create empty status if error
+			gitStatus = &git.StatusInfo{}
+		}
+
+		// Add repo to plan with Git status info
 		plan.Repos[repo] = &release.RepoReleasePlan{
 			CurrentVersion:      currentVersion,
 			SuggestedBump:       suggestedBump,
@@ -265,6 +280,16 @@ func runReleasePlan(ctx context.Context) (*release.ReleasePlan, error) {
 			ChangelogPath:       changelogPath,
 			Status:              status,
 			Selected:            hasRepoChanges, // Auto-select repos with changes
+			// Git status fields
+			Branch:              gitStatus.Branch,
+			IsDirty:             gitStatus.IsDirty,
+			HasUpstream:         gitStatus.HasUpstream,
+			AheadCount:          gitStatus.AheadCount,
+			BehindCount:         gitStatus.BehindCount,
+			ModifiedCount:       gitStatus.ModifiedCount,
+			StagedCount:         gitStatus.StagedCount,
+			UntrackedCount:      gitStatus.UntrackedCount,
+			CommitsSinceLastTag: commitsSinceTag[repo],
 		}
 	}
 

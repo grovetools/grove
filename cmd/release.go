@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -154,9 +155,15 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	}
 
 	// Calculate versions for all workspaces first to know which repos have changes
-	versions, currentVersions, hasChanges, err := calculateNextVersions(ctx, rootDir, workspaces, releaseMajor, releaseMinor, releasePatch, logger)
+	versions, currentVersions, commitsSinceTag, err := calculateNextVersions(ctx, rootDir, workspaces, releaseMajor, releaseMinor, releasePatch, logger)
 	if err != nil {
 		return fmt.Errorf("failed to calculate versions: %w", err)
+	}
+
+	// Derive hasChanges map from commitsSinceTag
+	hasChanges := make(map[string]bool)
+	for repo, count := range commitsSinceTag {
+		hasChanges[repo] = count > 0
 	}
 
 	// If using --with-deps, force include auto-dependencies even if they don't have changes
@@ -164,6 +171,7 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		for dep := range autoDependencies {
 			if !hasChanges[dep] {
 				hasChanges[dep] = true
+				commitsSinceTag[dep] = 0  // Mark as included but no commits
 				logger.WithField("repo", dep).Info("Force including dependency without changes")
 			}
 		}
@@ -825,10 +833,10 @@ func expandReposWithDependencies(repos []string, graph *depsgraph.Graph) ([]stri
 	return result, autoDeps
 }
 
-func calculateNextVersions(ctx context.Context, rootDir string, workspaces []string, major, minor, patch []string, logger *logrus.Logger) (map[string]string, map[string]string, map[string]bool, error) {
+func calculateNextVersions(ctx context.Context, rootDir string, workspaces []string, major, minor, patch []string, logger *logrus.Logger) (map[string]string, map[string]string, map[string]int, error) {
 	versions := make(map[string]string)
 	currentVersions := make(map[string]string)
-	hasChanges := make(map[string]bool)
+	commitsSinceTag := make(map[string]int)
 
 	// Create a map for filtering repositories if specified
 	repoFilter := make(map[string]bool)
@@ -879,7 +887,7 @@ func calculateNextVersions(ctx context.Context, rootDir string, workspaces []str
 			currentVersion = semver.MustParse("0.0.0")
 			currentVersions[repoName] = "v0.0.0"
 			logger.WithFields(logrus.Fields{"repo": repoName, "default": "v0.0.0"}).Info("No tags found, using default")
-			hasChanges[repoName] = true // New repo always needs initial release
+			commitsSinceTag[repoName] = 1 // New repo always needs initial release
 		} else {
 			currentTag = strings.TrimSpace(string(tagOutput))
 			currentVersions[repoName] = currentTag
@@ -901,8 +909,9 @@ func calculateNextVersions(ctx context.Context, rootDir string, workspaces []str
 				return nil, nil, nil, fmt.Errorf("failed to count commits for %s: %w", repoName, err)
 			}
 
-			commitCount := strings.TrimSpace(string(countOutput))
-			if commitCount == "0" && !releaseForceIncrement {
+			commitCountStr := strings.TrimSpace(string(countOutput))
+			commitCount, _ := strconv.Atoi(commitCountStr)
+			if commitCount == 0 && !releaseForceIncrement {
 				// Check if current commit already has the tag
 				tagCheckCmd, err := cmdBuilder.Build(ctx, "git", "describe", "--exact-match", "--tags", "HEAD")
 				if err != nil {
@@ -916,13 +925,13 @@ func calculateNextVersions(ctx context.Context, rootDir string, workspaces []str
 				if err == nil && strings.TrimSpace(string(tagCheckOutput)) == currentTag {
 					// Current commit already has this tag, keep the same version
 					versions[repoName] = currentTag
-					hasChanges[repoName] = false
+					commitsSinceTag[repoName] = 0
 					continue
 				}
 			}
 
 			// Either there are new commits, or force increment is enabled
-			hasChanges[repoName] = true
+			commitsSinceTag[repoName] = commitCount
 		}
 
 		// Determine bump type (default to patch)
@@ -945,7 +954,7 @@ func calculateNextVersions(ctx context.Context, rootDir string, workspaces []str
 		versions[repoName] = "v" + newVersion.String()
 	}
 
-	return versions, currentVersions, hasChanges, nil
+	return versions, currentVersions, commitsSinceTag, nil
 }
 
 func getVersionIncrement(current, proposed string) string {

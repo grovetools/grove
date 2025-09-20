@@ -257,13 +257,18 @@ func (m releaseTuiModel) Init() tea.Cmd {
 }
 
 func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Always update the viewport, regardless of the message type
+	var vpCmd tea.Cmd
+	m.viewport, vpCmd = m.viewport.Update(msg)
+	
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// Adjust viewport size - leave room for header and footer
 		m.viewport.Width = msg.Width - 4
-		m.viewport.Height = msg.Height - 6
-		return m, nil
+		m.viewport.Height = msg.Height - 8 // More room for header/footer
+		return m, vpCmd
 
 	case tea.KeyMsg:
 		switch m.currentView {
@@ -1076,7 +1081,7 @@ func (m releaseTuiModel) viewTable() string {
 	t := table.New().
 		Border(lipgloss.NormalBorder()).
 		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4"))).
-		Headers("", "Repository", "Current", "Proposed", "Increment", "Status", "Changelog")
+		Headers("", "Repository", "Branch", "Git Status", "Changes/Release", "Proposed", "Status", "Changelog")
 
 	// Count selected repositories with changes
 	selectedCount := 0
@@ -1088,17 +1093,13 @@ func (m releaseTuiModel) viewTable() string {
 
 	// Add parent ecosystem repository first if it exists
 	if m.plan.ParentVersion != "" {
-		incrementType := "date"
-		if m.plan.ParentCurrentVersion != "" && m.plan.ParentCurrentVersion == m.plan.ParentVersion {
-			incrementType = "-"
-		}
-		
 		row := []string{
 			"",  // No selection checkbox for parent
 			"grove-ecosystem",
-			m.plan.ParentCurrentVersion,
+			"-",  // Branch
+			"-",  // Git Status
+			m.plan.ParentCurrentVersion,  // Changes/Release (current version)
 			m.plan.ParentVersion,
-			incrementType,
 			"-",
 			"-", // No changelog status for parent
 		}
@@ -1106,29 +1107,12 @@ func (m releaseTuiModel) viewTable() string {
 		t.Row(row...)
 		
 		// Add separator row
-		t.Row("", "───────────────", "─────────", "──────────", "───────────", "─────────", "──────────")
+		t.Row("", "───────────────", "──────", "──────────", "───────────────", "──────────", "─────────", "──────────")
 	}
 
 	// Add rows for each repository
 	for i, repoName := range m.repoNames {
 		repo := m.plan.Repos[repoName]
-
-		// Determine increment type with color styling
-		var incrementType string
-		if repo.CurrentVersion == repo.NextVersion {
-			incrementType = "-"
-		} else {
-			switch strings.ToLower(repo.SelectedBump) {
-			case "major":
-				incrementType = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")).Render(repo.SelectedBump)
-			case "minor":
-				incrementType = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB86C")).Render(repo.SelectedBump)
-			case "patch":
-				incrementType = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B")).Render(repo.SelectedBump)
-			default:
-				incrementType = repo.SelectedBump
-			}
-		}
 
 		// Format status
 		var statusStr string
@@ -1186,12 +1170,38 @@ func (m releaseTuiModel) viewTable() string {
 			changelogStatus = releaseTuiStatusPendingStyle.Render("⏳ Pending")
 		}
 
+		// Format Git status
+		var gitStatusStr string
+		if !repo.IsDirty {
+			gitStatusStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B")).Render("✓ Clean")
+		} else {
+			// Build status string with counts
+			var parts []string
+			if repo.StagedCount > 0 {
+				parts = append(parts, fmt.Sprintf("S:%d", repo.StagedCount))
+			}
+			if repo.ModifiedCount > 0 {
+				parts = append(parts, fmt.Sprintf("M:%d", repo.ModifiedCount))
+			}
+			if repo.UntrackedCount > 0 {
+				parts = append(parts, fmt.Sprintf("?:%d", repo.UntrackedCount))
+			}
+			gitStatusStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB86C")).Render(strings.Join(parts, " "))
+		}
+
+		// Format Changes/Release column
+		changesReleaseStr := repo.CurrentVersion
+		if repo.CommitsSinceLastTag > 0 {
+			changesReleaseStr = fmt.Sprintf("%s (↑%d)", repo.CurrentVersion, repo.CommitsSinceLastTag)
+		}
+
 		row := []string{
 			checkbox,
 			repoName,
-			repo.CurrentVersion,
+			repo.Branch,
+			gitStatusStr,
+			changesReleaseStr,
 			repo.NextVersion,
-			incrementType,
 			statusStr,
 			changelogStatus,
 		}
@@ -1292,7 +1302,14 @@ func (m releaseTuiModel) viewTable() string {
 		}
 	}
 
-	return fmt.Sprintf("%s\n\n%s%s%s%s\n\n%s", header, tableStr, releaseInfo, reasoning, progress, footer)
+	// Combine all content that should be scrollable
+	fullContent := fmt.Sprintf("%s%s%s%s", tableStr, releaseInfo, reasoning, progress)
+	
+	// Update viewport with the content
+	m.viewport.SetContent(fullContent)
+	
+	// Return header, viewport, and footer
+	return fmt.Sprintf("%s\n\n%s\n\n%s", header, m.viewport.View(), footer)
 }
 
 func (m releaseTuiModel) viewChangelog() string {

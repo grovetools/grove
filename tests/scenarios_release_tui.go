@@ -92,6 +92,12 @@ func ReleaseTUISelectionScenario() *harness.Scenario {
 					return fmt.Errorf("failed to tag repo-a: %w", result.Error)
 				}
 				
+				// Checkout a feature branch
+				cmd = command.New("git", "checkout", "-b", "feature/new-ui").Dir(repoADir)
+				if result := cmd.Run(); result.Error != nil {
+					return fmt.Errorf("failed to create branch: %w", result.Error)
+				}
+				
 				// Add a new commit to make repo-a have changes
 				if err := fs.WriteString(filepath.Join(repoADir, "main.go"), 
 					"package main\n\nfunc main() {}\n"); err != nil {
@@ -101,6 +107,27 @@ func ReleaseTUISelectionScenario() *harness.Scenario {
 					return err
 				}
 				if err := git.Commit(repoADir, "feat: add main function"); err != nil {
+					return err
+				}
+				
+				// Create a modified (unstaged) file
+				if err := fs.WriteString(filepath.Join(repoADir, "utils.go"),
+					"package main\n\n// Modified file\n"); err != nil {
+					return err
+				}
+				
+				// Create and stage a new file
+				if err := fs.WriteString(filepath.Join(repoADir, "config.go"),
+					"package main\n\n// Config file\n"); err != nil {
+					return err
+				}
+				if err := git.Add(repoADir, "config.go"); err != nil {
+					return err
+				}
+				
+				// Create an untracked file
+				if err := fs.WriteString(filepath.Join(repoADir, "test.txt"),
+					"untracked file\n"); err != nil {
 					return err
 				}
 				
@@ -166,7 +193,34 @@ func ReleaseTUISelectionScenario() *harness.Scenario {
 			harness.NewStep("Launch release TUI", func(ctx *harness.Context) error {
 				// The ecosystem is already in ctx.RootDir, and harness runs commands from there
 				// So we can launch the TUI directly
-				session, err := ctx.StartTUI(ctx.GroveBinary, "release", "tui", "--fresh")
+				// Use the binary from bin/grove
+				// Try to find the correct binary
+				cwd, _ := os.Getwd()
+				fmt.Printf("Current working directory: %s\n", cwd)
+				fmt.Printf("PWD env var: %s\n", os.Getenv("PWD"))
+				
+				// Try different paths to find the binary
+				possiblePaths := []string{
+					filepath.Join(cwd, "bin", "grove"),
+					filepath.Join(os.Getenv("PWD"), "bin", "grove"),
+					"./bin/grove",
+					filepath.Join(cwd, "..", "..", "..", "bin", "grove"),
+				}
+				
+				var groveBinary string
+				for _, path := range possiblePaths {
+					if _, err := os.Stat(path); err == nil {
+						groveBinary = path
+						fmt.Printf("Found binary at: %s\n", groveBinary)
+						break
+					}
+				}
+				
+				if groveBinary == "" {
+					groveBinary = ctx.GroveBinary // fallback to default
+					fmt.Printf("Using fallback binary: %s\n", groveBinary)
+				}
+				session, err := ctx.StartTUI(groveBinary, "release", "tui", "--fresh")
 				if err != nil {
 					return fmt.Errorf("failed to start TUI: %w", err)
 				}
@@ -184,9 +238,21 @@ func ReleaseTUISelectionScenario() *harness.Scenario {
 			}),
 			harness.NewStep("Verify initial selection state", func(ctx *harness.Context) error {
 				session := ctx.Get("tui_session").(*tui.Session)
-				content, err := session.Capture()
+				// Capture with cleaned output to remove ANSI color codes
+				content, err := session.Capture(tui.WithCleanedOutput())
 				if err != nil {
 					return err
+				}
+
+				// Verify new headers are present
+				if !strings.Contains(content, "Branch") {
+					return fmt.Errorf("expected 'Branch' header not found in TUI output.\n%s", content)
+				}
+				if !strings.Contains(content, "Git Status") {
+					return fmt.Errorf("expected 'Git Status' header not found in TUI output.\n%s", content)
+				}
+				if !strings.Contains(content, "Changes/Release") {
+					return fmt.Errorf("expected 'Changes/Release' header not found in TUI output.\n%s", content)
 				}
 
 				// repo-a should be shown and selected (it has changes)
@@ -194,15 +260,32 @@ func ReleaseTUISelectionScenario() *harness.Scenario {
 					return fmt.Errorf("repo-a not found or not selected in TUI output.\n%s", content)
 				}
 				
+				// Verify Branch column shows feature/new-ui
+				if !strings.Contains(content, "feature/new-ui") {
+					return fmt.Errorf("expected branch 'feature/new-ui' not found.\n%s", content)
+				}
+				
+				// Verify Git Status column shows dirty status
+				// Should show something like "S:1 M:1 ?:1"
+				if !strings.Contains(content, "S:1") {
+					return fmt.Errorf("expected staged file count 'S:1' not found.\n%s", content)
+				}
+				if !strings.Contains(content, "M:1") {
+					return fmt.Errorf("expected modified file count 'M:1' not found.\n%s", content)
+				}
+				if !strings.Contains(content, "?:1") {
+					return fmt.Errorf("expected untracked file count '?:1' not found.\n%s", content)
+				}
+				
+				// Verify Changes/Release column shows v0.1.0 (↑1)
+				if !strings.Contains(content, "v0.1.0 (↑1)") {
+					return fmt.Errorf("expected changes/release 'v0.1.0 (↑1)' not found.\n%s", content)
+				}
+				
 				// repo-b should NOT be shown (it has no changes, is up to date)
 				// This is expected behavior - only repos with changes appear
 				if strings.Contains(content, "repo-b") {
 					return fmt.Errorf("repo-b should not appear (it has no changes), but it was found in TUI output.\n%s", content)
-				}
-				
-				// Verify we see the checkbox for repo-a selected
-				if !strings.Contains(content, "[✓]") {
-					return fmt.Errorf("Expected to see selected checkbox [✓] for repo-a.\n%s", content)
 				}
 				
 				// Store initial content for debugging
