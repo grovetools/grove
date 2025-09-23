@@ -1,0 +1,58 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/mattsolo1/grove-docgen/main/schema/docgen.config.schema.json
+category: Developer Tools
+description: Grove meta-CLI and package manager for the Grove ecosystem
+enabled: true
+sections:
+  - name: overview
+    order: 1
+    output: 01-overview.md
+    prompt: prompts/overview.md
+    title: Overview
+  - name: installation
+    order: 2
+    output: 02-installation.md
+    prompt: prompts/installation.md
+    title: Installation
+  - name: getting-started
+    order: 3
+    output: 03-getting-started.md
+    prompt: prompts/getting-started.md
+    title: Getting Started
+  - name: core-concepts
+    order: 4
+    output: 04-core-concepts.md
+    prompt: prompts/core-concepts.md
+    title: Core Concepts
+  - name: command-reference
+    order: 5
+    output: 05-command-reference.md
+    prompt: prompts/command-reference.md
+    title: Command Reference
+  - name: tutorials
+    order: 6
+    output: 06-tutorials.md
+    prompt: prompts/tutorials.md
+    title: Tutorials
+  - name: configuration
+    order: 7
+    output: 07-configuration.md
+    prompt: prompts/configuration.md
+    title: Configuration
+  - name: architecture
+    order: 8
+    output: 08-architecture.md
+    prompt: prompts/architecture.md
+    title: Architecture
+  - name: contributing
+    order: 9
+    output: 09-contributing.md
+    prompt: prompts/contributing.md
+    title: Contributing
+settings:
+  model: gemini-2.5-pro
+  output_dir: docs
+  regeneration_mode: scratch
+  rules_file: docs.rules
+  structured_output_file: pkg/docs/docs.json
+  system_prompt: default
+title: Grove Meta-CLI
