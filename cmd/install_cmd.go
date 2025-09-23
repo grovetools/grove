@@ -27,7 +27,7 @@ func newInstallCmd() *cobra.Command {
 		Long: `Install one or more Grove tools from GitHub releases.
 
 You can specify a specific version using the @ syntax, or install the latest version.
-Use 'all' to install all available tools.
+Use 'all' to install all available tools, or 'all@nightly' to install nightly builds of all tools.
 
 Examples:
   grove install cx           # Install latest version of cx
@@ -35,6 +35,7 @@ Examples:
   grove install cx@nightly   # Build and install cx from main branch
   grove install cx nb flow   # Install multiple tools
   grove install all          # Install all available tools
+  grove install all@nightly  # Install nightly builds of all tools
   grove install --use-gh cx  # Use gh CLI for private repo access`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -70,11 +71,20 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 		return fmt.Errorf("failed to create directory structure: %w", err)
 	}
 
-	// Expand "all" to list of all tools
-	tools := args
+	// Expand "all" to list of all tools, handling all@nightly specially
+	var toolsToProcess []string
+	var versionForAll string
+	
 	if len(args) == 1 && args[0] == "all" {
-		tools = sdk.GetAllTools()
+		toolsToProcess = sdk.GetAllTools()
+		versionForAll = "latest"
 		fmt.Println(toolNameStyle.Render("Installing all Grove tools..."))
+	} else if len(args) == 1 && args[0] == "all@nightly" {
+		toolsToProcess = sdk.GetAllTools()
+		versionForAll = "nightly"
+		fmt.Println(toolNameStyle.Render("Installing nightly builds for all Grove tools..."))
+	} else {
+		toolsToProcess = args
 	}
 
 	// Migration: ensure we're using the new per-tool version system
@@ -83,14 +93,21 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 	}
 
 	// Install each tool
-	for _, toolSpec := range tools {
-		// Parse tool[@version]
-		parts := strings.Split(toolSpec, "@")
-		toolName := parts[0]
-		version := "latest"
-
-		if len(parts) > 1 {
-			version = parts[1]
+	for _, toolSpec := range toolsToProcess {
+		var toolName, version string
+		
+		// If we're processing all tools with a specific version, use that
+		if versionForAll != "" {
+			toolName = toolSpec
+			version = versionForAll
+		} else {
+			// Parse tool[@version]
+			parts := strings.Split(toolSpec, "@")
+			toolName = parts[0]
+			version = "latest"
+			if len(parts) > 1 {
+				version = parts[1]
+			}
 		}
 
 		// Get currently installed version

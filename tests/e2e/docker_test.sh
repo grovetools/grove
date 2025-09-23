@@ -246,6 +246,15 @@ test_tool_management() {
     step "Listing all installed tools..."
     grove list
     
+    step "Testing 'grove install all@nightly' command..."
+    if ! grove install all@nightly --use-gh; then
+      error "Failed to install nightly builds of all tools."
+      exit 1
+    fi
+    
+    step "Verifying nightly builds are installed..."
+    grove list | grep -q "nightly" || error "Nightly builds not reflected in grove list output"
+    
     # Verify some key tools are installed and working
     step "Verifying key tools are installed..."
     local tools_to_check=("nb" "tend" "px")

@@ -60,6 +60,9 @@ The installer is smart:
 
    # If repositories are private, use the --use-gh flag
    grove install all --use-gh
+
+   # To install the latest development (nightly) builds of all tools
+   grove install all@nightly
    ```
 
 ## Usage
@@ -71,6 +74,8 @@ Install one or more Grove tools:
 grove install context          # Install by name
 grove install cx               # Install by alias
 grove install cx gvm agent     # Install multiple tools
+grove install all@nightly      # Install nightly builds of all tools
+grove install cx@nightly       # Install nightly build of specific tool
 ```
 
 ### Listing Available Tools
