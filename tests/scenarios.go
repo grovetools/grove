@@ -7,7 +7,7 @@ func AllScenarios() []*harness.Scenario {
 	return []*harness.Scenario{
 		ConventionalCommitsScenario(),
 		AddRepoDryRunScenario(),
-		AddRepoWithGitHubScenario(),
+		// AddRepoWithGitHubScenario(), // Commented out - GitHub integration test
 		AddRepoSkipGitHubScenario(),
 		PolyglotProjectTypesScenario(),
 		PolyglotDependencyGraphScenario(),

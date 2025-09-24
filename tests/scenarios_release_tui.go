@@ -103,14 +103,19 @@ func ReleaseTUISelectionScenario() *harness.Scenario {
 					"package main\n\nfunc main() {}\n"); err != nil {
 					return err
 				}
-				if err := git.Add(repoADir, "main.go"); err != nil {
+				// Also create utils.go in the same commit
+				if err := fs.WriteString(filepath.Join(repoADir, "utils.go"),
+					"package main\n\n// Original utils\n"); err != nil {
 					return err
 				}
-				if err := git.Commit(repoADir, "feat: add main function"); err != nil {
+				if err := git.Add(repoADir, "."); err != nil {
+					return err
+				}
+				if err := git.Commit(repoADir, "feat: add main function and utils"); err != nil {
 					return err
 				}
 				
-				// Create a modified (unstaged) file
+				// Now modify utils.go to create an unstaged modification
 				if err := fs.WriteString(filepath.Join(repoADir, "utils.go"),
 					"package main\n\n// Modified file\n"); err != nil {
 					return err
@@ -277,7 +282,7 @@ func ReleaseTUISelectionScenario() *harness.Scenario {
 					return fmt.Errorf("expected untracked file count '?:1' not found.\n%s", content)
 				}
 				
-				// Verify Changes/Release column shows v0.1.0 (↑1)
+				// Verify Changes/Release column shows v0.1.0 (↑1) - we made 1 commit after the tag
 				if !strings.Contains(content, "v0.1.0 (↑1)") {
 					return fmt.Errorf("expected changes/release 'v0.1.0 (↑1)' not found.\n%s", content)
 				}
