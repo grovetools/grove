@@ -136,3 +136,77 @@ const gofmtMockScript = `#!/bin/bash
 echo "gofmt: SUCCESS"
 exit 0
 `
+
+const gemapiMockScript = `#!/bin/bash
+# Mock gemapi for E2E tests - simulates LLM changelog generation
+
+# Default model for testing
+MODEL="gemini-1.5-flash-latest"
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    request)
+      REQUEST_MODE=true
+      shift
+      ;;
+    --model)
+      MODEL="$2"
+      shift 2
+      ;;
+    --file)
+      PROMPT_FILE="$2"
+      shift 2
+      ;;
+    --yes)
+      # Auto-confirm
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+# If this is a request command
+if [ "$REQUEST_MODE" = "true" ]; then
+  # Read the prompt file to determine what kind of response is needed
+  if [ -n "$PROMPT_FILE" ] && [ -f "$PROMPT_FILE" ]; then
+    PROMPT_CONTENT=$(cat "$PROMPT_FILE")
+    
+    # Check if this is a changelog generation request
+    if echo "$PROMPT_CONTENT" | grep -q "changelog" && echo "$PROMPT_CONTENT" | grep -q "JSON"; then
+      # Generate a mock changelog response
+      cat << 'EOF'
+{
+  "suggestion": "minor",
+  "justification": "New features were added without breaking changes.",
+  "changelog": "## v0.1.1 (2024-09-24)\\n\\nThis release introduces several new features and improvements.\\n\\n### Features\\n- Add new feature functionality (abc123d)\\n- Implement better error handling (def456e)\\n\\n### Bug Fixes\\n- Fix edge case in processing (789ghi0)\\n\\n### File Changes\\n3 files changed, 42 insertions(+), 5 deletions(-)"
+}
+EOF
+      exit 0
+    fi
+    
+    # Check if this is a general completion request
+    if echo "$PROMPT_CONTENT" | grep -q "complete\|generate\|create"; then
+      # Generate a generic response
+      echo "Mock response from gemapi for model $MODEL"
+      echo "This is a simulated LLM response for testing purposes."
+      exit 0
+    fi
+  fi
+  
+  # Default response for unknown requests
+  echo "Mock gemapi response"
+  exit 0
+fi
+
+# If not in request mode, show version or help
+if [ "$1" = "--version" ] || [ "$1" = "version" ]; then
+  echo "gemapi mock v0.0.1-test"
+  echo "Model: $MODEL"
+else
+  echo "gemapi mock - Simulated LLM API for testing"
+  echo "Usage: gemapi request --model <model> --file <prompt-file> --yes"
+fi
+`

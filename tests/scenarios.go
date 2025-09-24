@@ -16,8 +16,8 @@ func AllScenarios() []*harness.Scenario {
 		LLMChangelogScenario(),
 		ReleaseTUIScenario(),
 		ReleaseTUISelectionScenario(),
-		// SmartChangelogDetectionScenario(), // Complex TUI test - requires gemapi
-		// ChangelogUIIndicatorsScenario(),   // Complex TUI test - requires gemapi
+		// SmartChangelogDetectionScenario(),    // Complex test - needs work with release changelog command
+		// ChangelogUIIndicatorsScenario(),      // Complex TUI test - needs work
 		ChangelogHashTrackingScenario(),
 		ChangelogStateTransitionsScenario(),
 	}
