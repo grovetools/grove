@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/exec"
@@ -624,6 +625,12 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					if err := os.WriteFile(changelogPath, newContent, 0644); err != nil {
 						m.genProgress = fmt.Sprintf("❌ Failed to write changelog: %v", err)
 					} else {
+						// Calculate and store hash of the written content
+						hash := sha256.Sum256(newContent)
+						repo.ChangelogHash = fmt.Sprintf("%x", hash)
+						repo.ChangelogState = "clean"
+						release.SavePlan(m.plan)
+						
 						m.genProgress = fmt.Sprintf("✅ Changelog written to %s", changelogPath)
 						
 						// Open in editor for further editing
@@ -794,12 +801,19 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Check if all selected repos are approved
 		allApproved := true
 		hasSelection := false
-		for _, repo := range m.plan.Repos {
+		for repoName, repo := range m.plan.Repos {
 			if repo.Selected && repo.CurrentVersion != repo.NextVersion {
 				hasSelection = true
 				if repo.Status != "Approved" {
 					allApproved = false
 					break
+				}
+				
+				// Check for dirty changelog
+				if repo.ChangelogHash != "" {
+					if isDirty := checkChangelogDirty(m.plan.RootDir, repoName, repo); isDirty {
+						repo.ChangelogState = "dirty"
+					}
 				}
 			}
 		}
@@ -1138,6 +1152,9 @@ func (m releaseTuiModel) viewTable() string {
 		var changelogStatus string
 		if repo.CurrentVersion == repo.NextVersion {
 			changelogStatus = "-"
+		} else if repo.ChangelogState == "dirty" {
+			// Changelog was written and modified by user
+			changelogStatus = lipgloss.NewStyle().Foreground(lipgloss.Color("#8BE9FD")).Bold(true).Render("📝 Modified")
 		} else if repo.ChangelogPath != "" {
 			if _, err := os.Stat(repo.ChangelogPath); err == nil {
 				// Check if the changelog is stale (different commit)
@@ -1600,6 +1617,40 @@ func runReleaseTUI(ctx context.Context) error {
 	}
 	
 	return nil
+}
+
+// checkChangelogDirty checks if a changelog file has been modified since we wrote it
+func checkChangelogDirty(rootDir, repoName string, repo *release.RepoReleasePlan) bool {
+	if repo.ChangelogHash == "" {
+		return false // No hash stored, can't check
+	}
+	
+	changelogPath := filepath.Join(rootDir, repoName, "CHANGELOG.md")
+	currentContent, err := os.ReadFile(changelogPath)
+	if err != nil {
+		return false // Can't read file, assume clean
+	}
+	
+	// Calculate current hash
+	currentHash := sha256.Sum256(currentContent)
+	currentHashStr := fmt.Sprintf("%x", currentHash)
+	
+	// Compare with stored hash
+	isDirty := currentHashStr != repo.ChangelogHash
+	
+	// If dirty, validate that it still contains the expected version header
+	if isDirty && repo.NextVersion != "" {
+		// Check if the changelog contains the expected version header
+		expectedHeader := fmt.Sprintf("## %s", repo.NextVersion)
+		if !strings.Contains(string(currentContent), expectedHeader) {
+			// Warning: changelog was modified but doesn't contain expected version
+			// This is still considered dirty, but might need a warning
+			fmt.Printf("⚠️  Warning: Changelog for %s was modified but doesn't contain expected version header '%s'\n", 
+				repoName, expectedHeader)
+		}
+	}
+	
+	return isDirty
 }
 
 // newReleaseTuiCmd creates the 'grove release tui' subcommand

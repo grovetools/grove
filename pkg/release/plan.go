@@ -29,6 +29,10 @@ type RepoReleasePlan struct {
 	Status              string `json:"status"`           // "Pending Review", "Approved", "-"
 	Selected            bool   `json:"selected"`         // Whether this repo is selected for release
 	
+	// Changelog tracking for dirty detection
+	ChangelogHash       string `json:"changelog_hash,omitempty"`  // SHA256 hash of generated changelog content
+	ChangelogState      string `json:"changelog_state,omitempty"` // "clean", "dirty", or "none"
+	
 	// Git status information
 	Branch              string `json:"branch,omitempty"`
 	IsDirty             bool   `json:"is_dirty,omitempty"`

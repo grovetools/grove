@@ -472,7 +472,7 @@ func runReleaseApply(ctx context.Context) error {
 	}
 
 	// Execute dependency-aware release orchestration
-	if err := orchestrateRelease(ctx, plan.RootDir, plan.ReleaseLevels, versions, currentVersions, hasChanges, graph, logger, false); err != nil {
+	if err := orchestrateRelease(ctx, plan.RootDir, plan.ReleaseLevels, versions, currentVersions, hasChanges, graph, logger, false, plan); err != nil {
 		return fmt.Errorf("failed to orchestrate release: %w", err)
 	}
 

@@ -240,7 +240,7 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	}
 
 	// Execute dependency-aware release orchestration
-	if err := orchestrateRelease(ctx, rootDir, releaseLevels, versions, currentVersions, hasChanges, graph, logger, releaseLLMChangelog); err != nil {
+	if err := orchestrateRelease(ctx, rootDir, releaseLevels, versions, currentVersions, hasChanges, graph, logger, releaseLLMChangelog, nil); err != nil {
 		return fmt.Errorf("failed to orchestrate release: %w", err)
 	}
 
@@ -1010,7 +1010,7 @@ func getVersionIncrement(current, proposed string) string {
 	return "-"
 }
 
-func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]string, versions map[string]string, currentVersions map[string]string, hasChanges map[string]bool, graph *depsgraph.Graph, logger *logrus.Logger, useLLMChangelog bool) error {
+func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]string, versions map[string]string, currentVersions map[string]string, hasChanges map[string]bool, graph *depsgraph.Graph, logger *logrus.Logger, useLLMChangelog bool, plan *release.ReleasePlan) error {
 	displaySection("🎯 Release Orchestration")
 
 	// Process each level of dependencies
@@ -1100,22 +1100,36 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 				// Handle changelog - either use existing modifications or generate new
 				if !releaseDryRun {
 					// Check if CHANGELOG.md is already modified (from TUI workflow)
-					// Use git diff to check if the file has changes
+					// First check the plan's ChangelogState if available
 					changelogModified := false
+					skipChangelog := false
 					
-					// Check using git diff --name-only to see if CHANGELOG.md has changes
-					diffCmd := exec.Command("git", "diff", "--name-only", "CHANGELOG.md")
-					diffCmd.Dir = wsPath
-					if diffOutput, _ := diffCmd.Output(); len(diffOutput) > 0 {
-						changelogModified = true
+					// Check plan for changelog state
+					if plan != nil && plan.Repos != nil {
+						if repoPlan, ok := plan.Repos[repo]; ok && repoPlan.ChangelogState == "dirty" {
+							// The changelog was written and modified by user
+							changelogModified = true
+							skipChangelog = true // Don't regenerate, use the dirty version
+							displayInfo(fmt.Sprintf("Using manually edited changelog for %s", repo))
+						}
 					}
 					
-					// Also check if it's staged
+					// If not marked in plan, check git status
 					if !changelogModified {
-						diffCmd = exec.Command("git", "diff", "--cached", "--name-only", "CHANGELOG.md")
+						// Check using git diff --name-only to see if CHANGELOG.md has changes
+						diffCmd := exec.Command("git", "diff", "--name-only", "CHANGELOG.md")
 						diffCmd.Dir = wsPath
 						if diffOutput, _ := diffCmd.Output(); len(diffOutput) > 0 {
 							changelogModified = true
+						}
+						
+						// Also check if it's staged
+						if !changelogModified {
+							diffCmd = exec.Command("git", "diff", "--cached", "--name-only", "CHANGELOG.md")
+							diffCmd.Dir = wsPath
+							if diffOutput, _ := diffCmd.Output(); len(diffOutput) > 0 {
+								changelogModified = true
+							}
 						}
 					}
 					
@@ -1137,7 +1151,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 								}
 							}
 						}
-					} else {
+					} else if !skipChangelog {
 						// No existing changelog modifications, generate new one
 						displayInfo(fmt.Sprintf("Generating changelog for %s", repo))
 						changelogCmdArgs := []string{"release", "changelog", wsPath, "--version", version}
