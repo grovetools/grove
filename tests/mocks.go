@@ -210,3 +210,212 @@ else
   echo "Usage: gemapi request --model <model> --file <prompt-file> --yes"
 fi
 `
+
+const ghSyncDepsMockScript = `#!/bin/bash
+# Mock gh CLI for sync-deps release testing
+
+# Log all calls for verification
+echo "gh $@" >> "${GH_MOCK_LOG:-/tmp/gh-mock.log}"
+
+case "$1 $2" in
+    "run list")
+        # Simulate finding a workflow run
+        echo '[{"databaseId": 12345, "status": "completed", "conclusion": "success"}]'
+        exit 0
+        ;;
+    "run watch")
+        # Control CI success/failure via env var
+        if [[ "${GH_MOCK_CI_STATUS}" == "success" ]]; then
+            echo "✓ Workflow run completed successfully"
+            exit 0
+        else
+            echo "Error: CI workflow failed" >&2
+            exit 1
+        fi
+        ;;
+    "api repos/"*)
+        # Simulate getting latest release
+        echo '{"tag_name": "v0.1.0"}'
+        exit 0
+        ;;
+    *)
+        # Default success for other commands
+        exit 0
+        ;;
+esac
+`
+
+const goSyncDepsMockScript = `#!/bin/bash
+# Mock go CLI for sync-deps release testing
+
+# Log all calls for debugging
+echo "go $@" >> /tmp/go-mock.log
+echo "PWD: $(pwd)" >> /tmp/go-mock.log
+
+case "$1" in
+    "get")
+        # Simulate updating go.mod
+        # $2 is the module@version string (e.g., github.com/test/lib-a@v0.1.1)
+        MODULE_SPEC="$2"
+        MODULE_PATH=$(echo "$MODULE_SPEC" | cut -d'@' -f1)
+        NEW_VERSION=$(echo "$MODULE_SPEC" | cut -d'@' -f2)
+        
+        echo "MODULE_SPEC: $MODULE_SPEC" >> /tmp/go-mock.log
+        echo "MODULE_PATH: $MODULE_PATH" >> /tmp/go-mock.log
+        echo "NEW_VERSION: $NEW_VERSION" >> /tmp/go-mock.log
+        
+        # Find go.mod file
+        if [ -f "go.mod" ]; then
+            GO_MOD_FILE="go.mod"
+        else
+            GO_MOD_FILE=$(find . -name go.mod -print -quit 2>/dev/null)
+        fi
+        
+        echo "GO_MOD_FILE: $GO_MOD_FILE" >> /tmp/go-mock.log
+
+        if [ -f "$GO_MOD_FILE" ]; then
+            echo "Before update:" >> /tmp/go-mock.log
+            cat "$GO_MOD_FILE" >> /tmp/go-mock.log
+            
+            # Use sed to replace the version - handle both BSD and GNU sed
+            if sed --version 2>/dev/null | grep -q GNU; then
+                # GNU sed
+                sed -i -E "s|($MODULE_PATH\s+)v[0-9]+\.[0-9]+\.[0-9]+|\1$NEW_VERSION|g" "$GO_MOD_FILE"
+            else
+                # BSD sed (macOS)
+                sed -i '' -E "s|($MODULE_PATH[[:space:]]+)v[0-9]+\.[0-9]+\.[0-9]+|\1$NEW_VERSION|g" "$GO_MOD_FILE"
+            fi
+            
+            echo "After update:" >> /tmp/go-mock.log
+            cat "$GO_MOD_FILE" >> /tmp/go-mock.log
+        fi
+        exit 0
+        ;;
+    "list")
+        # Simulate successful list
+        if [[ "$2" == "-m" ]]; then
+            # Return module info
+            echo "github.com/test/lib-a v0.1.1"
+        fi
+        exit 0
+        ;;
+    "mod")
+        # Succeed for mod commands (tidy, download, etc)
+        exit 0
+        ;;
+    *)
+        # Pass through for other commands
+        exit 0
+        ;;
+esac
+`
+
+const gitPushMockScript = `#!/bin/bash
+# Mock git that passes through all commands except push
+# This allows real git operations but prevents push failures in tests
+
+if [ "$1" = "push" ]; then
+    # Simulate successful push
+    echo "To fake://repo"
+    echo " * [new tag]         v0.1.1 -> v0.1.1"
+    exit 0
+else
+    # Pass through to real git
+    exec /usr/bin/git "$@"
+fi
+`
+
+const gitSyncDepsMockScript = `#!/bin/bash
+# Mock git CLI for sync-deps release testing
+
+# State directory for tags - use .git directory if exists
+GIT_DIR=".git"
+if [ ! -d "$GIT_DIR" ]; then
+    mkdir -p "$GIT_DIR"
+fi
+TAG_FILE="$GIT_DIR/mock_tag"
+
+case "$1" in
+    "describe")
+        # Handle git describe --tags --abbrev=0
+        if [[ "$2" == "--tags" ]]; then
+            if [ -f "$TAG_FILE" ]; then
+                cat "$TAG_FILE"
+                exit 0
+            else
+                # No tags found
+                echo "fatal: No names found, cannot describe anything." >&2
+                exit 128
+            fi
+        fi
+        exit 0
+        ;;
+    "tag")
+        # Handle git tag <tagname>
+        if [ -n "$2" ] && [ "$2" != "-l" ] && [ "$2" != "--list" ]; then
+            echo "$2" > "$TAG_FILE"
+        fi
+        # Handle git tag -l or git tag --list
+        if [ "$2" = "-l" ] || [ "$2" = "--list" ] || [ -z "$2" ]; then
+            if [ -f "$TAG_FILE" ]; then
+                cat "$TAG_FILE"
+            fi
+        fi
+        exit 0
+        ;;
+    "rev-list")
+        # Simulate that there are commits since the last tag
+        echo "abc123def"
+        exit 0
+        ;;
+    "rev-parse")
+        # Handle various rev-parse commands
+        case "$2" in
+            "--short")
+                echo "abc123d"
+                ;;
+            "--abbrev-ref")
+                echo "main"
+                ;;
+            "HEAD")
+                echo "abc123def456789"
+                ;;
+            *)
+                echo "abc123def456789"
+                ;;
+        esac
+        exit 0
+        ;;
+    "status")
+        # Simulate clean working directory
+        if [[ "$2" == "--porcelain" ]]; then
+            # Return empty for clean status
+            exit 0
+        else
+            echo "On branch main"
+            echo "nothing to commit, working tree clean"
+            exit 0
+        fi
+        ;;
+    "diff")
+        # Simulate no differences
+        exit 0
+        ;;
+    "log")
+        # Simulate git log output
+        echo "commit abc123def456789"
+        echo "Author: Test User <test@example.com>"
+        echo "Date:   Thu Sep 24 12:00:00 2024 -0400"
+        echo ""
+        echo "    feat: add new feature"
+        exit 0
+        ;;
+    "init"|"add"|"commit"|"push"|"config"|"submodule"|"remote"|"checkout"|"branch")
+        # Succeed for all other commands
+        exit 0
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+`

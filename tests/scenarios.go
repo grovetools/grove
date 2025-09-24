@@ -20,6 +20,7 @@ func AllScenarios() []*harness.Scenario {
 		ReleaseTUIChangelogDirtyStateScenario(),
 		ChangelogHashTrackingScenario(),
 		ChangelogStateTransitionsScenario(),
+		SyncDepsReleaseScenario(),
 	}
 }
 
