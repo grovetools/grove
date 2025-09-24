@@ -22,7 +22,7 @@ func ReleaseTUISyncDepsScenario() *harness.Scenario {
 		Tags:        []string{"release", "tui", "sync-deps"},
 		LocalOnly:   true, // Requires interactive TUI session
 		Steps: []harness.Step{
-			setupSyncDepsTUIEcosystemStep("tui-sync-deps"),
+			setupSyncDepsTUIEcosystemStep(),
 			harness.NewStep("Launch TUI and wait for it to load", func(ctx *harness.Context) error {
 				// Create wrapper to include mocks in PATH
 				mockDir := ctx.Get("mock_dir").(string)
@@ -38,6 +38,11 @@ exec "%s" "$@"
 				}
 				if err := os.Chmod(wrapperPath, 0755); err != nil {
 					return fmt.Errorf("failed to chmod grove wrapper: %w", err)
+				}
+				
+				// Note: Need to cd to the ecosystem directory for the TUI to work
+				if err := os.Chdir(ctx.RootDir); err != nil {
+					return fmt.Errorf("failed to chdir to ecosystem: %w", err)
 				}
 				
 				session, err := ctx.StartTUI(wrapperPath, "release", "tui", "--fresh")
@@ -171,7 +176,7 @@ exec "%s" "$@"
 			}),
 			harness.NewStep("Verify dependency sync occurred", func(ctx *harness.Context) error {
 				// Check if app-b's go.mod was updated (if sync-deps worked)
-				appBPath := filepath.Join(ctx.RootDir, "tui-sync-deps", "app-b")
+				appBPath := filepath.Join(ctx.RootDir, "app-b")
 				goModPath := filepath.Join(appBPath, "go.mod")
 				
 				// The actual sync might not work in test environment, but we verify the flow
@@ -202,7 +207,7 @@ func ReleaseTUISyncDepsToggleScenario() *harness.Scenario {
 		Tags:        []string{"release", "tui", "sync-deps"},
 		LocalOnly:   true,
 		Steps: []harness.Step{
-			setupSyncDepsTUIEcosystemStep("tui-toggle"),
+			setupSyncDepsTUIEcosystemStep(),
 			harness.NewStep("Launch TUI", func(ctx *harness.Context) error {
 				mockDir := ctx.Get("mock_dir").(string)
 				wrapperContent := fmt.Sprintf(`#!/bin/bash
@@ -216,6 +221,11 @@ exec "%s" "$@"
 				}
 				if err := os.Chmod(wrapperPath, 0755); err != nil {
 					return err
+				}
+				
+				// Note: Need to cd to the ecosystem directory for the TUI to work
+				if err := os.Chdir(ctx.RootDir); err != nil {
+					return fmt.Errorf("failed to chdir to ecosystem: %w", err)
 				}
 				
 				session, err := ctx.StartTUI(wrapperPath, "release", "tui", "--fresh")
@@ -267,41 +277,15 @@ exec "%s" "$@"
 }
 
 // setupSyncDepsTUIEcosystemStep creates a test ecosystem with lib-a and app-b for TUI testing.
-func setupSyncDepsTUIEcosystemStep(name string) harness.Step {
+func setupSyncDepsTUIEcosystemStep() harness.Step {
 	return harness.NewStep("Setup sync-deps test ecosystem", func(ctx *harness.Context) error {
-		ecosystemDir := ctx.NewDir(name)
+		// Use ctx.RootDir directly as the ecosystem directory
+		ecosystemDir := ctx.RootDir
 		
 		// Setup mock directory
-		mockDir := ctx.NewDir("mocks-" + name)
-		if err := os.MkdirAll(mockDir, 0755); err != nil {
-			return err
-		}
+		mockDir := ctx.NewDir("mocks")
 		
-		// Write mock scripts
-		ghMockPath := filepath.Join(mockDir, "gh")
-		if err := fs.WriteString(ghMockPath, ghSyncDepsMockScript); err != nil {
-			return err
-		}
-		if err := os.Chmod(ghMockPath, 0755); err != nil {
-			return err
-		}
-		
-		goMockPath := filepath.Join(mockDir, "go")
-		if err := fs.WriteString(goMockPath, goSyncDepsMockScript); err != nil {
-			return err
-		}
-		if err := os.Chmod(goMockPath, 0755); err != nil {
-			return err
-		}
-		
-		gitMockPath := filepath.Join(mockDir, "git")
-		if err := fs.WriteString(gitMockPath, gitPushMockScript); err != nil {
-			return err
-		}
-		if err := os.Chmod(gitMockPath, 0755); err != nil {
-			return err
-		}
-		
+		// Write mock scripts (only the ones we need for TUI)
 		gemapiMockPath := filepath.Join(mockDir, "gemapi")
 		if err := fs.WriteString(gemapiMockPath, gemapiMockScript); err != nil {
 			return err
@@ -310,67 +294,122 @@ func setupSyncDepsTUIEcosystemStep(name string) harness.Step {
 			return err
 		}
 		
+		// Store the mock directory path in context for later use
 		ctx.Set("mock_dir", mockDir)
-		
-		// Initialize ecosystem
-		if err := os.MkdirAll(ecosystemDir, 0755); err != nil {
-			return err
-		}
-		
-		// Change to ecosystem directory
-		if err := os.Chdir(ecosystemDir); err != nil {
-			return err
-		}
 		
 		// Init ecosystem root
 		if err := git.Init(ecosystemDir); err != nil {
-			return err
+			return fmt.Errorf("failed to init ecosystem git: %w", err)
 		}
 		if err := git.SetupTestConfig(ecosystemDir); err != nil {
+			return fmt.Errorf("failed to setup ecosystem git config: %w", err)
+		}
+		
+		// Create grove.yml for ecosystem
+		if err := fs.WriteString(filepath.Join(ecosystemDir, "grove.yml"), 
+			"name: test-ecosystem\nworkspaces:\n  - \"*\"\n"); err != nil {
 			return err
 		}
-		if err := fs.WriteString(filepath.Join(ecosystemDir, "grove.yml"), "name: test-ecosystem\nworkspaces:\n  - \"*\"\n"); err != nil {
-			return err
-		}
-		if err := git.Add(ecosystemDir, "grove.yml"); err != nil {
+		
+		// Commit ecosystem root
+		if err := git.Add(ecosystemDir, "."); err != nil {
 			return err
 		}
 		if err := git.Commit(ecosystemDir, "Initial ecosystem setup"); err != nil {
 			return err
 		}
 		
-		// Setup lib-a
+		// Setup lib-a as a subdirectory (not submodule)
 		libAPath := filepath.Join(ecosystemDir, "lib-a")
-		if err := setupTUITestRepo(libAPath, "lib-a", "github.com/test/lib-a", true); err != nil {
-			return fmt.Errorf("failed to setup lib-a: %w", err)
+		if err := os.Mkdir(libAPath, 0755); err != nil {
+			return err
 		}
 		
-		// Setup app-b with dependency on lib-a
+		// Init lib-a
+		if err := git.Init(libAPath); err != nil {
+			return err
+		}
+		if err := git.SetupTestConfig(libAPath); err != nil {
+			return err
+		}
+		
+		// Create lib-a files
+		if err := fs.WriteString(filepath.Join(libAPath, "grove.yml"), 
+			"name: lib-a\ntype: go\n"); err != nil {
+			return err
+		}
+		if err := fs.WriteString(filepath.Join(libAPath, "go.mod"), 
+			"module github.com/test/lib-a\ngo 1.21\n"); err != nil {
+			return err
+		}
+		
+		// Initial commit and tag for lib-a
+		if err := git.Add(libAPath, "."); err != nil {
+			return err
+		}
+		if err := git.Commit(libAPath, "Initial commit"); err != nil {
+			return err
+		}
+		if result := command.New("git", "tag", "v0.1.0").Dir(libAPath).Run(); result.Error != nil {
+			return result.Error
+		}
+		
+		// Add a new commit to create changes for release
+		if err := fs.WriteString(filepath.Join(libAPath, "lib.go"), 
+			"package liba\n\nfunc NewFeature() string { return \"v0.1.1\" }\n"); err != nil {
+			return err
+		}
+		if err := git.Add(libAPath, "."); err != nil {
+			return err
+		}
+		if err := git.Commit(libAPath, "feat: add new feature"); err != nil {
+			return err
+		}
+		
+		// Setup app-b as a subdirectory
 		appBPath := filepath.Join(ecosystemDir, "app-b")
-		if err := setupTUITestRepo(appBPath, "app-b", "github.com/test/app-b", false); err != nil {
-			return fmt.Errorf("failed to setup app-b: %w", err)
-		}
-		
-		// Add dependency from app-b to lib-a
-		goModContent := "module github.com/test/app-b\n\nrequire github.com/test/lib-a v0.1.0\n"
-		if err := fs.WriteString(filepath.Join(appBPath, "go.mod"), goModContent); err != nil {
-			return err
-		}
-		if err := git.Add(appBPath, "go.mod"); err != nil {
-			return err
-		}
-		if err := git.Commit(appBPath, "feat: add dependency on lib-a"); err != nil {
+		if err := os.Mkdir(appBPath, 0755); err != nil {
 			return err
 		}
 		
-		// Add as submodules to root
-		if res := command.New("git", "submodule", "add", "./lib-a").Dir(ecosystemDir).Run(); res.Error != nil {
-			return res.Error
+		// Init app-b
+		if err := git.Init(appBPath); err != nil {
+			return err
 		}
-		if res := command.New("git", "submodule", "add", "./app-b").Dir(ecosystemDir).Run(); res.Error != nil {
-			return res.Error
+		if err := git.SetupTestConfig(appBPath); err != nil {
+			return err
 		}
-		if err := git.Commit(ecosystemDir, "feat: add project submodules"); err != nil {
+		
+		// Create app-b files with dependency on lib-a
+		if err := fs.WriteString(filepath.Join(appBPath, "grove.yml"), 
+			"name: app-b\ntype: go\n"); err != nil {
+			return err
+		}
+		if err := fs.WriteString(filepath.Join(appBPath, "go.mod"), 
+			"module github.com/test/app-b\ngo 1.21\n\nrequire github.com/test/lib-a v0.1.0\n"); err != nil {
+			return err
+		}
+		
+		// Initial commit and tag for app-b
+		if err := git.Add(appBPath, "."); err != nil {
+			return err
+		}
+		if err := git.Commit(appBPath, "Initial commit"); err != nil {
+			return err
+		}
+		if result := command.New("git", "tag", "v0.1.0").Dir(appBPath).Run(); result.Error != nil {
+			return result.Error
+		}
+		
+		// Add a new commit to create changes for release
+		if err := fs.WriteString(filepath.Join(appBPath, "main.go"), 
+			"package main\n\nimport _ \"github.com/test/lib-a\"\n\nfunc main() {}\n"); err != nil {
+			return err
+		}
+		if err := git.Add(appBPath, "."); err != nil {
+			return err
+		}
+		if err := git.Commit(appBPath, "feat: add main function"); err != nil {
 			return err
 		}
 		
@@ -378,83 +417,3 @@ func setupSyncDepsTUIEcosystemStep(name string) harness.Step {
 	})
 }
 
-// setupTUITestRepo creates a test repository with basic structure for TUI testing.
-func setupTUITestRepo(path, name, module string, isLibrary bool) error {
-	if err := os.Mkdir(path, 0755); err != nil {
-		return err
-	}
-	if err := git.Init(path); err != nil {
-		return err
-	}
-	if err := git.SetupTestConfig(path); err != nil {
-		return err
-	}
-	
-	// Add GitHub remote
-	if res := command.New("git", "remote", "add", "origin", fmt.Sprintf("https://github.com/test/%s.git", name)).Dir(path).Run(); res.Error != nil {
-		// Ignore error
-	}
-	
-	// Create grove.yml
-	if err := fs.WriteString(filepath.Join(path, "grove.yml"), fmt.Sprintf("name: %s\n", name)); err != nil {
-		return err
-	}
-	
-	// Create go.mod
-	if err := fs.WriteString(filepath.Join(path, "go.mod"), fmt.Sprintf("module %s\n", module)); err != nil {
-		return err
-	}
-	
-	// Create .github/workflows/ci.yml
-	githubDir := filepath.Join(path, ".github", "workflows")
-	if err := os.MkdirAll(githubDir, 0755); err != nil {
-		return err
-	}
-	ciContent := "name: CI\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo 'Test CI'\n"
-	if err := fs.WriteString(filepath.Join(githubDir, "ci.yml"), ciContent); err != nil {
-		return err
-	}
-	
-	// Create source file
-	if isLibrary {
-		if err := fs.WriteString(filepath.Join(path, "lib.go"), "package lib\n\nconst Version = \"v0.1.0\"\n"); err != nil {
-			return err
-		}
-	} else {
-		if err := fs.WriteString(filepath.Join(path, "main.go"), "package main\n\nfunc main() {}\n"); err != nil {
-			return err
-		}
-	}
-	
-	// Initial commit
-	if err := git.Add(path, "."); err != nil {
-		return err
-	}
-	if err := git.Commit(path, "Initial commit"); err != nil {
-		return err
-	}
-	
-	// Tag v0.1.0
-	if res := command.New("git", "tag", "v0.1.0").Dir(path).Run(); res.Error != nil {
-		return res.Error
-	}
-	
-	// Make a change so it's eligible for release
-	if isLibrary {
-		if err := fs.WriteString(filepath.Join(path, "feature.go"), "package lib\n\nfunc NewFeature() string { return \"feature\" }\n"); err != nil {
-			return err
-		}
-	} else {
-		if err := fs.WriteString(filepath.Join(path, "cmd.go"), "package main\n\nfunc RunCommand() { println(\"running\") }\n"); err != nil {
-			return err
-		}
-	}
-	if err := git.Add(path, "."); err != nil {
-		return err
-	}
-	if err := git.Commit(path, "feat: add new feature"); err != nil {
-		return err
-	}
-	
-	return nil
-}
