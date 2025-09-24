@@ -217,32 +217,56 @@ const ghSyncDepsMockScript = `#!/bin/bash
 # Log all calls for verification
 echo "gh $@" >> "${GH_MOCK_LOG:-/tmp/gh-mock.log}"
 
-case "$1 $2" in
-    "run list")
-        # Simulate finding a workflow run
-        echo '[{"databaseId": 12345, "status": "completed", "conclusion": "success"}]'
+# Simulate state tracking - after a few calls, return a workflow run
+STATE_FILE="/tmp/gh-mock-state"
+if [ -f "$STATE_FILE" ]; then
+    COUNT=$(cat "$STATE_FILE")
+else
+    COUNT=0
+fi
+
+# Parse arguments
+if [[ "$1" == "run" ]]; then
+    if [[ "$2" == "list" ]]; then
+        # Increment counter
+        COUNT=$((COUNT + 1))
+        echo $COUNT > "$STATE_FILE"
+        
+        # Check what workflow is being requested
+        if [[ "$*" == *"--workflow Release"* ]]; then
+            # After a few calls, return a release workflow run to simulate it appearing
+            if [ $COUNT -gt 3 ]; then
+                echo '[{"databaseId": 12345, "status": "in_progress", "conclusion": null, "headBranch": "v0.1.1", "event": "push", "workflowName": "Release"}]'
+                rm -f "$STATE_FILE"  # Reset for next test
+            else
+                echo '[]'
+            fi
+        elif [[ "$*" == *"--workflow CI"* ]]; then
+            # Return a CI workflow run
+            echo '[{"databaseId": 12346, "status": "completed", "conclusion": "success", "createdAt": "2025-09-24T00:00:00Z"}]'
+        else
+            # Return empty for other queries
+            echo '[]'
+        fi
         exit 0
-        ;;
-    "run watch")
+    elif [[ "$2" == "watch" ]]; then
         # Control CI success/failure via env var
-        if [[ "${GH_MOCK_CI_STATUS}" == "success" ]]; then
+        if [[ "${GH_MOCK_CI_STATUS}" == "failure" ]]; then
+            echo "Error: release workflow failed" >&2
+            exit 1
+        else
             echo "✓ Workflow run completed successfully"
             exit 0
-        else
-            echo "Error: CI workflow failed" >&2
-            exit 1
         fi
-        ;;
-    "api repos/"*)
-        # Simulate getting latest release
-        echo '{"tag_name": "v0.1.0"}'
-        exit 0
-        ;;
-    *)
-        # Default success for other commands
-        exit 0
-        ;;
-esac
+    fi
+elif [[ "$1" == "api" ]]; then
+    # Handle API calls
+    echo '{"tag_name": "v0.1.0"}'
+    exit 0
+fi
+
+# Default success for other commands
+exit 0
 `
 
 const goSyncDepsMockScript = `#!/bin/bash
