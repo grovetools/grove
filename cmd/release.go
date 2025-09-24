@@ -93,7 +93,6 @@ Examples:
 	cmd.Flags().BoolVar(&releaseInteractive, "interactive", false, "Launch interactive TUI for release planning and approval")
 
 	// Add subcommands
-	cmd.AddCommand(newReleaseChangelogCmd())
 	cmd.AddCommand(newReleaseTuiCmd()) // Add TUI as a subcommand
 
 	return cmd
@@ -1154,7 +1153,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 					} else if !skipChangelog {
 						// No existing changelog modifications, generate new one
 						displayInfo(fmt.Sprintf("Generating changelog for %s", repo))
-						changelogCmdArgs := []string{"release", "changelog", wsPath, "--version", version}
+						changelogCmdArgs := []string{"changelog", wsPath, "--version", version}
 						if useLLMChangelog {
 							changelogCmdArgs = append(changelogCmdArgs, "--llm")
 						}

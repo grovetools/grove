@@ -15,6 +15,7 @@ var rootCmd = cli.NewStandardCommand("grove", "Grove workspace orchestrator and 
 
 func init() {
 	// Add subcommands
+	rootCmd.AddCommand(newChangelogCmd())
 	rootCmd.AddCommand(newDepsCmd())
 	rootCmd.AddCommand(internal.NewInternalCmd())
 

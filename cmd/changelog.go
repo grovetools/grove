@@ -15,10 +15,10 @@ var (
 	useLLM bool
 )
 
-func newReleaseChangelogCmd() *cobra.Command {
+func newChangelogCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "changelog <repo-path>",
-		Short: "Generate and prepend a changelog for a repository",
+		Short: "Generate a changelog for a repository",
 		Long: `Generates a changelog entry for a repository and prepends it to CHANGELOG.md.
 
 By default, it generates the changelog from conventional commits.

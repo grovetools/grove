@@ -16,8 +16,8 @@ func AllScenarios() []*harness.Scenario {
 		LLMChangelogScenario(),
 		ReleaseTUIScenario(),
 		ReleaseTUISelectionScenario(),
-		// SmartChangelogDetectionScenario(),    // Complex test - needs work with release changelog command
-		// ChangelogUIIndicatorsScenario(),      // Complex TUI test - needs work
+		// ReleaseTUIChangelogWorkflowScenario(),    // Complex TUI test - needs more work
+		// ReleaseTUIChangelogDirtyStateScenario(),  // Complex TUI test - needs more work
 		ChangelogHashTrackingScenario(),
 		ChangelogStateTransitionsScenario(),
 	}

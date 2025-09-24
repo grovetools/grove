@@ -269,12 +269,12 @@ func TestLoadConfig(t *testing.T) {
 			},
 			{
 				Name:        "Generate LLM changelog",
-				Description: "Uses grove release changelog with --llm flag to generate changelog",
+				Description: "Uses grove changelog with --llm flag to generate changelog",
 				Func: func(ctx *harness.Context) error {
 					repoDir := ctx.Get("repo_dir").(string)
 					
-					// Run grove release changelog with LLM flag
-					cmd := command.New(ctx.GroveBinary, "release", "changelog", repoDir, 
+					// Run grove changelog with LLM flag
+					cmd := command.New(ctx.GroveBinary, "changelog", repoDir, 
 						"--llm", "--version", "v0.2.0").Dir(repoDir)
 					result := cmd.Run()
 					
@@ -283,7 +283,7 @@ func TestLoadConfig(t *testing.T) {
 							result.Error, result.Stderr)
 					}
 					
-					ctx.ShowCommandOutput("grove release changelog --llm", result.Stdout, result.Stderr)
+					ctx.ShowCommandOutput("grove changelog --llm", result.Stdout, result.Stderr)
 					
 					// Read the generated changelog
 					changelogPath := filepath.Join(repoDir, "CHANGELOG.md")

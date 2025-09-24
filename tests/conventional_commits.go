@@ -207,11 +207,11 @@ func ConventionalCommitsScenario() *harness.Scenario {
 			},
 			{
 				Name:        "Generate changelog for v0.2.0",
-				Description: "Uses grove release changelog to generate a changelog",
+				Description: "Uses grove changelog to generate a changelog",
 				Func: func(ctx *harness.Context) error {
 					repoDir := ctx.Get("repo_dir").(string)
 					
-					cmd := command.New(ctx.GroveBinary, "release", "changelog", ".", "--version", "v0.2.0").Dir(repoDir)
+					cmd := command.New(ctx.GroveBinary, "changelog", ".", "--version", "v0.2.0").Dir(repoDir)
 					result := cmd.Run()
 					
 					if result.Error != nil {
@@ -296,7 +296,7 @@ func ConventionalCommitsScenario() *harness.Scenario {
 					}
 					
 					// Generate changelog for v0.3.0
-					cmd := command.New(ctx.GroveBinary, "release", "changelog", ".", "--version", "v0.3.0").Dir(repoDir)
+					cmd := command.New(ctx.GroveBinary, "changelog", ".", "--version", "v0.3.0").Dir(repoDir)
 					result := cmd.Run()
 					
 					if result.Error != nil {
