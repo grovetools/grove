@@ -3,3 +3,8 @@ description: Grove package manager and command delegator
 binary:
   name: grove
   path: ./bin/grove
+
+logging:
+  file:
+    enabled: true
+    format: json

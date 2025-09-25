@@ -7,6 +7,7 @@ require (
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.9
 	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/hpcloud/tail v1.0.0
 	github.com/mattsolo1/grove-core v0.2.13
 	github.com/mattsolo1/grove-tend v0.2.19
 	github.com/pelletier/go-toml/v2 v2.2.4
@@ -39,4 +40,6 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/sys v0.36.0 // indirect
 	golang.org/x/text v0.3.8 // indirect
+	gopkg.in/fsnotify.v1 v1.4.7 // indirect
+	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 )

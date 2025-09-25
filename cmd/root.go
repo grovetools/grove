@@ -17,6 +17,7 @@ func init() {
 	// Add subcommands
 	rootCmd.AddCommand(newChangelogCmd())
 	rootCmd.AddCommand(newDepsCmd())
+	rootCmd.AddCommand(newLogsCmd())
 	rootCmd.AddCommand(internal.NewInternalCmd())
 
 	// Set up the root command's RunE to handle tool delegation
