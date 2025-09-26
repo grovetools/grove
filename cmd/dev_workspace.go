@@ -49,16 +49,22 @@ When inside a workspace, Grove automatically uses binaries from that workspace.`
 
 		if workspaceRoot != "" {
 			fmt.Printf("📍 You are in a Grove workspace: %s\n", workspaceRoot)
-			fmt.Println("\nBinaries provided by this workspace:")
+			
+			// Try to discover binaries, but don't fail if we can't
 			binaries, err := workspace.DiscoverLocalBinaries(workspaceRoot)
 			if err != nil {
-				return fmt.Errorf("failed to discover binaries: %w", err)
-			}
-			for _, binary := range binaries {
-				// Check if binary actually exists
-				if _, err := os.Stat(binary.Path); err == nil {
-					fmt.Printf("  - %s (%s)\n", binary.Name, binary.Path)
+				// Just warn, don't fail - workspace detection still succeeded
+				fmt.Printf("\nNote: Could not discover binaries: %v\n", err)
+			} else if len(binaries) > 0 {
+				fmt.Println("\nBinaries provided by this workspace:")
+				for _, binary := range binaries {
+					// Check if binary actually exists
+					if _, err := os.Stat(binary.Path); err == nil {
+						fmt.Printf("  - %s (%s)\n", binary.Name, binary.Path)
+					}
 				}
+			} else {
+				fmt.Println("\nNo binaries found in this workspace.")
 			}
 		} else {
 			fmt.Println("Not in a Grove workspace. Using global binaries.")
