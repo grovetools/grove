@@ -1484,19 +1484,17 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 			return fmt.Errorf("go mod tidy failed: %w (output: %s)", err, output)
 		}
 
-		// Check for changes
-		status, err := git.GetStatus(modulePath)
-		if err != nil {
-			return fmt.Errorf("failed to get git status: %w", err)
+		// Always stage the dependency files first
+		if err := executeGitCommand(ctx, modulePath, []string{"add", "go.mod", "go.sum"},
+			"Stage dependency updates", logger); err != nil {
+			return err
 		}
 
-		if status.IsDirty {
-			// Commit the dependency updates
-			if err := executeGitCommand(ctx, modulePath, []string{"add", "go.mod", "go.sum"},
-				"Stage dependency updates", logger); err != nil {
-				return err
-			}
-
+		// Check if there are any staged changes before committing
+		diffCmd := exec.CommandContext(ctx, "git", "diff", "--staged", "--quiet")
+		diffCmd.Dir = modulePath
+		if err := diffCmd.Run(); err != nil {
+			// An error (usually exit code 1) means there are staged changes
 			commitMsg := "chore(deps): bump dependencies"
 			if err := executeGitCommand(ctx, modulePath, []string{"commit", "-m", commitMsg},
 				"Commit dependency updates", logger); err != nil {

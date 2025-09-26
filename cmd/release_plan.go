@@ -440,36 +440,8 @@ func runReleaseApply(ctx context.Context) error {
 		}
 	}
 
-	// Copy staged changelogs back to repositories
-	for repo, repoPlan := range plan.Repos {
-		if repoPlan.Selected && repoPlan.ChangelogPath != "" && repoPlan.Status == "Approved" {
-			node, ok := graph.GetNode(repo)
-			if !ok {
-				continue
-			}
-
-			targetPath := filepath.Join(node.Dir, "CHANGELOG.md")
-			existingContent, _ := os.ReadFile(targetPath)
-
-			// Read staged changelog
-			stagedContent, err := os.ReadFile(repoPlan.ChangelogPath)
-			if err != nil {
-				logger.WithField("repo", repo).WithError(err).Warn("Failed to read staged changelog")
-				continue
-			}
-
-			// Prepend to existing content
-			newContent := stagedContent
-			if len(existingContent) > 0 {
-				newContent = append(stagedContent, '\n')
-				newContent = append(newContent, existingContent...)
-			}
-
-			if err := os.WriteFile(targetPath, newContent, 0644); err != nil {
-				logger.WithField("repo", repo).WithError(err).Warn("Failed to write changelog")
-			}
-		}
-	}
+	// Note: Changelogs are already written to repositories by the 'w' command in the TUI
+	// The orchestrateRelease function will detect and commit these existing changelogs
 
 	// Execute dependency-aware release orchestration
 	if err := orchestrateRelease(ctx, plan.RootDir, plan.ReleaseLevels, versions, currentVersions, hasChanges, graph, logger, false, plan); err != nil {
