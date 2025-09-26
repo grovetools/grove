@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
+	stdlog "log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,7 +66,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	maxFields, _ := cmd.Flags().GetInt("max-fields")
 	tableView, _ := cmd.Flags().GetBool("table")
 	verbosity, _ := cmd.Flags().GetCount("verbose")
-	_, _ = cmd.Flags().GetInt("lines") // lines parameter for future use
+	linesToShow, _ := cmd.Flags().GetInt("lines")
 
 	// 1. Determine which workspaces to show
 	var workspaces []string
@@ -163,16 +165,33 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		wg.Add(1)
 		go func(path, wsName string) {
 			defer wg.Done()
-			config := tail.Config{
-				Follow: follow,
-				ReOpen: follow, // Only reopen if following
+			
+			// 1. Pre-read last N lines if requested.
+			if linesToShow > 0 {
+				lastLines, err := readLastNLines(path, linesToShow)
+				if err != nil {
+					logger.Debugf("Error reading last lines from %s: %v", path, err)
+				} else {
+					for _, line := range lastLines {
+						// Ensure we don't send empty strings from the pre-read
+						if line != "" {
+							lineChan <- TailedLine{Workspace: wsName, Line: line}
+						}
+					}
+				}
 			}
-			// When following, start from the end
-			if follow {
-				config.Location = &tail.SeekInfo{Offset: 0, Whence: io.SeekEnd}
-			} else {
-				// If not following, read from beginning to see existing logs
-				config.Location = &tail.SeekInfo{Offset: 0, Whence: io.SeekStart}
+
+			// 2. If not in follow mode, we are done.
+			if !follow {
+				return
+			}
+
+			// 3. If in follow mode, start tailing from the absolute end of the file.
+			config := tail.Config{
+				Follow:   true,
+				ReOpen:   true,
+				Location: &tail.SeekInfo{Offset: 0, Whence: io.SeekEnd}, // Start from the end
+				Logger:   stdlog.New(ioutil.Discard, "", 0), // Suppress tail library debug output
 			}
 
 			t, err := tail.TailFile(path, config)
@@ -556,4 +575,84 @@ func getLevelStyle(level string) lipgloss.Style {
 	default:
 		return lipgloss.NewStyle()
 	}
+}
+
+// readLastNLines efficiently reads the last n lines from a file without loading
+// the entire file into memory. It reads the file in chunks from the end.
+func readLastNLines(path string, n int) ([]string, error) {
+	if n <= 0 {
+		return []string{}, nil
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	stat, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	filesize := stat.Size()
+	if filesize == 0 {
+		return []string{}, nil
+	}
+
+	// Use a buffer to read chunks of the file
+	const bufferSize = 4096
+	buffer := make([]byte, bufferSize)
+	
+	var lines []string
+	var lineBuffer []byte
+	offset := filesize
+
+	for len(lines) < n && offset > 0 {
+		readSize := int64(bufferSize)
+		if offset < readSize {
+			readSize = offset
+		}
+		offset -= readSize
+
+		_, err := file.ReadAt(buffer[:readSize], offset)
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
+
+		// Process the buffer from end to start
+		for i := int(readSize) - 1; i >= 0; i-- {
+			if buffer[i] == '\n' {
+				// We found a newline, so we have a complete line
+				if len(lineBuffer) > 0 {
+					// Prepend to lines (we're reading backwards)
+					lines = append([]string{string(lineBuffer)}, lines...)
+					lineBuffer = nil
+					
+					if len(lines) >= n {
+						break
+					}
+				}
+			} else {
+				// Prepend byte to the current line buffer
+				lineBuffer = append([]byte{buffer[i]}, lineBuffer...)
+			}
+		}
+
+		if len(lines) >= n {
+			break
+		}
+	}
+	
+	// Add the first line if it wasn't terminated by a newline
+	if len(lines) < n && len(lineBuffer) > 0 {
+		lines = append([]string{string(lineBuffer)}, lines...)
+	}
+
+	// In case we over-shot due to buffer boundaries, trim to N lines
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+
+	return lines, nil
 }
