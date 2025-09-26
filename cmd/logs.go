@@ -54,6 +54,7 @@ parses the structured log entries, and displays them in a color-coded, readable 
 	cmd.Flags().Int("max-fields", 5, "Maximum number of additional fields to show on one line (0 = unlimited)")
 	cmd.Flags().Bool("table", false, "Show structured fields in a table below each log line")
 	cmd.Flags().CountP("verbose", "v", "Increase verbosity (use -v, -vv, -vvv for more detail)")
+	cmd.Flags().BoolP("tui", "i", false, "Launch interactive TUI mode")
 
 	return cmd
 }
@@ -66,7 +67,17 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	maxFields, _ := cmd.Flags().GetInt("max-fields")
 	tableView, _ := cmd.Flags().GetBool("table")
 	verbosity, _ := cmd.Flags().GetCount("verbose")
+	tuiMode, _ := cmd.Flags().GetBool("tui")
 	linesToShow, _ := cmd.Flags().GetInt("lines")
+
+	// Auto-detect TTY and enable TUI mode if interactive
+	if !tuiMode && os.Stdin != nil {
+		if fi, err := os.Stdout.Stat(); err == nil {
+			if (fi.Mode() & os.ModeCharDevice) != 0 {
+				tuiMode = true
+			}
+		}
+	}
 
 	// 1. Determine which workspaces to show
 	var workspaces []string
@@ -155,6 +166,11 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	if len(logFiles) == 0 {
 		logger.Info("No log files found in any workspace.")
 		return nil
+	}
+
+	// If TUI mode is enabled, run the TUI instead
+	if tuiMode {
+		return runLogsTUI(cmd, workspaces, follow)
 	}
 
 	// 3. Concurrently tail files
