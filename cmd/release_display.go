@@ -68,8 +68,11 @@ var (
 			Foreground(lipgloss.Color("196"))
 )
 
-// Initialize pretty logger for display functions
-var prettyLog = grovelogging.NewPrettyLogger()
+// Initialize loggers for display functions
+var (
+	log       = grovelogging.NewLogger("grove-meta")
+	prettyLog = grovelogging.NewPrettyLogger()
+)
 
 // Phase display helpers
 func displayPhase(title string) {
@@ -102,11 +105,11 @@ func displayProgress(message string) {
 }
 
 func displayComplete(message string) {
-	fmt.Printf("%s %s\n", releaseCheckmarkStyle.Render("✓"), message)
+	prettyLog.Success(message)
 }
 
 func displayFailed(message string) {
-	fmt.Printf("%s %s\n", crossStyle.Render("✗"), message)
+	prettyLog.ErrorPretty(message, nil)
 }
 
 // Create a styled pre-flight checks table
@@ -187,7 +190,7 @@ func displayPreflightTable(headers []string, rows [][]string) {
 		return lipgloss.NewStyle().Padding(0, 1)
 	})
 
-	fmt.Println(t)
+	prettyLog.InfoPretty(t.String())
 }
 
 // Create a progress box for release operations
@@ -199,7 +202,7 @@ func displayReleaseProgress(title string, items []string) {
 	content = append(content, items...)
 
 	box := phaseBoxStyle.Render(strings.Join(content, "\n"))
-	fmt.Println(box)
+	prettyLog.InfoPretty(box)
 }
 
 // Display final success message
@@ -219,7 +222,8 @@ func displayFinalSuccess(version string, repoCount int) {
 	}
 
 	box := successBoxStyle.Render(strings.Join(content, "\n"))
-	fmt.Println("\n" + box)
+	prettyLog.Blank()
+	prettyLog.InfoPretty(box)
 }
 
 // Display release summary with better formatting
