@@ -1,205 +1,162 @@
 # Grove Installation Guide
 
-This guide walks you through installing the Grove CLI and setting up your environment to use the Grove ecosystem of tools.
+This guide provides comprehensive instructions for installing the Grove command-line interface (CLI) and configuring your system to use the full suite of Grove tools.
 
 ## Prerequisites
 
-- A Unix-like operating system (macOS or Linux)
-- `curl` or `wget` for downloading
-- (Optional) GitHub CLI (`gh`) for private repository access
+Before installing Grove, ensure your system meets the following requirements:
 
-## Supported Platforms
+- **Operating System**: A Unix-like environment such as macOS or Linux.
+- **Go Toolchain**: Required only if you plan to build from source. Go version 1.21 or later is recommended.
+- **Git**: Required for building from source and for certain commands that interact with repositories.
+- **`curl`**: Used by the primary installation script to download binaries.
+- **GitHub CLI (`gh`)**: Optional but recommended for seamless access to private Grove repositories. The installer will use it automatically if it's installed and authenticated.
 
-Grove supports the following platforms:
-- **macOS**: Intel (amd64) and Apple Silicon (arm64)
-- **Linux**: x86_64 (amd64) and ARM64
+## Installation Methods
 
-## Primary Installation Method
+There are several ways to install the `grove` CLI. The recommended method for most users is the installation script.
 
-The recommended way to install Grove is using the installation script:
+### Method 1: Installation Script (Recommended)
+
+The quickest way to install Grove is with a single command in your terminal. The script automatically detects your operating system and architecture, downloads the correct binary, and places it in the appropriate directory.
 
 ```bash
 curl -sSfL https://raw.githubusercontent.com/mattsolo1/grove-meta/main/scripts/install.sh | sh
 ```
 
-This single command will:
-1. Detect your operating system and architecture
-2. Download the appropriate Grove binary for your platform
-3. Install it to `~/.grove/bin/grove`
-4. Create the necessary directory structure
+This command performs the following actions:
+1.  Creates the `~/.grove` directory structure.
+2.  Downloads the latest `grove` binary to `~/.grove/bin/grove`.
+3.  Ensures the binary is executable.
 
-## Smart Installation Features
+The installer intelligently handles repository access:
+-   **Public Repositories**: By default, it uses `curl` to download from public GitHub releases.
+-   **Private Repositories**: If it detects that the GitHub CLI (`gh`) is installed and authenticated (`gh auth status`), it will automatically use `gh` to download releases, providing seamless access to private repositories.
 
-The Grove installer is intelligent and adapts to your environment:
+### Method 2: Building from Source
 
-### Public Repository Access
-By default, the installer uses `curl` to download Grove from GitHub's public releases. This works without any authentication and is suitable for public repositories.
+If you have the Go toolchain installed, you can build and install Grove directly from the source code.
 
-### Private Repository Support
-If you're working with private Grove repositories, the installer automatically detects and uses the GitHub CLI (`gh`) when:
-1. The `gh` command is installed on your system
-2. You're authenticated with GitHub (`gh auth status` succeeds)
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/mattsolo1/grove-meta.git
+    cd grove-meta
+    ```
 
-When these conditions are met, the installer will:
-- Use `gh release download` instead of `curl`
-- Access private repositories seamlessly
-- Display a message confirming it's using the `gh` CLI
+2.  **Build the binary:**
+    The project `Makefile` provides a convenient way to build the application. The resulting binary will be placed in the `./bin` directory.
+    ```bash
+    make build
+    ```
 
-To explicitly use the GitHub CLI after installation:
-```bash
-grove install all --use-gh
-grove update --use-gh
-```
+3.  **Install the binary:**
+    After building, copy the binary to the Grove installation directory.
+    ```bash
+    # Create the target directory if it doesn't exist
+    mkdir -p ~/.grove/bin
 
-## Post-Installation Setup
+    # Copy the binary
+    cp ./bin/grove ~/.grove/bin/
+    ```
 
-### Step 1: Update Your PATH
+### Method 3: Manual Installation
 
-The most important post-installation step is adding the Grove binary directory to your PATH. This allows you to run `grove` and all installed tools from any directory.
+You can also install Grove by manually downloading a pre-built binary from the project's [GitHub Releases page](https://github.com/mattsolo1/grove-meta/releases).
 
-#### For Zsh (default on modern macOS):
-```bash
-echo 'export PATH="$HOME/.grove/bin:$PATH"' >> ~/.zshrc
-source ~/.zshrc
-```
+1.  Navigate to the releases page and find the appropriate asset for your operating system and architecture (e.g., `grove-darwin-arm64`).
+2.  Download the binary.
+3.  Rename the downloaded file to `grove`.
+4.  Move the binary to the installation directory:
+    ```bash
+    # Create the directory if it doesn't exist
+    mkdir -p ~/.grove/bin
 
-#### For Bash:
-```bash
-echo 'export PATH="$HOME/.grove/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
-```
+    # Move and rename the binary
+    mv /path/to/downloaded/file ~/.grove/bin/grove
+    ```
+5.  Make the binary executable:
+    ```bash
+    chmod +x ~/.grove/bin/grove
+    ```
 
-#### For Fish:
-```fish
-set -U fish_user_paths $HOME/.grove/bin $fish_user_paths
-```
+## Post-Installation Configuration
 
-### Step 2: Verify Installation
+After installing the `grove` binary, you must add its location to your shell's `PATH` environment variable. This allows you to run `grove` and other installed tools from any directory.
 
-After updating your PATH, verify Grove is installed correctly:
+1.  **Add Grove to your PATH:**
+    Execute the command appropriate for your shell:
 
-```bash
-grove version
-```
+    *   **For Zsh (`~/.zshrc`):**
+        ```bash
+        echo 'export PATH="$HOME/.grove/bin:$PATH"' >> ~/.zshrc
+        ```
 
-You should see output showing the Grove version and build information.
+    *   **For Bash (`~/.bashrc` or `~/.bash_profile`):**
+        ```bash
+        echo 'export PATH="$HOME/.grove/bin:$PATH"' >> ~/.bashrc
+        ```
 
-### Step 3: Install Grove Tools
+    *   **For Fish (`~/.config/fish/config.fish`):**
+        ```fish
+        set -U fish_user_paths $HOME/.grove/bin $fish_user_paths
+        ```
 
-Once Grove is installed and in your PATH, you can install the ecosystem tools:
+2.  **Apply the changes:**
+    For the changes to take effect, either restart your terminal or source your shell's configuration file:
+    ```bash
+    # For Zsh
+    source ~/.zshrc
 
-```bash
-# Install all available tools (public repositories)
-grove install all
+    # For Bash
+    source ~/.bashrc
+    ```
 
-# Install all tools from private repositories
-grove install all --use-gh
+3.  **Verify the installation:**
+    Run the `version` command to confirm that `grove` is installed and accessible.
+    ```bash
+    grove version
+    ```
+    This should display the version, commit, and build date of the `grove` CLI.
 
-# Install specific tools
-grove install context flow notebook
-```
+4.  **Install Grove tools:**
+    With the meta-CLI installed, you can now install the rest of the tools in the Grove ecosystem.
+    ```bash
+    # Install all available tools
+    grove install all
 
-## Understanding the Grove Directory Structure
+    # If you need to access private repositories, use the --use-gh flag
+    grove install all --use-gh
+    ```
 
-After installation, Grove creates the following directory structure in your home directory:
+## Upgrading Grove
 
-```
-~/.grove/
-├── bin/                    # Active tool binaries and symlinks
-│   ├── grove              # The Grove CLI itself
-│   ├── cx -> context      # Alias symlinks
-│   ├── context            # Installed tool binaries
-│   └── ...
-├── versions/              # Version-specific installations
-│   ├── context/
-│   │   ├── v0.2.0/       # Specific version installations
-│   │   └── v0.2.1/
-│   └── flow/
-│       └── v0.1.0/
-├── active_versions.json   # Tracks active version for each tool
-└── devlinks.json         # Tracks local development links
-```
+You can update the `grove` CLI and all installed tools to their latest versions.
 
-### Directory Purposes
+-   **Update the `grove` CLI itself:**
+    ```bash
+    grove self-update
+    ```
 
-- **`bin/`**: Contains the active binaries for all tools. This is the directory you add to your PATH.
-- **`versions/`**: Stores multiple versions of each tool, allowing you to switch between them.
-- **`active_versions.json`**: Records which version of each tool is currently active.
-- **`devlinks.json`**: Used by `grove dev` commands to track local development builds.
-
-## Alternative Installation Methods
-
-### Manual Installation
-
-If you prefer not to use the installation script, you can manually install Grove:
-
-1. Download the appropriate binary for your platform from the [releases page](https://github.com/mattsolo1/grove-meta/releases)
-2. Rename it to `grove`
-3. Move it to a directory in your PATH
-4. Make it executable: `chmod +x grove`
-
-### Building from Source
-
-If you have Go installed, you can build Grove from source:
-
-```bash
-git clone https://github.com/mattsolo1/grove-meta.git
-cd grove-meta
-make build
-cp ./bin/grove ~/.grove/bin/
-```
+-   **Update all installed tools:**
+    ```bash
+    grove update all
+    ```
 
 ## Troubleshooting
 
-### "grove: command not found"
+### `grove: command not found`
+This error indicates that the `~/.grove/bin` directory is not in your shell's `PATH`.
+-   Ensure you have completed the "Post-Installation Configuration" steps correctly for your shell.
+-   Verify the `export PATH` line was added to your shell's configuration file (e.g., `~/.zshrc`).
+-   Try opening a new terminal window to ensure the configuration has been loaded.
 
-This error means Grove is not in your PATH. Ensure you've:
-1. Added `~/.grove/bin` to your PATH (see Step 1 above)
-2. Reloaded your shell configuration (`source ~/.zshrc` or similar)
-3. Opened a new terminal window
-
-### Permission Denied Errors
-
-If you get permission errors during installation:
-```bash
-chmod +x ~/.grove/bin/grove
-```
+### Permission Denied
+If you encounter a "permission denied" error when trying to run `grove`, the binary may not be executable.
+-   Run `chmod +x ~/.grove/bin/grove` to grant execute permissions.
 
 ### Private Repository Access Issues
-
-If you're having trouble accessing private repositories:
-
-1. Ensure the GitHub CLI is installed:
-   ```bash
-   brew install gh  # macOS
-   # or see https://cli.github.com for other platforms
-   ```
-
-2. Authenticate with GitHub:
-   ```bash
-   gh auth login
-   ```
-
-3. Verify authentication:
-   ```bash
-   gh auth status
-   ```
-
-4. Use the `--use-gh` flag:
-   ```bash
-   grove install all --use-gh
-   ```
-
-### Network Issues
-
-If you're behind a corporate firewall or proxy:
-- The installer respects standard HTTP proxy environment variables (`HTTP_PROXY`, `HTTPS_PROXY`)
-- You may need to configure `git` and `gh` to use your proxy settings
-
-## Next Steps
-
-Now that Grove is installed and configured, you're ready to start using it! Continue to the [Getting Started Guide](./03-getting-started.md) to learn how to:
-- List available tools
-- Install individual tools
-- Run Grove commands
-- Update tools to newer versions
+If `grove install` or `grove update` fails with errors related to private repositories:
+1.  **Install the GitHub CLI**: Follow the official instructions at [cli.github.com](https://cli.github.com).
+2.  **Authenticate with GitHub**: Run `gh auth login` and follow the prompts.
+3.  **Verify Authentication**: Run `gh auth status`. It should show you as logged in.
+4.  **Use the `--use-gh` flag**: Rerun your command with the `--use-gh` flag (e.g., `grove install all --use-gh`).

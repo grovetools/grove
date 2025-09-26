@@ -1,514 +1,202 @@
 # Grove Architecture
 
-This document describes the high-level architecture of the Grove ecosystem and the internal design of the Grove meta-tool.
+This document describes the high-level architecture of the Grove ecosystem and the internal design of the `grove` meta-tool.
 
 ## System Overview
 
-Grove follows a distributed architecture pattern where:
-- Each tool is an independent repository with its own release cycle
-- The Grove meta-tool acts as the central orchestrator
-- Tools communicate through well-defined interfaces
-- Binary management uses a layered symlink system
-- Configuration is declarative and file-based
+Grove employs a distributed architecture where each tool is an independent repository with its own release cycle. The `grove` meta-tool (`grove-meta` repository) functions as the central package manager and command orchestrator for the entire ecosystem. This design promotes modularity, independent development, and focused tooling.
 
+The system's operation centers around two main contexts: the global installation managed within the `~/.grove` directory and the project-specific context within a Grove workspace.
+
+```mermaid
+graph TD
+    subgraph User Interaction
+        A[User Command: `grove <subcommand>` or `<tool> <args>`]
+    end
+
+    A --> B{Grove Meta-CLI};
+
+    subgraph Grove Meta-CLI
+        B --> B1[Command Dispatch];
+        B --> B2[Tool Registry];
+        B --> B3[SDK & Version Manager];
+        B --> B4[Dev Link Manager];
+        B --> B5[Workspace Controller];
+    end
+
+    B1 --> C{Execution Flow};
+
+    subgraph Execution Flow
+        C -- No Workspace --> D{Global Binary Resolution};
+        C -- In Workspace --> E{Workspace Binary Resolution};
+    end
+
+    subgraph Workspace Context ".grove-workspace"
+        E -- Uses --> E1[Workspace Binaries e.g., ./repo/bin/cx];
+        E1 --> F[Individual Tool];
+    end
+
+    subgraph Global Context "~/.grove"
+        D --> D1["~/.grove/bin (Symlinks)"];
+        D1 -- Dev Override --> D2["devlinks.json"];
+        D1 -- Release Version --> D3["active_versions.json"];
+        D2 --> F;
+        D3 --> D4["~/.grove/versions/..."];
+        D4 --> F;
+    end
+
+    subgraph Tool Ecosystem
+        F;
+        G[grove-context];
+        H[grove-flow];
+        I[grove-notebook];
+        J[...]
+    end
+
+    F --- G & H & I & J;
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      User Commands                           │
-└─────────────────────────────┬───────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     Grove Meta-CLI                           │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
-│  │ Command  │  │   Tool   │  │ Version  │  │   Dev    │    │
-│  │ Dispatch │  │ Registry │  │ Manager  │  │  Links   │    │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘    │
-└─────────────────────────────┬───────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    ~/.grove Directory                        │
-│  ┌────────────┐  ┌────────────┐  ┌────────────────────┐    │
-│  │    bin/    │  │  versions/ │  │  Configuration     │    │
-│  │ (symlinks) │  │  (tools)   │  │  (JSON files)      │    │
-│  └────────────┘  └────────────┘  └────────────────────┘    │
-└─────────────────────────────┬───────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     Individual Tools                         │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
-│  │  grove-  │  │  grove-  │  │  grove-  │  │  grove-  │    │
-│  │ context  │  │   flow   │  │ notebook │  │   tmux   │    │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘    │
-└─────────────────────────────────────────────────────────────┘
-```
+
+## Core Principles and Design Decisions
+
+The architecture is guided by several key principles:
+
+1.  **Modularity and Independence**: Each tool is a self-contained project. This allows for independent versioning, testing, and release cycles, preventing a single tool's development from blocking others.
+2.  **Convention over Configuration**: Grove relies on conventions for project structure (e.g., `grove.yml`, `Makefile` targets) to automate discovery and orchestration, minimizing the need for explicit configuration.
+3.  **Developer Experience First**: Features like workspace-aware binary resolution, development links (`grove dev`), and aggregated commands (`grove ws status`) are designed to streamline the development workflow within the ecosystem.
+4.  **Polyglot Support**: The architecture is not limited to Go. Through a system of project handlers, it can manage and orchestrate releases for projects written in different languages (e.g., Python/Rust via Maturin).
+5.  **File-based State**: Configuration and state (active versions, dev links, release plans) are stored in human-readable JSON files, making the system transparent and easy to debug or manually edit if necessary.
 
 ## Component Architecture
 
-### Grove Meta-CLI Components
+The `grove` meta-tool is a Go application built with the `cobra` CLI framework. Its logic is organized into distinct packages, each with a clear responsibility.
 
-The Grove meta-tool is organized into several key packages:
+#### `cmd/` - Command Layer
 
-#### `/cmd` - Command Layer
-- **Purpose**: Define CLI commands and subcommands
-- **Key Files**:
-  - `root.go`: Main entry point and command delegation
-  - `install_cmd.go`: Tool installation logic
-  - `dev_*.go`: Development workflow commands
-  - `deps.go`: Dependency management commands
-  - `release.go`: Release orchestration
-  - `workspace_*.go`: Workspace management
+This package defines the entire CLI structure, including commands, subcommands, flags, and arguments. It acts as the primary interface to the user.
 
-#### `/pkg` - Core Logic
+-   `root.go`: Implements the main `grove` command and the core command delegation logic. It determines whether a command is internal to `grove` or should be passed to an installed tool.
+-   `install_cmd.go`, `update_cmd.go`, `self_update.go`: Manage the installation and updating of tools from release artifacts.
+-   `dev_*.go`: A suite of commands (`dev link`, `dev use`, `dev list`) for managing local development binaries, allowing developers to override released tool versions with locally-built ones.
+-   `release.go`, `release_tui.go`: Orchestrate complex, multi-repository releases. This includes dependency-aware version calculation, changelog generation, and an interactive TUI for release planning and execution.
+-   `workspace_*.go`: Provide aggregated views and operations across all repositories in an ecosystem (e.g., `ws status`, `ws issues`).
+-   `deps.go`: Manages Go module dependencies across all Go-based projects in the ecosystem.
 
-##### `/pkg/sdk` - SDK Management
-- **Purpose**: Handle tool installation and version management
-- **Key Components**:
-  - `Manager`: Central SDK manager
-  - `ToolRegistry`: Maps tool names to repositories
-  - Version tracking and switching
-  - Binary download and verification
+#### `pkg/` - Core Logic and Services
 
-##### `/pkg/workspace` - Workspace Discovery
-- **Purpose**: Find and manage Grove workspaces
-- **Key Functions**:
-  - `FindRoot()`: Locate ecosystem root
-  - `Discover()`: Find all workspaces using glob patterns
-  - Project enumeration and filtering
+This directory contains the internal APIs that power the CLI commands.
 
-##### `/pkg/devlinks` - Development Links
-- **Purpose**: Manage local development binary overrides
-- **Key Components**:
-  - `Config`: Development links configuration
-  - `BinaryLinks`: Per-tool link management
-  - `LinkInfo`: Individual link metadata
-  - Registry persistence in `devlinks.json`
+-   **`pkg/sdk`**: The SDK manager handles the lifecycle of released tools. It fetches release information from GitHub, downloads binaries, organizes them by version in `~/.grove/versions`, and manages the active version for each tool in `active_versions.json`.
+-   **`pkg/workspace`**: Implements the logic for discovering and interacting with Grove workspaces. It finds the ecosystem root by looking for a `grove.yml` file and discovers individual projects based on glob patterns defined therein. It also handles the discovery of local binaries within a development workspace.
+-   **`pkg/devlinks`**: Manages the local development binary "override" system. It maintains a registry (`~/.grove/devlinks.json`) of binaries from local worktrees that can be activated to temporarily replace the globally installed versions.
+-   **`pkg/reconciler`**: This component is responsible for the version resolution logic. It reconciles the state from `devlinks.json` and `active_versions.json` to determine the single, effective binary that should be active for a given tool and manages the symlinks in `~/.grove/bin`.
+-   **`pkg/depsgraph`**: Builds an in-memory dependency graph of all projects within an ecosystem. It parses project files (like `go.mod` or `pyproject.toml`) to understand inter-project dependencies. The graph is used by the release command to determine the correct build order via topological sorting.
+-   **`pkg/project`**: Provides a generic interface (`ProjectHandler`) for interacting with projects of different types (Go, Python/Maturin, etc.). This abstraction allows commands like `release` to operate on a polyglot monorepo.
+-   **`pkg/release`**: Contains the complex orchestration logic for the `grove release` command. It manages the release lifecycle, from version calculation and changelog generation to Git tagging and CI monitoring. It also manages the state of an interactive release via `release_plan.json`.
+-   **`pkg/gh`**: A wrapper around the GitHub CLI (`gh`) for interacting with the GitHub API, used for fetching release data, monitoring CI status, and managing repository secrets.
 
-##### `/pkg/reconciler` - Version Reconciliation
-- **Purpose**: Intelligent layering of dev and release versions
-- **Algorithm**:
-  1. Check for active dev link
-  2. Fall back to release version
-  3. Update symlinks accordingly
-  4. Handle missing binaries gracefully
+## Binary Management and Execution
 
-##### `/pkg/depsgraph` - Dependency Graph
-- **Purpose**: Build and analyze project dependency relationships
-- **Key Features**:
-  - Graph construction from go.mod files
-  - Topological sorting for release order
-  - Cycle detection
-  - Level-based grouping
+Grove's binary management is a key feature, providing a flexible, multi-layered system that seamlessly switches between development and release versions.
 
-##### `/pkg/project` - Project Handlers
-- **Purpose**: Abstract project-type-specific operations
-- **Supported Types**:
-  - `GoHandler`: Go module projects
-  - `MaturinHandler`: Python/Rust hybrid projects
-  - `NodeHandler`: Node.js projects
-  - `TemplateHandler`: Project templates
-- **Interface**:
-  ```go
-  type ProjectHandler interface {
-      ParseDependencies(path string) ([]Dependency, error)
-      UpdateDependency(path string, dep Dependency) error
-      GetVersion(path string) (string, error)
-      SetVersion(path string, version string) error
-      GetBuildCommand() string
-      GetTestCommand() string
-  }
-  ```
+### The `~/.grove` Directory
 
-##### `/pkg/release` - Release Orchestration
-- **Purpose**: Coordinate multi-project releases
-- **Features**:
-  - Version bump calculation
-  - Changelog generation
-  - Git operations
-  - CI/CD integration
-
-##### `/pkg/gh` - GitHub Integration
-- **Purpose**: Interact with GitHub API
-- **Features**:
-  - Release creation and management
-  - Issue and PR operations
-  - Repository information retrieval
-
-## Directory Structure
-
-### `~/.grove` Directory Layout
-
-The Grove home directory contains all installed tools and configuration:
+All globally managed tools and configuration reside in `~/.grove`:
 
 ```
 ~/.grove/
-├── bin/                           # Active tool binaries
-│   ├── grove                     # Grove meta-tool
-│   ├── context                   # Full binary or symlink
-│   ├── cx → context              # Alias symlink
-│   ├── flow                      # Another tool
-│   └── ...
+├── bin/                       # Symlinks to active tool binaries. This dir is added to PATH.
+│   ├── grove                  # The meta-tool itself (usually a symlink to a version).
+│   ├── cx                     # An alias symlink to the 'context' binary.
+│   └── context                # The primary symlink for the 'grove-context' tool.
 │
-├── versions/                      # All installed versions
-│   ├── context/
-│   │   ├── v0.2.0/
-│   │   │   └── bin/
-│   │   │       └── context
-│   │   └── v0.2.1/
-│   │       └── bin/
-│   │           └── context
-│   └── flow/
-│       └── v0.1.0/
-│           └── bin/
-│               └── flow
+├── versions/                  # All installed release binaries, organized by version.
+│   ├── v0.1.0/
+│   │   └── bin/
+│   │       ├── cx
+│   │       └── flow
+│   └── v0.2.0/
+│       └── bin/
+│           └── cx
 │
-├── active_versions.json          # Currently active versions
-├── devlinks.json                 # Development link registry
-└── config.yml                    # User configuration (future)
+├── active_versions.json       # Maps each tool to its active release version.
+└── devlinks.json              # Registry for local development binary overrides.
 ```
 
-### File Formats
+### Version Resolution Flow
 
-#### `active_versions.json`
-```json
-{
-  "grove-context": "v0.2.1",
-  "grove-flow": "v0.1.0",
-  "grove-notebook": "v0.3.0"
-}
+When a command is executed, Grove determines which binary to use with the following priority:
+
+```mermaid
+graph TD
+    A[Command executed: `cx stats`] --> B{Inside a .grove-workspace?};
+    B -- Yes --> C{Discover workspace binaries via `grove.yml`};
+    C --> D{Binary `cx` found in workspace?};
+    D -- Yes --> E[Execute local binary e.g., `/path/to/worktree/grove-context/bin/cx`];
+    D -- No --> F{Check for dev link override in `~/.grove/devlinks.json`};
+    B -- No --> F;
+    F -- Yes --> G[Execute binary from dev link path e.g., `/path/to/dev/worktree/bin/cx`];
+    F -- No --> H{Check for active release version in `~/.grove/active_versions.json`};
+    H -- Yes --> I{Get version (e.g., v0.2.0)};
+    I --> J[Execute binary from versioned path e.g., `~/.grove/versions/v0.2.0/bin/cx`];
+    H -- No --> K[Error: Tool not installed];
+
+    E --> Z[End];
+    G --> Z[End];
+    J --> Z[End];
+    K --> Z[End];
 ```
 
-#### `devlinks.json`
-```json
-{
-  "binaries": {
-    "context": {
-      "links": {
-        "feature-branch": {
-          "path": "/home/user/projects/grove-context-feature/bin/context",
-          "worktree_path": "/home/user/projects/grove-context-feature",
-          "registered_at": "2024-01-15T10:30:00Z"
-        }
-      },
-      "current": "feature-branch"
-    }
-  }
-}
-```
-
-## Binary Management Architecture
-
-### Symlink Hierarchy
-
-Grove uses a multi-level symlink system for flexibility:
-
-1. **Alias Level**: `cx` → `context`
-2. **Binary Level**: `context` → `../versions/context/v0.2.1/bin/context`
-3. **Dev Override**: `context` → `/path/to/dev/binary`
-
-### Version Resolution Algorithm
-
-```python
-def resolve_tool_binary(tool_name):
-    # 1. Check for dev override
-    if dev_link_exists(tool_name):
-        return get_dev_link_path(tool_name)
-    
-    # 2. Check for active release version
-    if active_version_exists(tool_name):
-        version = get_active_version(tool_name)
-        return get_version_path(tool_name, version)
-    
-    # 3. Tool not available
-    return None
-```
-
-### Installation Process
-
-1. **Download Binary**:
-   - Detect platform (OS/arch)
-   - Fetch from GitHub releases
-   - Verify checksums (if available)
-
-2. **Store Version**:
-   - Create version directory
-   - Place binary with correct permissions
-   - Update version metadata
-
-3. **Activate Version**:
-   - Update active_versions.json
-   - Create/update symlinks in bin/
-   - Verify execution
+This layered approach provides a seamless developer experience:
+1.  **Workspace Priority**: When inside a development workspace (e.g., a git worktree), Grove automatically uses the binaries compiled within that workspace. This requires no manual commands (`grove dev use` is no longer necessary for this common case).
+2.  **Global Dev Overrides**: The `grove dev` commands allow a developer to globally "pin" a tool to a specific local development version, which is useful when working on a tool that affects others outside of its immediate workspace.
+3.  **Stable Releases**: The default behavior is to use the managed, stable release versions installed via `grove install`.
 
 ## Command Delegation Architecture
 
+The `grove` CLI acts as a meta-tool. It has its own set of commands but also delegates commands to the individual tools it manages.
+
 ### Delegation Flow
 
-```
-User Input: grove cx update
-     │
-     ▼
-Parse Command
-     │
-     ├─> Is "cx" a Grove subcommand? → No
-     │
-     ├─> Is "cx" a known tool? → Yes
-     │
-     ├─> Resolve binary path
-     │
-     ├─> Execute: exec.Command(binaryPath, "update")
-     │
-     └─> Pass through stdio
-```
+The delegation logic in `cmd/root.go` follows a clear chain of responsibility:
 
-### Subcommand Detection
-
-Grove distinguishes between its own subcommands and tool delegation:
-
-1. Check against known Grove subcommands (install, update, dev, etc.)
-2. If not found, attempt tool delegation
-3. If tool not found, show error with suggestions
-
-## Polyglot Support Architecture
-
-### Project Type Registry
-
-Grove supports multiple project types through a handler registry:
-
-```go
-registry := project.NewRegistry()
-registry.Register(project.TypeGo, NewGoHandler())
-registry.Register(project.TypeMaturin, NewMaturinHandler())
-registry.Register(project.TypeNode, NewNodeHandler())
+```mermaid
+sequenceDiagram
+    actor User
+    User->>Grove CLI: grove cx stats
+    Grove CLI->>Cobra Framework: Parse "cx stats"
+    Cobra Framework-->>Grove CLI: "cx" is not a known subcommand
+    Grove CLI->>Delegation Logic: Attempt to delegate "cx"
+    Delegation Logic->>Workspace Discovery: Is current directory a workspace?
+    Workspace Discovery-->>Delegation Logic: Yes, at /path/to/ws
+    Delegation Logic->>Workspace Discovery: Discover binaries in workspace
+    Workspace Discovery-->>Delegation Logic: Found cx at /path/to/ws/grove-context/bin/cx
+    Delegation Logic->>OS: exec("/path/to/ws/grove-context/bin/cx", "stats")
+    Note over Delegation Logic,OS: PATH is prepended with workspace bin dirs
+    OS-->>User: Output of "cx stats"
 ```
 
-### Handler Responsibilities
+If the command is not run from within a workspace, the flow proceeds to check the global `~/.grove/bin` directory, which contains the symlinks managed by the reconciler.
 
-Each handler implements project-specific operations:
+## Release Orchestration
 
-- **Dependency Parsing**: Extract from go.mod, package.json, pyproject.toml
-- **Version Management**: Read/write version information
-- **Build Commands**: Return appropriate build/test commands
-- **Project Detection**: Check for project files
+The `grove release` command is one of the most complex features, orchestrating releases across multiple independent repositories.
 
-### Build System Integration
+1.  **Plan Generation (`release tui` or `release --interactive`)**:
+    *   A `depsgraph` is built by parsing all project files (`go.mod`, `pyproject.toml`, etc.) via the `project` handlers.
+    *   The graph is topologically sorted to determine the release order.
+    *   The next semantic version is calculated for each repository with changes since its last tag.
+    *   For each repository, an LLM (via `grove-gemini`) is used to analyze git history and generate a draft changelog and a suggested version bump.
+    *   This entire plan is presented in an interactive TUI, where the developer can review, edit changelogs, adjust versions, and approve each repository for release. The state is saved to `~/.grove/release_plan.json`.
 
-Grove leverages Makefiles for build consistency:
+2.  **Plan Application (`A` key in TUI or `grove release apply`)**:
+    *   The command iterates through the release levels determined by the topological sort. Repositories within the same level can be released in parallel.
+    *   For each repository:
+        a.  Dependencies on other Grove projects are updated to their newly released versions.
+        b.  The `CHANGELOG.md` file is committed.
+        c.  A new version tag is created and pushed.
+        d.  The command monitors the GitHub Actions CI/CD workflow for a successful build and release of artifacts.
+        e.  It then polls the Go module proxy to wait for the new version to become available.
+    *   After all repositories in a level are successfully released and available, the process moves to the next level.
+    *   Finally, the root ecosystem repository is updated to point to the new submodule commits, and a parent tag is created for the entire ecosystem release.
 
-```makefile
-# Standard targets expected by Grove
-build:      # Build the project
-test:       # Run tests
-clean:      # Clean build artifacts
-dev:        # Development build
-release:    # Release build
-```
-
-## Release Architecture
-
-### Dependency-Based Release Ordering
-
-Grove uses topological sorting to determine release order:
-
-```
-Level 0: [grove-core, grove-tend]           # No dependencies
-Level 1: [grove-context, grove-flow]        # Depend on Level 0
-Level 2: [grove-meta]                       # Depends on Level 0 & 1
-```
-
-### Release State Machine
-
-```
-     ┌─────────┐
-     │  Start  │
-     └────┬────┘
-          │
-          ▼
-    ┌────────────┐
-    │ Check Deps │
-    └─────┬──────┘
-          │
-          ▼
-    ┌────────────┐
-    │ Calculate  │
-    │  Versions  │
-    └─────┬──────┘
-          │
-          ▼
-    ┌────────────┐
-    │  Generate  │
-    │ Changelogs │
-    └─────┬──────┘
-          │
-          ▼
-    ┌────────────┐
-    │   Tag &    │
-    │   Release  │
-    └─────┬──────┘
-          │
-          ▼
-    ┌────────────┐
-    │   Update   │
-    │ Dependents │
-    └─────┬──────┘
-          │
-          ▼
-     ┌─────────┐
-     │Complete │
-     └─────────┘
-```
-
-## Workspace Discovery Architecture
-
-### Discovery Algorithm
-
-```python
-def discover_workspaces(root_dir):
-    config = load_config(f"{root_dir}/grove.yml")
-    workspaces = []
-    
-    for pattern in config.workspaces:
-        matches = glob(f"{root_dir}/{pattern}")
-        for match in matches:
-            if is_directory(match) and exists(f"{match}/grove.yml"):
-                workspaces.append(match)
-    
-    return unique(workspaces)
-```
-
-### Workspace Context
-
-Grove maintains workspace context for operations:
-
-- Current workspace detection
-- Workspace-scoped commands
-- Cross-workspace operations
-- Workspace status aggregation
-
-## Security Architecture
-
-### Binary Verification
-
-- Download from official GitHub releases
-- HTTPS-only downloads
-- Future: Signature verification
-- Future: Checksum validation
-
-### Private Repository Support
-
-- GitHub CLI integration for authentication
-- Token-based access for CI/CD
-- Secure credential storage
-- No credentials in configuration files
-
-## Performance Optimizations
-
-### Lazy Loading
-
-- Commands are loaded on-demand
-- Tool registry loaded only when needed
-- Configuration cached in memory
-- Workspace discovery results cached
-
-### Parallel Operations
-
-- Concurrent tool installations
-- Parallel dependency updates
-- Batch GitHub API calls
-- Concurrent workspace operations
-
-### Efficient File Operations
-
-- Symlinks instead of copies
-- Incremental updates
-- Minimal file I/O
-- Strategic caching
-
-## Extension Points
-
-### Custom Project Types
-
-Add support for new languages/frameworks:
-
-1. Implement `ProjectHandler` interface
-2. Register with project registry
-3. Define build commands
-4. Add configuration support
-
-### Custom Commands
-
-Extend Grove with new functionality:
-
-1. Add command file in `/cmd`
-2. Register with root command
-3. Implement business logic
-4. Update documentation
-
-### Tool Integration
-
-Add new tools to the ecosystem:
-
-1. Update tool registry
-2. Configure repository mapping
-3. Set up CI/CD for releases
-4. Update installation scripts
-
-## Future Architecture Enhancements
-
-### Planned Improvements
-
-1. **Plugin System**:
-   - Dynamic command loading
-   - Third-party extensions
-   - Custom tool providers
-
-2. **Remote Configuration**:
-   - Centralized configuration server
-   - Team configuration sharing
-   - Configuration versioning
-
-3. **Advanced Caching**:
-   - Binary cache server
-   - Distributed caching
-   - Offline mode support
-
-4. **Enhanced Security**:
-   - Binary signature verification
-   - Sandboxed execution
-   - Audit logging
-
-5. **Improved Performance**:
-   - Background updates
-   - Predictive prefetching
-   - Compressed transfers
-
-## Design Principles
-
-### Core Principles
-
-1. **Simplicity**: Easy to understand and use
-2. **Flexibility**: Adapt to different workflows
-3. **Reliability**: Consistent and predictable behavior
-4. **Performance**: Fast operations with minimal overhead
-5. **Extensibility**: Easy to add new features and tools
-
-### Architectural Decisions
-
-1. **File-based Configuration**: Simple, version-controlled, portable
-2. **Symlink-based Binary Management**: Flexible, efficient, transparent
-3. **Distributed Architecture**: Independent tool development and releases
-4. **Convention over Configuration**: Sensible defaults, minimal setup
-5. **Progressive Disclosure**: Simple for beginners, powerful for experts
-
-## Summary
-
-Grove's architecture is designed to be:
-
-- **Modular**: Clear separation of concerns
-- **Scalable**: Handles ecosystems of any size
-- **Maintainable**: Clean code organization
-- **Testable**: Well-defined interfaces
-- **Extensible**: Easy to add new capabilities
-
-The architecture supports Grove's mission of providing a powerful, flexible, and user-friendly ecosystem management system for CLI tools.
+This dependency-aware, CI-integrated process ensures that downstream projects are only updated and released after their upstream dependencies are successfully built, released, and published.

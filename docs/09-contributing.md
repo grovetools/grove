@@ -1,587 +1,335 @@
 # Contributing to Grove
 
-Thank you for your interest in contributing to Grove! This guide will help you get started with development, testing, and submitting contributions to the Grove meta-tool.
+Thank you for your interest in contributing to the Grove ecosystem! This guide provides a comprehensive overview of how to get started with development, testing, and submitting contributions to `grove-meta`.
 
 ## Development Setup
 
 ### Prerequisites
 
-Before contributing to Grove, ensure you have:
-
-- Go 1.21 or later installed
+- Go 1.24 or later
 - Git configured with your GitHub account
-- Make utility available
-- (Optional) GitHub CLI (`gh`) for working with issues and PRs
-- (Optional) `golangci-lint` for code linting
+- Make
+- GitHub CLI (`gh`) for repository and release management
 
-### Cloning the Repository
+### Getting the Code
 
-1. Fork the repository on GitHub (if you're not a maintainer)
-2. Clone your fork or the main repository:
+1.  **Fork the repository** on GitHub if you are an external contributor.
+2.  **Clone your fork** or the main repository:
 
-```bash
-# For contributors with direct access
-git clone https://github.com/mattsolo1/grove-meta.git
-cd grove-meta
+    ```bash
+    # For contributors with direct access
+    git clone https://github.com/mattsolo1/grove-meta.git
+    cd grove-meta
 
-# For external contributors
-git clone https://github.com/YOUR_USERNAME/grove-meta.git
-cd grove-meta
-git remote add upstream https://github.com/mattsolo1/grove-meta.git
-```
+    # For external contributors
+    git clone https://github.com/YOUR_USERNAME/grove-meta.git
+    cd grove-meta
+    git remote add upstream https://github.com/mattsolo1/grove-meta.git
+    ```
 
-### Setting Up the Development Environment
+### Initial Environment Setup
 
-1. **Install dependencies**:
-```bash
-go mod download
-```
+1.  **Install dependencies**:
+    ```bash
+    go mod download
+    ```
 
-2. **Install Git hooks** (enforces conventional commits):
-```bash
-grove git-hooks install
-# or if grove isn't installed yet
-go run . git-hooks install
-```
+2.  **Install Git hooks**: This project uses conventional commits, enforced by a Git hook.
+    ```bash
+    # If you have a version of grove already installed
+    grove git-hooks install
 
-3. **Verify your setup**:
-```bash
-make build
-./bin/grove version
-```
+    # If you don't have grove installed yet
+    go run . git-hooks install
+    ```
+
+3.  **Verify your setup**:
+    ```bash
+    make build
+    ./bin/grove version
+    ```
 
 ## Building Grove
 
-Grove uses a Makefile to standardize build operations. Always review the Makefile first to understand available targets.
+The project uses a `Makefile` to standardize build operations. Always check the `Makefile` for available targets.
 
 ### Common Build Commands
 
-```bash
-# Standard build
-make build              # Creates binary in ./bin/grove
+| Command | Description |
+| :--- | :--- |
+| `make build` | Creates a standard production binary in `./bin/grove`. |
+| `make dev` | Creates a development build with race condition detection. |
+| `make clean` | Removes build artifacts from the `./bin` directory. |
+| `make build-all` | (If available) Creates binaries for multiple OS/architecture combinations. |
 
-# Development build with race detector
-make dev                # Includes race condition detection
+### Build Output and Versioning
 
-# Clean build artifacts
-make clean              # Removes binaries and temp files
-
-# Build for all platforms
-make build-all          # Creates binaries for multiple OS/arch combinations
-```
-
-### Build Output
-
-- **Binary location**: `./bin/grove`
-- **Never** copy binaries elsewhere in PATH manually
-- Use `grove dev link` for development testing
-- Version information is injected at build time via LDFLAGS
-
-### Version Information
-
-During development, version strings are automatically generated from Git:
-- Format: `branch-commit[-dirty]`
-- Example: `main-abc123` or `feature-def456-dirty`
-
-For releases, the version is passed by CI/CD:
-- Format: `vX.Y.Z`
-- Example: `v0.2.1`
+- **Binary Location**: The compiled binary is placed at `./bin/grove`.
+- **Development Builds**: For local development, version information is automatically injected from Git, resulting in versions like `main-abc123d-dirty`.
+- **Release Builds**: For official releases, a semantic version (e.g., `v0.5.1`) is passed by the CI/CD pipeline.
 
 ## Testing
 
+Grove uses a combination of standard Go unit tests and a dedicated end-to-end (E2E) testing framework called `tend`.
+
 ### Unit Tests
 
-Run the standard Go test suite:
-
+Run the Go test suite for all packages:
 ```bash
 make test
-# or with verbose output
+```
+For more detailed output, run Go tests directly:
+```bash
 go test -v ./...
 ```
 
-### End-to-End Tests
+### End-to-End (E2E) Tests
 
-Grove uses the `tend` testing framework for E2E tests:
+E2E tests simulate real-world CLI usage and verify complex workflows.
 
-1. **Build the test runner**:
-```bash
-make test-e2e-build
-```
+1.  **Build the test runner**:
+    ```bash
+    make test-e2e-build
+    ```
 
-2. **List available test scenarios**:
-```bash
-./bin/tend list
-```
+2.  **List available test scenarios**:
+    ```bash
+    ./bin/tend list
+    ```
 
-3. **Run all E2E tests**:
-```bash
-make test-e2e
-```
+3.  **Run all E2E tests**:
+    ```bash
+    make test-e2e
+    ```
 
-4. **Run specific test scenarios**:
-```bash
-make test-e2e ARGS="run -i conventional-commits"
-make test-e2e ARGS="run -i add-repo-dry-run"
-```
+4.  **Run specific test scenarios by tag or name**:
+    ```bash
+    # Run by scenario name
+    make test-e2e ARGS="run -i conventional-commits"
+
+    # Run all scenarios with the 'release' tag
+    make test-e2e ARGS="run -t release"
+    ```
 
 ### Available Test Scenarios
+The test suite covers a wide range of functionalities. Use `tend list` for the most up-to-date list. Key scenarios include:
 
 | Scenario | Description |
-|----------|-------------|
-| `conventional-commits` | Tests commit message validation |
-| `add-repo-dry-run` | Tests repository creation in dry-run mode |
-| `add-repo-with-github` | Tests GitHub integration |
-| `add-repo-skip-github` | Tests local-only repo creation |
-| `polyglot-project-types` | Tests multiple language support |
-| `polyglot-dependency-graph` | Tests cross-language dependencies |
-| `release-tui` | Tests interactive release interface |
-| `llm-changelog` | Tests AI-powered changelog generation |
+|:---|:---|
+| `conventional-commits` | Tests commit message validation via Git hooks. |
+| `add-repo-*` | Tests repository creation (dry-run, local-only, etc.). |
+| `polyglot-*` | Tests support for multiple project types (Go, Python/Maturin). |
+| `release-tui-*` | Tests the interactive TUI for release planning and execution. |
+| `llm-changelog` | Tests AI-powered changelog generation. |
+| `sync-deps-*` | Tests automatic dependency synchronization during releases. |
+| `workspace-*` | Tests workspace detection and context-aware binary delegation. |
 
 ### Docker-based E2E Tests
 
-For isolated testing environments:
+For fully isolated and reproducible testing, run the E2E suite inside a Docker container:
 
 ```bash
-# Run with mock data
+# Run with mock GitHub services (default)
 make test-e2e-docker
 
-# Run with live GitHub (requires GITHUB_TOKEN)
+# Run against live GitHub (requires a GITHUB_TOKEN)
 GITHUB_TOKEN=your_token make test-e2e-docker
 ```
 
 ## Code Quality
 
-### Code Formatting
+### Formatting
 
-Grove uses standard Go formatting:
-
+Code is formatted using the standard `gofmt` tool.
 ```bash
-make fmt                # Format all code
-gofmt -w .             # Alternative
+make fmt
 ```
 
 ### Static Analysis
 
-Run static analysis tools:
-
+Use `make check` to run all quality checks, including formatting, `go vet`, and `golangci-lint`.
 ```bash
-make vet                # Run go vet
-make lint               # Run golangci-lint (if installed)
-make check              # Run all checks (fmt, vet, lint, test)
+# Run go vet
+make vet
+
+# Run golangci-lint (if installed)
+make lint
+
+# Run all checks (fmt, vet, lint, test)
+make check
 ```
 
-### Installing golangci-lint
-
-If you don't have golangci-lint:
-
+If you need to install `golangci-lint`:
 ```bash
 go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 ```
 
 ## Commit Guidelines
 
-Grove enforces Conventional Commits format for all commit messages. This ensures consistent, readable history and enables automated changelog generation.
+This project enforces the **Conventional Commits** specification. This practice ensures a consistent and readable Git history, which is used to automate changelog generation.
 
 ### Commit Message Format
 
 ```
 <type>(<scope>): <subject>
 
-<body>
+[optional body]
 
-<footer>
+[optional footer(s)]
 ```
 
-### Types
+### Allowed Types
 
-- **feat**: New feature
-- **fix**: Bug fix
-- **docs**: Documentation changes
-- **style**: Code style changes (formatting, semicolons, etc.)
-- **refactor**: Code refactoring without feature changes
-- **perf**: Performance improvements
-- **test**: Test additions or corrections
-- **build**: Build system or dependency changes
-- **ci**: CI/CD configuration changes
-- **chore**: Routine tasks, maintenance
+- **feat**: A new feature for the user.
+- **fix**: A bug fix for the user.
+- **docs**: Documentation-only changes.
+- **style**: Code style changes (formatting, etc.) that do not affect the meaning of the code.
+- **refactor**: A code change that neither fixes a bug nor adds a feature.
+- **perf**: A code change that improves performance.
+- **test**: Adding missing tests or correcting existing tests.
+- **build**: Changes that affect the build system or external dependencies.
+- **ci**: Changes to our CI configuration files and scripts.
+- **chore**: Other changes that don't modify source or test files.
 
 ### Examples
 
 ```bash
-# Feature
-git commit -m "feat(dev): add interactive TUI for dev link management"
+# A new feature with a scope
+git commit -m "feat(release): add interactive TUI for release planning"
 
-# Bug fix
-git commit -m "fix(install): handle private repository authentication correctly"
+# A fix with a body explaining the change
+git commit -m "fix(install): correctly handle private repository URLs
 
-# Documentation
-git commit -m "docs: add polyglot project type examples"
+The previous implementation failed to parse SSH-based URLs. This change
+adds regex support for both HTTPS and SSH formats."
 
-# With scope and body
-git commit -m "feat(release): implement dependency-aware release ordering
+# A breaking change
+git commit -m "feat(dev)!: rework workspace detection to use a new marker file
 
-This change ensures that tools are released in the correct order based
-on their dependency relationships, preventing version conflicts."
+BREAKING CHANGE: The workspace marker file is now '.grove-workspace'
+instead of '.grove-ecosystem-worktree'."
 ```
 
-### Commit Hook Enforcement
-
-The installed Git hook will:
-1. Check your commit message format
-2. Reject non-conforming commits
-3. Provide helpful error messages
-
-If you need to bypass (not recommended):
-```bash
-git commit --no-verify -m "your message"
-```
+The installed `commit-msg` hook will automatically validate your commit messages and reject non-conforming ones.
 
 ## Development Workflow
 
-### Creating a Feature Branch
+### Branching and Worktrees
 
+Create a new branch for your feature or fix.
 ```bash
-# Create and switch to a new branch
 git checkout -b feature/your-feature-name
-
-# Or use git worktree for parallel development
-git worktree add ../grove-meta-feature feature/your-feature-name
-cd ../grove-meta-feature
 ```
 
-### Making Changes
-
-1. **Write tests first** (TDD approach recommended)
-2. **Implement your feature**
-3. **Run tests locally**:
-   ```bash
-   make test
-   make test-e2e ARGS="run -i relevant-scenario"
-   ```
-4. **Check code quality**:
-   ```bash
-   make check
-   ```
-
-### Testing with Development Builds
-
-Link your development build for testing:
-
+For developing multiple features in parallel without cloning the repository multiple times, `git worktree` is recommended:
 ```bash
-make build
-grove dev link grove ./bin/grove --name my-feature
-grove dev use grove my-feature
-
-# Test your changes
-grove --version
-grove your-new-command
-
-# Reset when done
-grove dev reset grove
+git worktree add ../grove-meta-my-feature feature/my-feature-name
+cd ../grove-meta-my-feature
 ```
 
-### Updating Dependencies
+### Testing Local Changes
 
-If you need to update or add dependencies:
+The Grove ecosystem is designed for seamless local development.
 
-```bash
-# Add a new dependency
-go get github.com/example/package
+1.  **Build your changes**:
+    ```bash
+    make build
+    ```
 
-# Update grove-core
-go get -u github.com/mattsolo1/grove-core@latest
+2.  **Use workspace-aware execution**: When you are inside the `grove-meta` project directory (or a worktree), the `grove` command automatically detects and uses the local binary from `./bin/grove`. This is the primary method for testing.
 
-# Clean up
-go mod tidy
-```
+    ```bash
+    # From the root of your grove-meta worktree
+    ./bin/grove your-new-command
+    ```
+
+3.  **Use `grove dev` for global testing**: If you need to test your development build outside of its worktree, use the `grove dev` commands to create a globally accessible link.
+
+    ```bash
+    # Register your local build
+    grove dev link . --as my-feature
+
+    # Activate it
+    grove dev use grove my-feature
+
+    # Now you can test 'grove' from any directory
+    cd ~
+    grove --version
+
+    # Switch back to the released version when done
+    grove dev use grove --release
+    ```
 
 ## Pull Request Process
 
-### Before Submitting
+1.  **Run all checks**: Before submitting, ensure all tests and quality checks pass.
+    ```bash
+    make check
+    make test-e2e
+    ```
 
-1. **Ensure all tests pass**:
-   ```bash
-   make check
-   make test-e2e
-   ```
+2.  **Update documentation**: If your changes affect user-facing behavior, update the relevant documentation in the `/docs` directory and the command's help text.
 
-2. **Update documentation** if needed:
-   - Update relevant docs in `/docs`
-   - Update command help text
-   - Update README if adding major features
+3.  **Push your branch** and create a pull request using the GitHub web interface or the `gh` CLI:
+    ```bash
+    git push origin feature/your-feature-name
+    gh pr create --title "feat(scope): your descriptive title" --body-file .github/PULL_REQUEST_TEMPLATE.md
+    ```
 
-3. **Squash commits** if needed:
-   ```bash
-   git rebase -i origin/main
-   ```
-
-### Submitting a Pull Request
-
-1. **Push your branch**:
-   ```bash
-   git push origin feature/your-feature-name
-   ```
-
-2. **Create the PR**:
-   ```bash
-   # Using GitHub CLI
-   gh pr create --title "feat: your feature" --body "Description..."
-   
-   # Or via GitHub web interface
-   ```
-
-3. **PR Description Template**:
-   ```markdown
-   ## Summary
-   Brief description of the changes
-   
-   ## Motivation
-   Why these changes are needed
-   
-   ## Changes
-   - Change 1
-   - Change 2
-   
-   ## Testing
-   How the changes were tested
-   
-   ## Checklist
-   - [ ] Tests added/updated
-   - [ ] Documentation updated
-   - [ ] Conventional commit format
-   - [ ] E2E tests pass
-   ```
-
-### Code Review Process
-
-1. **Automated checks** will run on your PR:
-   - Unit tests
-   - E2E tests
-   - Linting
-   - Build verification
-
-2. **Maintainer review**:
-   - Code quality and style
-   - Test coverage
-   - Documentation completeness
-   - Architecture alignment
-
-3. **Address feedback**:
-   ```bash
-   # Make requested changes
-   git add .
-   git commit -m "fix: address review feedback"
-   git push origin feature/your-feature-name
-   ```
+4.  **Code Review**: Once submitted, your PR will be reviewed by maintainers. Automated checks will also run. Address any feedback by pushing additional commits to your branch.
 
 ## Project Structure
 
-Understanding Grove's structure helps when contributing:
+A high-level overview of the `grove-meta` repository structure:
 
 ```
 grove-meta/
-├── cmd/                    # Command implementations
-│   ├── root.go            # Main entry point
-│   ├── install_cmd.go     # Install command
-│   ├── dev_*.go           # Dev subcommands
-│   └── ...
-├── pkg/                   # Core packages
-│   ├── sdk/               # SDK management
-│   ├── workspace/         # Workspace operations
-│   ├── devlinks/          # Dev link management
-│   ├── reconciler/        # Version reconciliation
-│   ├── depsgraph/         # Dependency graphs
-│   └── project/           # Project type handlers
-├── tests/                 # Test files
-│   ├── e2e/              # E2E test runner
-│   └── scenarios.go      # Test scenarios
-├── scripts/              # Helper scripts
-├── docs/                 # Documentation
-├── Makefile              # Build automation
-└── go.mod                # Go module definition
+├── cmd/            # Command-line interface logic (Cobra commands)
+│   ├── dev_*.go    # Subcommands for 'grove dev'
+│   ├── release_*.go# Subcommands for 'grove release'
+│   └── root.go     # Root command and tool delegation
+├── pkg/            # Core libraries and business logic
+│   ├── depsgraph/  # Dependency graph construction and sorting
+│   ├── devlinks/   # Management of local development symlinks
+│   ├── project/    # Handlers for different project types (Go, Python, etc.)
+│   ├── reconciler/ # Logic for layering dev versions over releases
+│   ├── release/    # Release orchestration and planning
+│   ├── sdk/        # Management of installed Grove tool versions
+│   └── workspace/  # Discovery and operations across workspaces
+├── tests/          # End-to-end tests
+│   ├── e2e/        # Test runner and Docker setup
+│   └── scenarios*.go # Definitions of test scenarios
+├── Makefile        # Build, test, and maintenance automation
+└── go.mod          # Go module definition
 ```
 
 ## Adding New Features
 
 ### Adding a New Command
 
-1. Create command file in `/cmd`:
-```go
-// cmd/mycommand.go
-package cmd
+1.  Create a new file `cmd/my_command.go`.
+2.  Use the `cli.NewStandardCommand` helper to create a new Cobra command.
+3.  Add the new command to `rootCmd` in your file's `init()` function.
+4.  Implement the command's logic in a `run...` function.
+5.  Add unit and E2E tests for the new command.
 
-import "github.com/spf13/cobra"
+### Adding a New Project Type
 
-func init() {
-    rootCmd.AddCommand(newMyCommand())
-}
+Grove's polyglot capabilities can be extended by adding new project type handlers.
 
-func newMyCommand() *cobra.Command {
-    return &cobra.Command{
-        Use:   "mycommand",
-        Short: "Brief description",
-        RunE:  runMyCommand,
-    }
-}
+1.  Create a new handler in `pkg/project/` that implements the `ProjectHandler` interface.
+2.  Register your new handler in `pkg/project/registry.go`.
+3.  Add E2E tests in the `tests/` directory to validate behavior for the new project type.
 
-func runMyCommand(cmd *cobra.Command, args []string) error {
-    // Implementation
-    return nil
-}
-```
+### Adding a Tool to the SDK Registry
 
-2. Add tests in `/cmd/mycommand_test.go`
-3. Update documentation
-
-### Adding a Project Type
-
-1. Implement the ProjectHandler interface:
-```go
-// pkg/project/myhandler.go
-type MyHandler struct{}
-
-func (h *MyHandler) ParseDependencies(path string) ([]Dependency, error) {
-    // Implementation
-}
-
-// Implement other interface methods...
-```
-
-2. Register in `/pkg/project/registry.go`
-3. Add E2E tests
-4. Document in configuration guide
-
-### Adding a Tool to the Registry
-
-Update `/pkg/sdk/manager.go`:
-```go
-var toolRegistry = map[string]ToolInfo{
-    // ...existing tools...
-    "newtool": {
-        RepoName:   "grove-newtool",
-        BinaryName: "newtool",
-    },
-}
-```
+To make a new tool installable via `grove install`, add it to the `toolRegistry` map in `pkg/sdk/manager.go`.
 
 ## Debugging
 
-### Debug Output
-
-Enable debug logging:
-```bash
-GROVE_DEBUG=true grove list
-```
-
-### Verbose Mode
-
-Use the verbose flag:
-```bash
-grove --verbose install cx
-```
-
-### Development Inspection
-
-Inspect Grove's state:
-```bash
-# Check active versions
-cat ~/.grove/active_versions.json
-
-# Check dev links
-cat ~/.grove/devlinks.json
-
-# Check installed versions
-ls -la ~/.grove/versions/
-```
-
-## Common Issues
-
-### Build Failures
-
-```bash
-# Clean and rebuild
-make clean
-go mod download
-make build
-```
-
-### Test Failures
-
-```bash
-# Run specific failing test
-go test -v -run TestName ./pkg/...
-
-# Check E2E test logs
-make test-e2e ARGS="run -i failing-scenario --verbose"
-```
-
-### Commit Hook Issues
-
-```bash
-# Reinstall hooks
-grove git-hooks uninstall
-grove git-hooks install
-
-# Check hook is installed
-ls -la .git/hooks/commit-msg
-```
-
-## Documentation
-
-When contributing, update documentation for:
-
-- New commands: Add to Command Reference
-- New features: Update relevant guides
-- Breaking changes: Add migration notes
-- Configuration changes: Update Configuration Guide
-
-### Documentation Standards
-
-- Use clear, concise language
-- Include code examples
-- Explain the "why" not just the "what"
-- Keep formatting consistent
-- Test all examples
-
-## Release Process
-
-While releases are typically handled by maintainers, understanding the process helps:
-
-1. **Version bumping**: Semantic versioning (major.minor.patch)
-2. **Changelog generation**: From conventional commits
-3. **Tag creation**: Triggers CI/CD
-4. **Binary building**: Multi-platform builds
-5. **GitHub release**: With release notes
-6. **Registry update**: Tool version updates
-
-## Getting Help
-
-### Resources
-
-- **Issues**: [GitHub Issues](https://github.com/mattsolo1/grove-meta/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/mattsolo1/grove-meta/discussions)
-- **Documentation**: This guide and `/docs` directory
-
-### Communication Channels
-
-- Open an issue for bugs or feature requests
-- Start a discussion for questions or ideas
-- Comment on existing issues to provide input
-
-## Code of Conduct
-
-- Be respectful and inclusive
-- Welcome newcomers and help them get started
-- Focus on constructive feedback
-- Respect differing opinions
-- Report inappropriate behavior to maintainers
-
-## License
-
-By contributing to Grove, you agree that your contributions will be licensed under the same license as the project (check LICENSE file).
-
-## Thank You!
-
-Your contributions make Grove better for everyone. Whether you're fixing bugs, adding features, improving documentation, or helping others, every contribution is valued and appreciated.
-
-Happy coding! 🌲
+- **Enable Debug Logging**: Set the `GROVE_DEBUG=true` environment variable.
+- **Verbose Flag**: Many commands support a `--verbose` flag for more detailed output.
+- **Inspect State**: Grove stores its state in `~/.grove`. You can inspect these files for debugging:
+    - `~/.grove/active_versions.json`: Tracks the active release version for each tool.
+    - `~/.grove/devlinks.json`: Tracks registered local development builds.
+    - `~/.grove/versions/`: Contains the unpacked binaries for each installed version.

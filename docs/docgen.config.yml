@@ -51,7 +51,7 @@ sections:
 settings:
   model: gemini-2.5-pro
   output_dir: docs
-  regeneration_mode: scratch
+  regeneration_mode: reference
   rules_file: docs.rules
   structured_output_file: pkg/docs/docs.json
   system_prompt: default

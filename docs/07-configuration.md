@@ -1,243 +1,152 @@
 # Grove Configuration Guide
 
-Grove uses `grove.yml` configuration files to define ecosystem structure, project metadata, and tool behavior. This guide explains the configuration format and available options.
+Grove uses `grove.yml` files to define ecosystem structure and project metadata. This guide explains the configuration format, available options, and related files that control the Grove environment.
 
-## Configuration Hierarchy
+## Configuration Files Overview
 
-Grove uses a two-level configuration hierarchy:
+Grove's configuration is distributed across several files, each with a distinct purpose.
 
-1. **Root Configuration** (`grove.yml` at ecosystem root): Defines the overall ecosystem and workspace discovery patterns
-2. **Project Configuration** (`grove.yml` in each project): Defines individual tool metadata and build settings
+| File | Location | Purpose |
+| --- | --- | --- |
+| `grove.yml` | Ecosystem Root | Defines the overall ecosystem and discovers projects using workspace patterns. |
+| `grove.yml` | Project Directory | Defines metadata and build configuration for a single project (tool or library). |
+| `registry.json` | `~/.grove/` | Tracks available tools for installation and management. |
+| `active_versions.json` | `~/.grove/` | Manages the active release version for each installed tool. |
+| `devlinks.json` | `~/.grove/` | Manages local development overrides for tool binaries. |
 
-## Root Configuration (Ecosystem Level)
+---
 
-The root `grove.yml` file identifies a Grove ecosystem and defines how to discover its projects.
+## Ecosystem Configuration (`grove.yml` at Root)
 
-### Basic Structure
+The root `grove.yml` file identifies a Grove ecosystem and specifies how to discover its member projects. Grove finds this file by searching upward from the current directory.
+
+### Example Structure
 
 ```yaml
-name: grove-ecosystem
-description: The Grove CLI toolkit ecosystem
+# ./grove.yml
+name: acme-dev-tools
+description: Development tools and libraries for the ACME team.
 workspaces:
-  - "grove-*"
-  - "libs/*"
-  - "tools/*/project"
+  - "tools/*"
+  - "libs/core-*"
 ```
 
 ### Configuration Keys
 
-#### `name` (required)
-The name of your ecosystem. This should be a short, descriptive identifier.
+#### `name`
+-   **Type**: `string`
+-   **Default**: None (Required)
+-   **Description**: The name of the ecosystem. This should be a short, descriptive identifier.
+
+#### `description`
+-   **Type**: `string`
+-   **Default**: None (Required)
+-   **Description**: A human-readable description of the ecosystem's purpose.
+
+#### `workspaces`
+-   **Type**: `array` of `string`
+-   **Default**: None (Required)
+-   **Description**: An array of glob patterns that Grove uses to discover project directories. Each pattern is relative to the root `grove.yml`. A directory is only considered a workspace if it matches a pattern **and** contains its own `grove.yml` file.
+
+---
+
+## Project Configuration (`grove.yml` in Workspaces)
+
+Each project (workspace) has its own `grove.yml` file that defines its specific metadata and configuration.
+
+### Example Structure
 
 ```yaml
-name: my-tools
-```
-
-#### `description` (required)
-A human-readable description of the ecosystem's purpose.
-
-```yaml
-description: Development tools for our team
-```
-
-#### `workspaces` (required)
-An array of glob patterns that Grove uses to discover project directories. Each pattern is relative to the root configuration file.
-
-```yaml
-workspaces:
-  - "*"                 # All immediate subdirectories
-  - "tools/*"           # All directories under tools/
-  - "libs/*/project"    # Nested project structures
-  - "services/svc-*"    # Directories matching a pattern
-```
-
-### Discovery Rules
-
-When Grove searches for workspaces:
-1. It evaluates each glob pattern against the filesystem
-2. For each matching directory, it checks for a `grove.yml` file
-3. Only directories containing `grove.yml` are considered valid workspaces
-4. Duplicates are automatically removed
-
-### Complete Root Example
-
-```yaml
-name: acme-grove
-description: ACME Corporation's Grove ecosystem
-workspaces:
-  - "core/*"          # Core libraries
-  - "tools/*"         # CLI tools
-  - "services/*"      # Service applications
-  - "experiments/*"   # Experimental projects
-```
-
-## Project Configuration (Workspace Level)
-
-Each workspace/project has its own `grove.yml` defining its specific configuration.
-
-### Basic Structure
-
-```yaml
-name: grove-context
-description: Dynamic context management for LLMs
-binary:
-  name: context
-  path: ./bin/context
+# ./tools/my-cli/grove.yml
+name: my-cli
+description: A command-line tool for managing widgets.
 type: go
+binary:
+  name: my-cli
+  path: bin/my-cli
 ```
 
 ### Configuration Keys
 
-#### `name` (required)
-The project name. This should match the repository/directory name for consistency.
+#### `name`
+-   **Type**: `string`
+-   **Default**: None (Required)
+-   **Description**: The project's name. By convention, this should match the repository or directory name.
+
+#### `description`
+-   **Type**: `string`
+-   **Default**: None (Required)
+-   **Description**: A concise, one-line summary of the project's function.
+
+#### `type`
+-   **Type**: `string`
+-   **Default**: `go`
+-   **Description**: Specifies the project type, which informs Grove how to handle dependencies, builds, and releases.
+
+##### Supported Project Types
+
+| Type | Description | Dependency File |
+| :--- | :--- | :--- |
+| `go` | Standard Go applications or libraries. | `go.mod` |
+| `maturin` | Python projects using Rust, managed by Maturin. | `pyproject.toml` |
+| `node` | Node.js projects. (Support is experimental) | `package.json` |
+| `template` | Project templates used by `grove add-repo`. | N/A |
+
+#### `binary`
+-   **Type**: `object`
+-   **Default**: None (Optional)
+-   **Description**: Defines the primary binary produced by a project. This is used by `grove dev` for local development linking. Omit this for library projects.
+-   **Structure**:
+    -   `name` (`string`, required): The final name of the executable.
+    -   `path` (`string`, required): The build output path, relative to the project root.
+
+    ```yaml
+    binary:
+      name: cx
+      path: bin/cx
+    ```
+
+#### `binaries`
+-   **Type**: `array` of `object`
+-   **Default**: None (Optional)
+-   **Description**: For projects that produce multiple binaries, this key defines each one.
+-   **Structure**: Same as `binary`, but as a list.
+
+    ```yaml
+    binaries:
+      - name: server
+        path: bin/server
+      - name: client
+        path: bin/client
+    ```
+
+### Tool-Specific Extensions
+
+Tools within the Grove ecosystem can use `grove.yml` for their own configuration by adding a top-level key. This allows for centralized project configuration.
+
+**Example**: The `grove llm` command can be configured with a default model.
 
 ```yaml
-name: grove-analyzer
-```
-
-#### `description` (required)
-A concise description of what the tool does.
-
-```yaml
-description: Static analysis tool for Grove projects
-```
-
-#### `binary` (optional)
-Defines the binary output for CLI tools.
-
-```yaml
-binary:
-  name: analyzer           # Name of the binary
-  path: ./bin/analyzer     # Path relative to project root
-```
-
-##### Binary Configuration Details:
-- `name`: The executable name users will run
-- `path`: Build output location (relative to project root)
-- Used by Grove for installation and version management
-- Can be omitted for libraries that don't produce binaries
-
-#### `type` (optional, default: "go")
-Specifies the project type, which determines how Grove handles builds and dependencies.
-
-```yaml
-type: maturin  # For Python/Rust projects
-```
-
-##### Supported Project Types:
-
-| Type | Description | Build Command | Dependency File |
-|------|-------------|---------------|-----------------|
-| `go` | Go projects | `make build` | `go.mod` |
-| `maturin` | Python/Rust hybrid | `maturin build` | `pyproject.toml` |
-| `node` | Node.js projects | `npm build` | `package.json` |
-| `template` | Project templates | N/A | N/A |
-
-#### `alias` (optional)
-Short command alias for the tool. Usually defined in the registry instead of the config.
-
-```yaml
-alias: cx  # Users can run 'cx' instead of 'context'
-```
-
-#### `version` (optional)
-Version information. Typically managed through Git tags rather than config.
-
-```yaml
-version: 0.2.1
-```
-
-### Project Type Examples
-
-#### Go Project
-```yaml
-name: grove-context
-description: Context management for LLMs
-binary:
-  name: context
-  path: ./bin/context
+# ./tools/my-agent/grove.yml
+name: my-agent
+description: An AI agent.
 type: go
-```
-
-#### Maturin (Python/Rust) Project
-```yaml
-name: grove-ml
-description: Machine learning utilities
 binary:
-  name: groveml
-  path: ./target/release/groveml
-type: maturin
+  name: my-agent
+  path: bin/my-agent
+
+# Tool-specific extension for grove-llm
+llm:
+  default_model: gpt-4o-mini
 ```
 
-#### Node.js Project
-```yaml
-name: grove-web
-description: Web interface for Grove
-binary:
-  name: grove-web
-  path: ./dist/cli.js
-type: node
-```
+---
 
-#### Library Project (No Binary)
-```yaml
-name: grove-core
-description: Shared Grove library
-type: go
-# No binary section - this is a library
-```
+## Tool Registry (`registry.json`)
 
-## Advanced Configuration
+Grove uses a `registry.json` file in `~/.grove/` to track available tools for installation. While Grove ships with a default internal registry, this file can be customized.
 
-### Multi-Binary Projects
-
-For projects that produce multiple binaries:
-
-```yaml
-name: grove-multi-tool
-description: Swiss army knife of Grove tools
-binaries:  # Note: plural form (not yet implemented)
-  - name: tool1
-    path: ./bin/tool1
-  - name: tool2
-    path: ./bin/tool2
-type: go
-```
-
-### Custom Build Configuration
-
-Projects can extend their build configuration through Makefile targets:
-
-```yaml
-name: grove-custom
-description: Tool with custom build process
-binary:
-  name: custom
-  path: ./output/custom
-type: go
-# Build details in Makefile
-```
-
-The Makefile should implement standard targets:
-- `build`: Build the binary
-- `test`: Run tests
-- `clean`: Clean build artifacts
-- `dev`: Development build with debugging
-
-### Environment-Specific Configuration
-
-While not directly supported in `grove.yml`, you can use environment variables in your Makefiles:
-
-```makefile
-# In Makefile
-ifdef GROVE_ENV
-    BUILD_FLAGS += -tags=$(GROVE_ENV)
-endif
-```
-
-## Registry Configuration
-
-Grove uses a `registry.json` file to track available tools across the ecosystem:
+### Example Structure
 
 ```json
 {
@@ -246,237 +155,80 @@ Grove uses a `registry.json` file to track available tools across the ecosystem:
       "name": "grove-context",
       "alias": "cx",
       "repository": "github.com/mattsolo1/grove-context",
-      "binary": "context",
+      "binary": "cx",
       "version": "latest",
-      "description": "Context management for LLMs"
-    },
-    {
-      "name": "grove-flow",
-      "alias": "flow",
-      "repository": "github.com/mattsolo1/grove-flow",
-      "binary": "flow",
-      "version": "v0.1.0",
-      "description": "Workflow automation"
+      "description": "Rule-based tool for dynamically managing file-based LLM context."
     }
   ]
 }
 ```
 
-### Registry Fields
+-   **`name`**: The full, descriptive name of the tool.
+-   **`alias`**: A short, convenient command for daily use.
+-   **`repository`**: The Go module path or source for the tool.
+-   **`binary`**: The name of the executable file.
+-   **`version`**: The default version to install (e.g., `"latest"` or `"v0.2.1"`).
+-   **`description`**: A brief summary of the tool's purpose.
 
-- `name`: Full tool name
-- `alias`: Short command alias
-- `repository`: Go module path
-- `binary`: Binary name
-- `version`: Version to install ("latest" or specific version)
-- `description`: Tool description
+---
 
-## Configuration Best Practices
+## User Configuration (in `~/.grove/`)
 
-### 1. Naming Conventions
+The `~/.grove` directory stores user-specific configuration and state, managing the versions and binaries active on your system.
 
-- Use lowercase with hyphens for names: `grove-my-tool`
-- Keep names consistent across repository, directory, and config
-- Use clear, descriptive names that indicate purpose
+### `active_versions.json`
 
-### 2. Workspace Patterns
+This file tracks the currently active *released* version for each installed tool. The `grove install` and `grove version use` commands modify this file.
 
-- Start simple with `"*"` for small ecosystems
-- Use subdirectories to organize by type: `tools/*`, `libs/*`
-- Be specific to avoid accidentally including non-Grove directories
-- Test patterns with `grove workspace list`
-
-### 3. Binary Paths
-
-- Always use relative paths from project root
-- Follow platform conventions: `./bin/` for Unix-like systems
-- Keep binary names simple and memorable
-- Match binary name to project name when possible
-
-### 4. Descriptions
-
-- Keep descriptions concise (one line)
-- Focus on what the tool does, not how
-- Use active voice
-- Include key features or use cases
-
-### 5. Version Management
-
-- Let Git tags drive versioning
-- Don't hardcode versions in grove.yml
-- Use semantic versioning consistently
-- Document breaking changes
-
-## Migration from Legacy Configuration
-
-If you have an older Grove configuration:
-
-### Old Format (Single Binary)
-```yaml
-# Old format
-binary: context
+**Example**:
+```json
+{
+  "versions": {
+    "cx": "v0.3.0",
+    "flow": "v0.2.5",
+    "grove": "v0.5.1"
+  }
+}
 ```
 
-### New Format (Structured)
-```yaml
-# New format
-binary:
-  name: context
-  path: ./bin/context
+### `devlinks.json`
+
+This file manages local development overrides. When you use `grove dev link`, you register a locally built binary. `grove dev use` activates it by creating a symlink in `~/.grove/bin` and updating this file. Development links always take precedence over released versions.
+
+**Example**:
+```json
+{
+  "binaries": {
+    "flow": {
+      "links": {
+        "feature-branch": {
+          "path": "/path/to/your/worktree/bin/flow",
+          "worktree_path": "/path/to/your/worktree",
+          "registered_at": "2023-10-27T10:00:00Z"
+        }
+      },
+      "current": "feature-branch"
+    }
+  }
+}
 ```
 
-### Migration Steps
-
-1. Update all project `grove.yml` files to new format
-2. Ensure binary paths are correct
-3. Test with `grove list`
-4. Commit changes across all projects
-
-## Validation
-
-Grove validates configuration files on load. Common validation errors:
-
-### Missing Required Fields
-```
-Error: grove.yml missing required field 'name'
-```
-**Solution**: Add the missing field to your configuration.
-
-### Invalid Workspace Pattern
-```
-Error: Invalid glob pattern in workspaces
-```
-**Solution**: Check glob syntax and escape special characters.
-
-### Binary Path Not Found
-```
-Warning: Binary path './bin/tool' does not exist
-```
-**Solution**: Build the project or correct the path.
+---
 
 ## Environment Variables
 
-Grove respects several environment variables that affect configuration:
+Grove's behavior can be modified with the following environment variables:
 
 | Variable | Description | Default |
-|----------|-------------|---------|
-| `GROVE_HOME` | Grove installation directory | `~/.grove` |
-| `GROVE_WORKSPACE` | Default workspace for operations | Current directory |
-| `GROVE_DEBUG` | Enable debug output | `false` |
-| `GROVE_USE_GH` | Always use GitHub CLI | `false` |
+| :--- | :--- | :--- |
+| `GROVE_DEBUG` | If set to `true`, enables verbose debug logging. | `false` |
+| `GROVE_PAT` | A GitHub Personal Access Token used by `grove add-repo` to set up secrets in new private repositories. | (none) |
 
-## Configuration File Locations
+---
 
-Grove looks for configuration files in these locations:
+## Configuration Best Practices
 
-1. **Ecosystem Root**: First `grove.yml` with `workspaces` found when searching up from current directory
-2. **Project Root**: `grove.yml` in each workspace directory
-3. **User Config**: `~/.grove/config.yml` (future feature)
-4. **System Config**: `/etc/grove/config.yml` (future feature)
-
-## Dynamic Configuration
-
-Some configuration can be modified at runtime:
-
-### Development Overrides
-```bash
-# Override binary path for development
-grove dev link tool /custom/path/to/binary
-```
-
-### Version Switching
-```bash
-# Switch to a different version
-grove version set tool v0.2.0
-```
-
-### Workspace Selection
-```bash
-# Run command in specific workspace
-grove run --workspace grove-core make test
-```
-
-## Configuration Examples
-
-### Minimal Configuration
-```yaml
-name: simple-tool
-description: A simple Grove tool
-```
-
-### Full-Featured Tool
-```yaml
-name: grove-advanced
-description: Advanced Grove tool with all features
-binary:
-  name: advanced
-  path: ./bin/advanced
-type: go
-alias: adv
-version: 1.0.0
-```
-
-### Ecosystem with Mixed Project Types
-Root `grove.yml`:
-```yaml
-name: polyglot-ecosystem
-description: Multi-language Grove ecosystem
-workspaces:
-  - "go/*"
-  - "python/*"
-  - "node/*"
-  - "rust/*"
-```
-
-## Troubleshooting Configuration
-
-### Workspace Not Discovered
-
-**Symptom**: `grove workspace list` doesn't show your project
-
-**Solutions**:
-1. Check workspace patterns in root `grove.yml`
-2. Ensure project has its own `grove.yml`
-3. Verify pattern matches directory structure
-4. Run from within the ecosystem directory
-
-### Binary Not Found After Installation
-
-**Symptom**: Tool installs but isn't executable
-
-**Solutions**:
-1. Verify `binary.path` in `grove.yml`
-2. Check build output location
-3. Ensure binary has execute permissions
-4. Confirm `~/.grove/bin` is in PATH
-
-### Configuration Changes Not Applied
-
-**Symptom**: Changes to `grove.yml` aren't reflected
-
-**Solutions**:
-1. No caching - changes should be immediate
-2. Check for syntax errors in YAML
-3. Ensure you're editing the right file
-4. Try `grove list` to force re-read
-
-## Future Configuration Features
-
-Planned enhancements to Grove configuration:
-
-- **User-level configuration**: Personal preferences and defaults
-- **Configuration inheritance**: Base configurations with overrides
-- **Configuration validation**: Schema-based validation
-- **Dynamic reloading**: Watch for configuration changes
-- **Configuration templates**: Shareable configuration presets
-- **Environment-specific overrides**: Development vs. production settings
-
-## Summary
-
-Grove's configuration system is designed to be:
-- **Simple**: Minimal required configuration
-- **Flexible**: Supports various project types and structures
-- **Discoverable**: Automatic workspace discovery
-- **Extensible**: Room for growth and customization
-
-Start with minimal configuration and add complexity only as needed. The defaults are sensible for most Go projects, and the system is designed to work with minimal setup.
+-   **Naming Consistency**: Keep names consistent across the repository, directory, and `grove.yml` `name` field.
+-   **Workspace Granularity**: Start with broad workspace patterns (e.g., `"*"`). As your ecosystem grows, organize projects into subdirectories (e.g., `tools/*`, `libs/*`) and refine the patterns.
+-   **Versioning**: Manage project versions using Git tags, not the `version` key in `grove.yml`. The `grove release` command automates this process based on conventional commits.
+-   **Binary Paths**: Use relative paths for `binary.path` (e.g., `bin/my-tool`). The Makefile in each project should be responsible for placing the compiled binary at this location.
