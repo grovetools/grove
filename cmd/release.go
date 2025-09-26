@@ -2129,21 +2129,18 @@ func syncDependenciesForRepos(ctx context.Context, rootDir string, repos []strin
 			updateErrors = append(updateErrors, fmt.Errorf("%s: go mod tidy: %w", repo, err))
 		}
 
-		// Check for changes and commit
-		status, err := git.GetStatus(wsPath)
-		if err != nil {
-			logger.WithError(err).Warnf("Failed to get git status for %s", repo)
+		// Always try to stage go.mod and go.sum first
+		if err := executeGitCommand(ctx, wsPath, []string{"add", "go.mod", "go.sum"},
+			"Stage dependency sync", logger); err != nil {
+			logger.WithError(err).Warnf("Failed to stage changes for %s", repo)
 			continue
 		}
 
-		if status.IsDirty {
-			// Stage go.mod and go.sum
-			if err := executeGitCommand(ctx, wsPath, []string{"add", "go.mod", "go.sum"},
-				"Stage dependency sync", logger); err != nil {
-				logger.WithError(err).Warnf("Failed to stage changes for %s", repo)
-				continue
-			}
-
+		// Check if there are any staged changes before committing
+		diffCmd := exec.CommandContext(ctx, "git", "diff", "--staged", "--quiet")
+		diffCmd.Dir = wsPath
+		if err := diffCmd.Run(); err != nil {
+			// An error (usually exit code 1) means there are staged changes
 			// Build detailed commit message
 			commitMsg := "chore(deps): sync Grove dependencies to latest versions\n\n"
 			if len(versionChanges) > 0 {
