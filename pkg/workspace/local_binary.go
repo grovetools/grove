@@ -30,11 +30,11 @@ type projectBinaryConfig struct {
 // 1. A `binaries` list in grove.yml (for multi-binary projects)
 // 2. A single `binary` key in grove.yml (for backward compatibility)
 // 3. Auto-discovery for the grove-meta repository itself
-// 4. Auto-discovery for the grove-ecosystem repository
+// 4. Dynamic discovery for multi-project directories (ecosystem worktrees)
 func DiscoverLocalBinaries(worktreePath string) ([]BinaryMeta, error) {
 	var binaries []BinaryMeta
 
-	// 1. Check for grove.yml configuration
+	// 1. Check for grove.yml configuration at the root
 	groveYAMLPath := filepath.Join(worktreePath, "grove.yml")
 	if data, err := os.ReadFile(groveYAMLPath); err == nil {
 		var projConfig projectBinaryConfig
@@ -66,40 +66,60 @@ func DiscoverLocalBinaries(worktreePath string) ([]BinaryMeta, error) {
 		}, nil
 	}
 
-	// 3. Auto-discovery for grove-ecosystem repository
-	// Check if we're in grove-ecosystem by looking for characteristic directories
-	if _, err := os.Stat(filepath.Join(worktreePath, "grove-core")); err == nil {
-		// This is the grove-ecosystem repo, discover all binary packages
-		var ecosystemBinaries []BinaryMeta
-
-		// List of known grove-ecosystem binary packages
-		packages := []struct {
-			dir    string
-			binary string
-		}{
-			{"grove-meta", "grove"},
-			{"grove-context", "cx"},
-			{"grove-sandbox", "sb"},
-			{"grove-flow", "flow"},
-			{"grove-notebook", "nb"},
-			{"grove-canopy", "canopy"},
-			{"grove-proxy", "px"},
-			{"grove-tend", "tend"},
-		}
-
-		for _, pkg := range packages {
-			binPath := filepath.Join(worktreePath, pkg.dir, "bin", pkg.binary)
-			// Check if the binary exists
-			if _, err := os.Stat(binPath); err == nil {
-				ecosystemBinaries = append(ecosystemBinaries, BinaryMeta{
-					Name: pkg.binary,
-					Path: binPath,
-				})
+	// 3. Dynamic discovery for multi-project directories
+	// If no grove.yml at root, scan subdirectories for grove projects
+	entries, err := os.ReadDir(worktreePath)
+	if err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			
+			subdir := filepath.Join(worktreePath, entry.Name())
+			subGroveYML := filepath.Join(subdir, "grove.yml")
+			
+			// Check if this subdirectory has a grove.yml
+			if data, err := os.ReadFile(subGroveYML); err == nil {
+				var projConfig projectBinaryConfig
+				if yaml.Unmarshal(data, &projConfig) == nil {
+					// Check for multi-binary configuration
+					if len(projConfig.Binaries) > 0 {
+						for _, b := range projConfig.Binaries {
+							if b.Name != "" && b.Path != "" {
+								absPath := filepath.Join(subdir, b.Path)
+								binaries = append(binaries, BinaryMeta{Name: b.Name, Path: absPath})
+							}
+						}
+					} else if b := projConfig.Binary; b.Name != "" && b.Path != "" {
+						// Single binary configuration
+						absPath := filepath.Join(subdir, b.Path)
+						binaries = append(binaries, BinaryMeta{Name: b.Name, Path: absPath})
+					}
+				}
+			}
+			
+			// Also check for grove-meta special case (may not have grove.yml with binary config)
+			if entry.Name() == "grove-meta" {
+				groveMetaMainPath := filepath.Join(subdir, "cmd", "grove", "main.go")
+				if _, err := os.Stat(groveMetaMainPath); err == nil {
+					groveBinPath := filepath.Join(subdir, "bin", "grove")
+					// Check if not already added
+					found := false
+					for _, b := range binaries {
+						if b.Name == "grove" && b.Path == groveBinPath {
+							found = true
+							break
+						}
+					}
+					if !found {
+						binaries = append(binaries, BinaryMeta{Name: "grove", Path: groveBinPath})
+					}
+				}
 			}
 		}
-
-		if len(ecosystemBinaries) > 0 {
-			return ecosystemBinaries, nil
+		
+		if len(binaries) > 0 {
+			return binaries, nil
 		}
 	}
 

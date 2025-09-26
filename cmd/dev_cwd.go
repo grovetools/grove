@@ -13,17 +13,23 @@ import (
 )
 
 func newDevCwdCmd() *cobra.Command {
-	cmd := cli.NewStandardCommand("cwd", "Link and use binaries from current directory")
+	cmd := cli.NewStandardCommand("cwd", "Globally activate binaries from current directory")
 
-	cmd.Long = `Automatically register and activate binaries from the current working directory.
-This is a convenience command that combines 'grove dev link' and 'grove dev use' in one step,
-using the current directory's binaries.
+	cmd.Long = `Globally register and activate all binaries from the current working directory.
+This command combines 'grove dev link' and 'grove dev use' for all binaries in the current
+directory, making them the global default.
 
-This command is particularly useful when developing features in a worktree.`
+NOTE: With automatic workspace detection, this command is now primarily useful for forcing
+a specific worktree's binaries to be used globally across your entire system. When you're
+working inside a workspace, Grove automatically uses that workspace's binaries without
+needing to run this command.`
 
-	cmd.Example = `  # In a feature worktree, link and use all binaries
-  cd ~/grove-ecosystem/worktrees/my-feature
-  grove dev cwd`
+	cmd.Example = `  # Force global activation of binaries from current directory
+  cd ~/grove-ecosystem/.grove-worktrees/my-feature
+  grove dev cwd
+  
+  # The automatic alternative (no command needed):
+  # Simply 'cd' into any workspace and Grove will automatically use its binaries`
 
 	cmd.Args = cobra.NoArgs
 
@@ -59,7 +65,10 @@ This command is particularly useful when developing features in a worktree.`
 			return fmt.Errorf("failed to load config: %w", err)
 		}
 
-		// Register and activate each discovered binary
+		// Track which binaries were successfully registered
+		var registeredBinaries []workspace.BinaryMeta
+
+		// Register each discovered binary
 		for _, binary := range discoveredBinaries {
 			binaryName := binary.Name
 			binaryPath := binary.Path
@@ -86,6 +95,9 @@ This command is particularly useful when developing features in a worktree.`
 
 			config.Binaries[binaryName].Links[alias] = linkInfo
 			fmt.Printf("Registered binary '%s' version '%s'\n", binaryName, alias)
+			
+			// Track this as successfully registered
+			registeredBinaries = append(registeredBinaries, binary)
 		}
 
 		// Save configuration
@@ -93,8 +105,8 @@ This command is particularly useful when developing features in a worktree.`
 			return fmt.Errorf("failed to save config: %w", err)
 		}
 
-		// Activate all discovered binaries
-		for _, binary := range discoveredBinaries {
+		// Activate only the successfully registered binaries
+		for _, binary := range registeredBinaries {
 			if err := activateDevLink(binary.Name, alias); err != nil {
 				fmt.Printf("Warning: failed to activate '%s': %v\n", binary.Name, err)
 				continue
