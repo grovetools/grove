@@ -1,3 +1,116 @@
+## v0.4.0 (2025-09-26)
+
+This release introduces major improvements to the developer experience with workspace-aware tooling and a new log viewer. The `grove` can automatically use binaries from the current workspace, which can be explicitly managed with the new `grove activate` command (4d19dd3, 4897254). A unified `grove logs` command has been added, featuring an interactive TUI for browsing, searching, and analyzing structured logs across the ecosystem (bda1ed4, 617d279). The release process has been significantly refactored to be more robust, with smarter dependency management and changelog handling to prevent common failures (0da8d36, 9453ff3).
+
+### Features
+- Add interactive TUI for `grove logs` with split-view, visual selection, and JSON copy (617d279)
+- Implement automatic workspace-aware binary resolution using `.grove-workspace` marker files (4897254)
+- Add `grove activate` command for explicit workspace shell activation and PATH management (4d19dd3)
+- Add unified `grove logs` command for viewing structured logs from all workspaces (bda1ed4)
+- Show historical logs before tailing with `grove logs` via the --lines/-n flag (f9f9eb7)
+- Add unified `grove llm` command to act as a facade for multiple LLM providers (c2e3250)
+- Add smart changelog detection in the release TUI to preserve manual edits (0a2225a)
+- Add support for installing all tools as nightly builds with `grove install all@nightly` (990ca28)
+- Add Git info display and scrolling to the release TUI (97c1dd4)
+- Add comprehensive logging to debug release issues (1aae158)
+- Enhance release display with structured logging from a pretty logger (0590694, b4727bb)
+
+### Bug Fixes
+- Resolve release failures caused by dirty changelogs and duplicated content (9453ff3)
+- Update staged changelog version in TUI when bump level is changed (e28ecf6)
+- Fix dependency update commits to only trigger when files actually change (142367e)
+- Correct TUI test key sequences for sync-deps functionality (f3cc349)
+- Resolve mock gemapi PATH issues in TUI tests (2f7c1e1)
+- Resolve sync-deps test failures with improved CI monitoring simulation (85a69f3)
+- Simplify TUI test setup to match the changelog test pattern (6a1d08f)
+- Fix release-tui tests for smart changelog detection and git status behavior (5269afa)
+
+### Refactoring
+- Simplify the release process by removing the redundant `--sync-deps` flag and automating dependency updates (0da8d36)
+- Move `release changelog` subcommand to top-level `changelog` command (a6c7757)
+
+### Testing
+- Add comprehensive tests for workspace-aware binary resolution and delegation (b3af5ed)
+- Add TUI tests for dependency synchronization functionality (d0a0b9b)
+- Add E2E test scenario for `release --sync-deps` functionality (274c32f)
+- Enable and fix TUI changelog workflow tests with improved capabilities (5d77532)
+- Add comprehensive tests for smart changelog detection and state tracking (337bad3)
+- Add E2E test for release TUI selection functionality (e4020ff)
+
+### Documentation
+- Align documentation prompt files with the `docgen.config.yml` structure (177958b)
+- Add documentation generated directly by Claude for core features (dcd44b2)
+
+### Chores
+- Update .gitignore rules for `go.work` and build instructions (74fee8d)
+- Remove old documentation files (734dde6)
+
+### File Changes
+```
+ .gitignore                                 |   7 +
+ .grove-workspace                           |   3 +
+ CLAUDE.md                                  |  30 +
+ README.md                                  |   5 +
+ cmd/activate.go                            | 235 +++++++
+ cmd/{release_changelog.go => changelog.go} |   4 +-
+ cmd/dev.go                                 |   1 +
+ cmd/dev_cwd.go                             |  34 +-
+ cmd/dev_workspace.go                       |  76 +++
+ cmd/install_cmd.go                         |  41 +-
+ cmd/llm.go                                 | 135 ++++
+ cmd/logs.go                                | 674 ++++++++++++++++++++
+ cmd/logs_tui.go                            | 969 +++++++++++++++++++++++++++++
+ cmd/release.go                             | 423 +++++--------
+ cmd/release_display.go                     |  40 +-
+ cmd/release_plan.go                        |  77 ++-
+ cmd/release_tui.go                         | 219 +++++--
+ cmd/root.go                                | 139 ++++-
+ docs/01-overview.md                        |  75 +++
+ docs/02-installation.md                    | 162 +++++
+ docs/03-getting-started.md                 | 164 +++++
+ docs/04-core-concepts.md                   | 143 +++++
+ docs/05-command-reference.md               | 687 ++++++++++++++++++++
+ docs/06-tutorials.md                       | 281 +++++++++
+ docs/07-configuration.md                   | 234 +++++++
+ docs/08-architecture.md                    | 202 ++++++
+ docs/09-contributing.md                    | 335 ++++++++++
+ docs/README.md                             |  65 --
+ docs/dependency-management.md              | 234 -------
+ docs/docgen.config.yml                     |  58 ++
+ docs/docs.rules                            |   2 +
+ docs/prompts/architecture.md               |  63 ++
+ docs/prompts/command-reference.md          |  42 ++
+ docs/prompts/configuration.md              |  56 ++
+ docs/prompts/contributing.md               |  64 ++
+ docs/prompts/core-concepts.md              |  37 ++
+ docs/prompts/getting-started.md            |  44 ++
+ docs/prompts/installation.md               |  41 ++
+ docs/prompts/overview.md                   |  28 +
+ docs/prompts/tutorials.md                  |  48 ++
+ docs/release-process.md                    | 212 -------
+ docs/release-workflow-template.md          | 214 -------
+ docs/sdk-manager-api.md                    | 233 -------
+ go.mod                                     |   3 +
+ go.sum                                     |   5 +
+ grove.yml                                  |   5 +
+ pkg/release/plan.go                        |  15 +
+ pkg/sdk/manager.go                         |   1 +
+ pkg/workspace/local_binary.go              |  88 ++-
+ tests/conventional_commits.go              |   6 +-
+ tests/e2e/docker_test.sh                   |   9 +
+ tests/e2e/mocks/gemapi                     |  72 +++
+ tests/mocks.go                             | 307 +++++++++
+ tests/scenarios.go                         |  13 +-
+ tests/scenarios_changelog_dirty.go         | 311 +++++++++
+ tests/scenarios_changelog_dirty_simple.go  | 287 +++++++++
+ tests/scenarios_llm_changelog.go           |  28 +-
+ tests/scenarios_release_tui.go             | 380 +++++++++++
+ tests/scenarios_sync_deps.go               | 365 +++++++++++
+ tests/scenarios_sync_deps_tui.go           | 504 +++++++++++++++
+ tests/scenarios_workspace_aware.go         | 249 ++++++++
+ 61 files changed, 8073 insertions(+), 1411 deletions(-)
+```
+
 ## v0.3.0 (2025-09-17)
 
 This release introduces a new interactive TUI for the `grove release` command, available via the `--interactive` flag or the `tui` subcommand (a0c2886). This interface provides a comprehensive dashboard for planning and executing releases across the ecosystem, showing current versions, proposed bumps, and dependency-ordered release levels (a71afa2, edfbfc0). A key feature is the integration of LLM-powered changelog generation and semantic versioning suggestions directly within the TUI (20dd1aa, 9630dd1). The TUI allows for repository selection (22507ba), bulk selection shortcuts (9a9afbd), and preserves manually generated changelogs to avoid being overwritten (9b7c400).
