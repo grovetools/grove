@@ -14,12 +14,12 @@ import (
 	"github.com/mattsolo1/grove-tend/pkg/tui"
 )
 
-// ReleaseTUISyncDepsScenario tests the sync-deps functionality via the release TUI.
+// ReleaseTUISyncDepsScenario tests that dependencies are automatically synced via the release TUI.
 func ReleaseTUISyncDepsScenario() *harness.Scenario {
 	return &harness.Scenario{
 		Name:        "release-tui-sync-deps",
-		Description: "Tests the sync-deps functionality through the release TUI interface",
-		Tags:        []string{"release", "tui", "sync-deps"},
+		Description: "Tests that dependencies are automatically synced through the release TUI interface",
+		Tags:        []string{"release", "tui", "dependencies"},
 		LocalOnly:   true, // Requires interactive TUI session
 		Steps: []harness.Step{
 			setupSyncDepsTUIEcosystemStep(),
@@ -63,47 +63,20 @@ exec "%s" "$@"
 				}
 				return nil
 			}),
-			harness.NewStep("Toggle sync-deps option in TUI", func(ctx *harness.Context) error {
+			harness.NewStep("Verify dependencies will be synced automatically", func(ctx *harness.Context) error {
 				session := ctx.Get("tui_session").(*tui.Session)
 				
-				// Press Tab to switch to settings view
-				if err := session.SendKeysAndWaitForChange(2*time.Second, "Tab"); err != nil {
-					return fmt.Errorf("failed to switch to settings view: %w", err)
-				}
+				// Dependencies are now always synced automatically
+				// No need to toggle any option
 				
-				// Wait for settings view to appear
-				if err := session.WaitForText("Release Settings", 2*time.Second); err != nil {
-					// Try alternate text
-					if err := session.WaitForText("Settings", 2*time.Second); err != nil {
-						return fmt.Errorf("settings view did not appear: %w", err)
-					}
-				}
-				
-				// Press uppercase 'S' to toggle sync-deps
-				if err := session.SendKeysAndWaitForChange(2*time.Second, "S"); err != nil {
-					return fmt.Errorf("failed to toggle sync-deps: %w", err)
-				}
-				
-				// Wait for confirmation message
-				if _, err := session.WaitForAnyText([]string{"SYNC DEPS ENABLED", "SYNC-DEPS ENABLED", "Sync Deps: ON"}, 3*time.Second); err != nil {
-					// Don't fail if we can't find the exact message
-					content, _ := session.Capture()
-					if !strings.Contains(strings.ToLower(content), "sync") {
-						return fmt.Errorf("sync-deps toggle confirmation not found")
-					}
-				}
-				
-				// Press Tab again to return to main table
-				if err := session.SendKeysAndWaitForChange(2*time.Second, "Tab"); err != nil {
-					return fmt.Errorf("failed to return to main view: %w", err)
-				}
-				
-				// Verify sync-deps is enabled in header
+				// Just verify the TUI is ready
 				content, _ := session.Capture()
-				if !strings.Contains(content, "[SYNC-DEPS]") && !strings.Contains(content, "SYNC DEPS") {
-					// Don't fail - indicator might be elsewhere
-					ctx.Set("sync_deps_enabled", true)
+				if !strings.Contains(content, "Grove Release Manager") {
+					return fmt.Errorf("TUI not properly loaded")
 				}
+				
+				// Mark that deps will be synced (always true now)
+				ctx.Set("sync_deps_enabled", true)
 				
 				return nil
 			}),
@@ -228,7 +201,7 @@ exec "%s" "$@"
 				return nil
 			}),
 			harness.NewStep("Verify dependency sync occurred", func(ctx *harness.Context) error {
-				// Check if app-b's go.mod was updated (if sync-deps worked)
+				// Check if app-b's go.mod was updated (dependencies should be synced automatically)
 				appBPath := filepath.Join(ctx.RootDir, "app-b")
 				goModPath := filepath.Join(appBPath, "go.mod")
 				
@@ -252,16 +225,29 @@ exec "%s" "$@"
 	}
 }
 
-// ReleaseTUISyncDepsToggleScenario tests toggling sync-deps on and off in the TUI.
+// ReleaseTUISyncDepsToggleScenario is deprecated - sync-deps is now always enabled.
+// This test is kept for reference but is now a no-op.
 func ReleaseTUISyncDepsToggleScenario() *harness.Scenario {
 	return &harness.Scenario{
-		Name:        "release-tui-sync-deps-toggle",
-		Description: "Tests enabling and disabling sync-deps option in the release TUI",
-		Tags:        []string{"release", "tui", "sync-deps"},
+		Name:        "release-tui-sync-deps-toggle", 
+		Description: "DEPRECATED: sync-deps is now always enabled automatically",
+		Tags:        []string{"release", "tui", "deprecated"},
+		Skip:        true, // Skip this test as the feature no longer exists
 		LocalOnly:   true,
 		Steps: []harness.Step{
-			setupSyncDepsTUIEcosystemStep(),
-			harness.NewStep("Launch TUI", func(ctx *harness.Context) error {
+			harness.NewStep("Skip deprecated test", func(ctx *harness.Context) error {
+				// This test is deprecated because sync-deps is now always enabled
+				return nil
+			}),
+		},
+	}
+}
+
+// Original test steps are kept below for reference but not used
+func deprecatedSyncDepsToggleSteps() []harness.Step {
+	return []harness.Step{
+		setupSyncDepsTUIEcosystemStep(),
+		harness.NewStep("Launch TUI", func(ctx *harness.Context) error {
 				mockDir := ctx.Get("mock_dir").(string)
 				wrapperContent := fmt.Sprintf(`#!/bin/bash
 export PATH="%s:$PATH"
@@ -371,7 +357,7 @@ exec "%s" "$@"
 				session := ctx.Get("tui_session").(*tui.Session)
 				return session.SendKeys("q")
 			}),
-		},
+		}
 	}
 }
 

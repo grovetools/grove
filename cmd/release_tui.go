@@ -219,7 +219,6 @@ type releaseTuiModel struct {
 	showHelp      bool          // Whether to show help popup
 	shouldApply   bool          // Flag to indicate we should exit and apply
 	push          bool          // Whether to push to remote
-	syncDeps      bool          // Whether to sync dependencies
 	settingsIndex int           // Currently selected setting in settings view
 }
 
@@ -925,17 +924,6 @@ func (m releaseTuiModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 				return clearProgressMsg{}
 			})
-			
-		case 2: // Sync deps
-			m.syncDeps = !m.syncDeps
-			if m.syncDeps {
-				m.genProgress = "🔗 SYNC DEPS ENABLED: Will update dependency references"
-			} else {
-				m.genProgress = "⛓️ SYNC DEPS DISABLED: Dependencies unchanged"
-			}
-			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
-				return clearProgressMsg{}
-			})
 		}
 		
 	case key.Matches(msg, m.keys.ToggleDryRun):
@@ -962,17 +950,6 @@ func (m releaseTuiModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return clearProgressMsg{}
 		})
 		
-	case key.Matches(msg, m.keys.ToggleSyncDeps):
-		m.settingsIndex = 2 // Jump to sync-deps setting
-		m.syncDeps = !m.syncDeps
-		if m.syncDeps {
-			m.genProgress = "🔗 SYNC DEPS ENABLED: Will update dependency references"
-		} else {
-			m.genProgress = "⛓️ SYNC DEPS DISABLED: Dependencies unchanged"
-		}
-		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
-			return clearProgressMsg{}
-		})
 	}
 
 	return m, nil
@@ -1113,9 +1090,6 @@ func (m releaseTuiModel) viewTable() string {
 	}
 	if m.push {
 		modes = append(modes, "PUSH")
-	}
-	if m.syncDeps {
-		modes = append(modes, "SYNC-DEPS")
 	}
 	if len(modes) > 0 {
 		headerText += " [" + strings.Join(modes, " | ") + "]"
@@ -1423,8 +1397,6 @@ func (m releaseTuiModel) viewSettings() string {
 	// Push toggle
 	settings = append(settings, formatSetting(1, "P", "Push to Remote", "Push changes to remote repositories after release", m.push))
 	
-	// Sync deps toggle  
-	settings = append(settings, formatSetting(2, "S", "Sync Dependencies", "Update dependency versions across repositories", m.syncDeps))
 	
 	content := toggleStyle.Render(strings.Join(settings, "\n\n"))
 	
@@ -1639,7 +1611,6 @@ func runReleaseTUI(ctx context.Context) error {
 	if model, ok := finalModel.(releaseTuiModel); ok && model.shouldApply {
 		// Set the global flags from the TUI state
 		releasePush = model.push
-		releaseSyncDeps = model.syncDeps
 		releaseDryRun = model.dryRun
 		
 		// Exit the TUI and run the release in the terminal

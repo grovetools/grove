@@ -41,7 +41,6 @@ var (
 	releaseYes            bool
 	releaseSkipParent     bool
 	releaseWithDeps       bool
-	releaseSyncDeps       bool
 	releaseLLMChangelog   bool
 	releaseInteractive    bool // New flag for interactive TUI mode
 )
@@ -83,7 +82,6 @@ Examples:
 	cmd.Flags().BoolVar(&releasePush, "push", false, "Push all repositories to remote before tagging")
 	cmd.Flags().StringSliceVar(&releaseRepos, "repos", []string{}, "Only release specified repositories (e.g., grove-meta,grove-core)")
 	cmd.Flags().BoolVar(&releaseWithDeps, "with-deps", false, "Include all dependencies of specified repositories in the release")
-	cmd.Flags().BoolVar(&releaseSyncDeps, "sync-deps", false, "Sync Grove dependencies to latest versions between levels")
 	cmd.Flags().StringSliceVar(&releaseMajor, "major", []string{}, "Repositories to receive major version bump")
 	cmd.Flags().StringSliceVar(&releaseMinor, "minor", []string{}, "Repositories to receive minor version bump")
 	cmd.Flags().StringSliceVar(&releasePatch, "patch", []string{}, "Repositories to receive patch version bump (default for all)")
@@ -1090,10 +1088,19 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 
 				// Update dependencies if this is not the first level (skip in dry-run mode)
 				if levelIndex > 0 && !releaseDryRun {
+					logger.WithFields(logrus.Fields{
+						"repo": repo,
+						"wsPath": wsPath,
+					}).Info("[orchestrateRelease] Calling updateDependencies")
 					if err := updateDependencies(ctx, wsPath, versions, graph, logger); err != nil {
+						logger.WithFields(logrus.Fields{
+							"repo": repo,
+							"error": err,
+						}).Error("[orchestrateRelease] updateDependencies failed")
 						errChan <- fmt.Errorf("failed to update dependencies for %s: %w", repo, err)
 						return
 					}
+					logger.WithField("repo", repo).Info("[orchestrateRelease] updateDependencies completed successfully")
 				}
 
 				// Handle changelog - either use existing modifications or generate new
@@ -1257,32 +1264,6 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 			}
 		}
 
-		// After releasing this level, sync dependencies for the next levels if requested
-		if releaseSyncDeps && levelIndex < len(releaseLevels)-1 && !releaseDryRun {
-			logger.Info("Syncing Grove dependencies to latest versions before next level...")
-			displayInfo("🔄 Syncing Grove dependencies to latest versions...")
-
-			// Collect repositories in the next levels that need syncing
-			var reposToSync []string
-			for nextLevel := levelIndex + 1; nextLevel < len(releaseLevels); nextLevel++ {
-				for _, repo := range releaseLevels[nextLevel] {
-					// Only sync repos that will be released
-					if changes, ok := hasChanges[repo]; ok && changes {
-						reposToSync = append(reposToSync, repo)
-					}
-				}
-			}
-
-			if len(reposToSync) > 0 {
-				// Run dependency sync for these repositories
-				if err := syncDependenciesForRepos(ctx, rootDir, reposToSync, graph, logger); err != nil {
-					logger.WithError(err).Warn("Failed to sync dependencies, continuing anyway")
-					displayWarning("Failed to sync some dependencies: " + err.Error())
-				} else {
-					displaySuccess("Dependencies synced successfully")
-				}
-			}
-		}
 	}
 
 	displaySuccess("All modules released successfully")
@@ -1355,20 +1336,55 @@ func updateDependencies(ctx context.Context, modulePath string, releasedVersions
 			continue
 		}
 
-		// Check if this dependency has a new version
-		newVersion, hasNewVersion := releasedVersions[depWorkspaceName]
-		if !hasNewVersion {
+		// Determine the target version for this dependency
+		var targetVersion string
+		
+		// First check if this dependency is being released in the current batch
+		if newVersion, hasNewVersion := releasedVersions[depWorkspaceName]; hasNewVersion {
+			targetVersion = newVersion
+			logger.WithFields(logrus.Fields{
+				"dep": dep.Name,
+				"workspace": depWorkspaceName,
+				"version": newVersion,
+			}).Info("Using version from current release batch")
+		} else {
+			// Dependency is not in current release batch, fetch latest version
+			// Only fetch latest for Go projects (others don't have a module proxy)
+			if projectType == project.TypeGo {
+				latestVersion, err := getLatestModuleVersion(dep.Name)
+				if err != nil {
+					logger.WithError(err).Warnf("Failed to get latest version for %s, keeping current version", dep.Name)
+					continue
+				}
+				targetVersion = latestVersion
+				logger.WithFields(logrus.Fields{
+					"dep": dep.Name,
+					"workspace": depWorkspaceName,
+					"version": latestVersion,
+				}).Info("Using latest version from module proxy")
+			} else {
+				// For non-Go projects, skip if not in release batch
+				continue
+			}
+		}
+
+		// Check if update is needed
+		if dep.Version == targetVersion {
+			logger.WithFields(logrus.Fields{
+				"dep": dep.Name,
+				"version": dep.Version,
+			}).Debug("Dependency already at target version")
 			continue
 		}
 
 		logger.WithFields(logrus.Fields{
 			"dep": dep.Name,
 			"old": dep.Version,
-			"new": newVersion,
+			"new": targetVersion,
 		}).Info("Updating dependency")
 
-		// Update to new version
-		dep.Version = newVersion
+		// Update to target version
+		dep.Version = targetVersion
 		if err := handler.UpdateDependency(modulePath, dep); err != nil {
 			return fmt.Errorf("failed to update %s: %w", dep.Name, err)
 		}
@@ -1398,7 +1414,7 @@ func updateDependencies(ctx context.Context, modulePath string, releasedVersions
 					return err
 				}
 
-				commitMsg := "chore(deps): bump dependencies"
+				commitMsg := "chore(deps): update Grove dependencies to latest versions"
 				if err := executeGitCommand(ctx, modulePath, []string{"commit", "-m", commitMsg},
 					"Commit dependency updates", logger); err != nil {
 					return err
@@ -1454,21 +1470,50 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 			continue
 		}
 
-		// Check if this dependency has a new version
-		newVersion, hasNewVersion := releasedVersions[depName]
-		if !hasNewVersion {
+		// Determine the target version for this dependency
+		var targetVersion string
+		
+		// First check if this dependency is being released in the current batch
+		if newVersion, hasNewVersion := releasedVersions[depName]; hasNewVersion {
+			targetVersion = newVersion
+			logger.WithFields(logrus.Fields{
+				"dep": req.Mod.Path,
+				"depName": depName,
+				"version": newVersion,
+			}).Info("[updateGoDependencies] Using version from current release batch")
+		} else {
+			// Dependency is not in current release batch, fetch latest version
+			latestVersion, err := getLatestModuleVersion(req.Mod.Path)
+			if err != nil {
+				logger.WithError(err).Warnf("[updateGoDependencies] Failed to get latest version for %s, keeping current version", req.Mod.Path)
+				continue
+			}
+			targetVersion = latestVersion
+			logger.WithFields(logrus.Fields{
+				"dep": req.Mod.Path,
+				"depName": depName,
+				"version": latestVersion,
+			}).Info("[updateGoDependencies] Using latest version from module proxy")
+		}
+
+		// Check if update is needed
+		if req.Mod.Version == targetVersion {
+			logger.WithFields(logrus.Fields{
+				"dep": req.Mod.Path,
+				"version": req.Mod.Version,
+			}).Debug("[updateGoDependencies] Dependency already at target version")
 			continue
 		}
 
 		logger.WithFields(logrus.Fields{
 			"dep": req.Mod.Path,
 			"old": req.Mod.Version,
-			"new": newVersion,
+			"new": targetVersion,
 		}).Info("[updateGoDependencies] Updating dependency")
-		updatedDeps = append(updatedDeps, fmt.Sprintf("%s: %s -> %s", req.Mod.Path, req.Mod.Version, newVersion))
+		updatedDeps = append(updatedDeps, fmt.Sprintf("%s: %s -> %s", req.Mod.Path, req.Mod.Version, targetVersion))
 
-		// Update to new version
-		cmd := exec.CommandContext(ctx, "go", "get", fmt.Sprintf("%s@%s", req.Mod.Path, newVersion))
+		// Update to target version
+		cmd := exec.CommandContext(ctx, "go", "get", fmt.Sprintf("%s@%s", req.Mod.Path, targetVersion))
 		cmd.Dir = modulePath
 		cmd.Env = append(os.Environ(),
 			"GOPRIVATE=github.com/mattsolo1/*",
@@ -1516,7 +1561,7 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 		if err := diffCmd.Run(); err != nil {
 			// An error (usually exit code 1) means there are staged changes
 			logger.WithField("modulePath", modulePath).Info("[updateGoDependencies] Found staged changes, will commit")
-			commitMsg := "chore(deps): bump dependencies"
+			commitMsg := "chore(deps): update Grove dependencies to latest versions"
 			if err := executeGitCommand(ctx, modulePath, []string{"commit", "-m", commitMsg},
 				"Commit dependency updates", logger); err != nil {
 				return err
@@ -2021,193 +2066,6 @@ func checkForOutdatedDependencies(ctx context.Context, rootDir string, workspace
 }
 
 // extractCurrentVersions parses go.mod content and returns a map of module -> version
-func extractCurrentVersions(goModContent string) map[string]string {
-	versions := make(map[string]string)
-	lines := strings.Split(goModContent, "\n")
-	inRequire := false
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "require (" {
-			inRequire = true
-			continue
-		}
-		if inRequire && line == ")" {
-			break
-		}
-
-		if inRequire || strings.HasPrefix(line, "require ") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 && strings.HasPrefix(parts[0], "github.com/mattsolo1/") {
-				versions[parts[0]] = parts[1]
-			}
-		}
-	}
-
-	return versions
-}
-
-func syncDependenciesForRepos(ctx context.Context, rootDir string, repos []string, graph *depsgraph.Graph, logger *logrus.Logger) error {
-	logger.WithFields(logrus.Fields{
-		"repos": repos,
-		"rootDir": rootDir,
-	}).Info("[syncDependenciesForRepos] Starting dependency sync")
-	
-	// Map repo names to workspace paths
-	repoPaths := make(map[string]string)
-	for _, repo := range repos {
-		if node, exists := graph.GetNode(repo); exists {
-			repoPaths[repo] = node.Dir
-		}
-	}
-
-	// Track all unique Grove dependencies that need updating
-	uniqueDeps := make(map[string]bool)
-
-	// Scan each repository for Grove dependencies
-	for repo, wsPath := range repoPaths {
-		goModPath := filepath.Join(wsPath, "go.mod")
-		goModContent, err := os.ReadFile(goModPath)
-		if err != nil {
-			logger.WithError(err).Warnf("Failed to read go.mod for %s", repo)
-			continue
-		}
-
-		// Parse dependencies
-		lines := strings.Split(string(goModContent), "\n")
-		inRequire := false
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if line == "require (" {
-				inRequire = true
-				continue
-			}
-			if inRequire && line == ")" {
-				break
-			}
-
-			if inRequire || strings.HasPrefix(line, "require ") {
-				if strings.Contains(line, "github.com/mattsolo1/") {
-					parts := strings.Fields(line)
-					if len(parts) >= 1 {
-						dep := parts[0]
-						if strings.HasPrefix(dep, "github.com/mattsolo1/") {
-							uniqueDeps[dep] = true
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// Get latest versions for all dependencies
-	depVersions := make(map[string]string)
-	for dep := range uniqueDeps {
-		version, err := getLatestModuleVersion(dep)
-		if err != nil {
-			logger.WithError(err).Warnf("Failed to get latest version for %s", dep)
-			continue
-		}
-		depVersions[dep] = version
-	}
-
-	// Update each repository
-	var updateErrors []error
-	for repo, wsPath := range repoPaths {
-		logger.WithField("repo", repo).Info("Syncing dependencies")
-
-		// Track what actually changed for better commit messages
-		versionChanges := make(map[string]string)
-
-		// Get current versions before updating
-		goModPath := filepath.Join(wsPath, "go.mod")
-		beforeContent, _ := os.ReadFile(goModPath)
-		currentVersions := extractCurrentVersions(string(beforeContent))
-
-		// Update each dependency
-		for dep, version := range depVersions {
-			// Check if this update would actually change anything
-			depName := filepath.Base(dep)
-			if currentVersion, exists := currentVersions[dep]; exists && currentVersion != version {
-				versionChanges[depName] = fmt.Sprintf("%s → %s", currentVersion, version)
-			}
-
-			cmd := exec.CommandContext(ctx, "go", "get", fmt.Sprintf("%s@%s", dep, version))
-			cmd.Dir = wsPath
-			cmd.Env = append(os.Environ(),
-				"GOPRIVATE=github.com/mattsolo1/*",
-				"GOPROXY=direct",
-			)
-
-			if output, err := cmd.CombinedOutput(); err != nil {
-				logger.WithError(err).WithField("output", string(output)).
-					Warnf("Failed to update %s in %s", dep, repo)
-				updateErrors = append(updateErrors, fmt.Errorf("%s: %w", repo, err))
-			}
-		}
-
-		// Run go mod tidy
-		cmd := exec.CommandContext(ctx, "go", "mod", "tidy")
-		cmd.Dir = wsPath
-		cmd.Env = append(os.Environ(),
-			"GOPRIVATE=github.com/mattsolo1/*",
-			"GOPROXY=direct",
-		)
-
-		if output, err := cmd.CombinedOutput(); err != nil {
-			logger.WithError(err).WithField("output", string(output)).
-				Warnf("go mod tidy failed for %s", repo)
-			updateErrors = append(updateErrors, fmt.Errorf("%s: go mod tidy: %w", repo, err))
-		}
-
-		// Always try to stage go.mod and go.sum first
-		logger.WithField("repo", repo).Info("[syncDependenciesForRepos] Staging go.mod and go.sum")
-		if err := executeGitCommand(ctx, wsPath, []string{"add", "go.mod", "go.sum"},
-			"Stage dependency sync", logger); err != nil {
-			logger.WithError(err).Warnf("[syncDependenciesForRepos] Failed to stage changes for %s", repo)
-			continue
-		}
-
-		// Check if there are any staged changes before committing
-		logger.WithField("repo", repo).Info("[syncDependenciesForRepos] Checking for staged changes")
-		diffCmd := exec.CommandContext(ctx, "git", "diff", "--staged", "--quiet")
-		diffCmd.Dir = wsPath
-		if err := diffCmd.Run(); err != nil {
-			// An error (usually exit code 1) means there are staged changes
-			logger.WithField("repo", repo).Info("[syncDependenciesForRepos] Found staged changes, will commit")
-			// Build detailed commit message
-			commitMsg := "chore(deps): sync Grove dependencies to latest versions\n\n"
-			if len(versionChanges) > 0 {
-				for depName, change := range versionChanges {
-					commitMsg += fmt.Sprintf("- %s: %s\n", depName, change)
-				}
-			}
-
-			if err := executeGitCommand(ctx, wsPath, []string{"commit", "-m", commitMsg},
-				"Commit dependency sync", logger); err != nil {
-				logger.WithError(err).Warnf("Failed to commit changes for %s", repo)
-				continue
-			}
-
-			// Push
-			if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", "HEAD:main"},
-				"Push dependency sync", logger); err != nil {
-				logger.WithError(err).Warnf("Failed to push changes for %s", repo)
-				continue
-			}
-
-			logger.WithField("repo", repo).Info("[syncDependenciesForRepos] Dependencies synced and pushed")
-		} else {
-			logger.WithField("repo", repo).Info("[syncDependenciesForRepos] No staged changes found, skipping commit")
-		}
-	}
-
-	if len(updateErrors) > 0 {
-		return fmt.Errorf("some repositories failed to sync: %d errors", len(updateErrors))
-	}
-
-	return nil
-}
 
 // shouldWaitForModuleAvailability determines if a project needs module availability checking
 // Template projects and other non-Go modules should skip this check

@@ -12,12 +12,12 @@ import (
 	"github.com/mattsolo1/grove-tend/pkg/harness"
 )
 
-// SyncDepsReleaseScenario tests the `grove release --sync-deps` functionality.
+// SyncDepsReleaseScenario tests the automatic dependency syncing during release.
 func SyncDepsReleaseScenario() *harness.Scenario {
 	return &harness.Scenario{
 		Name:        "sync-deps-release",
-		Description: "Tests the release process with --sync-deps flag, handling both success and CI failure.",
-		Tags:        []string{"release", "sync-deps", "ci"},
+		Description: "Tests the release process with automatic dependency syncing.",
+		Tags:        []string{"release", "dependencies", "ci"},
 		Steps: []harness.Step{
 			{
 				Name:        "Run release with successful upstream CI",
@@ -68,8 +68,8 @@ func SyncDepsReleaseScenario() *harness.Scenario {
 					}()
 
 					// Run release command - only patch lib-a, let --with-deps pull in app-b
+					// Dependencies will be synced automatically
 					cmd := command.New(ctx.GroveBinary, "release",
-						"--sync-deps",
 						"--with-deps", // Include dependencies
 						"--patch", "lib-a", // Only specify lib-a
 						"--yes",
@@ -93,8 +93,8 @@ func SyncDepsReleaseScenario() *harness.Scenario {
 					}
 
 					// 2. Check that app-b was included in the release
-					// Note: The --sync-deps flag doesn't seem to update go.mod in our test environment
-					// This might be due to the mock go command or the test setup
+					// Dependencies should be synced automatically during the release
+					// This might be affected by the mock go command in the test setup
 					// For now, we'll just verify that app-b was part of the release plan
 
 					// 3. Downstream (app-b) was also released
