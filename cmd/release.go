@@ -1290,6 +1290,11 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 }
 
 func updateDependencies(ctx context.Context, modulePath string, releasedVersions map[string]string, graph *depsgraph.Graph, logger *logrus.Logger) error {
+	logger.WithFields(logrus.Fields{
+		"modulePath": modulePath,
+		"releasedVersions": releasedVersions,
+	}).Info("[updateDependencies] Starting dependency update")
+	
 	// Load grove.yml to get project type
 	groveYmlPath := filepath.Join(modulePath, "grove.yml")
 	cfg, err := config.Load(groveYmlPath)
@@ -1407,6 +1412,11 @@ func updateDependencies(ctx context.Context, modulePath string, releasedVersions
 
 // Keep the original function for backward compatibility
 func updateGoDependencies(ctx context.Context, modulePath string, releasedVersions map[string]string, graph *depsgraph.Graph, logger *logrus.Logger) error {
+	logger.WithFields(logrus.Fields{
+		"modulePath": modulePath,
+		"releasedVersions": releasedVersions,
+	}).Info("[updateGoDependencies] Starting dependency update")
+	
 	goModPath := filepath.Join(modulePath, "go.mod")
 
 	// Read current go.mod
@@ -1422,6 +1432,7 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 
 	// Track if we made any updates
 	hasUpdates := false
+	updatedDeps := []string{}
 
 	// Check each dependency
 	for _, req := range modFile.Require {
@@ -1453,7 +1464,8 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 			"dep": req.Mod.Path,
 			"old": req.Mod.Version,
 			"new": newVersion,
-		}).Info("Updating dependency")
+		}).Info("[updateGoDependencies] Updating dependency")
+		updatedDeps = append(updatedDeps, fmt.Sprintf("%s: %s -> %s", req.Mod.Path, req.Mod.Version, newVersion))
 
 		// Update to new version
 		cmd := exec.CommandContext(ctx, "go", "get", fmt.Sprintf("%s@%s", req.Mod.Path, newVersion))
@@ -1472,6 +1484,11 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 	}
 
 	if hasUpdates {
+		logger.WithFields(logrus.Fields{
+			"modulePath": modulePath,
+			"updatedDeps": updatedDeps,
+		}).Info("[updateGoDependencies] Running go mod tidy after updates")
+		
 		// Run go mod tidy
 		cmd := exec.CommandContext(ctx, "go", "mod", "tidy")
 		cmd.Dir = modulePath
@@ -1485,16 +1502,20 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 		}
 
 		// Always stage the dependency files first
+		logger.WithField("modulePath", modulePath).Info("[updateGoDependencies] Staging go.mod and go.sum")
 		if err := executeGitCommand(ctx, modulePath, []string{"add", "go.mod", "go.sum"},
 			"Stage dependency updates", logger); err != nil {
+			logger.WithError(err).Error("[updateGoDependencies] Failed to stage dependency files")
 			return err
 		}
 
 		// Check if there are any staged changes before committing
+		logger.WithField("modulePath", modulePath).Info("[updateGoDependencies] Checking for staged changes")
 		diffCmd := exec.CommandContext(ctx, "git", "diff", "--staged", "--quiet")
 		diffCmd.Dir = modulePath
 		if err := diffCmd.Run(); err != nil {
 			// An error (usually exit code 1) means there are staged changes
+			logger.WithField("modulePath", modulePath).Info("[updateGoDependencies] Found staged changes, will commit")
 			commitMsg := "chore(deps): bump dependencies"
 			if err := executeGitCommand(ctx, modulePath, []string{"commit", "-m", commitMsg},
 				"Commit dependency updates", logger); err != nil {
@@ -1508,9 +1529,14 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 					return err
 				}
 			}
+		} else {
+			logger.WithField("modulePath", modulePath).Info("[updateGoDependencies] No staged changes found, skipping commit")
 		}
+	} else {
+		logger.WithField("modulePath", modulePath).Info("[updateGoDependencies] No updates needed")
 	}
 
+	logger.WithField("modulePath", modulePath).Info("[updateGoDependencies] Completed successfully")
 	return nil
 }
 
@@ -2022,6 +2048,11 @@ func extractCurrentVersions(goModContent string) map[string]string {
 }
 
 func syncDependenciesForRepos(ctx context.Context, rootDir string, repos []string, graph *depsgraph.Graph, logger *logrus.Logger) error {
+	logger.WithFields(logrus.Fields{
+		"repos": repos,
+		"rootDir": rootDir,
+	}).Info("[syncDependenciesForRepos] Starting dependency sync")
+	
 	// Map repo names to workspace paths
 	repoPaths := make(map[string]string)
 	for _, repo := range repos {
@@ -2130,17 +2161,20 @@ func syncDependenciesForRepos(ctx context.Context, rootDir string, repos []strin
 		}
 
 		// Always try to stage go.mod and go.sum first
+		logger.WithField("repo", repo).Info("[syncDependenciesForRepos] Staging go.mod and go.sum")
 		if err := executeGitCommand(ctx, wsPath, []string{"add", "go.mod", "go.sum"},
 			"Stage dependency sync", logger); err != nil {
-			logger.WithError(err).Warnf("Failed to stage changes for %s", repo)
+			logger.WithError(err).Warnf("[syncDependenciesForRepos] Failed to stage changes for %s", repo)
 			continue
 		}
 
 		// Check if there are any staged changes before committing
+		logger.WithField("repo", repo).Info("[syncDependenciesForRepos] Checking for staged changes")
 		diffCmd := exec.CommandContext(ctx, "git", "diff", "--staged", "--quiet")
 		diffCmd.Dir = wsPath
 		if err := diffCmd.Run(); err != nil {
 			// An error (usually exit code 1) means there are staged changes
+			logger.WithField("repo", repo).Info("[syncDependenciesForRepos] Found staged changes, will commit")
 			// Build detailed commit message
 			commitMsg := "chore(deps): sync Grove dependencies to latest versions\n\n"
 			if len(versionChanges) > 0 {
@@ -2162,7 +2196,9 @@ func syncDependenciesForRepos(ctx context.Context, rootDir string, repos []strin
 				continue
 			}
 
-			logger.WithField("repo", repo).Info("Dependencies synced and pushed")
+			logger.WithField("repo", repo).Info("[syncDependenciesForRepos] Dependencies synced and pushed")
+		} else {
+			logger.WithField("repo", repo).Info("[syncDependenciesForRepos] No staged changes found, skipping commit")
 		}
 	}
 

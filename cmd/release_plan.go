@@ -9,20 +9,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/git"
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-meta/pkg/depsgraph"
 	"github.com/mattsolo1/grove-meta/pkg/release"
 	"github.com/mattsolo1/grove-meta/pkg/workspace"
-	"github.com/sirupsen/logrus"
-	"github.com/spf13/cobra"
 )
 
 // runReleasePlan generates a release plan without executing it
 func runReleasePlan(ctx context.Context) (*release.ReleasePlan, error) {
-	// Create a temporary command to get logger
-	cmd := &cobra.Command{}
-	var logger *logrus.Logger = cli.GetLogger(cmd)
+	// Create logger directly with proper name
+	logger := grovelogging.NewLogger("grove-meta").Logger
 
 	displayPhase("Preparing Release Plan")
 
@@ -368,9 +365,8 @@ func contains(slice []string, item string) bool {
 
 // runReleaseApply executes a previously generated release plan
 func runReleaseApply(ctx context.Context) error {
-	// Create a temporary command to get logger
-	cmd := &cobra.Command{}
-	var logger *logrus.Logger = cli.GetLogger(cmd)
+	// Create logger directly with proper name
+	logger := grovelogging.NewLogger("grove-meta").Logger
 
 	displayPhase("Applying Release Plan")
 
