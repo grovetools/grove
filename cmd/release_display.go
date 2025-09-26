@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 )
 
 // Define reusable styles for the release command
@@ -67,34 +68,37 @@ var (
 			Foreground(lipgloss.Color("196"))
 )
 
+// Initialize pretty logger for display functions
+var prettyLog = grovelogging.NewPrettyLogger()
+
 // Phase display helpers
 func displayPhase(title string) {
-	fmt.Println(releaseTitleStyle.Render(fmt.Sprintf("🚀 %s", title)))
+	prettyLog.InfoPretty(fmt.Sprintf("🚀 %s", title))
 }
 
 func displaySection(title string) {
-	fmt.Println(releaseSectionStyle.Render(title))
+	prettyLog.InfoPretty(title)
 }
 
 func displaySuccess(message string) {
-	fmt.Println(releaseSuccessStyle.Render(fmt.Sprintf("✅ %s", message)))
+	prettyLog.Success(message)
 }
 
 func displayWarning(message string) {
-	fmt.Println(releaseWarningStyle.Render(fmt.Sprintf("⚠️  %s", message)))
+	prettyLog.WarnPretty(message)
 }
 
 func displayError(message string) {
-	fmt.Println(releaseErrorStyle.Render(fmt.Sprintf("❌ %s", message)))
+	prettyLog.ErrorPretty(message, nil)
 }
 
 func displayInfo(message string) {
-	fmt.Println(releaseInfoStyle.Render(message))
+	prettyLog.InfoPretty(message)
 }
 
 // Progress display helpers
 func displayProgress(message string) {
-	fmt.Printf("%s %s\n", spinnerStyle.Render("◆"), message)
+	prettyLog.InfoPretty(fmt.Sprintf("◆ %s", message))
 }
 
 func displayComplete(message string) {
@@ -234,7 +238,8 @@ func displayReleaseSummary(releaseLevels [][]string, versions map[string]string,
 
 		if len(reposInLevel) > 0 {
 			levelCount++
-			fmt.Printf("\n%s\n", releaseHighlightStyle.Render(fmt.Sprintf("Level %d (can release in parallel):", levelCount)))
+			prettyLog.Blank()
+			prettyLog.InfoPretty(fmt.Sprintf("Level %d (can release in parallel):", levelCount))
 
 			for _, repo := range reposInLevel {
 				current := currentVersions[repo]
@@ -244,12 +249,11 @@ func displayReleaseSummary(releaseLevels [][]string, versions map[string]string,
 				proposed := versions[repo]
 				increment := getVersionIncrement(current, proposed)
 
-				fmt.Printf("  %s %s: %s → %s (%s)\n",
-					releaseCheckmarkStyle.Render("•"),
+				prettyLog.InfoPretty(fmt.Sprintf("  • %s: %s → %s (%s)",
 					repo,
 					releaseDimStyle.Render(current),
 					releaseHighlightStyle.Render(proposed),
-					releaseInfoStyle.Render(increment))
+					releaseInfoStyle.Render(increment)))
 			}
 		}
 	}
