@@ -460,8 +460,15 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.selectedIndex < len(m.repoNames) {
 			repoName := m.repoNames[m.selectedIndex]
 			if repo, ok := m.plan.Repos[repoName]; ok {
+				oldVersion := repo.NextVersion
 				repo.SelectedBump = "major"
 				repo.NextVersion = calculateNextVersion(repo.CurrentVersion, "major")
+				// Update the staged changelog if it exists
+				if repo.ChangelogPath != "" {
+					if err := updateStagedChangelogVersion(repo.ChangelogPath, oldVersion, repo.NextVersion); err != nil {
+						m.genProgress = fmt.Sprintf("⚠️  Failed to update changelog version: %v", err)
+					}
+				}
 			}
 		}
 		return m, nil
@@ -470,8 +477,15 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.selectedIndex < len(m.repoNames) {
 			repoName := m.repoNames[m.selectedIndex]
 			if repo, ok := m.plan.Repos[repoName]; ok {
+				oldVersion := repo.NextVersion
 				repo.SelectedBump = "minor"
 				repo.NextVersion = calculateNextVersion(repo.CurrentVersion, "minor")
+				// Update the staged changelog if it exists
+				if repo.ChangelogPath != "" {
+					if err := updateStagedChangelogVersion(repo.ChangelogPath, oldVersion, repo.NextVersion); err != nil {
+						m.genProgress = fmt.Sprintf("⚠️  Failed to update changelog version: %v", err)
+					}
+				}
 			}
 		}
 		return m, nil
@@ -480,8 +494,15 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.selectedIndex < len(m.repoNames) {
 			repoName := m.repoNames[m.selectedIndex]
 			if repo, ok := m.plan.Repos[repoName]; ok {
+				oldVersion := repo.NextVersion
 				repo.SelectedBump = "patch"
 				repo.NextVersion = calculateNextVersion(repo.CurrentVersion, "patch")
+				// Update the staged changelog if it exists
+				if repo.ChangelogPath != "" {
+					if err := updateStagedChangelogVersion(repo.ChangelogPath, oldVersion, repo.NextVersion); err != nil {
+						m.genProgress = fmt.Sprintf("⚠️  Failed to update changelog version: %v", err)
+					}
+				}
 			}
 		}
 		return m, nil
@@ -493,8 +514,18 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if repo, ok := m.plan.Repos[repoName]; ok {
 				// Only apply if there's a suggestion
 				if repo.SuggestedBump != "" {
+					oldVersion := repo.NextVersion
 					repo.SelectedBump = repo.SuggestedBump
 					repo.NextVersion = calculateNextVersion(repo.CurrentVersion, repo.SuggestedBump)
+					// Update the staged changelog if it exists
+					if repo.ChangelogPath != "" {
+						if err := updateStagedChangelogVersion(repo.ChangelogPath, oldVersion, repo.NextVersion); err != nil {
+							m.genProgress = fmt.Sprintf("⚠️  Failed to update changelog version: %v", err)
+							return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+								return clearProgressMsg{}
+							})
+						}
+					}
 					m.genProgress = fmt.Sprintf("✅ Applied %s version bump to %s", 
 						strings.ToUpper(repo.SuggestedBump), repoName)
 					// Save the updated plan
@@ -1614,6 +1645,33 @@ func runReleaseTUI(ctx context.Context) error {
 		// Exit the TUI and run the release in the terminal
 		// runReleaseApply will print its own header
 		return runReleaseApply(ctx)
+	}
+	
+	return nil
+}
+
+// updateStagedChangelogVersion updates the version in a staged changelog file
+func updateStagedChangelogVersion(changelogPath, oldVersion, newVersion string) error {
+	if changelogPath == "" || oldVersion == "" || newVersion == "" || oldVersion == newVersion {
+		return nil // Nothing to update
+	}
+	
+	// Read the staged changelog
+	content, err := os.ReadFile(changelogPath)
+	if err != nil {
+		return fmt.Errorf("failed to read staged changelog: %w", err)
+	}
+	
+	// Replace the old version with the new version in the header
+	// Look for "## oldVersion (date)" pattern
+	oldHeader := fmt.Sprintf("## %s (", oldVersion)
+	newHeader := fmt.Sprintf("## %s (", newVersion)
+	
+	updatedContent := strings.Replace(string(content), oldHeader, newHeader, 1)
+	
+	// Write back the updated content
+	if err := os.WriteFile(changelogPath, []byte(updatedContent), 0644); err != nil {
+		return fmt.Errorf("failed to write updated changelog: %w", err)
 	}
 	
 	return nil
