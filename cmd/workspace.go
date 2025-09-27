@@ -17,6 +17,9 @@ func newWorkspaceCmd() *cobra.Command {
 	}
 
 	// Subcommands will be added here
+	cmd.AddCommand(NewWorkspaceCreateCmd()) // Add this
+	cmd.AddCommand(NewWorkspaceOpenCmd())   // Add this
+	cmd.AddCommand(NewWorkspaceRemoveCmd()) // Add this
 	cmd.AddCommand(NewWorkspaceInitCmd())
 	cmd.AddCommand(newWorkspaceListCmd())
 	cmd.AddCommand(newWorkspaceStatusCmd())
