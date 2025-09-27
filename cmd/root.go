@@ -65,7 +65,7 @@ func Execute() error {
 }
 
 // findWorkspaceRoot searches upward from the current directory for a
-// .grove-workspace marker file, indicating we're in a managed workspace.
+// .grove/workspace marker file, indicating we're in a managed workspace.
 // This supports both Grove ecosystem worktrees and user monorepos.
 func findWorkspaceRoot() string {
 	cwd, err := os.Getwd()
@@ -75,15 +75,9 @@ func findWorkspaceRoot() string {
 
 	dir := cwd
 	for {
-		// Check for the new generic marker first
-		markerPath := filepath.Join(dir, ".grove-workspace")
+		// Check for the new generic marker
+		markerPath := filepath.Join(dir, ".grove", "workspace")
 		if _, err := os.Stat(markerPath); err == nil {
-			return dir
-		}
-		
-		// Also check for legacy marker for backward compatibility
-		legacyMarkerPath := filepath.Join(dir, ".grove-ecosystem-worktree")
-		if _, err := os.Stat(legacyMarkerPath); err == nil {
 			return dir
 		}
 

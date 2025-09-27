@@ -46,7 +46,8 @@ func WorkspaceDetectionScenario() *harness.Scenario {
 					os.Chdir(workspaceDir)
 					
 					// Create workspace marker
-					fs.WriteString(filepath.Join(workspaceDir, ".grove-workspace"), 
+					os.MkdirAll(filepath.Join(workspaceDir, ".grove"), 0755)
+					fs.WriteString(filepath.Join(workspaceDir, ".grove", "workspace"), 
 						"branch: test\nplan: test-plan\ncreated_at: 2025-09-26T12:00:00Z\n")
 					
 					// Create a mock grove binary
@@ -127,7 +128,8 @@ func WorkspaceBinaryDelegationScenario() *harness.Scenario {
 					defer os.Chdir(originalDir)
 					os.Chdir(workspaceDir)
 					
-					fs.WriteString(filepath.Join(workspaceDir, ".grove-workspace"),
+					os.MkdirAll(filepath.Join(workspaceDir, ".grove"), 0755)
+					fs.WriteString(filepath.Join(workspaceDir, ".grove", "workspace"),
 						"branch: test\nplan: test-plan\ncreated_at: 2025-09-26T12:00:00Z\n")
 					
 					// Create mock cx binary in workspace
@@ -202,48 +204,3 @@ echo "Path: $0"
 	}
 }
 
-// WorkspaceLegacyMarkerScenario tests backward compatibility with legacy marker
-func WorkspaceLegacyMarkerScenario() *harness.Scenario {
-	return &harness.Scenario{
-		Name:        "workspace-legacy-marker",
-		Description: "Verifies backward compatibility with .grove-ecosystem-worktree marker",
-		Tags:        []string{"workspace", "backward-compatibility"},
-		Steps: []harness.Step{
-			{
-				Name:        "Test legacy marker detection",
-				Description: "Test grove detects legacy .grove-ecosystem-worktree marker",
-				Func: func(ctx *harness.Context) error {
-					// Create workspace with legacy marker
-					workspaceDir := ctx.NewDir("legacy-workspace")
-					originalDir, _ := os.Getwd()
-					defer os.Chdir(originalDir)
-					os.Chdir(workspaceDir)
-					
-					// Use legacy marker name
-					fs.WriteString(filepath.Join(workspaceDir, ".grove-ecosystem-worktree"),
-						"branch: legacy\nplan: legacy-plan\ncreated_at: 2025-09-26T12:00:00Z\n")
-					
-					groveBinary := ctx.GroveBinary
-					
-					// Test workspace detection with legacy marker
-					cmd := command.New(groveBinary, "dev", "workspace", "--check")
-					result := cmd.Run()
-					
-					if result.ExitCode != 0 {
-						return fmt.Errorf("legacy marker not detected, exit code: %d", result.ExitCode)
-					}
-					
-					// Verify path detection
-					cmd = command.New(groveBinary, "dev", "workspace", "--path")
-					result = cmd.Run()
-					
-					if !strings.Contains(result.Stdout, workspaceDir) {
-						return fmt.Errorf("legacy marker workspace path not detected, got: %s", result.Stdout)
-					}
-					
-					return nil
-				},
-			},
-		},
-	}
-}

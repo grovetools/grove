@@ -12,7 +12,7 @@ import (
 func newDevWorkspaceCmd() *cobra.Command {
 	cmd := cli.NewStandardCommand("workspace", "Display information about the current workspace context")
 	cmd.Long = `Provides information about the currently active Grove workspace.
-A workspace is detected by the presence of a '.grove-workspace' file in a parent directory.
+A workspace is detected by the presence of a '.grove/workspace' file in a parent directory.
 When inside a workspace, Grove automatically uses binaries from that workspace.`
 	cmd.Example = `  # Show current workspace info
   grove dev workspace

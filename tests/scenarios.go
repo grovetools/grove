@@ -25,7 +25,6 @@ func AllScenarios() []*harness.Scenario {
 		ReleaseTUISyncDepsToggleScenario(),
 		WorkspaceDetectionScenario(),
 		WorkspaceBinaryDelegationScenario(),
-		WorkspaceLegacyMarkerScenario(),
 	}
 }
 
