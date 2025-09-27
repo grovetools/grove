@@ -67,7 +67,7 @@ binary:
 `)
 					
 					// Test inside workspace
-					cmd = command.New(groveBinary, "dev", "workspace")
+					cmd = command.New(groveBinary, "dev", "workspace").Dir(workspaceDir)
 					result = cmd.Run()
 					// The command might fail if binary discovery fails, but should still output workspace info
 					combinedOutput := result.Stdout + result.Stderr
@@ -87,14 +87,14 @@ binary:
 					// We're primarily testing workspace detection
 					
 					// Test --check flag
-					cmd = command.New(groveBinary, "dev", "workspace", "--check")
+					cmd = command.New(groveBinary, "dev", "workspace", "--check").Dir(workspaceDir)
 					result = cmd.Run()
 					if result.ExitCode != 0 {
 						return fmt.Errorf("workspace --check should return 0 in workspace")
 					}
 					
 					// Test --path flag
-					cmd = command.New(groveBinary, "dev", "workspace", "--path")
+					cmd = command.New(groveBinary, "dev", "workspace", "--path").Dir(workspaceDir)
 					result = cmd.Run()
 					if result.ExitCode != 0 {
 						return fmt.Errorf("workspace --path failed: %s", result.Stderr)
@@ -179,7 +179,7 @@ echo "Path: $0"
 					groveBinary := ctx.GroveBinary
 					
 					// Test delegation inside workspace
-					cmd := command.New(groveBinary, "cx", "version")
+					cmd := command.New(groveBinary, "cx", "version").Dir(workspaceDir)
 					result := cmd.Run()
 					
 					// Should use workspace version
