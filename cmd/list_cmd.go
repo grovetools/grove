@@ -143,8 +143,8 @@ func runList(cmd *cobra.Command, args []string) error {
 			OtherVersions: []string{},
 		}
 
-		// Get effective source from reconciler - use repoName instead of toolName
-		source, version, path := r.GetEffectiveSource(repoName)
+		// Get effective source from reconciler
+		source, version, path := r.GetEffectiveSource(toolName)
 
 		if source == "dev" {
 			info.Status = "dev"

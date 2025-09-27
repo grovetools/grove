@@ -72,12 +72,16 @@ func (r *Reconciler) Reconcile(toolName string) error {
 	binDir := filepath.Join(r.groveHome, "bin")
 	symlinkPath := filepath.Join(binDir, effectiveAlias)
 
-	// Check if a dev override is active (dev links still use original toolName)
-	if binLinks, exists := r.devConfig.Binaries[repoName]; exists && binLinks.Current != "" {
-		// Dev override is active
-		if linkInfo, ok := binLinks.Links[binLinks.Current]; ok {
-			logger.Info("'%s' is using dev link '%s' (%s)", effectiveAlias, binLinks.Current, linkInfo.Path)
-			return createOrUpdateSymlink(symlinkPath, linkInfo.Path)
+	// Check if a dev override is active - dev links are stored by tool alias
+	// Try both the effectiveAlias and repoName for backward compatibility  
+	checkNames := []string{effectiveAlias, repoName}
+	for _, checkName := range checkNames {
+		if binLinks, exists := r.devConfig.Binaries[checkName]; exists && binLinks.Current != "" {
+			// Dev override is active
+			if linkInfo, ok := binLinks.Links[binLinks.Current]; ok {
+				logger.Info("'%s' is using dev link '%s' (%s)", effectiveAlias, binLinks.Current, linkInfo.Path)
+				return createOrUpdateSymlink(symlinkPath, linkInfo.Path)
+			}
 		}
 	}
 
@@ -113,10 +117,14 @@ func (r *Reconciler) GetEffectiveSource(toolName string) (source string, version
 		effectiveAlias = toolName
 	}
 
-	// Check dev links first
-	if binLinks, exists := r.devConfig.Binaries[repoName]; exists && binLinks.Current != "" {
-		if linkInfo, ok := binLinks.Links[binLinks.Current]; ok {
-			return "dev", binLinks.Current, linkInfo.Path
+	// Check dev links first - dev links are stored by tool alias (e.g., "cx" not "grove-context")
+	// Try both the effectiveAlias and the original toolName for backward compatibility
+	checkNames := []string{effectiveAlias, toolName}
+	for _, checkName := range checkNames {
+		if binLinks, exists := r.devConfig.Binaries[checkName]; exists && binLinks.Current != "" {
+			if linkInfo, ok := binLinks.Links[binLinks.Current]; ok {
+				return "dev", binLinks.Current, linkInfo.Path
+			}
 		}
 	}
 
