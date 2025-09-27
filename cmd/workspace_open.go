@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/mattsolo1/grove-core/cli"
@@ -26,8 +27,11 @@ func NewWorkspaceOpenCmd() *cobra.Command {
 			return err
 		}
 
-		// Convention: worktree is located at .grove-worktrees/<name>
-		worktreePath := filepath.Join(gitRoot, ".grove-worktrees", name)
+		// Find the worktree path - it could be in different locations
+		worktreePath, err := findWorktreePath(gitRoot, name)
+		if err != nil {
+			return err
+		}
 
 		tmuxClient, err := tmux.NewClient()
 		if err != nil {
@@ -53,4 +57,27 @@ func NewWorkspaceOpenCmd() *cobra.Command {
 		return tmuxClient.SwitchClient(context.Background(), sessionName)
 	}
 	return cmd
+}
+
+// findWorktreePath finds the actual path to a worktree by checking multiple possible locations
+func findWorktreePath(gitRoot, name string) (string, error) {
+	// First, try to discover workspaces to find the repo that might contain the worktree
+	workspaces, err := workspace.Discover(gitRoot)
+	if err == nil {
+		// Check each workspace for the worktree
+		for _, wsPath := range workspaces {
+			worktreePath := filepath.Join(wsPath, ".grove-worktrees", name)
+			if _, err := os.Stat(worktreePath); err == nil {
+				return worktreePath, nil
+			}
+		}
+	}
+	
+	// Fall back to ecosystem root convention
+	worktreePath := filepath.Join(gitRoot, ".grove-worktrees", name)
+	if _, err := os.Stat(worktreePath); err == nil {
+		return worktreePath, nil
+	}
+	
+	return "", fmt.Errorf("worktree '%s' not found in any workspace or ecosystem root", name)
 }
