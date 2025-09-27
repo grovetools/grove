@@ -61,53 +61,69 @@ func (r *Reconciler) ReconcileAll(tools []string) error {
 
 // Reconcile reconciles the symlink for a specific tool
 func (r *Reconciler) Reconcile(toolName string) error {
-	binDir := filepath.Join(r.groveHome, "bin")
-	symlinkPath := filepath.Join(binDir, toolName)
+	// Get tool info using FindTool - toolName could be repo name or alias
+	repoName, _, effectiveAlias, found := sdk.FindTool(toolName)
+	if !found {
+		// If not found, use the toolName as is (backward compatibility)
+		repoName = toolName
+		effectiveAlias = toolName
+	}
 
-	// Check if a dev override is active
-	if binLinks, exists := r.devConfig.Binaries[toolName]; exists && binLinks.Current != "" {
+	binDir := filepath.Join(r.groveHome, "bin")
+	symlinkPath := filepath.Join(binDir, effectiveAlias)
+
+	// Check if a dev override is active (dev links still use original toolName)
+	if binLinks, exists := r.devConfig.Binaries[repoName]; exists && binLinks.Current != "" {
 		// Dev override is active
 		if linkInfo, ok := binLinks.Links[binLinks.Current]; ok {
-			logger.Info("'%s' is using dev link '%s' (%s)", toolName, binLinks.Current, linkInfo.Path)
+			logger.Info("'%s' is using dev link '%s' (%s)", effectiveAlias, binLinks.Current, linkInfo.Path)
 			return createOrUpdateSymlink(symlinkPath, linkInfo.Path)
 		}
 	}
 
 	// No dev override, fall back to released version
-	toolVersion := r.toolVersions.GetToolVersion(toolName)
+	toolVersion := r.toolVersions.GetToolVersion(repoName)
 	if toolVersion == "" {
-		logger.Debug("No active version for %s and no dev override", toolName)
+		logger.Debug("No active version for %s and no dev override", repoName)
 		// Remove the symlink if it exists
 		os.Remove(symlinkPath)
 		return nil
 	}
 
 	// Check if the tool exists in the active version
-	releasedBinPath := filepath.Join(r.groveHome, "versions", toolVersion, "bin", toolName)
+	releasedBinPath := filepath.Join(r.groveHome, "versions", toolVersion, "bin", effectiveAlias)
 	if _, err := os.Stat(releasedBinPath); err == nil {
-		logger.Info("'%s' is using released version '%s'", toolName, toolVersion)
+		logger.Info("'%s' is using released version '%s'", effectiveAlias, toolVersion)
 		return createOrUpdateSymlink(symlinkPath, releasedBinPath)
 	}
 
 	// Tool doesn't exist in the active version
-	logger.Debug("%s not found in version %s", toolName, toolVersion)
+	logger.Debug("%s not found in version %s", effectiveAlias, toolVersion)
 	os.Remove(symlinkPath)
 	return nil
 }
 
 // GetEffectiveSource returns the effective source (dev or release) for a tool
 func (r *Reconciler) GetEffectiveSource(toolName string) (source string, version string, path string) {
+	// Get tool info using FindTool
+	repoName, _, effectiveAlias, found := sdk.FindTool(toolName)
+	if !found {
+		// If not found, use the toolName as is (backward compatibility)
+		repoName = toolName
+		effectiveAlias = toolName
+	}
+
 	// Check dev links first
-	if binLinks, exists := r.devConfig.Binaries[toolName]; exists && binLinks.Current != "" {
+	if binLinks, exists := r.devConfig.Binaries[repoName]; exists && binLinks.Current != "" {
 		if linkInfo, ok := binLinks.Links[binLinks.Current]; ok {
 			return "dev", binLinks.Current, linkInfo.Path
 		}
 	}
 
 	// Check released version
-	toolVersion := r.toolVersions.GetToolVersion(toolName)
+	toolVersion := r.toolVersions.GetToolVersion(repoName)
 	if toolVersion != "" {
-		releasedBinPath := filepath.Join(r.groveHome, "versions", toolVersion, "bin", toolName)
+		releasedBinPath := filepath.Join(r.groveHome, "versions", toolVersion, "bin", effectiveAlias)
 		if _, err := os.Stat(releasedBinPath); err == nil {
 			return "release", toolVersion, releasedBinPath
 		}

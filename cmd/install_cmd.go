@@ -84,7 +84,19 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 		versionForAll = "nightly"
 		fmt.Println(toolNameStyle.Render("Installing nightly builds for all Grove tools..."))
 	} else {
-		toolsToProcess = args
+		// Resolve dependencies for the requested tools
+		resolvedTools, err := manager.ResolveDependencies(args)
+		if err != nil {
+			return fmt.Errorf("failed to resolve dependencies: %w", err)
+		}
+
+		// Inform user about added dependencies
+		if len(resolvedTools) > len(args) {
+			added := getAddedDependencies(args, resolvedTools)
+			logger.Infof("The following dependencies will also be installed: %s", strings.Join(added, ", "))
+		}
+
+		toolsToProcess = resolvedTools
 	}
 
 	// Migration: ensure we're using the new per-tool version system
@@ -112,6 +124,25 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 
 		// Get currently installed version
 		currentVersion, _ := manager.GetToolVersion(toolName)
+
+		// Check if the binary actually exists for the current version
+		var binaryExists bool
+		if currentVersion != "" {
+			// Load tool versions and create reconciler to find the binary path
+			tv, _ := sdk.LoadToolVersions(os.Getenv("HOME") + "/.grove")
+			if tv == nil {
+				tv = &sdk.ToolVersions{Versions: make(map[string]string)}
+			}
+			r, _ := reconciler.NewWithToolVersions(tv)
+			if r != nil {
+				_, _, currentPath := r.GetEffectiveSource(toolName)
+				if currentPath != "" {
+					if _, err := os.Stat(currentPath); err == nil {
+						binaryExists = true
+					}
+				}
+			}
+		}
 
 		// Handle nightly builds
 		if version == "nightly" {
@@ -141,8 +172,8 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 				}
 				version = latestVersion
 
-				// Check if already up-to-date
-				if currentVersion == version {
+				// Check if already up-to-date AND binary exists
+				if currentVersion == version && binaryExists {
 					fmt.Printf("%s %s... %s (%s)\n",
 						faintStyle.Render("Checking"),
 						toolNameStyle.Render(toolName),
@@ -257,6 +288,27 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 	}
 
 	return nil
+}
+
+// getAddedDependencies finds which tools were added by the resolver
+func getAddedDependencies(original, resolved []string) []string {
+	originalSet := make(map[string]bool)
+	for _, spec := range original {
+		repoName, _, _, _ := sdk.FindTool(strings.Split(spec, "@")[0])
+		if repoName != "" {
+			originalSet[repoName] = true
+		}
+	}
+
+	var added []string
+	for _, spec := range resolved {
+		repoName := strings.Split(spec, "@")[0]
+		if !originalSet[repoName] {
+			_, _, alias, _ := sdk.FindTool(repoName)
+			added = append(added, alias)
+		}
+	}
+	return added
 }
 
 // clearDevLinkForTool clears the active dev link for a specific tool

@@ -30,31 +30,99 @@ const (
 
 // ToolInfo contains information about a tool
 type ToolInfo struct {
-	RepoName   string
-	BinaryName string
+	Alias        string   // Default alias and binary name
+	Dependencies []string // List of canonical RepoNames this tool depends on
 }
 
-// toolRegistry maps tool names to their repository and binary names
+// toolRegistry maps a tool's canonical repository name to its information
 var toolRegistry = map[string]ToolInfo{
-	"canopy":                {RepoName: "grove-canopy", BinaryName: "canopy"},
-	"clogs":                 {RepoName: "grove-claude-logs", BinaryName: "clogs"},
-	"core":                  {RepoName: "grove-core", BinaryName: "core"},
-	"cx":                    {RepoName: "grove-context", BinaryName: "cx"},
-	"docgen":                {RepoName: "grove-docgen", BinaryName: "docgen"},
-	"flow":                  {RepoName: "grove-flow", BinaryName: "flow"},
-	"gemapi":                {RepoName: "grove-gemini", BinaryName: "gemapi"},
-	"gmux":                  {RepoName: "grove-tmux", BinaryName: "gmux"},
-	"grove":                 {RepoName: "grove-meta", BinaryName: "grove"},
-	"grove-hooks":           {RepoName: "grove-hooks", BinaryName: "hooks"},
-	"nb":                    {RepoName: "grove-notebook", BinaryName: "nb"},
-	"neogrove":              {RepoName: "grove-nvim", BinaryName: "neogrove"},
-	"notify":                {RepoName: "grove-notifications", BinaryName: "notify"},
-	"project-tmpl-go":       {RepoName: "grove-project-tmpl-go", BinaryName: "project-tmpl-go"},
-	"project-tmpl-maturin":  {RepoName: "grove-project-tmpl-maturin", BinaryName: "project-tmpl-maturin"},
-	"project-tmpl-react-ts": {RepoName: "grove-project-tmpl-react-ts", BinaryName: "project-tmpl-react-ts"},
-	"px":                    {RepoName: "grove-proxy", BinaryName: "px"},
-	"sb":                    {RepoName: "grove-sandbox", BinaryName: "sb"},
-	"tend":                  {RepoName: "grove-tend", BinaryName: "tend"},
+	"grove-canopy":                {Alias: "canopy"},
+	"grove-claude-logs":           {Alias: "clogs"},
+	"grove-core":                  {Alias: "core"},
+	"grove-context":               {Alias: "cx"},
+	"grove-docgen":                {Alias: "docgen"},
+	"grove-flow":                  {Alias: "flow", Dependencies: []string{"grove-context", "grove-gemini"}},
+	"grove-gemini":                {Alias: "gemapi"},
+	"grove-tmux":                  {Alias: "gmux"},
+	"grove-meta":                  {Alias: "grove", Dependencies: []string{"grove-context", "grove-gemini", "grove-notebook"}},
+	"grove-hooks":                 {Alias: "hooks"},
+	"grove-notebook":              {Alias: "nb"},
+	"grove-nvim":                  {Alias: "neogrove"},
+	"grove-notifications":         {Alias: "notify"},
+	"grove-project-tmpl-go":       {Alias: "project-tmpl-go"},
+	"grove-project-tmpl-maturin":  {Alias: "project-tmpl-maturin"},
+	"grove-project-tmpl-react-ts": {Alias: "project-tmpl-react-ts"},
+	"grove-proxy":                 {Alias: "px"},
+	"grove-sandbox":               {Alias: "sb"},
+	"grove-tend":                  {Alias: "tend"},
+}
+
+// AliasConfig represents the structure of the aliases.json file
+type AliasConfig struct {
+	Aliases map[string]string `json:"aliases"` // repoName -> custom alias
+}
+
+// LoadAliases loads the user's custom alias configuration
+func LoadAliases(groveHome string) (*AliasConfig, error) {
+	aliasFile := filepath.Join(groveHome, "aliases.json")
+	conf := &AliasConfig{Aliases: make(map[string]string)}
+
+	if data, err := os.ReadFile(aliasFile); err == nil {
+		if err := json.Unmarshal(data, &conf); err != nil {
+			// If parsing fails, proceed with an empty config
+			conf = &AliasConfig{Aliases: make(map[string]string)}
+		}
+	}
+	return conf, nil
+}
+
+// SaveAliases saves the user's custom alias configuration
+func SaveAliases(groveHome string, config *AliasConfig) error {
+	aliasFile := filepath.Join(groveHome, "aliases.json")
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal aliases: %w", err)
+	}
+	return os.WriteFile(aliasFile, data, 0644)
+}
+
+// FindTool resolves a user-provided identifier (repo name, alias) to its canonical info
+// It returns the canonical repoName, the ToolInfo, the effective alias, and a found boolean
+func FindTool(identifier string) (string, ToolInfo, string, bool) {
+	groveHome := filepath.Join(os.Getenv("HOME"), ".grove")
+	aliases, _ := LoadAliases(groveHome)
+
+	// 1. Check if identifier is a custom alias
+	for repoName, customAlias := range aliases.Aliases {
+		if identifier == customAlias {
+			if info, ok := toolRegistry[repoName]; ok {
+				return repoName, info, customAlias, true
+			}
+		}
+	}
+
+	// 2. Check if identifier is a default alias or a repo name
+	for repoName, info := range toolRegistry {
+		if identifier == info.Alias || identifier == repoName {
+			effectiveAlias := info.Alias
+			if customAlias, ok := aliases.Aliases[repoName]; ok {
+				effectiveAlias = customAlias
+			}
+			return repoName, info, effectiveAlias, true
+		}
+	}
+
+	return "", ToolInfo{}, "", false
+}
+
+// GetAllTools returns all registered tool repository names
+func GetAllTools() []string {
+	tools := make([]string, 0, len(toolRegistry))
+	for repoName := range toolRegistry {
+		tools = append(tools, repoName)
+	}
+	sort.Strings(tools)
+	return tools
 }
 
 // Manager handles SDK installation and version management
@@ -90,6 +158,65 @@ func (m *Manager) SetUseGH(useGH bool) {
 	m.useGH = useGH
 }
 
+// ResolveDependencies takes a list of user-specified tools and returns a complete
+// list of tools to install, including all dependencies
+func (m *Manager) ResolveDependencies(initialToolSpecs []string) ([]string, error) {
+	toProcess := make(map[string]string) // repoName -> version
+	final := make(map[string]string)
+
+	// 1. Initial population from user input
+	for _, spec := range initialToolSpecs {
+		parts := strings.SplitN(spec, "@", 2)
+		identifier := parts[0]
+		version := "latest"
+		if len(parts) > 1 {
+			version = parts[1]
+		}
+
+		repoName, _, _, found := FindTool(identifier)
+		if !found {
+			return nil, fmt.Errorf("tool '%s' not found in registry", identifier)
+		}
+		toProcess[repoName] = version
+	}
+
+	// 2. Breadth-first traversal to find all dependencies
+	queue := make([]string, 0, len(toProcess))
+	for repoName := range toProcess {
+		queue = append(queue, repoName)
+		final[repoName] = toProcess[repoName]
+	}
+
+	for len(queue) > 0 {
+		currentRepo := queue[0]
+		queue = queue[1:]
+
+		_, info, _, found := FindTool(currentRepo)
+		if !found || len(info.Dependencies) == 0 {
+			continue
+		}
+
+		for _, depRepoName := range info.Dependencies {
+			if _, exists := final[depRepoName]; !exists {
+				final[depRepoName] = "latest" // Dependencies default to latest
+				queue = append(queue, depRepoName)
+			}
+		}
+	}
+
+	// 3. Format the final list as specs
+	result := make([]string, 0, len(final))
+	for repoName, version := range final {
+		if version == "latest" {
+			result = append(result, repoName)
+		} else {
+			result = append(result, fmt.Sprintf("%s@%s", repoName, version))
+		}
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
 // EnsureDirs creates the necessary directory structure
 func (m *Manager) EnsureDirs() error {
 	dirs := []string{
@@ -121,14 +248,21 @@ func (m *Manager) GetActiveVersion() (string, error) {
 
 // GetToolVersion returns the active version for a specific tool
 func (m *Manager) GetToolVersion(tool string) (string, error) {
+	// Get canonical repo name
+	repoName, _, _, found := FindTool(tool)
+	if !found {
+		// If not found, use the tool name as is (backward compatibility)
+		repoName = tool
+	}
+
 	tv, err := LoadToolVersions(m.baseDir)
 	if err != nil {
 		return "", fmt.Errorf("failed to load tool versions: %w", err)
 	}
 
-	version := tv.GetToolVersion(tool)
+	version := tv.GetToolVersion(repoName)
 	if version == "" {
-		return "", fmt.Errorf("no active version for %s", tool)
+		return "", fmt.Errorf("no active version for %s", repoName)
 	}
 
 	return version, nil
@@ -142,12 +276,19 @@ func (m *Manager) SetActiveVersion(version string) error {
 
 // SetToolVersion sets the active version for a specific tool
 func (m *Manager) SetToolVersion(tool, version string) error {
+	// Get canonical repo name
+	repoName, _, _, found := FindTool(tool)
+	if !found {
+		// If not found, use the tool name as is (backward compatibility)
+		repoName = tool
+	}
+
 	tv, err := LoadToolVersions(m.baseDir)
 	if err != nil {
 		return fmt.Errorf("failed to load tool versions: %w", err)
 	}
 
-	tv.SetToolVersion(tool, version)
+	tv.SetToolVersion(repoName, version)
 
 	if err := tv.Save(m.baseDir); err != nil {
 		return fmt.Errorf("failed to save tool versions: %w", err)
@@ -166,31 +307,17 @@ type GitHubRelease struct {
 }
 
 // resolveRepoName resolves a tool name to its repository name
-// It handles both old tool names (keys in toolRegistry) and actual binary names
+// It uses the FindTool function to handle aliases and canonical names
 func resolveRepoName(toolName string) (string, error) {
-	// First check if it's a direct key in toolRegistry
-	if info, ok := toolRegistry[toolName]; ok {
-		return info.RepoName, nil
+	repoName, _, _, found := FindTool(toolName)
+	if found {
+		return repoName, nil
 	}
 
-	// Check if the toolName is already a valid repository name
+	// If not found, check if it's already a grove- repository name
+	// This allows for future tools not yet in the registry
 	if strings.HasPrefix(toolName, "grove-") {
-		// Verify it's a known repository by checking if it exists as a value
-		for _, info := range toolRegistry {
-			if info.RepoName == toolName {
-				return toolName, nil
-			}
-		}
-		// Even if not in our map, allow it - it might be a new repository
 		return toolName, nil
-	}
-
-	// Check if adding "grove-" prefix gives us a valid repo
-	expectedRepo := "grove-" + toolName
-	for _, info := range toolRegistry {
-		if info.RepoName == expectedRepo {
-			return info.RepoName, nil
-		}
 	}
 
 	return "", fmt.Errorf("unknown tool: %s", toolName)
@@ -346,22 +473,22 @@ func (m *Manager) InstallTool(toolName, versionTag string) error {
 		return err
 	}
 
-	// Get tool info
-	toolInfo, ok := toolRegistry[toolName]
-	if !ok {
+	// Get tool info using FindTool
+	repoName, toolInfo, effectiveAlias, found := FindTool(toolName)
+	if !found {
 		return fmt.Errorf("unknown tool: %s", toolName)
 	}
 
 	// Get release information
-	release, err := m.GetRelease(toolName, versionTag)
+	release, err := m.GetRelease(repoName, versionTag)
 	if err != nil {
 		return err
 	}
 
-	// Construct the binary name using the tool's binary name (not repo name)
+	// Construct the binary name using the tool's default alias (not custom alias)
 	osName := runtime.GOOS
 	archName := runtime.GOARCH
-	binaryAssetName := fmt.Sprintf("%s-%s-%s", toolInfo.BinaryName, osName, archName)
+	binaryAssetName := fmt.Sprintf("%s-%s-%s", toolInfo.Alias, osName, archName)
 
 	// Find the asset URL
 	var downloadURL string
@@ -382,15 +509,15 @@ func (m *Manager) InstallTool(toolName, versionTag string) error {
 		return fmt.Errorf("failed to create version directory: %w", err)
 	}
 
-	// Download the binary
-	targetPath := filepath.Join(versionBinDir, toolName)
+	// Download the binary - use effective alias as the binary name
+	targetPath := filepath.Join(versionBinDir, effectiveAlias)
 	if err := m.downloadFile(downloadURL, targetPath); err != nil {
-		return fmt.Errorf("failed to download %s: %w", toolName, err)
+		return fmt.Errorf("failed to download %s: %w", repoName, err)
 	}
 
 	// Make executable
 	if err := os.Chmod(targetPath, 0755); err != nil {
-		return fmt.Errorf("failed to make %s executable: %w", toolName, err)
+		return fmt.Errorf("failed to make %s executable: %w", effectiveAlias, err)
 	}
 
 	return nil
@@ -403,9 +530,9 @@ func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
 		return "", err
 	}
 
-	// Get tool info
-	toolInfo, ok := toolRegistry[toolName]
-	if !ok {
+	// Get tool info using FindTool
+	repoName, _, effectiveAlias, found := FindTool(toolName)
+	if !found {
 		return "", fmt.Errorf("unknown tool: %s", toolName)
 	}
 
@@ -417,7 +544,7 @@ func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
 	defer os.RemoveAll(tempDir)
 
 	// Clone the repository using gh CLI
-	repoSlug := fmt.Sprintf("%s/%s", GitHubOwner, toolInfo.RepoName)
+	repoSlug := fmt.Sprintf("%s/%s", GitHubOwner, repoName)
 	cloneCmd := exec.Command("gh", "repo", "clone", repoSlug, tempDir, "--", "--depth=1")
 	if output, err := cloneCmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("failed to clone repository: %w\nOutput: %s", err, string(output))
@@ -449,14 +576,14 @@ func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
 	// Find the binary for this specific tool
 	var binaryPath string
 	for _, binary := range binaries {
-		if binary.Name == toolName {
+		if binary.Name == effectiveAlias {
 			binaryPath = binary.Path
 			break
 		}
 	}
 
 	if binaryPath == "" {
-		return "", fmt.Errorf("could not find built binary for %s", toolName)
+		return "", fmt.Errorf("could not find built binary for %s", effectiveAlias)
 	}
 
 	// Create version directory
@@ -465,8 +592,8 @@ func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
 		return "", fmt.Errorf("failed to create version directory: %w", err)
 	}
 
-	// Copy the binary to the version directory
-	targetPath := filepath.Join(versionBinDir, toolName)
+	// Copy the binary to the version directory - use effective alias
+	targetPath := filepath.Join(versionBinDir, effectiveAlias)
 	sourceFile, err := os.Open(binaryPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to open built binary: %w", err)
@@ -485,7 +612,7 @@ func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
 
 	// Make executable
 	if err := os.Chmod(targetPath, 0755); err != nil {
-		return "", fmt.Errorf("failed to make %s executable: %w", toolName, err)
+		return "", fmt.Errorf("failed to make %s executable: %w", effectiveAlias, err)
 	}
 
 	return versionTag, nil
@@ -498,14 +625,22 @@ func (m *Manager) UseVersion(versionTag string) error {
 
 // UseToolVersion switches a specific tool to a specific version
 func (m *Manager) UseToolVersion(tool, versionTag string) error {
-	// Check if the tool at this version is installed
-	toolPath := filepath.Join(m.baseDir, VersionsDir, versionTag, BinDir, tool)
-	if _, err := os.Stat(toolPath); os.IsNotExist(err) {
-		return fmt.Errorf("tool %s version %s is not installed", tool, versionTag)
+	// Get tool info using FindTool
+	repoName, _, effectiveAlias, found := FindTool(tool)
+	if !found {
+		// If not found, use the tool name as is (backward compatibility)
+		repoName = tool
+		effectiveAlias = tool
 	}
 
-	// Update the tool version
-	if err := m.SetToolVersion(tool, versionTag); err != nil {
+	// Check if the tool at this version is installed
+	toolPath := filepath.Join(m.baseDir, VersionsDir, versionTag, BinDir, effectiveAlias)
+	if _, err := os.Stat(toolPath); os.IsNotExist(err) {
+		return fmt.Errorf("tool %s version %s is not installed", repoName, versionTag)
+	}
+
+	// Update the tool version - use repoName as the key
+	if err := m.SetToolVersion(repoName, versionTag); err != nil {
 		return err
 	}
 
@@ -611,25 +746,12 @@ func (m *Manager) resetDevLinks() error {
 	return devlinks.ClearAllCurrentLinks()
 }
 
-// GetAllTools returns the list of all available tools
-func GetAllTools() []string {
-	// Extract all tool names from the toolRegistry map to ensure consistency
-	tools := make([]string, 0, len(toolRegistry))
-	for tool := range toolRegistry {
-		tools = append(tools, tool)
-	}
-
-	// Sort for consistent output
-	sort.Strings(tools)
-	return tools
-}
-
-// GetToolToRepoMap returns the tool to repository name mapping
+// GetToolToRepoMap returns the alias to repository name mapping
 func GetToolToRepoMap() map[string]string {
 	// Return a copy to prevent external modification
 	result := make(map[string]string, len(toolRegistry))
-	for k, v := range toolRegistry {
-		result[k] = v.RepoName
+	for repoName, info := range toolRegistry {
+		result[info.Alias] = repoName
 	}
 	return result
 }

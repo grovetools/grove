@@ -143,8 +143,8 @@ func runList(cmd *cobra.Command, args []string) error {
 			OtherVersions: []string{},
 		}
 
-		// Get effective source from reconciler
-		source, version, path := r.GetEffectiveSource(toolName)
+		// Get effective source from reconciler - use repoName instead of toolName
+		source, version, path := r.GetEffectiveSource(repoName)
 
 		if source == "dev" {
 			info.Status = "dev"
@@ -166,9 +166,10 @@ func runList(cmd *cobra.Command, args []string) error {
 			info.ActivePath = path
 		}
 
-		// Check for other installed versions
+		// Check for other installed versions - use effective alias from FindTool
+		_, _, effectiveAlias, _ := sdk.FindTool(repoName)
 		for _, installedVersion := range installedVersions {
-			versionBinPath := filepath.Join(groveHome, "versions", installedVersion, "bin", toolName)
+			versionBinPath := filepath.Join(groveHome, "versions", installedVersion, "bin", effectiveAlias)
 			if _, err := os.Stat(versionBinPath); err == nil {
 				// Only add to other versions if it's not the active version
 				if source != "release" || version != installedVersion {
