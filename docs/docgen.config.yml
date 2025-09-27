@@ -6,48 +6,48 @@ sections:
   - name: overview
     order: 1
     output: 01-overview.md
-    prompt: prompts/overview.md
+    prompt: prompts/01-overview.md
     title: Overview
-  - name: installation
+  - name: examples
     order: 2
-    output: 02-installation.md
-    prompt: prompts/installation.md
-    title: Installation
-  - name: getting-started
-    order: 3
-    output: 03-getting-started.md
-    prompt: prompts/getting-started.md
-    title: Getting Started
+    output: 02-examples.md
+    prompt: prompts/02-examples.md
+    title: Examples
   - name: core-concepts
-    order: 4
-    output: 04-core-concepts.md
-    prompt: prompts/core-concepts.md
+    order: 3
+    output: 03-core-concepts.md
+    prompt: prompts/03-core-concepts.md
     title: Core Concepts
-  - name: command-reference
-    order: 5
-    output: 05-command-reference.md
-    prompt: prompts/command-reference.md
-    title: Command Reference
   - name: tutorials
-    order: 6
-    output: 06-tutorials.md
-    prompt: prompts/tutorials.md
+    order: 4
+    output: 04-tutorials.md
+    prompt: prompts/04-tutorials.md
     title: Tutorials
   - name: configuration
-    order: 7
-    output: 07-configuration.md
-    prompt: prompts/configuration.md
+    order: 5
+    output: 05-configuration.md
+    prompt: prompts/05-configuration.md
     title: Configuration
   - name: architecture
-    order: 8
-    output: 08-architecture.md
-    prompt: prompts/architecture.md
+    order: 6
+    output: 06-architecture.md
+    prompt: prompts/06-architecture.md
     title: Architecture
+  - name: command-reference
+    order: 7
+    output: 07-command-reference.md
+    prompt: prompts/07-command-reference.md
+    title: Command Reference
   - name: contributing
-    order: 9
-    output: 09-contributing.md
-    prompt: prompts/contributing.md
+    order: 8
+    output: 08-contributing.md
+    prompt: prompts/08-contributing.md
     title: Contributing
+  - name: changelog
+    order: 9
+    output: 09-changelog.md
+    prompt: prompts/09-changelog.md
+    title: Changelog
 settings:
   model: gemini-2.5-pro
   output_dir: docs
