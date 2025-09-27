@@ -209,6 +209,33 @@ func AddRepoSkipGitHubScenario() *harness.Scenario {
 					fs.WriteString(filepath.Join(ecosystemDir, "Makefile"), 
 						"PACKAGES = grove-core\n# GROVE-META:ADD-REPO:PACKAGES\n\nBINARIES = grove\n# GROVE-META:ADD-REPO:BINARIES\n")
 					
+					// Initialize as a git repository
+					cmd := command.New("git", "init").Dir(ecosystemDir)
+					if result := cmd.Run(); result.Error != nil {
+						return fmt.Errorf("failed to init git: %w", result.Error)
+					}
+					
+					// Add and commit initial files
+					cmd = command.New("git", "add", ".").Dir(ecosystemDir)
+					if result := cmd.Run(); result.Error != nil {
+						return fmt.Errorf("failed to add files: %w", result.Error)
+					}
+					
+					cmd = command.New("git", "config", "user.email", "test@example.com").Dir(ecosystemDir)
+					if result := cmd.Run(); result.Error != nil {
+						return fmt.Errorf("failed to configure git email: %w", result.Error)
+					}
+					
+					cmd = command.New("git", "config", "user.name", "Test User").Dir(ecosystemDir)
+					if result := cmd.Run(); result.Error != nil {
+						return fmt.Errorf("failed to configure git name: %w", result.Error)
+					}
+					
+					cmd = command.New("git", "commit", "-m", "Initial commit").Dir(ecosystemDir)
+					if result := cmd.Run(); result.Error != nil {
+						return fmt.Errorf("failed to commit: %w", result.Error)
+					}
+					
 					// Change to ecosystem directory
 					originalDir, _ := os.Getwd()
 					defer os.Chdir(originalDir)
@@ -227,11 +254,12 @@ func AddRepoSkipGitHubScenario() *harness.Scenario {
 					os.Setenv("PATH", mockDir+":"+os.Getenv("PATH"))
 					
 					groveBinary := ctx.GroveBinary
-					cmd := command.New(groveBinary, "add-repo", "grove-test-local",
-						"--alias=gtl", 
+					groveCmd := command.New(groveBinary, "add-repo", "grove-test-local",
+						"--alias=gtl",
+						"--ecosystem", 
 						"--skip-github")
 					
-					result := cmd.Run()
+					result := groveCmd.Run()
 					if result.ExitCode != 0 {
 						return fmt.Errorf("command failed: %s", result.Stderr)
 					}
@@ -243,6 +271,30 @@ func AddRepoSkipGitHubScenario() *harness.Scenario {
 					
 					if _, err := os.Stat(filepath.Join(ecosystemDir, "grove-test-local", "go.mod")); os.IsNotExist(err) {
 						return fmt.Errorf("go.mod not created")
+					}
+
+					// Verify ecosystem integration files
+					// 1. Verify go.work content
+					goWorkPath := filepath.Join(ecosystemDir, "go.work")
+					goWorkContent, err := os.ReadFile(goWorkPath)
+					if err != nil {
+						return fmt.Errorf("failed to read go.work: %w", err)
+					}
+					expectedGoWorkUse := "./grove-test-local"
+					if !strings.Contains(string(goWorkContent), expectedGoWorkUse) {
+						return fmt.Errorf("go.work was not updated correctly. Expected to find '%s' in:\n%s", expectedGoWorkUse, string(goWorkContent))
+					}
+
+					// 2. Verify .gitmodules content for submodule integration
+					gitModulesPath := filepath.Join(ecosystemDir, ".gitmodules")
+					gitModulesContent, err := os.ReadFile(gitModulesPath)
+					if err != nil {
+						return fmt.Errorf("failed to read .gitmodules: %w", err)
+					}
+					expectedSubmoduleEntry := "[submodule \"grove-test-local\"]"
+					expectedSubmoduleURL := "url = ./grove-test-local"
+					if !strings.Contains(string(gitModulesContent), expectedSubmoduleEntry) || !strings.Contains(string(gitModulesContent), expectedSubmoduleURL) {
+						return fmt.Errorf(".gitmodules was not updated correctly. Expected submodule entry for 'grove-test-local' in:\n%s", string(gitModulesContent))
 					}
 					
 					return nil

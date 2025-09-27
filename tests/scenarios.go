@@ -9,6 +9,7 @@ func AllScenarios() []*harness.Scenario {
 		AddRepoDryRunScenario(),
 		// AddRepoWithGitHubScenario(), // Commented out - GitHub integration test
 		AddRepoSkipGitHubScenario(),
+		WorkspaceBootstrappingScenario(), // Add the new scenario here
 		PolyglotProjectTypesScenario(),
 		PolyglotDependencyGraphScenario(),
 		PolyglotAddRepoScenario(),
