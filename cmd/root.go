@@ -21,6 +21,7 @@ func init() {
 	rootCmd.AddCommand(newActivateCmd())
 	rootCmd.AddCommand(newChangelogCmd())
 	rootCmd.AddCommand(newDepsCmd())
+	rootCmd.AddCommand(newDocsCmd())
 	rootCmd.AddCommand(newLogsCmd())
 	rootCmd.AddCommand(newRunCmd())
 	rootCmd.AddCommand(internal.NewInternalCmd())
