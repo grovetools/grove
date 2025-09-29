@@ -2,10 +2,13 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/mattsolo1/grove-meta/pkg/release"
 	"github.com/spf13/cobra"
@@ -209,21 +212,131 @@ Use this to abort a release in progress and start fresh.`,
 // newReleaseUndoTagCmd creates the 'grove release undo-tag' subcommand
 func newReleaseUndoTagCmd() *cobra.Command {
 	var tagName string
-	var allRepos bool
+	var remote bool
+	var force bool
+	var fromPlan bool
 	
 	cmd := &cobra.Command{
 		Use:   "undo-tag [tag]",
-		Short: "Remove a tag that hasn't been pushed yet",
-		Long: `Remove a local tag that was created but hasn't been pushed to remote.
+		Short: "Remove tags locally and optionally from remote",
+		Long: `Remove tags that were created during a release.
 
-This is useful if you need to fix something after tagging but before pushing.
+This is useful if you need to fix something after tagging.
 
 Examples:
   grove release undo-tag v1.2.3              # Remove specific tag from current repo
-  grove release undo-tag --all v1.2.3        # Remove tag from all repositories
-  grove release undo-tag --last              # Remove the last created tag`,
+  grove release undo-tag v1.2.3 --remote     # Also remove from origin
+  grove release undo-tag --from-plan         # Remove all tags from release plan
+  grove release undo-tag --from-plan --remote --force  # Force remove from remote too`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			
+			if fromPlan {
+				// Load the release plan
+				plan, err := release.LoadPlan()
+				if err != nil {
+					if os.IsNotExist(err) {
+						return fmt.Errorf("no release plan found - cannot undo tags without a plan")
+					}
+					return fmt.Errorf("failed to load release plan: %w", err)
+				}
+				
+				// Confirm the action
+				if !force {
+					fmt.Println("This will remove the following tags:")
+					for repoName, repo := range plan.Repos {
+						if repo.Selected && repo.NextVersion != "" {
+							fmt.Printf("  - %s: %s", repoName, repo.NextVersion)
+							if remote {
+								fmt.Print(" (local and remote)")
+							} else {
+								fmt.Print(" (local only)")
+							}
+							fmt.Println()
+						}
+					}
+					
+					fmt.Print("\nAre you sure? [y/N]: ")
+					var response string
+					fmt.Scanln(&response)
+					response = strings.TrimSpace(strings.ToLower(response))
+					
+					if response != "y" && response != "yes" {
+						fmt.Println("Cancelled")
+						return nil
+					}
+				}
+				
+				// Track results
+				var successCount, failCount int
+				var errors []string
+				
+				// Process each repository
+				for repoName, repo := range plan.Repos {
+					if !repo.Selected || repo.NextVersion == "" {
+						continue
+					}
+					
+					// Find the repository path
+					repoPath := findRepositoryPath(repoName)
+					if repoPath == "" {
+						errors = append(errors, fmt.Sprintf("%s: could not find repository path", repoName))
+						failCount++
+						continue
+					}
+					
+					version := repo.NextVersion
+					
+					// Delete local tag
+					deleteCmd := exec.CommandContext(ctx, "git", "tag", "-d", version)
+					deleteCmd.Dir = repoPath
+					output, err := deleteCmd.CombinedOutput()
+					if err != nil {
+						if !strings.Contains(string(output), "not found") {
+							errors = append(errors, fmt.Sprintf("%s: failed to delete local tag: %s", repoName, string(output)))
+							failCount++
+							continue
+						}
+						// Tag doesn't exist locally, that's ok
+					} else {
+						fmt.Printf("  ✓ Removed local tag %s from %s\n", version, repoName)
+					}
+					
+					// Delete remote tag if requested
+					if remote {
+						pushCmd := exec.CommandContext(ctx, "git", "push", "origin", ":refs/tags/"+version)
+						pushCmd.Dir = repoPath
+						output, err := pushCmd.CombinedOutput()
+						if err != nil {
+							if !strings.Contains(string(output), "not found") {
+								errors = append(errors, fmt.Sprintf("%s: failed to delete remote tag: %s", repoName, string(output)))
+								failCount++
+								continue
+							}
+							// Tag doesn't exist remotely, that's ok
+						} else {
+							fmt.Printf("  ✓ Removed remote tag %s from %s\n", version, repoName)
+						}
+					}
+					
+					successCount++
+				}
+				
+				// Report results
+				fmt.Printf("\n✅ Successfully processed %d repositories\n", successCount)
+				if failCount > 0 {
+					fmt.Printf("❌ Failed on %d repositories:\n", failCount)
+					for _, err := range errors {
+						fmt.Printf("  - %s\n", err)
+					}
+					return fmt.Errorf("some operations failed")
+				}
+				
+				return nil
+			}
+			
+			// Single tag mode
 			if len(args) > 0 {
 				tagName = args[0]
 			}
@@ -238,31 +351,349 @@ Examples:
 				tagName = strings.TrimSpace(string(output))
 			}
 			
+			// Confirm if not forced
+			if !force && remote {
+				fmt.Printf("This will remove tag %s locally", tagName)
+				if remote {
+					fmt.Print(" and from remote")
+				}
+				fmt.Print(". Continue? [y/N]: ")
+				
+				var response string
+				fmt.Scanln(&response)
+				response = strings.TrimSpace(strings.ToLower(response))
+				
+				if response != "y" && response != "yes" {
+					fmt.Println("Cancelled")
+					return nil
+				}
+			}
+			
 			fmt.Printf("Removing tag: %s\n", tagName)
 			
-			if allRepos {
-				// TODO: Iterate through all repos and remove the tag
-				fmt.Println("Removing from all repositories...")
-				return fmt.Errorf("--all flag not yet implemented")
-			} else {
-				// Remove from current repository
-				gitCmd := exec.Command("git", "tag", "-d", tagName)
-				output, err := gitCmd.CombinedOutput()
+			// Remove from current repository
+			gitCmd := exec.Command("git", "tag", "-d", tagName)
+			output, err := gitCmd.CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("failed to delete tag: %w\n%s", err, string(output))
+			}
+			
+			fmt.Printf("✅ Successfully removed local tag %s\n", tagName)
+			
+			// Remove from remote if requested
+			if remote {
+				pushCmd := exec.Command("git", "push", "origin", ":refs/tags/"+tagName)
+				output, err := pushCmd.CombinedOutput()
 				if err != nil {
-					return fmt.Errorf("failed to delete tag: %w\n%s", err, string(output))
+					return fmt.Errorf("failed to delete remote tag: %w\n%s", err, string(output))
 				}
-				
-				fmt.Printf("✅ Successfully removed tag %s\n", tagName)
+				fmt.Printf("✅ Successfully removed remote tag %s\n", tagName)
 			}
 			
 			return nil
 		},
 	}
 	
-	cmd.Flags().BoolVar(&allRepos, "all", false, "Remove tag from all repositories")
-	cmd.Flags().Bool("last", false, "Remove the last created tag")
+	cmd.Flags().BoolVar(&remote, "remote", false, "Also delete tags from origin")
+	cmd.Flags().BoolVar(&force, "force", false, "Skip confirmation prompts")
+	cmd.Flags().BoolVar(&fromPlan, "from-plan", false, "Remove tags for all repos in the release plan")
 	
 	return cmd
+}
+
+// findRepositoryPath tries to locate a repository by name
+func findRepositoryPath(repoName string) string {
+	// Try common patterns
+	patterns := []string{
+		repoName,                                              // Current directory subdirectory
+		filepath.Join("..", repoName),                        // Sibling directory
+		filepath.Join("..", "..", "grove-ecosystem", repoName), // Grove ecosystem structure
+	}
+	
+	for _, pattern := range patterns {
+		if info, err := os.Stat(pattern); err == nil && info.IsDir() {
+			// Check if it's a git repository
+			gitPath := filepath.Join(pattern, ".git")
+			if _, err := os.Stat(gitPath); err == nil {
+				absPath, _ := filepath.Abs(pattern)
+				return absPath
+			}
+		}
+	}
+	
+	// If not found, return empty string
+	return ""
+}
+
+// newReleaseRollbackCmd creates the 'grove release rollback' subcommand
+func newReleaseRollbackCmd() *cobra.Command {
+	var commits int
+	var mode string
+	var push bool
+	var forcePush bool
+	
+	cmd := &cobra.Command{
+		Use:   "rollback",
+		Short: "Rollback commits in repositories from the release plan",
+		Long: `Rollback recent commits in repositories that are part of the release plan.
+
+This command helps recover from failed releases by resetting repositories
+to a previous state. It reads the release plan to know which repositories
+to operate on.
+
+Examples:
+  grove release rollback                    # Rollback 1 commit (mixed mode)
+  grove release rollback --commits 2        # Rollback 2 commits
+  grove release rollback --hard             # Hard reset (loses changes)
+  grove release rollback --soft --push      # Soft reset and push
+  grove release rollback --push --force     # Force push after rollback`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			
+			// Load the release plan
+			plan, err := release.LoadPlan()
+			if err != nil {
+				if os.IsNotExist(err) {
+					return fmt.Errorf("no release plan found - rollback requires a plan to know which repos to operate on")
+				}
+				return fmt.Errorf("failed to load release plan: %w", err)
+			}
+			
+			// Validate mode
+			validModes := map[string]bool{"hard": true, "soft": true, "mixed": true}
+			if !validModes[mode] {
+				return fmt.Errorf("invalid mode %q - must be hard, soft, or mixed", mode)
+			}
+			
+			// Warn about destructive operation
+			fmt.Printf("⚠️  This will rollback %d commit(s) using %s reset\n", commits, mode)
+			if mode == "hard" {
+				fmt.Println("   WARNING: Hard reset will LOSE all uncommitted changes!")
+			}
+			
+			// List affected repositories
+			fmt.Println("\nAffected repositories:")
+			repoCount := 0
+			for repoName, repo := range plan.Repos {
+				if repo.Selected {
+					fmt.Printf("  - %s", repoName)
+					if repo.NextVersion != "" {
+						fmt.Printf(" (was releasing %s)", repo.NextVersion)
+					}
+					fmt.Println()
+					repoCount++
+				}
+			}
+			
+			if repoCount == 0 {
+				fmt.Println("No repositories selected in the plan")
+				return nil
+			}
+			
+			// Confirm the action
+			fmt.Print("\nAre you sure you want to rollback? [y/N]: ")
+			var response string
+			fmt.Scanln(&response)
+			response = strings.TrimSpace(strings.ToLower(response))
+			
+			if response != "y" && response != "yes" {
+				fmt.Println("Cancelled")
+				return nil
+			}
+			
+			// Create backup tag with timestamp
+			backupTag := fmt.Sprintf("backup-%d", time.Now().Unix())
+			fmt.Printf("\nCreating backup tags with prefix: %s\n", backupTag)
+			
+			// Track results
+			var successCount, failCount int
+			var errors []string
+			rollbackState := make(map[string]string) // Track what we rolled back
+			
+			// Process each repository
+			for repoName, repo := range plan.Repos {
+				if !repo.Selected {
+					continue
+				}
+				
+				// Find the repository path
+				repoPath := findRepositoryPath(repoName)
+				if repoPath == "" {
+					errors = append(errors, fmt.Sprintf("%s: could not find repository path", repoName))
+					failCount++
+					continue
+				}
+				
+				fmt.Printf("\nProcessing %s...\n", repoName)
+				
+				// Create backup tag first
+				backupRepoTag := fmt.Sprintf("%s-%s", backupTag, repoName)
+				tagCmd := exec.CommandContext(ctx, "git", "tag", backupRepoTag, "-m", fmt.Sprintf("Backup before rollback"))
+				tagCmd.Dir = repoPath
+				if output, err := tagCmd.CombinedOutput(); err != nil {
+					// Don't fail if tag already exists, just warn
+					if !strings.Contains(string(output), "already exists") {
+						fmt.Printf("  ⚠️  Could not create backup tag: %s\n", strings.TrimSpace(string(output)))
+					}
+				} else {
+					fmt.Printf("  ✓ Created backup tag: %s\n", backupRepoTag)
+				}
+				
+				// Check for uncommitted changes if using hard reset
+				if mode == "hard" {
+					statusCmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
+					statusCmd.Dir = repoPath
+					if output, _ := statusCmd.Output(); len(output) > 0 {
+						fmt.Printf("  ⚠️  Warning: %s has uncommitted changes that will be lost!\n", repoName)
+					}
+				}
+				
+				// Perform the reset
+				resetArgs := []string{"reset", "--" + mode, fmt.Sprintf("HEAD~%d", commits)}
+				resetCmd := exec.CommandContext(ctx, "git", resetArgs...)
+				resetCmd.Dir = repoPath
+				output, err := resetCmd.CombinedOutput()
+				if err != nil {
+					errors = append(errors, fmt.Sprintf("%s: reset failed: %s", repoName, string(output)))
+					failCount++
+					continue
+				}
+				
+				// Get the new HEAD commit for tracking
+				headCmd := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
+				headCmd.Dir = repoPath
+				if headOutput, err := headCmd.Output(); err == nil {
+					rollbackState[repoName] = strings.TrimSpace(string(headOutput))
+				}
+				
+				fmt.Printf("  ✓ Rolled back %d commit(s) (%s mode)\n", commits, mode)
+				
+				// Push if requested
+				if push {
+					// Check if we need force push
+					needsForce := false
+					
+					// Check if local branch has diverged from remote
+					statusCmd := exec.CommandContext(ctx, "git", "status", "-sb")
+					statusCmd.Dir = repoPath
+					if statusOutput, err := statusCmd.Output(); err == nil {
+						// If we've rolled back, we'll likely be behind and need force
+						if strings.Contains(string(statusOutput), "behind") || commits > 0 {
+							needsForce = true
+						}
+					}
+					
+					if needsForce && !forcePush {
+						errors = append(errors, fmt.Sprintf("%s: needs force push but --force not provided", repoName))
+						fmt.Printf("  ⚠️  Skipping push: force push required but --force not provided\n")
+						failCount++
+						continue
+					}
+					
+					// Perform the push
+					pushArgs := []string{"push", "origin", "HEAD"}
+					if needsForce && forcePush {
+						pushArgs = append(pushArgs, "--force-with-lease")
+						fmt.Printf("  → Force pushing to origin...\n")
+					} else {
+						fmt.Printf("  → Pushing to origin...\n")
+					}
+					
+					pushCmd := exec.CommandContext(ctx, "git", pushArgs...)
+					pushCmd.Dir = repoPath
+					output, err := pushCmd.CombinedOutput()
+					if err != nil {
+						errors = append(errors, fmt.Sprintf("%s: push failed: %s", repoName, string(output)))
+						failCount++
+						continue
+					}
+					
+					if needsForce && forcePush {
+						fmt.Printf("  ✓ Force pushed to origin\n")
+					} else {
+						fmt.Printf("  ✓ Pushed to origin\n")
+					}
+				}
+				
+				successCount++
+			}
+			
+			// Save rollback state for potential recovery
+			if len(rollbackState) > 0 {
+				if err := saveRollbackState(rollbackState); err != nil {
+					fmt.Printf("\n⚠️  Could not save rollback state: %v\n", err)
+				} else {
+					fmt.Printf("\n📝 Rollback state saved to ~/.grove/release_rollback.json\n")
+				}
+			}
+			
+			// Report results
+			fmt.Printf("\n✅ Successfully rolled back %d repositories\n", successCount)
+			if failCount > 0 {
+				fmt.Printf("❌ Failed on %d repositories:\n", failCount)
+				for _, err := range errors {
+					fmt.Printf("  - %s\n", err)
+				}
+				return fmt.Errorf("some rollback operations failed")
+			}
+			
+			fmt.Printf("\n💡 To recover, use the backup tags created with prefix: %s\n", backupTag)
+			
+			return nil
+		},
+	}
+	
+	cmd.Flags().IntVar(&commits, "commits", 1, "Number of commits to roll back")
+	cmd.Flags().StringVar(&mode, "mode", "mixed", "Reset mode: hard, soft, or mixed")
+	cmd.Flags().BoolVar(&push, "push", false, "Push the rollback to origin")
+	cmd.Flags().BoolVar(&forcePush, "force", false, "Allow force push if needed")
+	
+	// Add shortcuts for modes
+	cmd.Flags().Bool("hard", false, "Shortcut for --mode=hard")
+	cmd.Flags().Bool("soft", false, "Shortcut for --mode=soft")
+	cmd.Flags().Bool("mixed", false, "Shortcut for --mode=mixed")
+	
+	// Handle mode shortcuts
+	cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
+		if cmd.Flags().Changed("hard") {
+			mode = "hard"
+		} else if cmd.Flags().Changed("soft") {
+			mode = "soft"
+		} else if cmd.Flags().Changed("mixed") {
+			mode = "mixed"
+		}
+		return nil
+	}
+	
+	return cmd
+}
+
+// saveRollbackState saves information about the rollback for potential recovery
+func saveRollbackState(state map[string]string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	
+	groveDir := filepath.Join(home, ".grove")
+	if err := os.MkdirAll(groveDir, 0755); err != nil {
+		return err
+	}
+	
+	statePath := filepath.Join(groveDir, "release_rollback.json")
+	
+	// Create rollback record
+	record := map[string]interface{}{
+		"timestamp":    time.Now().Format(time.RFC3339),
+		"repositories": state,
+	}
+	
+	data, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		return err
+	}
+	
+	return os.WriteFile(statePath, data, 0644)
 }
 
 // newReleaseReviewCmd creates an alias for the TUI command
