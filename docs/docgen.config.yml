@@ -13,41 +13,16 @@ sections:
     output: 02-examples.md
     prompt: prompts/02-examples.md
     title: Examples
-  - name: core-concepts
-    order: 3
-    output: 03-core-concepts.md
-    prompt: prompts/03-core-concepts.md
-    title: Core Concepts
-  - name: tutorials
-    order: 4
-    output: 04-tutorials.md
-    prompt: prompts/04-tutorials.md
-    title: Tutorials
   - name: configuration
-    order: 5
-    output: 05-configuration.md
-    prompt: prompts/05-configuration.md
+    order: 3
+    output: 03-configuration.md
+    prompt: prompts/03-configuration.md
     title: Configuration
-  - name: architecture
-    order: 6
-    output: 06-architecture.md
-    prompt: prompts/06-architecture.md
-    title: Architecture
   - name: command-reference
-    order: 7
-    output: 07-command-reference.md
-    prompt: prompts/07-command-reference.md
+    order: 4
+    output: 04-command-reference.md
+    prompt: prompts/04-command-reference.md
     title: Command Reference
-  - name: contributing
-    order: 8
-    output: 08-contributing.md
-    prompt: prompts/08-contributing.md
-    title: Contributing
-  - name: changelog
-    order: 9
-    output: 09-changelog.md
-    prompt: prompts/09-changelog.md
-    title: Changelog
 settings:
   model: gemini-2.5-pro
   output_dir: docs
@@ -55,4 +30,4 @@ settings:
   rules_file: docs.rules
   structured_output_file: pkg/docs/docs.json
   system_prompt: default
-title: Grove Meta-CLI
+title: Grove
