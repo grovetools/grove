@@ -48,6 +48,18 @@ and documentation updates.`,
 				return err
 			}
 			
+			// Set the plan type based on the --rc flag
+			if isRC {
+				plan.Type = "rc"
+			} else {
+				plan.Type = "full"
+			}
+			
+			// Save the plan again with the type
+			if err := release.SavePlan(plan); err != nil {
+				return fmt.Errorf("failed to save release plan type: %w", err)
+			}
+			
 			// Display summary
 			fmt.Println("\n✅ Release plan generated successfully!")
 			fmt.Printf("   Plan saved to: ~/.grove/release_plan.json\n")

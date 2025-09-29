@@ -76,7 +76,6 @@ type releaseKeyMap struct {
 	TogglePush      key.Binding
 	ToggleSyncDeps  key.Binding
 	Approve         key.Binding
-	Apply           key.Binding
 	Help            key.Binding
 	Quit            key.Binding
 	Back            key.Binding
@@ -170,10 +169,6 @@ var releaseKeys = releaseKeyMap{
 	Approve: key.NewBinding(
 		key.WithKeys("a"),
 		key.WithHelp("a", "approve"),
-	),
-	Apply: key.NewBinding(
-		key.WithKeys("A"),
-		key.WithHelp("A", "apply release"),
 	),
 	Help: key.NewBinding(
 		key.WithKeys("?"),
@@ -545,7 +540,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.EditChangelog):
 		// Edit the staged changelog for the selected repository
-		if m.selectedIndex < len(m.repoNames) {
+		if m.plan.Type == "full" && m.selectedIndex < len(m.repoNames) {
 			repoName := m.repoNames[m.selectedIndex]
 			if repo, ok := m.plan.Repos[repoName]; ok {
 				if repo.ChangelogPath != "" {
@@ -595,7 +590,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.ViewChangelog):
-		if m.selectedIndex < len(m.repoNames) {
+		if m.plan.Type == "full" && m.selectedIndex < len(m.repoNames) {
 			repoName := m.repoNames[m.selectedIndex]
 			if repo, ok := m.plan.Repos[repoName]; ok {
 				// Only view if repo has changes
@@ -619,7 +614,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.WriteChangelog):
 		// Write changelog to repository CHANGELOG.md
-		if m.selectedIndex < len(m.repoNames) {
+		if m.plan.Type == "full" && m.selectedIndex < len(m.repoNames) {
 			repoName := m.repoNames[m.selectedIndex]
 			if repo, ok := m.plan.Repos[repoName]; ok {
 				if repo.ChangelogPath != "" {
@@ -747,7 +742,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.GenerateChangelog):
-		if m.selectedIndex < len(m.repoNames) && !m.generating {
+		if m.plan.Type == "full" && m.selectedIndex < len(m.repoNames) && !m.generating {
 			repoName := m.repoNames[m.selectedIndex]
 			if repo, ok := m.plan.Repos[repoName]; ok {
 				// Only generate for repos with changes
@@ -827,35 +822,6 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showHelp = !m.showHelp
 		return m, nil
 
-	case key.Matches(msg, m.keys.Apply):
-		// Check if all selected repos are approved
-		allApproved := true
-		hasSelection := false
-		for repoName, repo := range m.plan.Repos {
-			if repo.Selected && repo.CurrentVersion != repo.NextVersion {
-				hasSelection = true
-				if repo.Status != "Approved" {
-					allApproved = false
-					break
-				}
-				
-				// Check for dirty changelog
-				if repo.ChangelogHash != "" {
-					if isDirty := checkChangelogDirty(m.plan.RootDir, repoName, repo); isDirty {
-						repo.ChangelogState = "dirty"
-					}
-				}
-			}
-		}
-		if allApproved && hasSelection {
-			// Save the plan and set flag to exit TUI
-			release.SavePlan(m.plan)
-			// Set the global dry-run flag
-			releaseDryRun = m.dryRun
-			m.shouldApply = true
-			return m, tea.Quit
-		}
-		return m, nil
 	}
 
 	return m, nil
@@ -1029,33 +995,42 @@ func (m releaseTuiModel) renderHelp() string {
 		lipgloss.NewStyle().Bold(true).Render("Release:"),
 		"",
 		formatPair("a", "Toggle approval"),
-		formatPair("A", "Apply release"),
 		"",
 		formatPair("?", "Toggle help"),
 	}
 	
 	// Right column - Changelog and Status
-	rightLines := []string{
-		lipgloss.NewStyle().Bold(true).Render("Changelog:"),
-		"",
-		formatPair("g", "Generate current"),
-		formatPair("G", "Generate selected"),
-		formatPair("e", "Edit staged"),
-		formatPair("E", "Edit CHANGELOG.md"),
-		formatPair("w", "Write to repo"),
-		"",
-		lipgloss.NewStyle().Bold(true).Render("LLM Rules:"),
-		"",
-		formatPair("r", "Edit rules"),
-		formatPair("R", "Reset to '*'"),
-		"",
-		lipgloss.NewStyle().Bold(true).Render("Status:"),
-		"",
-		"✓         Generated",
-		"⚠         Stale (new commits)",
-		"⏳        Pending",
-		"✓         Approved",
-		"[✓]       Selected",
+	var rightLines []string
+	if m.plan.Type == "full" {
+		rightLines = []string{
+			lipgloss.NewStyle().Bold(true).Render("Changelog:"),
+			"",
+			formatPair("g", "Generate current"),
+			formatPair("G", "Generate selected"),
+			formatPair("e", "Edit staged"),
+			formatPair("E", "Edit CHANGELOG.md"),
+			formatPair("w", "Write to repo"),
+			"",
+			lipgloss.NewStyle().Bold(true).Render("LLM Rules:"),
+			"",
+			formatPair("r", "Edit rules"),
+			formatPair("R", "Reset to '*'"),
+			"",
+			lipgloss.NewStyle().Bold(true).Render("Status:"),
+			"",
+			"✓         Generated",
+			"⚠         Stale (new commits)",
+			"⏳        Pending",
+			"✓         Approved",
+			"[✓]       Selected",
+		}
+	} else {
+		rightLines = []string{
+			lipgloss.NewStyle().Bold(true).Render("Status:"),
+			"",
+			"✓         Approved",
+			"[✓]       Selected",
+		}
 	}
 	
 	// Ensure both columns have the same number of lines
@@ -1099,8 +1074,14 @@ func (m releaseTuiModel) viewTable() string {
 	// Create table
 	t := table.New().
 		Border(lipgloss.NormalBorder()).
-		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4"))).
-		Headers("", "Repository", "Branch", "Git Status", "Changes/Release", "Proposed", "Status", "Changelog")
+		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4")))
+	
+	// Conditionally add headers based on plan type
+	if m.plan.Type == "full" {
+		t.Headers("", "Repository", "Branch", "Git Status", "Changes/Release", "Proposed", "Status", "Changelog")
+	} else {
+		t.Headers("", "Repository", "Branch", "Git Status", "Changes/Release", "Proposed", "Status")
+	}
 
 	// Count selected repositories with changes
 	selectedCount := 0
@@ -1112,21 +1093,38 @@ func (m releaseTuiModel) viewTable() string {
 
 	// Add parent ecosystem repository first if it exists
 	if m.plan.ParentVersion != "" {
-		row := []string{
-			"",  // No selection checkbox for parent
-			"grove-ecosystem",
-			"-",  // Branch
-			"-",  // Git Status
-			m.plan.ParentCurrentVersion,  // Changes/Release (current version)
-			m.plan.ParentVersion,
-			"-",
-			"-", // No changelog status for parent
+		var row []string
+		if m.plan.Type == "full" {
+			row = []string{
+				"",  // No selection checkbox for parent
+				"grove-ecosystem",
+				"-",  // Branch
+				"-",  // Git Status
+				m.plan.ParentCurrentVersion,  // Changes/Release (current version)
+				m.plan.ParentVersion,
+				"-",
+				"-", // No changelog status for parent
+			}
+		} else {
+			row = []string{
+				"",  // No selection checkbox for parent
+				"grove-ecosystem",
+				"-",  // Branch
+				"-",  // Git Status
+				m.plan.ParentCurrentVersion,  // Changes/Release (current version)
+				m.plan.ParentVersion,
+				"-",
+			}
 		}
 		
 		t.Row(row...)
 		
 		// Add separator row
-		t.Row("", "───────────────", "──────", "──────────", "───────────────", "──────────", "─────────", "──────────")
+		if m.plan.Type == "full" {
+			t.Row("", "───────────────", "──────", "──────────", "───────────────", "──────────", "─────────", "──────────")
+		} else {
+			t.Row("", "───────────────", "──────", "──────────", "───────────────", "──────────", "─────────")
+		}
 	}
 
 	// Add rows for each repository
@@ -1217,15 +1215,28 @@ func (m releaseTuiModel) viewTable() string {
 			changesReleaseStr = fmt.Sprintf("%s (↑%d)", repo.CurrentVersion, repo.CommitsSinceLastTag)
 		}
 
-		row := []string{
-			checkbox,
-			repoName,
-			repo.Branch,
-			gitStatusStr,
-			changesReleaseStr,
-			repo.NextVersion,
-			statusStr,
-			changelogStatus,
+		var row []string
+		if m.plan.Type == "full" {
+			row = []string{
+				checkbox,
+				repoName,
+				repo.Branch,
+				gitStatusStr,
+				changesReleaseStr,
+				repo.NextVersion,
+				statusStr,
+				changelogStatus,
+			}
+		} else {
+			row = []string{
+				checkbox,
+				repoName,
+				repo.Branch,
+				gitStatusStr,
+				changesReleaseStr,
+				repo.NextVersion,
+				statusStr,
+			}
 		}
 
 		// Highlight selected row (but not for repos without changes)
@@ -1589,15 +1600,9 @@ func runReleaseTUI(ctx context.Context) error {
 	plan, err := release.LoadPlan()
 	if err != nil {
 		if os.IsNotExist(err) {
-			// Generate a new plan
-			fmt.Println("No existing release plan found. Generating new plan...")
-			plan, err = runReleasePlan(ctx)
-			if err != nil {
-				return fmt.Errorf("failed to generate release plan: %w", err)
-			}
-		} else {
-			return fmt.Errorf("failed to load release plan: %w", err)
+			return fmt.Errorf("no release plan found. Please run 'grove release plan' first")
 		}
+		return fmt.Errorf("failed to load release plan: %w", err)
 	}
 
 	// Start the TUI

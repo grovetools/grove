@@ -896,7 +896,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 				}
 
 				// Handle changelog - either use existing modifications or generate new
-				if !releaseDryRun {
+				if !releaseDryRun && plan.Type == "full" {
 					// Check if CHANGELOG.md is already modified (from TUI workflow)
 					// First check the plan's ChangelogState if available
 					changelogModified := false

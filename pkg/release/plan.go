@@ -15,6 +15,7 @@ type ReleasePlan struct {
 	RootDir              string                      `json:"root_dir"`               // The root of the ecosystem being released
 	ParentVersion        string                      `json:"parent_version"`         // The parent ecosystem version
 	ParentCurrentVersion string                      `json:"parent_current_version"` // Current parent ecosystem version
+	Type                 string                      `json:"type,omitempty"`         // "full" or "rc"
 }
 
 // RepoReleasePlan holds the plan for a single repository.
