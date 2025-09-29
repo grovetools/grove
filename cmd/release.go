@@ -397,51 +397,6 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces
 	return nil
 }
 
-func pushRepositories(ctx context.Context, rootDir string, workspaces []string, hasChanges map[string]bool, logger *logrus.Logger) error {
-	displaySection("📤 Pushing Repositories")
-
-	// Create a map for filtering repositories if specified
-	repoFilter := make(map[string]bool)
-	if len(releaseRepos) > 0 {
-		for _, repo := range releaseRepos {
-			repoFilter[repo] = true
-		}
-	}
-
-	// First push the main repository
-	displayProgress("Pushing main repository...")
-	if err := executeGitCommand(ctx, rootDir, []string{"push", "origin", "main"}, "Push main repository", logger); err != nil {
-		return fmt.Errorf("failed to push main repository: %w", err)
-	}
-
-	// Process each workspace
-	for _, wsPath := range workspaces {
-		// Get relative path from root
-		relPath, err := filepath.Rel(rootDir, wsPath)
-		if err != nil {
-			relPath = wsPath
-		}
-
-		repoName := filepath.Base(wsPath)
-
-		// Skip if not in the filter list (when filter is specified)
-		if len(repoFilter) > 0 && !repoFilter[repoName] {
-			continue
-		}
-
-		// Push workspace
-		displayProgress(fmt.Sprintf("Pushing %s...", relPath))
-
-		if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", "main"},
-			fmt.Sprintf("Push %s", relPath), logger); err != nil {
-			// Only warn on push failures, don't fail the entire process
-			logger.WithFields(logrus.Fields{"path": relPath, "error": err}).Warn("Failed to push workspace")
-		}
-	}
-
-	displaySuccess("All repositories pushed to remote")
-	return nil
-}
 
 func tagSubmodules(ctx context.Context, rootDir string, versions map[string]string, hasChanges map[string]bool, logger *logrus.Logger) error {
 	// Get list of submodules
@@ -893,6 +848,22 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 						return
 					}
 					logger.WithField("repo", repo).Info("[orchestrateRelease] updateDependencies completed successfully")
+					
+					// After updating dependencies, check for changes and push them
+					status, _ := git.GetStatus(wsPath)
+					if status.IsDirty {
+						displayInfo(fmt.Sprintf("Pushing dependency updates for %s...", repo))
+						if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", "HEAD:main"}, "Push dependency updates", logger); err != nil {
+							errChan <- fmt.Errorf("failed to push dependency updates for %s: %w", repo, err)
+							return
+						}
+						// Wait for CI on main to complete
+						displayInfo(fmt.Sprintf("Waiting for CI to pass for %s after dependency updates...", repo))
+						if err := gh.WaitForCIWorkflow(ctx, wsPath); err != nil {
+							errChan <- fmt.Errorf("CI workflow for %s failed after dependency update: %w", repo, err)
+							return
+						}
+					}
 				}
 
 				// Handle changelog - either use existing modifications or generate new
@@ -946,6 +917,13 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 								if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", "HEAD:main"},
 									fmt.Sprintf("Push changelog for %s", repo), logger); err != nil {
 									logger.WithError(err).Warnf("Failed to push changelog commit for %s", repo)
+								} else {
+									// Wait for CI on main to complete after pushing changelog
+									displayInfo(fmt.Sprintf("Waiting for CI to pass for %s after changelog update...", repo))
+									if err := gh.WaitForCIWorkflow(ctx, wsPath); err != nil {
+										errChan <- fmt.Errorf("CI workflow for %s failed after changelog update: %w", repo, err)
+										return
+									}
 								}
 							}
 						}
@@ -976,6 +954,13 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 										if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", "HEAD:main"},
 											fmt.Sprintf("Push changelog for %s", repo), logger); err != nil {
 											logger.WithError(err).Warnf("Failed to push changelog commit for %s", repo)
+										} else {
+											// Wait for CI on main to complete after pushing changelog
+											displayInfo(fmt.Sprintf("Waiting for CI to pass for %s after changelog update...", repo))
+											if err := gh.WaitForCIWorkflow(ctx, wsPath); err != nil {
+												errChan <- fmt.Errorf("CI workflow for %s failed after changelog update: %w", repo, err)
+												return
+											}
 										}
 									}
 								}
@@ -1359,13 +1344,6 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 				return err
 			}
 
-			// Push if requested
-			if releasePush {
-				if err := executeGitCommand(ctx, modulePath, []string{"push", "origin", "HEAD"},
-					"Push dependency updates", logger); err != nil {
-					return err
-				}
-			}
 		} else {
 			logger.WithField("modulePath", modulePath).Info("[updateGoDependencies] No staged changes found, skipping commit")
 		}

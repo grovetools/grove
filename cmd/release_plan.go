@@ -429,12 +429,6 @@ func runReleaseApply(ctx context.Context) error {
 		displayWarning("Failed to check for outdated dependencies: " + err.Error())
 	}
 
-	// Push repositories to remote if requested
-	if releasePush {
-		if err := pushRepositories(ctx, plan.RootDir, workspaces, hasChanges, logger); err != nil {
-			return fmt.Errorf("failed to push repositories: %w", err)
-		}
-	}
 
 	// Note: Changelogs are already written to repositories by the 'w' command in the TUI
 	// The orchestrateRelease function will detect and commit these existing changelogs

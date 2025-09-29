@@ -417,3 +417,76 @@ found:
 	fmt.Printf("%s\n", successStyle.Render("🎉 Release workflow completed successfully for "+repoName+"@"+versionTag))
 	return nil
 }
+
+// WaitForCIWorkflow waits for CI workflow to complete for the latest commit on main branch
+func WaitForCIWorkflow(ctx context.Context, repoPath string) error {
+	slug, err := getRepoSlug(repoPath)
+	if err != nil {
+		return err
+	}
+	repoName := slug
+	if parts := strings.Split(slug, "/"); len(parts) == 2 {
+		repoName = parts[1]
+	}
+	
+	// Get latest commit on main
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "origin/main")
+	cmd.Dir = repoPath
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get latest commit on main for %s: %w", repoName, err)
+	}
+	commitSHA := strings.TrimSpace(string(output))
+	
+	// Poll for the CI run for this commit to appear
+	var runID string
+	findTimeout := time.After(5 * time.Minute)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-findTimeout:
+			return fmt.Errorf("timeout waiting for CI workflow for commit %s to appear", commitSHA)
+		case <-ticker.C:
+			cmd = exec.CommandContext(ctx, "gh", "run", "list",
+				"--repo", slug,
+				"--workflow", "CI",
+				"--commit", commitSHA,
+				"--limit", "1",
+				"--json", "databaseId")
+			
+			output, err := cmd.Output()
+			if err != nil {
+				continue // Try again
+			}
+
+			var runs []struct {
+				DatabaseID int64 `json:"databaseId"`
+			}
+			if err := json.Unmarshal(output, &runs); err == nil && len(runs) > 0 {
+				runID = fmt.Sprintf("%d", runs[0].DatabaseID)
+				goto foundCI
+			}
+		}
+	}
+
+foundCI:
+	// Watch the workflow run
+	fmt.Printf("%s\n", infoStyle.Render("👀 Watching CI workflow "+runID+" for "+repoName+"..."))
+	cmd = exec.CommandContext(ctx, "gh", "run", "watch", runID,
+		"--repo", slug,
+		"--exit-status")
+
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return fmt.Errorf("CI workflow %s failed (exit code: %d)", runID, exitErr.ExitCode())
+		}
+		return fmt.Errorf("failed to watch CI workflow: %w", err)
+	}
+	
+	fmt.Printf("%s\n", successStyle.Render("✅ CI workflow for "+repoName+" completed successfully"))
+	return nil
+}
