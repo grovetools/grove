@@ -13,15 +13,30 @@ sections:
     output: 01-overview.md
     prompt: prompts/01-overview.md
     title: Overview
-  - name: configuration
+  - name: installation
     order: 2
-    output: 02-configuration.md
-    prompt: prompts/02-configuration.md
+    output: 02-installation.md
+    prompt: prompts/02-installation.md
+    title: Installation
+  - name: binary-management
+    order: 3
+    output: 03-binary-management.md
+    prompt: prompts/03-binary-management.md
+    title: Binary Management
+  - name: ecosystems
+    order: 4
+    output: 04-ecosystems.md
+    prompt: prompts/04-ecosystems.md
+    title: Ecosystems
+  - name: configuration
+    order: 5
+    output: 05-configuration.md
+    prompt: prompts/05-configuration.md
     title: Configuration
   - name: command-reference
-    order: 3
-    output: 03-command-reference.md
-    prompt: prompts/03-command-reference.md
+    order: 6
+    output: 06-command-reference.md
+    prompt: prompts/06-command-reference.md
     title: Command Reference
 settings:
   model: gemini-2.5-pro
