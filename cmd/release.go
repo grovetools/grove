@@ -15,7 +15,6 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
-	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/command"
 	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/git"
@@ -23,7 +22,6 @@ import (
 	"github.com/mattsolo1/grove-meta/pkg/gh"
 	"github.com/mattsolo1/grove-meta/pkg/project"
 	"github.com/mattsolo1/grove-meta/pkg/release"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"golang.org/x/mod/modfile"
@@ -52,266 +50,60 @@ func init() {
 func newReleaseCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "release",
-		Short: "Create a new release for the Grove ecosystem",
-		Long: `Create a new release by automatically calculating version bumps for all submodules.
+		Short: "Manage releases for the Grove ecosystem",
+		Long: `Manage releases for the Grove ecosystem using a stateful, multi-step workflow.
 
-This command will:
-1. Calculate the next version for each submodule based on its latest tag
-2. Check that all repositories are clean (unless --force is used)
-3. Display the proposed versions and ask for confirmation
-4. Tag each submodule with its new version (triggers individual releases)
-5. Update submodule references in the parent repository
-6. Create a parent repository tag that documents the release
-7. Push all tags to origin
+The release process is divided into distinct commands:
+  plan    - Generate a release plan analyzing all repositories for changes
+  tui     - Review and approve the release plan interactively (or use 'review')
+  apply   - Execute the approved release plan
+  clear-plan - Clear the current release plan and start over
+  undo-tag   - Remove local tags that haven't been pushed
 
-By default, all submodules receive a patch version bump. Use flags to specify
-major or minor bumps for specific repositories.
+Typical workflow:
+  1. grove release plan              # Generate release plan
+  2. grove release tui               # Review and approve
+  3. grove release apply              # Execute the release
+
+For backwards compatibility, you can still use:
+  grove release --interactive         # Launches the TUI directly
 
 Examples:
-  grove release                                    # Patch bump for all
-  grove release --minor grove-core                 # Minor bump for grove-core, patch for others
-  grove release --major grove-core --minor grove-meta  # Mixed bumps
-  grove release --interactive                      # Launch interactive TUI for release planning`,
-		Args: cobra.NoArgs,
-		RunE: runRelease,
+  grove release plan --rc            # Plan a Release Candidate (no docs)
+  grove release plan --repos grove-core --with-deps  # Specific repos with dependencies
+  grove release tui                  # Review and modify the plan
+  grove release apply --dry-run      # Preview what would be done`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// For backwards compatibility, if --interactive flag is used, run TUI
+			if releaseInteractive {
+				ctx := context.Background()
+				return runReleaseTUI(ctx)
+			}
+			
+			// Otherwise show help for the parent command
+			return cmd.Help()
+		},
 	}
 
-	cmd.Flags().BoolVar(&releaseDryRun, "dry-run", false, "Print commands without executing them")
-	cmd.Flags().BoolVar(&releaseForce, "force", false, "Skip clean workspace checks")
-	cmd.Flags().BoolVar(&releaseForceIncrement, "force-increment", false, "Force version increment even if current commit has a tag")
-	cmd.Flags().BoolVar(&releasePush, "push", false, "Push all repositories to remote before tagging")
-	cmd.Flags().StringSliceVar(&releaseRepos, "repos", []string{}, "Only release specified repositories (e.g., grove-meta,grove-core)")
-	cmd.Flags().BoolVar(&releaseWithDeps, "with-deps", false, "Include all dependencies of specified repositories in the release")
-	cmd.Flags().StringSliceVar(&releaseMajor, "major", []string{}, "Repositories to receive major version bump")
-	cmd.Flags().StringSliceVar(&releaseMinor, "minor", []string{}, "Repositories to receive minor version bump")
-	cmd.Flags().StringSliceVar(&releasePatch, "patch", []string{}, "Repositories to receive patch version bump (default for all)")
-	cmd.Flags().BoolVar(&releaseYes, "yes", false, "Skip interactive confirmation (for CI/CD)")
-	cmd.Flags().BoolVar(&releaseSkipParent, "skip-parent", false, "Skip parent repository updates (submodules and tagging)")
-	cmd.Flags().BoolVar(&releaseLLMChangelog, "llm-changelog", false, "Generate changelog using an LLM instead of conventional commits")
-	cmd.Flags().BoolVar(&releaseInteractive, "interactive", false, "Launch interactive TUI for release planning and approval")
+	// Legacy flags for backwards compatibility
+	cmd.Flags().BoolVar(&releaseInteractive, "interactive", false, "Launch interactive TUI (deprecated: use 'grove release tui')")
+	cmd.Flags().MarkHidden("interactive")
 
 	// Add subcommands
-	cmd.AddCommand(newReleaseTuiCmd()) // Add TUI as a subcommand
+	cmd.AddCommand(newReleasePlanCmd())
+	cmd.AddCommand(newReleaseTuiCmd())
+	cmd.AddCommand(newReleaseReviewCmd()) // Alias for TUI
+	cmd.AddCommand(newReleaseApplyCmd())
+	cmd.AddCommand(newReleaseClearPlanCmd())
+	cmd.AddCommand(newReleaseUndoTagCmd())
 
 	return cmd
 }
 
-func runRelease(cmd *cobra.Command, args []string) error {
-	// Check if interactive mode is requested
-	if releaseInteractive {
-		ctx := context.Background()
-		return runReleaseTUI(ctx)
-	}
-	
-	// Otherwise, run the original release command
-	ctx := context.Background()
-	logger := cli.GetLogger(cmd)
-
-	displayPhase("Preparing Release")
-
-	// Find the root directory
-	rootDir, err := workspace.FindRoot("")
-	if err != nil {
-		return fmt.Errorf("failed to find workspace root: %w", err)
-	}
-
-	// Discover all workspaces
-	workspaces, err := workspace.Discover(rootDir)
-	if err != nil {
-		return fmt.Errorf("failed to discover workspaces: %w", err)
-	}
-	displayInfo(fmt.Sprintf("Discovered workspaces: %d", len(workspaces)))
-
-	// Build dependency graph with ALL workspaces to get complete dependency info
-	displayProgress("Building dependency graph...")
-	graph, err := depsgraph.BuildGraph(rootDir, workspaces)
-	if err != nil {
-		return fmt.Errorf("failed to build dependency graph: %w", err)
-	}
-
-	// Track which repos were auto-included due to dependencies
-	var autoDependencies map[string]bool
-
-	// If specific repos are requested with dependencies, expand the list
-	if len(releaseRepos) > 0 && releaseWithDeps {
-		expandedRepos, autoDeps := expandReposWithDependencies(releaseRepos, graph)
-		autoDependencies = autoDeps
-
-		// Log the expansion
-		originalCount := len(releaseRepos)
-		displayInfo(fmt.Sprintf("Expanded from %d to %d repositories", originalCount, len(expandedRepos)))
-		if len(autoDeps) > 0 {
-			displayInfo(fmt.Sprintf("Auto-including %d dependencies", len(autoDeps)))
-			for dep := range autoDeps {
-				logger.WithField("repo", dep).Info("Auto-including dependency")
-			}
-		}
-
-		// Update releaseRepos with the expanded list
-		releaseRepos = expandedRepos
-	}
-
-	// Calculate versions for all workspaces first to know which repos have changes
-	versions, currentVersions, commitsSinceTag, err := calculateNextVersions(ctx, rootDir, workspaces, releaseMajor, releaseMinor, releasePatch, logger)
-	if err != nil {
-		return fmt.Errorf("failed to calculate versions: %w", err)
-	}
-
-	// Derive hasChanges map from commitsSinceTag
-	hasChanges := make(map[string]bool)
-	for repo, count := range commitsSinceTag {
-		hasChanges[repo] = count > 0
-	}
-
-	// If using --with-deps, force include auto-dependencies even if they don't have changes
-	if releaseWithDeps && autoDependencies != nil {
-		for dep := range autoDependencies {
-			if !hasChanges[dep] {
-				hasChanges[dep] = true
-				commitsSinceTag[dep] = 0  // Mark as included but no commits
-				logger.WithField("repo", dep).Info("Force including dependency without changes")
-			}
-		}
-	}
-
-	// Create a map of nodes to release (only those with changes)
-	nodesToRelease := make(map[string]bool)
-	for repo, changes := range hasChanges {
-		if changes {
-			nodesToRelease[repo] = true
-		}
-	}
-
-	// Get topologically sorted release order for only the repos being released
-	releaseLevels, err := graph.TopologicalSortWithFilter(nodesToRelease)
-	if err != nil {
-		return fmt.Errorf("failed to sort dependencies: %w", err)
-	}
-
-	// Check if any repos have changes
-	hasAnyChanges := false
-	for _, changes := range hasChanges {
-		if changes {
-			hasAnyChanges = true
-			break
-		}
-	}
-
-	if !hasAnyChanges {
-		logger.Info("No repositories have changes since their last release. Nothing to release.")
-		return nil
-	}
-
-	// Determine parent repo version early so we can display it
-	parentVersion := ""
-	if !releaseSkipParent {
-		parentVersion = determineParentVersion(rootDir, versions, hasChanges)
-	}
-
-	// Display proposed versions and get confirmation
-	if !displayAndConfirmVersionsWithOrder(rootDir, versions, currentVersions, hasChanges, releaseLevels, graph, parentVersion, autoDependencies, logger) {
-		logger.Info("Release cancelled by user")
-		return nil
-	}
-
-	// Auto-commit grove-ecosystem changes if needed (only for repos being released)
-	if err := autoCommitEcosystemChanges(ctx, rootDir, hasChanges, logger); err != nil {
-		return fmt.Errorf("failed to auto-commit ecosystem changes: %w", err)
-	}
-
-	// Run pre-flight checks
-	if err := runPreflightChecks(ctx, rootDir, parentVersion, workspaces, logger); err != nil {
-		return err
-	}
-
-	// Check for outdated Grove dependencies and warn user
-	if err := checkForOutdatedDependencies(ctx, rootDir, workspaces, logger); err != nil {
-		displayWarning("Failed to check for outdated dependencies: " + err.Error())
-	}
-
-	// Push repositories to remote if requested
-	if releasePush {
-		if err := pushRepositories(ctx, rootDir, workspaces, hasChanges, logger); err != nil {
-			return fmt.Errorf("failed to push repositories: %w", err)
-		}
-	}
-
-	// Execute dependency-aware release orchestration
-	if err := orchestrateRelease(ctx, rootDir, releaseLevels, versions, currentVersions, hasChanges, graph, logger, releaseLLMChangelog, nil); err != nil {
-		return fmt.Errorf("failed to orchestrate release: %w", err)
-	}
-
-	// Final phase: commit and tag ecosystem
-	displaySection("🏁 Finalizing Ecosystem Release")
-
-	if !releaseSkipParent {
-		// Stage only the submodules that were released
-		for repo := range hasChanges {
-			if hasChanges[repo] {
-				if err := executeGitCommand(ctx, rootDir, []string{"add", repo}, fmt.Sprintf("Stage %s", repo), logger); err != nil {
-					return err
-				}
-			}
-		}
-
-		// Check if there are actually changes to commit after staging
-		status, err := git.GetStatus(rootDir)
-		if err != nil {
-			return fmt.Errorf("failed to check git status: %w", err)
-		}
-
-		// Only commit if there are staged changes
-		if status.IsDirty {
-			// Commit the submodule updates
-			commitMsg := createReleaseCommitMessage(versions, hasChanges)
-			if err := executeGitCommand(ctx, rootDir, []string{"commit", "-m", commitMsg}, "Commit release", logger); err != nil {
-				return err
-			}
-		} else {
-			displayInfo("No changes to commit after staging submodules")
-		}
-	}
-
-	// Count actually released modules
-	releasedCount := 0
-	for _, hasChanges := range hasChanges {
-		if hasChanges {
-			releasedCount++
-		}
-	}
-
-	// Handle parent repository updates unless skipped
-	var finalParentVersion string
-	if !releaseSkipParent {
-		// Recalculate parent version to handle same-day releases
-		finalParentVersion = determineParentVersion(rootDir, versions, hasChanges)
-		if finalParentVersion != parentVersion {
-			displayInfo(fmt.Sprintf("Adjusted parent version: %s → %s (same-day release)", parentVersion, finalParentVersion))
-		}
-
-		// Tag the main repository
-		if err := executeGitCommand(ctx, rootDir, []string{"tag", "-a", finalParentVersion, "-m", fmt.Sprintf("Release %s", finalParentVersion)}, "Tag main repository", logger); err != nil {
-			return err
-		}
-
-		// Push the main repository changes
-		if err := executeGitCommand(ctx, rootDir, []string{"push", "origin", "main"}, "Push main branch", logger); err != nil {
-			return err
-		}
-
-		// Push the main repository tag
-		if err := executeGitCommand(ctx, rootDir, []string{"push", "origin", finalParentVersion}, "Push release tag", logger); err != nil {
-			return err
-		}
-
-		displayFinalSuccess(finalParentVersion, releasedCount)
-	} else {
-		displayInfo("Skipping parent repository updates (--skip-parent flag)")
-		displaySuccess(fmt.Sprintf("Released %d module(s) successfully", releasedCount))
-	}
-
-	return nil
-}
+// Legacy runRelease function removed - replaced by stateful workflow:
+// - runReleasePlan (in release_plan.go)
+// - runReleaseTUI (in release_tui.go)  
+// - runReleaseApply (in release_plan.go)
 
 func autoCommitEcosystemChanges(ctx context.Context, rootDir string, hasChanges map[string]bool, logger *logrus.Logger) error {
 	// Check if grove-ecosystem has uncommitted changes
