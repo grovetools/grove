@@ -3,30 +3,30 @@ category: Developer Tools
 description: Grove meta-CLI and package manager for the Grove ecosystem
 enabled: true
 sections:
+  - name: introduction
+    order: 0
+    output: 00-introduction.md
+    prompt: prompts/00-introduction.md
+    title: Introduction
   - name: overview
     order: 1
     output: 01-overview.md
     prompt: prompts/01-overview.md
     title: Overview
-  - name: examples
-    order: 2
-    output: 02-examples.md
-    prompt: prompts/02-examples.md
-    title: Examples
   - name: configuration
-    order: 3
-    output: 03-configuration.md
-    prompt: prompts/03-configuration.md
+    order: 2
+    output: 02-configuration.md
+    prompt: prompts/02-configuration.md
     title: Configuration
   - name: command-reference
-    order: 4
-    output: 04-command-reference.md
-    prompt: prompts/04-command-reference.md
+    order: 3
+    output: 03-command-reference.md
+    prompt: prompts/03-command-reference.md
     title: Command Reference
 settings:
   model: gemini-2.5-pro
   output_dir: docs
-  regeneration_mode: reference
+  regeneration_mode: scratch
   rules_file: docs.rules
   structured_output_file: pkg/docs/docs.json
   system_prompt: default
