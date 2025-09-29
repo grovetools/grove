@@ -104,27 +104,27 @@ func StreamlinedFullReleaseScenario() *harness.Scenario {
 		Tags:        []string{"release", "refactor", "full"},
 		Steps: []harness.Step{
 			harness.SetupMocks(
-				harness.Mock{CommandName: "git", BinPath: "tests/bin/git"},
-				harness.Mock{CommandName: "gh", BinPath: "tests/bin/gh"},
-				harness.Mock{CommandName: "gemapi", BinPath: "tests/bin/gemapi"},
-				harness.Mock{CommandName: "go", BinPath: "tests/bin/go"},
+				harness.Mock{CommandName: "git", BinaryPath: "tests/bin/git"},
+				harness.Mock{CommandName: "gh", BinaryPath: "tests/bin/gh"},
+				harness.Mock{CommandName: "gemapi", BinaryPath: "tests/bin/gemapi"},
+				harness.Mock{CommandName: "go", BinaryPath: "tests/bin/go"},
 			),
 			setupMockEcosystemStep(),
 			harness.NewStep("Run 'grove release plan'", func(ctx *harness.Context) error {
-				ecosystemDir := ctx.MustGet("ecosystem_dir").(string)
+				ecosystemDir := ctx.Get("ecosystem_dir").(string)
 				
 				// Change to ecosystem directory for the command
 				cmd := ctx.Command("grove", "release", "plan", "--llm-changelog").
 					Dir(ecosystemDir).
-					Env("HOME", ctx.TempDir)
+					Env("HOME", ctx.RootDir)
 				
 				res := cmd.Run()
 				if res.Error != nil {
-					return fmt.Errorf("grove release plan failed: %v\nOutput: %s", res.Error, res.Output)
+					return fmt.Errorf("grove release plan failed: %v\nOutput: %s", res.Error, res.Stdout)
 				}
 
 				// Assert that release_plan.json exists
-				planPath := filepath.Join(ctx.TempDir, ".grove", "release_plan.json")
+				planPath := filepath.Join(ctx.RootDir, ".grove", "release_plan.json")
 				if _, err := os.Stat(planPath); os.IsNotExist(err) {
 					return fmt.Errorf("release_plan.json not created at %s", planPath)
 				}
@@ -145,7 +145,7 @@ func StreamlinedFullReleaseScenario() *harness.Scenario {
 				}
 
 				// Check for staged changelogs
-				stagingDir := filepath.Join(ctx.TempDir, ".grove", "release_staging")
+				stagingDir := filepath.Join(ctx.RootDir, ".grove", "release_staging")
 				for _, repo := range []string{"lib-a", "app-b"} {
 					changelogPath := filepath.Join(stagingDir, repo, "CHANGELOG.md")
 					if _, err := os.Stat(changelogPath); os.IsNotExist(err) {
@@ -157,8 +157,8 @@ func StreamlinedFullReleaseScenario() *harness.Scenario {
 				return nil
 			}),
 			harness.NewStep("Simulate TUI Review & Approval", func(ctx *harness.Context) error {
-				planPath := ctx.MustGet("release_plan_path").(string)
-				ecosystemDir := ctx.MustGet("ecosystem_dir").(string)
+				planPath := ctx.Get("release_plan_path").(string)
+				ecosystemDir := ctx.Get("ecosystem_dir").(string)
 
 				// Load the plan
 				planData, err := os.ReadFile(planPath)
@@ -178,7 +178,7 @@ func StreamlinedFullReleaseScenario() *harness.Scenario {
 				}
 
 				// Copy staged changelogs to repos and commit
-				stagingDir := filepath.Join(ctx.TempDir, ".grove", "release_staging")
+				stagingDir := filepath.Join(ctx.RootDir, ".grove", "release_staging")
 				for _, repo := range []string{"lib-a", "app-b"} {
 					stagedChangelog := filepath.Join(stagingDir, repo, "CHANGELOG.md")
 					repoChangelog := filepath.Join(ecosystemDir, repo, "CHANGELOG.md")
@@ -221,18 +221,18 @@ func StreamlinedFullReleaseScenario() *harness.Scenario {
 				return nil
 			}),
 			harness.NewStep("Run 'grove release apply'", func(ctx *harness.Context) error {
-				ecosystemDir := ctx.MustGet("ecosystem_dir").(string)
-				planPath := ctx.MustGet("release_plan_path").(string)
+				ecosystemDir := ctx.Get("ecosystem_dir").(string)
+				planPath := ctx.Get("release_plan_path").(string)
 
 				// Set environment for successful CI
 				cmd := ctx.Command("grove", "release", "apply").
 					Dir(ecosystemDir).
-					Env("HOME", ctx.TempDir).
+					Env("HOME", ctx.RootDir).
 					Env("GH_MOCK_CI_STATUS", "success")
 				
 				res := cmd.Run()
 				if res.Error != nil {
-					return fmt.Errorf("grove release apply failed: %v\nOutput: %s", res.Error, res.Output)
+					return fmt.Errorf("grove release apply failed: %v\nOutput: %s", res.Error, res.Stdout)
 				}
 
 				// Assert that release_plan.json is deleted
@@ -266,26 +266,26 @@ func StreamlinedRCReleaseScenario() *harness.Scenario {
 		Tags:        []string{"release", "refactor", "rc"},
 		Steps: []harness.Step{
 			harness.SetupMocks(
-				harness.Mock{CommandName: "git", BinPath: "tests/bin/git"},
-				harness.Mock{CommandName: "gh", BinPath: "tests/bin/gh"},
-				harness.Mock{CommandName: "gemapi", BinPath: "tests/bin/gemapi"},
-				harness.Mock{CommandName: "go", BinPath: "tests/bin/go"},
+				harness.Mock{CommandName: "git", BinaryPath: "tests/bin/git"},
+				harness.Mock{CommandName: "gh", BinaryPath: "tests/bin/gh"},
+				harness.Mock{CommandName: "gemapi", BinaryPath: "tests/bin/gemapi"},
+				harness.Mock{CommandName: "go", BinaryPath: "tests/bin/go"},
 			),
 			setupMockEcosystemStep(),
 			harness.NewStep("Run 'grove release plan --rc'", func(ctx *harness.Context) error {
-				ecosystemDir := ctx.MustGet("ecosystem_dir").(string)
+				ecosystemDir := ctx.Get("ecosystem_dir").(string)
 				
 				cmd := ctx.Command("grove", "release", "plan", "--rc").
 					Dir(ecosystemDir).
-					Env("HOME", ctx.TempDir)
+					Env("HOME", ctx.RootDir)
 				
 				res := cmd.Run()
 				if res.Error != nil {
-					return fmt.Errorf("grove release plan --rc failed: %v\nOutput: %s", res.Error, res.Output)
+					return fmt.Errorf("grove release plan --rc failed: %v\nOutput: %s", res.Error, res.Stdout)
 				}
 
 				// Assert that release_plan.json exists
-				planPath := filepath.Join(ctx.TempDir, ".grove", "release_plan.json")
+				planPath := filepath.Join(ctx.RootDir, ".grove", "release_plan.json")
 				if _, err := os.Stat(planPath); os.IsNotExist(err) {
 					return fmt.Errorf("release_plan.json not created at %s", planPath)
 				}
@@ -306,7 +306,7 @@ func StreamlinedRCReleaseScenario() *harness.Scenario {
 				}
 
 				// Assert that staging directory does NOT exist
-				stagingDir := filepath.Join(ctx.TempDir, ".grove", "release_staging")
+				stagingDir := filepath.Join(ctx.RootDir, ".grove", "release_staging")
 				if _, err := os.Stat(stagingDir); !os.IsNotExist(err) {
 					return fmt.Errorf("staging directory should not exist for RC releases")
 				}
@@ -315,7 +315,7 @@ func StreamlinedRCReleaseScenario() *harness.Scenario {
 				return nil
 			}),
 			harness.NewStep("Simulate Approval", func(ctx *harness.Context) error {
-				planPath := ctx.MustGet("release_plan_path").(string)
+				planPath := ctx.Get("release_plan_path").(string)
 
 				// Load the plan
 				planData, err := os.ReadFile(planPath)
@@ -347,17 +347,17 @@ func StreamlinedRCReleaseScenario() *harness.Scenario {
 				return nil
 			}),
 			harness.NewStep("Run 'grove release apply'", func(ctx *harness.Context) error {
-				ecosystemDir := ctx.MustGet("ecosystem_dir").(string)
-				planPath := ctx.MustGet("release_plan_path").(string)
+				ecosystemDir := ctx.Get("ecosystem_dir").(string)
+				planPath := ctx.Get("release_plan_path").(string)
 
 				cmd := ctx.Command("grove", "release", "apply").
 					Dir(ecosystemDir).
-					Env("HOME", ctx.TempDir).
+					Env("HOME", ctx.RootDir).
 					Env("GH_MOCK_CI_STATUS", "success")
 				
 				res := cmd.Run()
 				if res.Error != nil {
-					return fmt.Errorf("grove release apply failed: %v\nOutput: %s", res.Error, res.Output)
+					return fmt.Errorf("grove release apply failed: %v\nOutput: %s", res.Error, res.Stdout)
 				}
 
 				// Assert that release_plan.json is deleted
@@ -389,31 +389,31 @@ func StreamlinedFailureScenario() *harness.Scenario {
 		Tags:        []string{"release", "refactor", "failure"},
 		Steps: []harness.Step{
 			harness.SetupMocks(
-				harness.Mock{CommandName: "git", BinPath: "tests/bin/git"},
-				harness.Mock{CommandName: "gh", BinPath: "tests/bin/gh"},
-				harness.Mock{CommandName: "gemapi", BinPath: "tests/bin/gemapi"},
-				harness.Mock{CommandName: "go", BinPath: "tests/bin/go"},
+				harness.Mock{CommandName: "git", BinaryPath: "tests/bin/git"},
+				harness.Mock{CommandName: "gh", BinaryPath: "tests/bin/gh"},
+				harness.Mock{CommandName: "gemapi", BinaryPath: "tests/bin/gemapi"},
+				harness.Mock{CommandName: "go", BinaryPath: "tests/bin/go"},
 			),
 			setupMockEcosystemStep(),
 			harness.NewStep("Run 'grove release plan'", func(ctx *harness.Context) error {
-				ecosystemDir := ctx.MustGet("ecosystem_dir").(string)
+				ecosystemDir := ctx.Get("ecosystem_dir").(string)
 				
 				cmd := ctx.Command("grove", "release", "plan", "--llm-changelog").
 					Dir(ecosystemDir).
-					Env("HOME", ctx.TempDir)
+					Env("HOME", ctx.RootDir)
 				
 				res := cmd.Run()
 				if res.Error != nil {
-					return fmt.Errorf("grove release plan failed: %v\nOutput: %s", res.Error, res.Output)
+					return fmt.Errorf("grove release plan failed: %v\nOutput: %s", res.Error, res.Stdout)
 				}
 
-				planPath := filepath.Join(ctx.TempDir, ".grove", "release_plan.json")
+				planPath := filepath.Join(ctx.RootDir, ".grove", "release_plan.json")
 				ctx.Set("release_plan_path", planPath)
 				return nil
 			}),
 			harness.NewStep("Simulate Approval", func(ctx *harness.Context) error {
-				planPath := ctx.MustGet("release_plan_path").(string)
-				ecosystemDir := ctx.MustGet("ecosystem_dir").(string)
+				planPath := ctx.Get("release_plan_path").(string)
+				ecosystemDir := ctx.Get("ecosystem_dir").(string)
 
 				// Load and approve the plan
 				planData, err := os.ReadFile(planPath)
@@ -432,7 +432,7 @@ func StreamlinedFailureScenario() *harness.Scenario {
 				}
 
 				// Copy staged changelogs and commit
-				stagingDir := filepath.Join(ctx.TempDir, ".grove", "release_staging")
+				stagingDir := filepath.Join(ctx.RootDir, ".grove", "release_staging")
 				for _, repo := range []string{"lib-a", "app-b"} {
 					stagedChangelog := filepath.Join(stagingDir, repo, "CHANGELOG.md")
 					repoChangelog := filepath.Join(ecosystemDir, repo, "CHANGELOG.md")
@@ -469,12 +469,12 @@ func StreamlinedFailureScenario() *harness.Scenario {
 				return os.WriteFile(planPath, modifiedPlanData, 0644)
 			}),
 			harness.NewStep("Run 'grove release apply' with failing CI", func(ctx *harness.Context) error {
-				ecosystemDir := ctx.MustGet("ecosystem_dir").(string)
+				ecosystemDir := ctx.Get("ecosystem_dir").(string)
 
 				// Set environment for FAILING CI
 				cmd := ctx.Command("grove", "release", "apply").
 					Dir(ecosystemDir).
-					Env("HOME", ctx.TempDir).
+					Env("HOME", ctx.RootDir).
 					Env("GH_MOCK_CI_STATUS", "failure")
 				
 				res := cmd.Run()
@@ -486,15 +486,15 @@ func StreamlinedFailureScenario() *harness.Scenario {
 				return nil
 			}),
 			harness.NewStep("Run 'grove release undo-tag'", func(ctx *harness.Context) error {
-				ecosystemDir := ctx.MustGet("ecosystem_dir").(string)
+				ecosystemDir := ctx.Get("ecosystem_dir").(string)
 
 				cmd := ctx.Command("grove", "release", "undo-tag").
 					Dir(ecosystemDir).
-					Env("HOME", ctx.TempDir)
+					Env("HOME", ctx.RootDir)
 				
 				res := cmd.Run()
 				if res.Error != nil {
-					return fmt.Errorf("grove release undo-tag failed: %v\nOutput: %s", res.Error, res.Output)
+					return fmt.Errorf("grove release undo-tag failed: %v\nOutput: %s", res.Error, res.Stdout)
 				}
 
 				// Verify tags were removed
@@ -503,16 +503,16 @@ func StreamlinedFailureScenario() *harness.Scenario {
 				return nil
 			}),
 			harness.NewStep("Run 'grove release clear-plan'", func(ctx *harness.Context) error {
-				ecosystemDir := ctx.MustGet("ecosystem_dir").(string)
-				planPath := ctx.MustGet("release_plan_path").(string)
+				ecosystemDir := ctx.Get("ecosystem_dir").(string)
+				planPath := ctx.Get("release_plan_path").(string)
 
 				cmd := ctx.Command("grove", "release", "clear-plan").
 					Dir(ecosystemDir).
-					Env("HOME", ctx.TempDir)
+					Env("HOME", ctx.RootDir)
 				
 				res := cmd.Run()
 				if res.Error != nil {
-					return fmt.Errorf("grove release clear-plan failed: %v\nOutput: %s", res.Error, res.Output)
+					return fmt.Errorf("grove release clear-plan failed: %v\nOutput: %s", res.Error, res.Stdout)
 				}
 
 				// Assert that release_plan.json is deleted
@@ -521,7 +521,7 @@ func StreamlinedFailureScenario() *harness.Scenario {
 				}
 
 				// Assert that staging directory is deleted
-				stagingDir := filepath.Join(ctx.TempDir, ".grove", "release_staging")
+				stagingDir := filepath.Join(ctx.RootDir, ".grove", "release_staging")
 				if _, err := os.Stat(stagingDir); !os.IsNotExist(err) {
 					return fmt.Errorf("staging directory should be deleted after clear-plan")
 				}
