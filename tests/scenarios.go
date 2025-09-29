@@ -24,10 +24,10 @@ func AllScenarios() []*harness.Scenario {
 		SyncDepsReleaseScenario(),
 		WorkspaceDetectionScenario(),
 		WorkspaceBinaryDelegationScenario(),
-		// TODO: Uncomment once release refactor commands are implemented
-		// StreamlinedFullReleaseScenario(),
-		// StreamlinedRCReleaseScenario(),
-		// StreamlinedFailureScenario(),
+		// New streamline-release refactor scenarios
+		StreamlinedFullReleaseScenario(),
+		StreamlinedRCReleaseScenario(),
+		StreamlinedFailureScenario(),
 	}
 }
 
