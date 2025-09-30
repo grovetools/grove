@@ -16,26 +16,15 @@
 
 <!-- DOCGEN:OVERVIEW:END -->
 
-## Documentation
-
-See the [documentation](docs/) for detailed usage instructions:
-- [Introduction](docs/00-introduction.md) - Getting started guide
-- [Overview](docs/01-overview.md) - Core concepts and architecture
-- [Installation](docs/02-installation.md) - Installation and setup
-- [Binary Management](docs/03-binary-management.md) - Managing Grove binaries
-- [Ecosystems](docs/04-ecosystems.md) - Working with ecosystems
-- [Configuration](docs/05-configuration.md) - Configuration reference
-- [Command Reference](docs/06-command-reference.md) - Complete CLI reference
-
 <!-- DOCGEN:TOC:START -->
 
 See the [documentation](docs/) for detailed usage instructions:
-- [Introduction](docs/00-introduction.md) - The Grove Ecosystem is a set of command-line tools for AI-assisted coding, de...
-- [Overview](docs/01-overview.md) - <img src="./images/grove-base-readme.svg" width="60%" />
-- [Installation](docs/02-installation.md) - This guide provides instructions for installing Grove CLI (`grove`) and the a...
-- [Binary Management](docs/03-binary-management.md) - The `grove` CLI acts as a single entry point for managing and executing a sui...
-- [Ecosystems](docs/04-ecosystems.md) - The `grove` CLI includes a suite of commands designed to manage complex monor...
-- [Configuration](docs/05-configuration.md) - The Grove ecosystem uses a layered configuration system based on YAML files, ...
-- [Command Reference](docs/06-command-reference.md) - This document provides a comprehensive reference for all `grove` commands, or...
+- [Introduction](docs/00-introduction.md)
+- [Overview](docs/01-overview.md)
+- [Installation](docs/02-installation.md)
+- [Binary Management](docs/03-binary-management.md)
+- [Ecosystems](docs/04-ecosystems.md)
+- [Configuration](docs/05-configuration.md)
+- [Command Reference](docs/06-command-reference.md)
 
 <!-- DOCGEN:TOC:END -->
