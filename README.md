@@ -1,151 +1,41 @@
-# Grove
+<!-- DOCGEN:OVERVIEW:START -->
 
-A command-line interface (CLI) toolkit for AI-assisted coding.
+<img src="docs/images/grove-base-readme.svg" width="60%" />
 
-## Core Tools
+`grove-cli` is the meta-command-line interface and package manager for the Grove ecosystem. It provides a unified entry point for installing, managing, and orchestrating a suite of specialized tools designed for AI-assisted software development.
 
-| <div style="width:150px">Logo</div> | Package | Description | CI Status | Release |
-| :--: | ------- | ----------- | :-------: | :-----: |
-| <img src="https://github.com/user-attachments/assets/7c0c76de-d32b-4526-a43e-836b3df7a077" style="max-width:150px" /> | [**`grove-meta`**](https://github.com/mattsolo1/grove-meta) | The meta-CLI and package manager for the Grove ecosystem. | [![CI](https://github.com/mattsolo1/grove-meta/actions/workflows/ci.yml/badge.svg)](https://github.com/mattsolo1/grove-meta/actions/workflows/ci.yml) | ![Release](https://img.shields.io/github/v/release/mattsolo1/grove-meta) |
-| <img src="https://github.com/user-attachments/assets/fc7e287a-33e5-4146-9c1b-14b77c99bdba" style="max-width:150px" /> | [**`grove-context`**](https://github.com/mattsolo1/grove-context) | Rule-based tool for dynamically managing file-based LLM context. | [![CI](https://github.com/mattsolo1/grove-context/actions/workflows/ci.yml/badge.svg)](https://github.com/mattsolo1/grove-context/actions/workflows/ci.yml) | ![Release](https://img.shields.io/github/v/release/mattsolo1/grove-context) |
-| <img src="https://github.com/user-attachments/assets/6b0cc785-c87f-4a34-a1ac-f083b5f3f8ac" style="max-width:150px" /> | [**`grove-flow`**](https://github.com/mattsolo1/grove-flow) | LLM job orchestration and complex workflows in Markdown. | - | ![Release](https://img.shields.io/github/v/release/mattsolo1/grove-flow) |
-| <img src="https://github.com/user-attachments/assets/00670553-0a00-4f03-9bb1-8e02e1e68a7b" style="max-width:150px" /> | [**`grove-gemini`**](https://github.com/mattsolo1/grove-gemini) | CLI for Google's Gemini API with advanced caching and observability. | [![CI](https://github.com/mattsolo1/grove-gemini/actions/workflows/ci.yml/badge.svg)](https://github.com/mattsolo1/grove-gemini/actions/workflows/ci.yml) | ![Release](https://img.shields.io/github/v/release/mattsolo1/grove-gemini) |
-| <img src="https://github.com/user-attachments/assets/eda77869-0e99-467c-a20d-4d5b8262aecf" style="max-width:150px" /> | [**`grove-hooks`**](https://github.com/mattsolo1/grove-hooks) | Local-first observability and state management for AI agent sessions. | - | ![Release](https://img.shields.io/github/v/release/mattsolo1/grove-hooks) |
-| <img src="https://github.com/user-attachments/assets/e43f97b0-9d06-48ad-aa41-29e3a94fb499" style="max-width:150px" /> | [**`grove-notebook`**](https://github.com/mattsolo1/grove-notebook) | A command-line, workspace-aware note-taking system. | [![CI](https://github.com/mattsolo1/grove-notebook/actions/workflows/ci.yml/badge.svg)](https://github.com/mattsolo1/grove-notebook/actions/workflows/ci.yml) | ![Release](https://img.shields.io/github/v/release/mattsolo1/grove-notebook) |
-| <img src="https://github.com/user-attachments/assets/c6ca0fe6-38b5-4f55-b0e8-7e42d5940d48" style="max-width:150px" /> | [**`grove-tend`**](https://github.com/mattsolo1/grove-tend) | A Go library for creating powerful, scenario-based E2E testing frameworks. | - | ![Release](https://img.shields.io/github/v/release/mattsolo1/grove-tend) |
-| <img src="https://github.com/user-attachments/assets/506903c3-1aba-4331-9fe2-2c170fa8a611" style="max-width:150px" /> | [**`grove-tmux`**](https://github.com/mattsolo1/grove-tmux) | An interactive, context-aware session manager for tmux. | [![CI](https://github.com/mattsolo1/grove-tmux/actions/workflows/ci.yml/badge.svg)](https://github.com/mattsolo1/grove-tmux/actions/workflows/ci.yml) | ![Release](https://img.shields.io/github/v/release/mattsolo1/grove-tmux) |
-| <img src="https://github.com/user-attachments/assets/741e5cd5-687f-4e53-9bc9-fb28872aab0c" style="max-width:150px" /> | [**`grove-nvim`**](https://github.com/mattsolo1/grove-nvim) | Neovim plugin for the Grove ecosystem. | [![CI](https://github.com/mattsolo1/grove-nvim/actions/workflows/ci.yml/badge.svg)](https://github.com/mattsolo1/grove-nvim/actions/workflows/ci.yml) | ![Release](https://img.shields.io/github/v/release/mattsolo1/grove-nvim) |
+<!-- placeholder for animated gif -->
 
-## Supporting Libraries & Templates
+### Key Features
 
-| Package | Description | CI Status | Release |
-| ------- | ----------- | :-------: | :-----: |
-| [**`grove-core`**](https://github.com/mattsolo1/grove-core) | Shared library with standardized CLI patterns and utilities for all Grove tools. | - | ![Release](https://img.shields.io/github/v/release/mattsolo1/grove-core) |
-| [**`grove-claude-logs`**](https://github.com/mattsolo1/grove-claude-logs) | Claude transcript log parsing and monitoring. | [![CI](https://github.com/mattsolo1/grove-claude-logs/actions/workflows/ci.yml/badge.svg)](https://github.com/mattsolo1/grove-claude-logs/actions/workflows/ci.yml) | ![Release](https://img.shields.io/github/v/release/mattsolo1/grove-claude-logs) |
-| [**`grove-proxy`**](https://github.com/mattsolo1/grove-proxy) | Docker and proxy management for local services. | - | ![Release](https://img.shields.io/github/v/release/mattsolo1/grove-proxy) |
-| [**`grove-sandbox`**](https://github.com/mattsolo1/grove-sandbox) | Protected sandbox environments for development. | - | ![Release](https://img.shields.io/github/v/release/mattsolo1/grove-sandbox) |
-| [**`grove-notifications`**](https://github.com/mattsolo1/grove-notifications) | A unified notification system for all tools. | [![CI](https://github.com/mattsolo1/grove-notifications/actions/workflows/ci.yml/badge.svg)](https://github.com/mattsolo1/grove-notifications/actions/workflows/ci.yml) | ![Release](https://img.shields.io/github/v/release/mattsolo1/grove-notifications) |
-| [**`grove-project-tmpl-go`**](https://github.com/mattsolo1/grove-project-tmpl-go) | Project template for new Go applications. | - | ![Release](https://img.shields.io/github/v/release/mattsolo1/grove-project-tmpl-go) |
-| [**`grove-project-tmpl-maturin`**](https://github.com/mattsolo1/grove-project-tmpl-maturin) | Project template for Python/Rust (Maturin) projects. | [![CI](https://github.com/mattsolo1/grove-project-tmpl-maturin/actions/workflows/ci.yml/badge.svg)](https://github.com/mattsolo1/grove-project-tmpl-maturin/actions/workflows/ci.yml) | ![Release](https://img.shields.io/github/v/release/mattsolo1/grove-project-tmpl-maturin) |
-| [**`grove-project-tmpl-react-ts`**](https://github.com/mattsolo1/grove-project-tmpl-react-ts) | Grove template for React TypeScript projects. | [![CI](https://github.com/mattsolo1/grove-project-tmpl-react-ts/actions/workflows/ci.yml/badge.svg)](https://github.com/mattsolo1/grove-project-tmpl-react-ts/actions/workflows/ci.yml) | ![Release](https://img.shields.io/github/v/release/mattsolo1/grove-project-tmpl-react-ts) |
+*   **Tool Management**: Grove acts as a package manager and is responsible for installing, updating, and managing all other Grove tools, such as `grove-context`, `grove-flow`, and `grove-gemini`. It resolves inter-tool dependencies to ensure a consistent and functional toolset. Manages the entire lifecycle of Grove tools, including installation (`grove install`), updates (`grove update`), and versioning (`grove version use`). It supports downloading official releases or installing nightly builds from source.
+*   **Unified Command Interface**: Acts as a command delegator. Running `grove cx stats` finds and executes the `cx` binary with the `stats` argument. This provides a single, consistent entry point for all tools.
+*   **Local Development Support**: A `grove dev` command suite allows developers to link and switch between multiple local builds of any tool, making it easy to test different versions or feature branches across the entire system. The `grove activate` command provides explicit shell integration for development workspaces.
+*   **Ecosystem Orchestration**: Provides high-level commands that operate across all workspaces in an ecosystem. This includes  aggregated status dashboards (e.g., `grove ws status`) and a dependency-aware release engine (`grove release`) that automates versioning, changelog generation, and CI monitoring.
+*   **Aggregated Views**: Offerscommands like `grove logs`, `grove ws plans`, and `grove ws issues` that aggregate and display information from multiple tools across all projects in the ecosystem.
 
-This repository holds the meta-CLI and package manager for the Grove ecosystem. It provides a unified entry point for installing and managing Grove tools, as well as orchestrating operations across the entire ecosystem.
+<!-- DOCGEN:OVERVIEW:END -->
 
-## Installation
+## Documentation
 
-The `grove` CLI is the entry point to the ecosystem. Install it with a single command:
+See the [documentation](docs/) for detailed usage instructions:
+- [Introduction](docs/00-introduction.md) - Getting started guide
+- [Overview](docs/01-overview.md) - Core concepts and architecture
+- [Installation](docs/02-installation.md) - Installation and setup
+- [Binary Management](docs/03-binary-management.md) - Managing Grove binaries
+- [Ecosystems](docs/04-ecosystems.md) - Working with ecosystems
+- [Configuration](docs/05-configuration.md) - Configuration reference
+- [Command Reference](docs/06-command-reference.md) - Complete CLI reference
 
-```bash
-curl -sSfL https://raw.githubusercontent.com/mattsolo1/grove-meta/main/scripts/install.sh | sh
-```
+<!-- DOCGEN:TOC:START -->
 
-The installer is smart:
-- If the repository is public, it uses `curl`.
-- If the repository is private, it will automatically use the `gh` CLI if you are logged in (`gh auth status`).
+See the [documentation](docs/) for detailed usage instructions:
+- [Introduction](docs/00-introduction.md) - The Grove Ecosystem is a set of command-line tools for AI-assisted coding, de...
+- [Overview](docs/01-overview.md) - <img src="./images/grove-base-readme.svg" width="60%" />
+- [Installation](docs/02-installation.md) - This guide provides instructions for installing Grove CLI (`grove`) and the a...
+- [Binary Management](docs/03-binary-management.md) - The `grove` CLI acts as a single entry point for managing and executing a sui...
+- [Ecosystems](docs/04-ecosystems.md) - The `grove` CLI includes a suite of commands designed to manage complex monor...
+- [Configuration](docs/05-configuration.md) - The Grove ecosystem uses a layered configuration system based on YAML files, ...
+- [Command Reference](docs/06-command-reference.md) - This document provides a comprehensive reference for all `grove` commands, or...
 
-### Post-Installation
-
-1. **Update your PATH:** The installer will place the `grove` binary in `~/.grove/bin`. Make sure to add this directory to your shell's `PATH`.
-
-   ```bash
-   # Add this to your ~/.zshrc, ~/.bashrc, or equivalent
-   export PATH="$HOME/.grove/bin:$PATH"
-   ```
-
-2. **Install Grove Tools:** Once the `grove` CLI is installed and in your `PATH`, you can install all the other tools:
-
-   ```bash
-   # For public repositories
-   grove install all
-
-   # If repositories are private, use the --use-gh flag
-   grove install all --use-gh
-
-   # To install the latest development (nightly) builds of all tools
-   grove install all@nightly
-   ```
-
-## Usage
-
-### Installing Tools
-
-Install one or more Grove tools:
-```bash
-grove install context          # Install by name
-grove install cx               # Install by alias
-grove install cx gvm agent     # Install multiple tools
-grove install all@nightly      # Install nightly builds of all tools
-grove install cx@nightly       # Install nightly build of specific tool
-```
-
-### Listing Available Tools
-
-See all available Grove tools:
-```bash
-grove list
-```
-
-### Running Tools
-
-Once installed, tools can be run in three ways:
-
-1. Direct execution:
-   ```bash
-   cx update
-   ```
-
-2. Via Grove using alias:
-   ```bash
-   grove cx update
-   ```
-
-3. Via Grove using full name:
-   ```bash
-   grove context update
-   ```
-
-### Updating Tools
-
-Update tools to their latest version:
-```bash
-grove update                   # Update grove itself
-grove self-update              # Alternative way to update grove
-grove update context           # Update specific tool
-grove update cx flow           # Update multiple tools
-grove update all               # Update all installed tools
-```
-
-For private repositories, use the `--use-gh` flag:
-```bash
-grove update --use-gh
-grove self-update --use-gh
-```
-
-### Managing Dependencies
-
-Update Go module dependencies across all Grove submodules:
-```bash
-grove deps sync                                                # Update all Grove deps to latest
-grove deps sync --commit                                       # Update and commit changes
-grove deps bump github.com/mattsolo1/grove-core@latest        # Update specific dependency
-grove deps bump github.com/mattsolo1/grove-core@v0.2.1        # Update to specific version
-```
-
-See [Dependency Management](docs/dependency-management.md) for detailed documentation.
-
-## Tool Registry
-
-Grove uses a `registry.json` file to track available tools. Each tool entry includes:
-- Name: Full descriptive name
-- Alias: Short command for daily use
-- Repository: Go module path
-- Binary: Executable name
-- Version: Version tag or "latest"
-- Description: Tool purpose
-
-## Architecture
-
-Grove follows a distributed architecture where each tool is a separate repository and binary. The Grove meta-CLI acts as:
-1. A package manager for installing tools via `go install`
-2. A command delegator that forwards commands to installed tools
-3. A discovery mechanism for available tools
+<!-- DOCGEN:TOC:END -->

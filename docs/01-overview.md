@@ -1,5 +1,7 @@
 # Grove CLI
 
+<img src="./images/grove-base-readme.svg" width="60%" />
+
 `grove-cli` is the meta-command-line interface and package manager for the Grove ecosystem. It provides a unified entry point for installing, managing, and orchestrating a suite of specialized tools designed for AI-assisted software development.
 
 <!-- placeholder for animated gif -->
