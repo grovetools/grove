@@ -39,9 +39,7 @@ sections:
     prompt: prompts/06-command-reference.md
     title: Command Reference
 settings:
-  model: gemini-2.5-pro
   output_dir: docs
-  regeneration_mode: scratch
   rules_file: docs.rules
   structured_output_file: pkg/docs/docs.json
   system_prompt: default
