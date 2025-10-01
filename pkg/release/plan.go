@@ -33,6 +33,8 @@ type RepoReleasePlan struct {
 	// Changelog tracking for dirty detection
 	ChangelogHash       string `json:"changelog_hash,omitempty"`  // SHA256 hash of generated changelog content
 	ChangelogState      string `json:"changelog_state,omitempty"` // "clean", "dirty", or "none"
+	ChangelogPushed     bool   `json:"changelog_pushed,omitempty"` // Whether changelog has been committed and pushed
+	CIPassed           bool   `json:"ci_passed,omitempty"`        // Whether CI passed after changelog push
 	
 	// Git status information
 	Branch              string `json:"branch,omitempty"`

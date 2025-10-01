@@ -869,6 +869,19 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 
 				// Handle changelog - either use existing modifications or generate new
 				if !releaseDryRun && plan.Type == "full" {
+					// Check partial release state from previous attempts
+					if plan != nil && plan.Repos != nil {
+						if repoPlan, ok := plan.Repos[repo]; ok {
+							if repoPlan.ChangelogPushed && repoPlan.CIPassed {
+								displayInfo(fmt.Sprintf("Changelog pushed and CI passed for %s, skipping to tag creation", repo))
+								goto createTag // Skip everything - go straight to tagging
+							} else if repoPlan.ChangelogPushed {
+								displayInfo(fmt.Sprintf("Changelog already pushed for %s, skipping to CI wait", repo))
+								goto waitForCI // Skip changelog operations, but still wait for CI
+							}
+						}
+					}
+					
 					// Check if CHANGELOG.md is already modified (from TUI workflow)
 					// First check the plan's ChangelogState if available
 					changelogModified := false
@@ -920,6 +933,14 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 									logger.WithError(err).Warnf("Failed to push changelog commit for %s", repo)
 								} else {
 									// Wait for CI on main to complete after pushing changelog
+									// Update plan state to mark changelog as pushed first
+									if plan != nil && plan.Repos != nil {
+										if repoPlan, ok := plan.Repos[repo]; ok {
+											repoPlan.ChangelogPushed = true
+											release.SavePlan(plan) // Save updated state
+										}
+									}
+									
 									if !releaseSkipCI {
 										displayInfo(fmt.Sprintf("Waiting for CI to pass for %s after changelog update...", repo))
 										if err := gh.WaitForCIWorkflow(ctx, wsPath); err != nil {
@@ -928,6 +949,14 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 										}
 									} else {
 										displayInfo(fmt.Sprintf("Skipping CI wait for %s after changelog update (--skip-ci enabled)", repo))
+									}
+									
+									// Mark CI as passed only after successful wait or skip
+									if plan != nil && plan.Repos != nil {
+										if repoPlan, ok := plan.Repos[repo]; ok {
+											repoPlan.CIPassed = true
+											release.SavePlan(plan) // Save updated state
+										}
 									}
 								}
 							}
@@ -961,6 +990,14 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 											logger.WithError(err).Warnf("Failed to push changelog commit for %s", repo)
 										} else {
 											// Wait for CI on main to complete after pushing changelog
+											// Update plan state to mark changelog as pushed first
+											if plan != nil && plan.Repos != nil {
+												if repoPlan, ok := plan.Repos[repo]; ok {
+													repoPlan.ChangelogPushed = true
+													release.SavePlan(plan) // Save updated state
+												}
+											}
+											
 											if !releaseSkipCI {
 												displayInfo(fmt.Sprintf("Waiting for CI to pass for %s after changelog update...", repo))
 												if err := gh.WaitForCIWorkflow(ctx, wsPath); err != nil {
@@ -970,6 +1007,14 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 											} else {
 												displayInfo(fmt.Sprintf("Skipping CI wait for %s after changelog update (--skip-ci enabled)", repo))
 											}
+											
+											// Mark CI as passed only after successful wait or skip
+											if plan != nil && plan.Repos != nil {
+												if repoPlan, ok := plan.Repos[repo]; ok {
+													repoPlan.CIPassed = true
+													release.SavePlan(plan) // Save updated state
+												}
+											}
 										}
 									}
 								}
@@ -978,6 +1023,30 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 					}
 				}
 
+			waitForCI:
+				// If we jumped here, changelog was already pushed, but we need to wait for CI
+				// This handles the case where changelog succeeded but CI failed in a previous attempt
+				if plan != nil && plan.Repos != nil {
+					if repoPlan, ok := plan.Repos[repo]; ok && repoPlan.ChangelogPushed && !repoPlan.CIPassed {
+						if !releaseSkipCI {
+							displayInfo(fmt.Sprintf("Waiting for CI to pass for %s (changelog already pushed)...", repo))
+							if err := gh.WaitForCIWorkflow(ctx, wsPath); err != nil {
+								errChan <- fmt.Errorf("CI workflow for %s failed: %w", repo, err)
+								return
+							}
+							// Mark CI as passed and save plan
+							repoPlan.CIPassed = true
+							release.SavePlan(plan)
+						} else {
+							displayInfo(fmt.Sprintf("Skipping CI wait for %s (--skip-ci enabled)", repo))
+							// Even with --skip-ci, mark it as passed to avoid future waits
+							repoPlan.CIPassed = true
+							release.SavePlan(plan)
+						}
+					}
+				}
+
+			createTag:
 				// Tag the module
 				if err := executeGitCommand(ctx, wsPath, []string{"tag", "-a", version, "-m", fmt.Sprintf("Release %s", version)},
 					fmt.Sprintf("Tag %s", repo), logger); err != nil {
