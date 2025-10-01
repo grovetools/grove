@@ -33,6 +33,45 @@ var (
 	// errorStyle is defined in styles.go
 )
 
+// JSON output structures
+type WorkspaceStatusJSON struct {
+	Name    string                `json:"name"`
+	Type    string                `json:"type,omitempty"`
+	Git     *GitStatusJSON        `json:"git,omitempty"`
+	Context *ContextStatsJSON     `json:"context,omitempty"`
+	Release *ReleaseInfoJSON      `json:"release,omitempty"`
+	CI      *CIStatusJSON         `json:"ci,omitempty"`
+	Link    string                `json:"link"`
+	Errors  map[string]string     `json:"errors,omitempty"`
+}
+
+type GitStatusJSON struct {
+	Branch        string `json:"branch"`
+	IsDirty       bool   `json:"is_dirty"`
+	HasUpstream   bool   `json:"has_upstream"`
+	AheadCount    int    `json:"ahead_count"`
+	BehindCount   int    `json:"behind_count"`
+	ModifiedCount int    `json:"modified_count"`
+	StagedCount   int    `json:"staged_count"`
+	UntrackedCount int   `json:"untracked_count"`
+}
+
+type ContextStatsJSON struct {
+	TotalFiles  int   `json:"total_files"`
+	TotalTokens int   `json:"total_tokens"`
+	TotalSize   int64 `json:"total_size"`
+}
+
+type ReleaseInfoJSON struct {
+	LatestTag    string `json:"latest_tag"`
+	CommitsAhead int    `json:"commits_ahead"`
+}
+
+type CIStatusJSON struct {
+	MainCI string `json:"main_ci,omitempty"`
+	MyPRs  string `json:"my_prs,omitempty"`
+}
+
 // Removed init function - command is now added in workspace.go
 
 // getWorkspaceCmd finds the workspace command in the root command tree
@@ -55,12 +94,14 @@ func newWorkspaceStatusCmd() *cobra.Command {
 	}
 
 	cmd.Flags().String("cols", "git,main-ci,my-prs,cx,release", "Comma-separated columns to display (e.g., git,main-ci,my-prs,cx,release)")
+	cmd.Flags().Bool("json", false, "Output workspace status in JSON format")
 
 	return cmd
 }
 
 func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 	logger := cli.GetLogger(cmd)
+	opts := cli.GetOptions(cmd)
 
 	// Parse column selection
 	colsStr, _ := cmd.Flags().GetString("cols")
@@ -273,6 +314,90 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 	sort.Slice(statuses, func(i, j int) bool {
 		return statuses[i].Name < statuses[j].Name
 	})
+
+	// Handle JSON output
+	if opts.JSONOutput {
+		var jsonResults []WorkspaceStatusJSON
+		
+		for _, ws := range statuses {
+			jsonWs := WorkspaceStatusJSON{
+				Name: ws.Name,
+				Type: ws.Type,
+				Link: fmt.Sprintf("https://github.com/mattsolo1/%s", ws.Name),
+			}
+
+			// Add errors map if there are any errors
+			errors := make(map[string]string)
+			if ws.GitErr != nil {
+				errors["git"] = ws.GitErr.Error()
+			}
+			if ws.CxErr != nil {
+				errors["context"] = ws.CxErr.Error()
+			}
+			if ws.RelErr != nil {
+				errors["release"] = ws.RelErr.Error()
+			}
+			if ws.CIErr != nil {
+				errors["ci"] = ws.CIErr.Error()
+			}
+			if len(errors) > 0 {
+				jsonWs.Errors = errors
+			}
+
+			// Add git info if requested and available
+			if colMap["git"] && ws.Git != nil && ws.GitErr == nil {
+				jsonWs.Git = &GitStatusJSON{
+					Branch:         ws.Git.Branch,
+					IsDirty:        ws.Git.IsDirty,
+					HasUpstream:    ws.Git.HasUpstream,
+					AheadCount:     ws.Git.AheadCount,
+					BehindCount:    ws.Git.BehindCount,
+					ModifiedCount:  ws.Git.ModifiedCount,
+					StagedCount:    ws.Git.StagedCount,
+					UntrackedCount: ws.Git.UntrackedCount,
+				}
+			}
+
+			// Add context info if requested and available
+			if colMap["cx"] && ws.Context != nil && ws.CxErr == nil {
+				jsonWs.Context = &ContextStatsJSON{
+					TotalFiles:  ws.Context.TotalFiles,
+					TotalTokens: ws.Context.TotalTokens,
+					TotalSize:   ws.Context.TotalSize,
+				}
+			}
+
+			// Add release info if requested and available
+			if colMap["release"] && ws.Release != nil && ws.RelErr == nil {
+				jsonWs.Release = &ReleaseInfoJSON{
+					LatestTag:    ws.Release.LatestTag,
+					CommitsAhead: ws.Release.CommitsAhead,
+				}
+			}
+
+			// Add CI info if requested and available
+			if (colMap["main-ci"] || colMap["my-prs"]) && ws.CIErr == nil {
+				ciInfo := &CIStatusJSON{}
+				if colMap["main-ci"] {
+					ciInfo.MainCI = ws.MainCI
+				}
+				if colMap["my-prs"] {
+					ciInfo.MyPRs = ws.MyPRs
+				}
+				jsonWs.CI = ciInfo
+			}
+
+			jsonResults = append(jsonResults, jsonWs)
+		}
+
+		// Output JSON
+		jsonData, err := json.MarshalIndent(jsonResults, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal JSON: %w", err)
+		}
+		fmt.Println(string(jsonData))
+		return nil
+	}
 
 	// Build table headers dynamically
 	headers := []string{"WORKSPACE"}
