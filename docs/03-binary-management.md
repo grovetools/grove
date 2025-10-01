@@ -1,48 +1,51 @@
-# Core Concepts: Binary Management
+# Binary Management and Execution
 
 The `grove` CLI acts as a single entry point for managing and executing a suite of specialized tools. It determines which binary to run based on the current context, enabling users to switch between globally installed releases and local development builds.
 
 ## The Meta-CLI Pattern
 
-Grove employs two primary patterns to provide a unified interface: command delegation and aggregator facades. 
+Grove uses two primary patterns to provide a unified interface: command delegation and aggregator facades.
 
 ### Command Delegation
 
-At its core, `grove` is a **command delegator**. When you execute a command like `grove cx stats`, the `grove` binary does not contain the logic for `cx` itself. Instead, it finds the appropriate `cx` executable on your system and passes the `stats` argument to it. This allows each tool to be developed and versioned independently while providing the user with a single, consistent command structure.
-
+`grove` is a command delegator. When a command like `grove cx stats` is executed, the `grove` binary finds the appropriate `cx` executable on the system and passes the `stats` argument to it. This allows each tool to be developed and versioned independently while providing a single command structure.
 
 ### Aggregator Facades
 
-For certain high-level tasks, `grove` acts as an **aggregator**, providing a facade that orchestrates operations across multiple tools or workspaces. Commands like `grove logs` and `grove llm` offer a unified interface to complex underlying systems:
+For certain high-level tasks, `grove` acts as an aggregator, providing a facade that orchestrates operations across multiple tools or workspaces.
 
 *   **`grove logs`**: Discovers all workspaces in an ecosystem, finds their structured log files, and tails them into a single, aggregated stream.
 *   **`grove llm`**: Provides a consistent set of flags for making requests to different Large Language Models, delegating the request to the correct provider-specific tool (`grove-gemini`, `grove-openai`, etc.) based on the specified model.
 
-## Version Management
+## Binary Resolution Precedence
 
-Grove also provides two distinct command suites for explicitly managing the global set of tools.
+`grove` determines which version of a tool to run based on a hierarchy of contexts.
 
-### `grove install` and `grove version`
+1.  **Development Workspace**: If the current directory is within a Git worktree managed by Grove (identified by a `.grove-workspace` file), `grove` will prioritize using binaries built from source within that workspace (e.g., from its local `./bin` directory).
 
-This system manages stable, **released** versions of tools downloaded from GitHub.
+2.  **Global Fallbacks**: If not inside a development workspace, `grove` falls back to the globally managed binaries located in `~/.grove/bin`. This path contains symlinks that are managed by the versioning commands.
 
-*   `grove install <tool>` downloads a specific, versioned release and stores it in a dedicated directory within `~/.grove/versions/`.
-*   `grove version use <tool@version>` activates a specific downloaded version by updating the symlink in `~/.grove/bin`.
+## Version Management Systems
 
-This is the standard way to manage official tool releases for day-to-day use.
+Grove provides two distinct systems for managing the global set of tools that are used as fallbacks when not in a development workspace.
 
-### `grove dev`
+### Released Versions (`grove install` and `grove version`)
 
-This system manages locally-built, **development** versions from any directory on your filesystem. It is designed for when you need to test a development build outside of its specific workspace.
+This system manages stable, released versions of tools downloaded from GitHub.
+
+*   `grove install <tool>` downloads a specific, versioned release and stores it in `~/.grove/versions/`.
+*   `grove version use <tool@version>` activates a specific downloaded version by updating a symlink in `~/.grove/bin`.
+
+### Development Versions (`grove dev`)
+
+This system manages locally-built, development versions from any directory on the filesystem. It is used for testing a development build outside of its specific workspace.
 
 *   `grove dev link <path>` registers a binary built from a local source tree, making it available to the `dev` system.
 *   `grove dev use <tool> <alias>` activates a registered development build, making it the global default for that tool.
 
-### `grove activate`
+## Explicit PATH Management (`grove activate`)
 
-The `grove activate` command provides a mechanism to bring a development workspace's binaries into your shell's `PATH`. 
-
-This is useful for more complex scenarios, such as when tools need to call each other directly (without the `grove` prefix) or for integrating with external scripts and IDEs that need direct access to the binaries.
+The `grove activate` command provides a mechanism to bring a development workspace's binaries into the current shell's `PATH`. This makes the binaries directly executable without the `grove` prefix, which is useful for integration with external scripts or IDEs.
 
 **Example Usage:**
 

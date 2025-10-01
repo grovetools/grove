@@ -22,6 +22,7 @@ sections:
     output: 00-introduction.md
     prompt: prompts/00-introduction.md
     title: Introduction
+    agg_strip_lines: 2
   - name: overview
     order: 1
     output: 01-overview.md

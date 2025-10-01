@@ -1,6 +1,6 @@
 # Command Reference
 
-This document provides a comprehensive reference for all `grove` commands, organized by functional category.
+This document provides a reference for all `grove` commands, organized by functional category.
 
 ## Tool Management
 
@@ -13,7 +13,7 @@ Commands for installing, updating, and listing Grove tools.
 **Syntax**: `grove install [tool[@version]...]`
 
 **Description**:
-Installs one or more Grove tools from their GitHub releases. You can specify a tool by its name (e.g., `grove-context`) or its alias (`cx`). A specific version can be requested using the `@` syntax (e.g., `cx@v0.1.0`). To install a development build from the `main` branch, use `@nightly`. Using `all` will install all available tools. The command automatically resolves and installs any required dependencies.
+Installs one or more Grove tools from their GitHub releases. A tool can be specified by its repository name (e.g., `grove-context`) or its alias (`cx`). A specific version can be requested using the `@` syntax (e.g., `cx@v0.1.0`). To install a development build from the `main` branch, use `@nightly`. Using `all` will install all available tools. The command automatically resolves and installs any required dependencies.
 
 **Arguments**:
 -   `[tool[@version]...]` (required): One or more tools to install. Can optionally specify a version.
@@ -348,10 +348,11 @@ Executes a given command in each discovered workspace directory.
 -   `<command> [args...]` (required): The command and its arguments to execute.
 
 **Flags**:
-| Flag       | Alias | Description                            |
-| :--------- | :---- | :------------------------------------- |
-| `--filter` | `-f`  | Filter workspaces by a glob pattern.   |
-| `--json`   |       | Aggregate and output results in JSON format. |
+| Flag       | Alias | Description                                     |
+| :--------- | :---- | :---------------------------------------------- |
+| `--filter` | `-f`  | Filter workspaces by a glob pattern.            |
+| `--exclude`|       | Comma-separated list of workspaces to exclude.  |
+| `--json`   |       | Aggregate and output results in JSON format.    |
 
 **Examples**:
 ```bash

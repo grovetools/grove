@@ -1,4 +1,1 @@
-*
-../grove-flow/docs
-../grove-context/docs
-../grove-docgen/docs
+*.go

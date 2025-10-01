@@ -1,18 +1,18 @@
 # Configuration
 
-The Grove ecosystem uses a layered configuration system based on YAML files, allowing for both global defaults and project-specific overrides. Configuration is primarily managed through `grove.yml` files, which can exist at both the ecosystem (monorepo) root and within individual workspace directories.
+Grove uses a layered configuration system with YAML files. This allows for setting defaults at a high level and overriding them for specific projects.
 
 ## Configuration Files and Locations
 
-Grove uses a hierarchy of configuration files to manage settings.
+Settings are managed through a hierarchy of files.
 
-| File Location                    | Purpose                                                                   | Managed By                                 |
-| :------------------------------- | :------------------------------------------------------------------------ | :----------------------------------------- |
-| `[ECOSYSTEM_ROOT]/grove.yml`     | Defines the ecosystem, its workspaces, and global defaults for tools.     | User (manual edit)                         |
-| `[WORKSPACE_DIR]/grove.yml`      | Defines a specific workspace, its properties, and overrides global settings. | User (manual edit)                         |
-| `~/.grove/active_versions.json`  | Tracks the active released version for each installed tool.               | `grove install`, `grove version use`         |
-| `~/.grove/devlinks.json`         | Registers local development binaries from different worktrees.            | `grove dev link`, `grove dev use`            |
-| `~/.grove/aliases.json`          | Stores user-defined custom aliases for tools.                             | `grove alias set`, `grove alias unset`       |
+| File Location                | Purpose                                                                 | Managed By                         |
+| :--------------------------- | :---------------------------------------------------------------------- | :--------------------------------- |
+| `[ECOSYSTEM_ROOT]/grove.yml` | Defines the ecosystem, its workspaces, and global defaults for tools.   | User (manual edit)                 |
+| `[WORKSPACE_DIR]/grove.yml`  | Defines a workspace and can override ecosystem-level settings.          | User (manual edit)                 |
+| `~/.grove/active_versions.json` | Tracks the active released version for each installed tool.             | `grove install`, `grove version use` |
+| `~/.grove/devlinks.json`     | Registers local development binaries from worktrees.                    | `grove dev link`, `grove dev use`    |
+| `~/.grove/aliases.json`      | Stores user-defined custom aliases for tools.                           | `grove alias set`, `grove alias unset` |
 
 ## The `grove.yml` File
 
@@ -20,15 +20,15 @@ The `grove.yml` file is the primary configuration file for both ecosystems and i
 
 ### Ecosystem `grove.yml`
 
-When placed at the root of a monorepo, this file defines the entire ecosystem.
+When placed at the root of a monorepo, this file defines the ecosystem.
 
 **Key Fields:**
 
-| Key           | Type     | Description                                                                                                                              |
-| :------------ | :------- | :--------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`        | `string` | The name of the ecosystem.                                                                                                               |
-| `description` | `string` | A brief description of the ecosystem's purpose.                                                                                          |
-| `workspaces`  | `[]string` | An array of glob patterns that `grove` uses to discover the workspaces within the ecosystem (e.g., `["*"]` or `["tools/*", "libs/*"]`). |
+| Key           | Type       | Description                                                                    |
+| :------------ | :--------- | :----------------------------------------------------------------------------- |
+| `name`        | `string`   | The name of the ecosystem.                                                     |
+| `description` | `string`   | A brief description of the ecosystem's purpose.                                |
+| `workspaces`  | `[]string` | An array of glob patterns used to discover workspaces (e.g., `["*"]`). |
 
 **Example Ecosystem `grove.yml`:**
 
@@ -46,17 +46,17 @@ flow:
 
 ### Workspace `grove.yml`
 
-When placed within a workspace directory, this file defines the properties of that specific project.
+When placed within a workspace directory, this file defines the properties of that project.
 
 **Key Fields:**
 
-| Key           | Type     | Description                                                                                             |
-| :------------ | :------- | :------------------------------------------------------------------------------------------------------ |
-| `name`        | `string` | The canonical name of the workspace (e.g., `grove-context`).                                            |
-| `description` | `string` | A brief description of the workspace's purpose.                                                         |
-| `type`        | `string` | The project type, used by the release engine. (e.g., `go`, `maturin`, `template`). Defaults to `go`.      |
-| `binary`      | `object` | Contains information about the binary produced by this workspace.                                       |
-| `logging`     | `object` | Configures structured logging for the tool.                                                             |
+| Key           | Type     | Description                                                               |
+| :------------ | :------- | :------------------------------------------------------------------------ |
+| `name`        | `string` | The canonical name of the workspace (e.g., `grove-context`).              |
+| `description` | `string` | A brief description of the workspace's purpose.                           |
+| `type`        | `string` | The project type, used by the release engine (e.g., `go`, `maturin`). |
+| `binary`      | `object` | Contains information about the binary produced by this workspace.         |
+| `logging`     | `object` | Configures structured logging for the tool.                               |
 
 **Example Workspace `grove.yml`:**
 
@@ -82,7 +82,7 @@ flow:
 
 ### Tool-Specific Configuration
 
-Tools within the Grove ecosystem can define their own configuration blocks within `grove.yml`. These blocks are identified by a key matching the tool's name (e.g., `flow`, `llm`). This allows for centralized and version-controlled configuration for all tools.
+Tools can define their own configuration blocks within `grove.yml`, identified by a key matching the tool's name (e.g., `flow`, `llm`).
 
 **Example `flow` configuration block:**
 
@@ -98,31 +98,31 @@ flow:
 
 ## User-Level Configuration (`~/.grove/`)
 
-The `~/.grove` directory stores configuration and data that is specific to your user account and applies across all projects. These files are typically managed by `grove` commands and should not be edited manually.
+The `~/.grove` directory stores user-specific configuration and state. These files are generally managed by `grove` commands.
 
--   **`active_versions.json`**: A JSON file mapping each tool's repository name to its currently active released version tag (e.g., `"grove-context": "v0.5.1"`). Managed by `grove version use`.
--   **`devlinks.json`**: A registry of all locally-built binaries you have linked using `grove dev link`. It tracks the binary paths and which one is currently active for each tool.
--   **`aliases.json`**: A simple map of repository names to custom aliases, allowing you to override default aliases (e.g., change `cx` to `ctx`). Managed by `grove alias`.
+-   **`active_versions.json`**: A JSON file mapping each tool's repository name to its active released version tag (e.g., `"grove-context": "v0.5.1"`). Managed by `grove version use`.
+-   **`devlinks.json`**: A registry of locally-built binaries linked using `grove dev link`. It tracks binary paths and the active alias for each tool.
+-   **`aliases.json`**: A map of repository names to custom aliases, which override default tool aliases. Managed by `grove alias`.
 
 ## Configuration Precedence
 
-Grove resolves configuration settings using a clear order of precedence. A setting from a higher level will always override one from a lower level.
+Grove resolves settings in a specific order. A setting from a higher level overrides one from a lower level.
 
-1.  **Command-Line Flags** (Highest Priority): Flags passed directly to a command (e.g., `grove release --dry-run`).
-2.  **Environment Variables**: System environment variables (e.g., `GROVE_PAT`).
-3.  **Workspace `grove.yml`**: Settings defined in the `grove.yml` of the current workspace directory.
-4.  **Ecosystem `grove.yml`**: Settings from the root `grove.yml` in a monorepo.
-5.  **User-Level Configuration**: Files within `~/.grove/` that store user-wide state.
-6.  **Application Defaults** (Lowest Priority): Hardcoded default values within the tools themselves.
+1.  **Command-Line Flags** (Highest Priority)
+2.  **Environment Variables**
+3.  **Workspace `grove.yml`**
+4.  **Ecosystem `grove.yml`**
+5.  **User-Level Configuration** (`~/.grove/` files)
+6.  **Application Defaults** (Lowest Priority)
 
 ## Environment Variables
 
-Grove uses several environment variables to control its behavior:
+Grove uses several environment variables to control its behavior.
 
-| Variable               | Description                                                                                                   |
-| :--------------------- | :------------------------------------------------------------------------------------------------------------ |
-| `GROVE_PAT`            | A GitHub Personal Access Token used by `grove add-repo` and `release` for private repository operations.        |
-| `GROVE_DEBUG`          | If set to `true`, enables verbose debug logging for all Grove tools.                                          |
-| `GROVE_WORKSPACE_ROOT` | (Set by `grove activate`) The absolute path to the active development workspace root.                           |
-| `GROVE_ORIGINAL_PATH`  | (Set by `grove activate`) A backup of the original `PATH` variable, used to deactivate a workspace.             |
-| `EDITOR`               | The user's preferred command-line editor, used by commands like `cx edit`. If not set, defaults to `vim`. |
+| Variable               | Description                                                                                   |
+| :--------------------- | :-------------------------------------------------------------------------------------------- |
+| `GROVE_PAT`            | A GitHub Personal Access Token used by `grove add-repo` and `release` for private repository operations. |
+| `GROVE_DEBUG`          | If set to `true`, enables verbose debug logging for all Grove tools.                          |
+| `GROVE_WORKSPACE_ROOT` | (Set by `grove activate`) The absolute path to the active development workspace root.           |
+| `GROVE_ORIGINAL_PATH`  | (Set by `grove activate`) A backup of the original `PATH` variable, used to deactivate a workspace.  |
+| `EDITOR`               | The user's preferred command-line editor, used by commands like `cx edit`. Defaults to `vim`. |
