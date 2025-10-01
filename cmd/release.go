@@ -274,10 +274,7 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces
 	if mainStatus.IsDirty {
 		displayMainIssues = append(displayMainIssues, "uncommitted changes (will auto-commit relevant submodules)")
 	}
-	mainStatusStr := "✓ Clean"
-	if mainStatus.IsDirty {
-		mainStatusStr = "✗ Dirty"
-	}
+	// Skip grove-ecosystem status display since ecosystem operations are disabled
 	// Add ahead info even if not an issue
 	displayIssues := displayMainIssues
 	if releasePush && mainStatus.HasUpstream && mainStatus.AheadCount > 0 && len(displayMainIssues) == 0 {
@@ -290,15 +287,10 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces
 			}
 		}
 	}
-	tableRows = append(tableRows, []string{
-		"grove-ecosystem",
-		mainStatus.Branch,
-		mainStatusStr,
-		strings.Join(displayIssues, ", "),
-	})
+	// Skip adding grove-ecosystem to the table - ecosystem operations are disabled
 
 	// Workspaces
-	hasIssues := len(mainIssues) > 0
+	hasIssues := false // Don't consider grove-ecosystem issues since ecosystem operations are disabled
 	for _, ws := range workspaceStatuses {
 		issues := []string{}
 		statusStr := "✓ Clean"
@@ -329,8 +321,8 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces
 					issues = append(issues, "uncommitted changes")
 					statusStr = "✗ Dirty"
 				} else if allChanges == "CHANGELOG.md" {
-					// Show it's dirty but with a note that it's just the changelog
-					statusStr = "✗ Dirty"
+					// Show it's changelog only - use circle and orange color
+					statusStr = "◯ Changelog"
 					// Don't add to issues - it's not a blocker
 				}
 			}
@@ -358,7 +350,7 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces
 		}
 		
 		// If dirty but only CHANGELOG.md, add a note
-		if statusStr == "✗ Dirty" && len(issues) == 0 {
+		if statusStr == "◯ Changelog" && len(issues) == 0 {
 			// This means it's only the CHANGELOG.md that's dirty
 			displayIssues = append(displayIssues, "uncommitted CHANGELOG.md (will be committed)")
 		}

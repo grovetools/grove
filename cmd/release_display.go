@@ -154,6 +154,14 @@ func displayPreflightTable(headers []string, rows [][]string) {
 					releaseDimStyle.Render(issues),
 				}
 			}
+		} else if strings.Contains(status, "○") || strings.Contains(status, "Changelog") {
+			// Changelog-only status (orange)
+			styledRow = []string{
+				row[0],
+				row[1],
+				releaseWarningStyle.Render(status),
+				releaseInfoStyle.Render(issues),
+			}
 		} else if strings.Contains(status, "✗") {
 			// Dirty status
 			styledRow = []string{

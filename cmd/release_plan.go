@@ -413,10 +413,10 @@ func runReleaseApply(ctx context.Context) error {
 		return fmt.Errorf("no repositories selected for release")
 	}
 
-	// Auto-commit grove-ecosystem changes if needed
-	if err := autoCommitEcosystemChanges(ctx, plan.RootDir, hasChanges, logger); err != nil {
-		return fmt.Errorf("failed to auto-commit ecosystem changes: %w", err)
-	}
+	// Auto-commit grove-ecosystem changes if needed - DISABLED to avoid submodule conflicts
+	// if err := autoCommitEcosystemChanges(ctx, plan.RootDir, hasChanges, logger); err != nil {
+	//	return fmt.Errorf("failed to auto-commit ecosystem changes: %w", err)
+	// }
 
 	// Run pre-flight checks
 	parentVersion := determineParentVersion(plan.RootDir, versions, hasChanges)
@@ -478,7 +478,8 @@ func runReleaseApply(ctx context.Context) error {
 
 	// Handle parent repository updates unless skipped
 	var finalParentVersion string
-	if !releaseSkipParent {
+	// DISABLED: Skip parent repository operations to avoid submodule conflicts
+	if false && !releaseSkipParent {
 		// Recalculate parent version to handle same-day releases
 		finalParentVersion = determineParentVersion(plan.RootDir, versions, hasChanges)
 
