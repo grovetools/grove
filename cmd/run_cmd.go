@@ -20,12 +20,14 @@ func init() {
 
 func newRunCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "run <command> [args...]",
+		Use:   "run [flags] -- <command> [args...]",
 		Short: "Run a command in all workspaces",
 		Long: `Execute a command across all discovered workspaces.
 
 The command will be executed in each workspace directory with the
-workspace as the current working directory.`,
+workspace as the current working directory.
+
+Use -- to separate grove run flags from the command and its arguments.`,
 		Example: `  # Run grove context stats in all workspaces
   grove run cx stats
   
@@ -33,15 +35,18 @@ workspace as the current working directory.`,
   grove run git status
   
   # Filter workspaces by pattern
-  grove run --filter "grove-*" npm test
+  grove run --filter "grove-*" -- npm test
   
   # Exclude specific workspaces
-  grove run --exclude "grove-core,grove-flow" npm test
+  grove run --exclude "grove-core,grove-flow" -- npm test
+  
+  # Run command with flags (using -- separator)
+  grove run -- docgen generate --output docs/
   
   # Run with JSON output aggregation
-  grove run --json cx stats`,
-		Args: cobra.MinimumNArgs(1),
-		RunE: runCommand,
+  grove run --json -- cx stats`,
+		Args:                  cobra.MinimumNArgs(1),
+		RunE:                  runCommand,
 	}
 
 	cmd.Flags().StringVarP(&runFilter, "filter", "f", "", "Filter workspaces by glob pattern")
