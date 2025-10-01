@@ -95,6 +95,8 @@ func newWorkspaceStatusCmd() *cobra.Command {
 
 	cmd.Flags().String("cols", "git,main-ci,my-prs,cx,release", "Comma-separated columns to display (e.g., git,main-ci,my-prs,cx,release)")
 	cmd.Flags().Bool("json", false, "Output workspace status in JSON format")
+	cmd.Flags().String("include", "", "Comma-separated list of workspace patterns to include (glob patterns)")
+	cmd.Flags().String("exclude", "", "Comma-separated list of workspace patterns to exclude (glob patterns)")
 
 	return cmd
 }
@@ -125,6 +127,19 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 
 	if len(workspaces) == 0 {
 		return fmt.Errorf("no workspaces found")
+	}
+
+	// Apply include/exclude filters
+	includeStr, _ := cmd.Flags().GetString("include")
+	excludeStr, _ := cmd.Flags().GetString("exclude")
+	
+	if includeStr != "" || excludeStr != "" {
+		originalCount := len(workspaces)
+		workspaces = filterWorkspacesByIncludeExclude(workspaces, includeStr, excludeStr)
+		if len(workspaces) == 0 {
+			return fmt.Errorf("no workspaces matched the include/exclude filters")
+		}
+		logger.WithField("originalCount", originalCount).WithField("filteredCount", len(workspaces)).Debug("Applied workspace filters")
 	}
 
 	logger.WithField("count", len(workspaces)).Debug("Discovered workspaces")
@@ -618,4 +633,59 @@ func formatBytes(bytes int64) string {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// filterWorkspacesByIncludeExclude filters workspaces based on include and exclude patterns
+func filterWorkspacesByIncludeExclude(workspaces []string, includeStr, excludeStr string) []string {
+	var includePatterns, excludePatterns []string
+	
+	// Parse include patterns
+	if includeStr != "" {
+		for _, pattern := range strings.Split(includeStr, ",") {
+			pattern = strings.TrimSpace(pattern)
+			if pattern != "" {
+				includePatterns = append(includePatterns, pattern)
+			}
+		}
+	}
+	
+	// Parse exclude patterns
+	if excludeStr != "" {
+		for _, pattern := range strings.Split(excludeStr, ",") {
+			pattern = strings.TrimSpace(pattern)
+			if pattern != "" {
+				excludePatterns = append(excludePatterns, pattern)
+			}
+		}
+	}
+	
+	var filtered []string
+	for _, ws := range workspaces {
+		workspaceName := filepath.Base(ws)
+		
+		// Check include patterns - if include patterns exist, workspace must match at least one
+		includeMatch := len(includePatterns) == 0 // If no include patterns, include by default
+		for _, pattern := range includePatterns {
+			if matched, err := filepath.Match(pattern, workspaceName); err == nil && matched {
+				includeMatch = true
+				break
+			}
+		}
+		
+		// Check exclude patterns - if workspace matches any exclude pattern, skip it
+		excludeMatch := false
+		for _, pattern := range excludePatterns {
+			if matched, err := filepath.Match(pattern, workspaceName); err == nil && matched {
+				excludeMatch = true
+				break
+			}
+		}
+		
+		// Include workspace if it matches include criteria and doesn't match exclude criteria
+		if includeMatch && !excludeMatch {
+			filtered = append(filtered, ws)
+		}
+	}
+	
+	return filtered
 }
