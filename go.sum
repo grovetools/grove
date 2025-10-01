@@ -54,10 +54,10 @@ github.com/mattn/go-localereader v0.0.1 h1:ygSAOl7ZXTx4RdPYinUpg6W99U8jWvWi9Ye2J
 github.com/mattn/go-localereader v0.0.1/go.mod h1:8fBrzywKY7BI3czFoHkuzRoWE9C+EiG4R1k4Cjx5p88=
 github.com/mattn/go-runewidth v0.0.16 h1:E5ScNMtiwvlvB5paMFdw9p4kSQzbXFikJ5SQO6TULQc=
 github.com/mattn/go-runewidth v0.0.16/go.mod h1:Jdepj2loyihRzMpdS35Xk/zdY8IAYHsh153qUoGf23w=
-github.com/mattsolo1/grove-core v0.3.0 h1:3VGh5AYF8cG1yKYYIlQK3A8Zy8KJk60va4Z1lyO6bq8=
-github.com/mattsolo1/grove-core v0.3.0/go.mod h1:nZbX5yqE9rUgvqxt5N5bz8tfL5QWEtYnjNdp5AOvO20=
-github.com/mattsolo1/grove-tend v0.3.1 h1:XJKQCFQDj3dQHdhmyucJ33C8+oIlSyNBdXEt8HX+1QM=
-github.com/mattsolo1/grove-tend v0.3.1/go.mod h1:PratUa2+RsvzCKSlMwbkriCx4mugzqMa8NaE/UfqKTQ=
+github.com/mattsolo1/grove-core v0.4.0 h1:3Ggg/njGye9QFhf0j3F7oMMf/naaYKBV8zwfwvDxJz8=
+github.com/mattsolo1/grove-core v0.4.0/go.mod h1:+densY71b+POikhRVYwOY3tt+MAeu2OXs3/KQzQfuq8=
+github.com/mattsolo1/grove-tend v0.4.0 h1:tdOBOrSUfAoze952YspWDyV7RkGVNHvRk9tF8m3QXsk=
+github.com/mattsolo1/grove-tend v0.4.0/go.mod h1:YFFGEPSsmsTuJqVQXmwisDdq9Y7+pxLYVtWTa0+Uls4=
 github.com/mitchellh/mapstructure v1.5.0 h1:jeMsZIYE/09sWLaz43PL7Gy6RuMjD2eJVyuac5Z2hdY=
 github.com/mitchellh/mapstructure v1.5.0/go.mod h1:bFUtVrKA4DC2yAKiSyO/QUcy7e+RRV2QTWOzhPopBRo=
 github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 h1:ZK8zHtRHOkbHy6Mmr5D264iyp3TiX5OmNcI5cIARiQI=
