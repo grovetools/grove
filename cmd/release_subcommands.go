@@ -145,6 +145,7 @@ Use --dry-run to preview what would be done without making changes.`,
 	cmd.Flags().BoolVar(&releaseDryRun, "dry-run", false, "Print commands without executing them")
 	cmd.Flags().BoolVar(&releasePush, "push", false, "Push changes to remote repositories")
 	cmd.Flags().BoolVar(&releaseSkipParent, "skip-parent", false, "Skip parent repository updates")
+	cmd.Flags().BoolVar(&releaseSkipCI, "skip-ci", false, "Skip CI waits after changelog updates (still waits for release workflows)")
 	
 	return cmd
 }

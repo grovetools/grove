@@ -41,6 +41,7 @@ var (
 	releaseWithDeps       bool
 	releaseLLMChangelog   bool
 	releaseInteractive    bool // New flag for interactive TUI mode
+	releaseSkipCI         bool // Skip CI waits after changelog updates
 )
 
 func init() {
@@ -854,10 +855,14 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 							return
 						}
 						// Wait for CI on main to complete
-						displayInfo(fmt.Sprintf("Waiting for CI to pass for %s after dependency updates...", repo))
-						if err := gh.WaitForCIWorkflow(ctx, wsPath); err != nil {
-							errChan <- fmt.Errorf("CI workflow for %s failed after dependency update: %w", repo, err)
-							return
+						if !releaseSkipCI {
+							displayInfo(fmt.Sprintf("Waiting for CI to pass for %s after dependency updates...", repo))
+							if err := gh.WaitForCIWorkflow(ctx, wsPath); err != nil {
+								errChan <- fmt.Errorf("CI workflow for %s failed after dependency update: %w", repo, err)
+								return
+							}
+						} else {
+							displayInfo(fmt.Sprintf("Skipping CI wait for %s after dependency updates (--skip-ci enabled)", repo))
 						}
 					}
 				}
@@ -915,10 +920,14 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 									logger.WithError(err).Warnf("Failed to push changelog commit for %s", repo)
 								} else {
 									// Wait for CI on main to complete after pushing changelog
-									displayInfo(fmt.Sprintf("Waiting for CI to pass for %s after changelog update...", repo))
-									if err := gh.WaitForCIWorkflow(ctx, wsPath); err != nil {
-										errChan <- fmt.Errorf("CI workflow for %s failed after changelog update: %w", repo, err)
-										return
+									if !releaseSkipCI {
+										displayInfo(fmt.Sprintf("Waiting for CI to pass for %s after changelog update...", repo))
+										if err := gh.WaitForCIWorkflow(ctx, wsPath); err != nil {
+											errChan <- fmt.Errorf("CI workflow for %s failed after changelog update: %w", repo, err)
+											return
+										}
+									} else {
+										displayInfo(fmt.Sprintf("Skipping CI wait for %s after changelog update (--skip-ci enabled)", repo))
 									}
 								}
 							}
@@ -952,10 +961,14 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 											logger.WithError(err).Warnf("Failed to push changelog commit for %s", repo)
 										} else {
 											// Wait for CI on main to complete after pushing changelog
-											displayInfo(fmt.Sprintf("Waiting for CI to pass for %s after changelog update...", repo))
-											if err := gh.WaitForCIWorkflow(ctx, wsPath); err != nil {
-												errChan <- fmt.Errorf("CI workflow for %s failed after changelog update: %w", repo, err)
-												return
+											if !releaseSkipCI {
+												displayInfo(fmt.Sprintf("Waiting for CI to pass for %s after changelog update...", repo))
+												if err := gh.WaitForCIWorkflow(ctx, wsPath); err != nil {
+													errChan <- fmt.Errorf("CI workflow for %s failed after changelog update: %w", repo, err)
+													return
+												}
+											} else {
+												displayInfo(fmt.Sprintf("Skipping CI wait for %s after changelog update (--skip-ci enabled)", repo))
 											}
 										}
 									}
