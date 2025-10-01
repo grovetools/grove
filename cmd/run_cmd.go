@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-meta/pkg/runner"
@@ -10,11 +12,10 @@ import (
 )
 
 var runFilter string
+var runExclude string
 
 func init() {
-	runCmd := newRunCmd()
-	runCmd.Flags().StringVarP(&runFilter, "filter", "f", "", "Filter workspaces by glob pattern")
-	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(newRunCmd())
 }
 
 func newRunCmd() *cobra.Command {
@@ -34,11 +35,17 @@ workspace as the current working directory.`,
   # Filter workspaces by pattern
   grove run --filter "grove-*" npm test
   
+  # Exclude specific workspaces
+  grove run --exclude "grove-core,grove-flow" npm test
+  
   # Run with JSON output aggregation
   grove run --json cx stats`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: runCommand,
 	}
+
+	cmd.Flags().StringVarP(&runFilter, "filter", "f", "", "Filter workspaces by glob pattern")
+	cmd.Flags().StringVar(&runExclude, "exclude", "", "Comma-separated list of workspace patterns to exclude (glob patterns)")
 
 	return cmd
 }
@@ -71,6 +78,16 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		if len(workspaces) == 0 {
 			return fmt.Errorf("no workspaces matched filter: %s", runFilter)
 		}
+	}
+
+	// Apply exclude filter if provided
+	if runExclude != "" {
+		originalCount := len(workspaces)
+		workspaces = applyExcludeFilter(workspaces, runExclude)
+		if len(workspaces) == 0 {
+			return fmt.Errorf("no workspaces remained after applying exclude filter")
+		}
+		logger.WithField("originalCount", originalCount).WithField("filteredCount", len(workspaces)).Debug("Applied exclude filter")
 	}
 
 	logger.WithField("count", len(workspaces)).Info("Discovered workspaces")
@@ -114,6 +131,11 @@ func runScript(cmd *cobra.Command, script string) error {
 		workspaces = workspace.FilterWorkspaces(workspaces, runFilter)
 	}
 
+	// Apply exclude filter if provided
+	if runExclude != "" {
+		workspaces = applyExcludeFilter(workspaces, runExclude)
+	}
+
 	// Execute script
 	runnerOpts := runner.Options{
 		Workspaces: workspaces,
@@ -122,4 +144,44 @@ func runScript(cmd *cobra.Command, script string) error {
 	}
 
 	return runner.RunScript(runnerOpts, script)
+}
+
+// applyExcludeFilter removes workspaces that match any of the exclude patterns
+func applyExcludeFilter(workspaces []string, excludeStr string) []string {
+	if excludeStr == "" {
+		return workspaces
+	}
+
+	var excludePatterns []string
+	for _, pattern := range strings.Split(excludeStr, ",") {
+		pattern = strings.TrimSpace(pattern)
+		if pattern != "" {
+			excludePatterns = append(excludePatterns, pattern)
+		}
+	}
+
+	if len(excludePatterns) == 0 {
+		return workspaces
+	}
+
+	var filtered []string
+	for _, ws := range workspaces {
+		workspaceName := filepath.Base(ws)
+		
+		// Check if workspace matches any exclude pattern
+		excluded := false
+		for _, pattern := range excludePatterns {
+			if matched, err := filepath.Match(pattern, workspaceName); err == nil && matched {
+				excluded = true
+				break
+			}
+		}
+		
+		// Include workspace if it doesn't match any exclude pattern
+		if !excluded {
+			filtered = append(filtered, ws)
+		}
+	}
+
+	return filtered
 }
