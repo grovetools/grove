@@ -1,3 +1,231 @@
+## v0.5.0 (2025-10-01)
+
+This release introduces a major refactoring of the release process into a stateful, multi-stage workflow with `plan`, `tui`, and `apply` commands. It includes comprehensive safety commands like `undo-tag` and `rollback` (e797144, 5b03682, 68bb37c). The release orchestration is now more robust, featuring incremental pushing and CI validation after each step (db11744). New workspace management commands have been added for creating, opening, and removing worktrees (e3ad8d7, 63bfd0d), along with a command to bootstrap new ecosystems from scratch (`grove ws init`) (492542e). Command-line functionality is enhanced with include/exclude filtering for `grove run` and `grove ws status` (fec1660, 701c40d), and improved flag handling for `grove run` (9adb039). Tooling and documentation have been improved with a standalone `grove docs generate` command (c732139), automatic dependency resolution during installation (021672d), and simplified, more succinct documentation with TOC generation (8031430, 07ac4a0).
+
+### Features
+- Implement stateful release workflow with distinct plan, review, and apply stages (5b03682, 68bb37c)
+- Implement comprehensive safety commands for release workflow (`undo-tag`, `rollback`) (e797144)
+- Integrate incremental pushing and CI validation into release orchestration (db11744)
+- Implement workspace management commands (create, open, remove) (e3ad8d7, 63bfd0d)
+- Implement automatic dependency resolution for tool installation (021672d)
+- Add standalone `docs generate` command to run docgen across all workspaces (c732139)
+- Add exclude filtering to `grove run` command (fec1660)
+- Add include/exclude filtering to `grove ws status` command (701c40d)
+- Add comprehensive workspace bootstrapping E2E tests (492542e)
+- Add JSON output support to `grove ws status` command (10c0850)
+- Add TOC generation and docgen configuration updates (8031430)
+- Improve worktree discovery in workspace open command (44c363a)
+- Add E2E testing infrastructure for release refactor (2df176e, d5544a7)
+- Simplify and improve documentation and prompts (07ac4a0, 47c330e, b8fa99b, cbaa428)
+
+### Bug Fixes
+- Improve flag handling in `grove run` command (9adb039)
+- Update CI workflow to use `branches: [ none ]` for disabling (1f6003c)
+- Remove old documentation files (2c7c735)
+- Update E2E tests for streamline-release to match harness API (0e2de1f)
+- Correct dev link detection in reconciler (ba744c4)
+- Update workspace detection to use `.grove/workspace` marker (2ebe3e4)
+
+### Refactoring
+- Standardize `docgen.config.yml` key order and settings (e134d3e)
+
+### Documentation
+- Update docgen configuration and README templates (0cf9214)
+- Update docgen config and overview prompt (e7a63d7)
+- Simplify documentation structure to 4 sections (e8950d9)
+- Consolidate installation instructions into comprehensive guide (2d47c61)
+
+### Chores
+- Temporarily disable CI workflow (9217162)
+- Remove unused sync-deps-tui scenario (e857a10)
+
+### File Changes
+```
+ .github/workflows/ci.yml                           |   4 +-
+ .grove-workspace                                   |   6 +-
+ Makefile                                           |  11 +-
+ README.md                                          | 168 ++---
+ cmd/alias.go                                       | 159 +++++
+ cmd/dev_workspace.go                               |   2 +-
+ cmd/docs.go                                        | 120 ++++
+ cmd/install_cmd.go                                 |  58 +-
+ cmd/list_cmd.go                                    |   5 +-
+ cmd/release.go                                     | 388 +++--------
+ cmd/release_plan.go                                |   6 -
+ cmd/release_subcommands.go                         | 714 +++++++++++++++++++++
+ cmd/release_tui.go                                 | 183 +++---
+ cmd/root.go                                        |  13 +-
+ cmd/run_cmd.go                                     |  85 ++-
+ cmd/workspace.go                                   |   3 +
+ cmd/workspace_create.go                            |  55 ++
+ cmd/workspace_open.go                              |  83 +++
+ cmd/workspace_remove.go                            |  68 ++
+ cmd/workspace_status.go                            | 195 ++++++
+ docs/00-introduction.md                            |  21 +
+ docs/01-overview.md                                |  93 +--
+ docs/02-installation.md                            | 251 +++-----
+ docs/03-binary-management.md                       |  58 ++
+ docs/03-getting-started.md                         | 164 -----
+ docs/04-core-concepts.md                           | 143 -----
+ docs/04-ecosystems.md                              |  33 +
+ docs/05-command-reference.md                       | 687 --------------------
+ docs/05-configuration.md                           | 128 ++++
+ docs/06-command-reference.md                       | 551 ++++++++++++++++
+ docs/06-tutorials.md                               | 281 --------
+ docs/07-configuration.md                           | 234 -------
+ docs/08-architecture.md                            | 202 ------
+ docs/09-contributing.md                            | 335 ----------
+ docs/README.md.tpl                                 |   6 +
+ docs/docgen.config.yml                             |  81 ++-
+ docs/docs.rules                                    |   1 -
+ docs/images/grove-base-readme.svg                  | 345 ++++++++++
+ docs/prompts/00-introduction.md                    |  31 +
+ docs/prompts/01-overview.md                        |  31 +
+ docs/prompts/02-installation.md                    |  29 +
+ docs/prompts/03-binary-management.md               |  28 +
+ docs/prompts/04-ecosystems.md                      |  22 +
+ .../{configuration.md => 05-configuration.md}      |   0
+ ...ommand-reference.md => 06-command-reference.md} |   0
+ docs/prompts/architecture.md                       |  63 --
+ docs/prompts/contributing.md                       |  64 --
+ docs/prompts/core-concepts.md                      |  37 --
+ docs/prompts/getting-started.md                    |  44 --
+ docs/prompts/installation.md                       |  41 --
+ docs/prompts/overview.md                           |  28 -
+ docs/prompts/tutorials.md                          |  48 --
+ pkg/docs/docs.json                                 | 212 ++++++
+ pkg/gh/client.go                                   |  73 +++
+ pkg/reconciler/reconciler.go                       |  62 +-
+ pkg/release/plan.go                                |   1 +
+ pkg/sdk/manager.go                                 | 290 ++++++---
+ tests/e2e/docker_test.sh                           | 329 +++++++++-
+ tests/e2e_mocks/gemapi/main.go                     |  17 +
+ tests/e2e_mocks/gh/main.go                         |  41 ++
+ tests/e2e_mocks/git/main.go                        |  75 +++
+ tests/e2e_mocks/go/main.go                         |  38 ++
+ tests/scenarios.go                                 |   8 +-
+ tests/scenarios_add_repo.go                        |  58 +-
+ tests/scenarios_release_refactor.go                | 549 ++++++++++++++++
+ tests/scenarios_sync_deps_tui.go                   | 504 ---------------
+ tests/scenarios_workspace_aware.go                 |  59 +-
+ tests/scenarios_workspace_bootstrapping.go         | 129 ++++
+ 68 files changed, 5000 insertions(+), 3851 deletions(-)
+```
+
+## v0.5.0 (2025-10-01)
+
+This release introduces a major refactoring of the release process into a stateful, multi-stage workflow with `plan`, `tui`, and `apply` commands. It includes comprehensive safety commands like `undo-tag` and `rollback` (e797144, 5b03682, 68bb37c). The release orchestration is now more robust, featuring incremental pushing and CI validation after each step (db11744). New workspace management commands have been added for creating, opening, and removing worktrees (e3ad8d7, 63bfd0d), along with a command to bootstrap new ecosystems from scratch (`grove ws init`) (492542e). Command-line functionality is enhanced with include/exclude filtering for `grove run` and `grove ws status` (fec1660, 701c40d), and improved flag handling for `grove run` (9adb039). Tooling and documentation have been improved with a standalone `grove docs generate` command (c732139), automatic dependency resolution during installation (021672d), and simplified, more succinct documentation with TOC generation (8031430, 07ac4a0).
+
+### Features
+- Implement stateful release workflow with distinct plan, review, and apply stages (5b03682, 68bb37c)
+- Implement comprehensive safety commands for release workflow (`undo-tag`, `rollback`) (e797144)
+- Integrate incremental pushing and CI validation into release orchestration (db11744)
+- Implement workspace management commands (create, open, remove) (e3ad8d7, 63bfd0d)
+- Implement automatic dependency resolution for tool installation (021672d)
+- Add standalone `docs generate` command to run docgen across all workspaces (c732139)
+- Add exclude filtering to `grove run` command (fec1660)
+- Add include/exclude filtering to `grove ws status` command (701c40d)
+- Add comprehensive workspace bootstrapping E2E tests (492542e)
+- Add JSON output support to `grove ws status` command (10c0850)
+- Add TOC generation and docgen configuration updates (8031430)
+- Improve worktree discovery in workspace open command (44c363a)
+- Add E2E testing infrastructure for release refactor (2df176e, d5544a7)
+- Simplify and improve documentation and prompts (07ac4a0, 47c330e, b8fa99b, cbaa428)
+
+### Bug Fixes
+- Improve flag handling in `grove run` command (9adb039)
+- Update CI workflow to use `branches: [ none ]` for disabling (1f6003c)
+- Remove old documentation files (2c7c735)
+- Update E2E tests for streamline-release to match harness API (0e2de1f)
+- Correct dev link detection in reconciler (ba744c4)
+- Update workspace detection to use `.grove/workspace` marker (2ebe3e4)
+
+### Refactoring
+- Standardize `docgen.config.yml` key order and settings (e134d3e)
+
+### Documentation
+- Update docgen configuration and README templates (0cf9214)
+- Update docgen config and overview prompt (e7a63d7)
+- Simplify documentation structure to 4 sections (e8950d9)
+- Consolidate installation instructions into comprehensive guide (2d47c61)
+
+### Chores
+- Temporarily disable CI workflow (9217162)
+- Remove unused sync-deps-tui scenario (e857a10)
+
+### File Changes
+```
+ .github/workflows/ci.yml                           |   4 +-
+ .grove-workspace                                   |   6 +-
+ Makefile                                           |  11 +-
+ README.md                                          | 168 ++---
+ cmd/alias.go                                       | 159 +++++
+ cmd/dev_workspace.go                               |   2 +-
+ cmd/docs.go                                        | 120 ++++
+ cmd/install_cmd.go                                 |  58 +-
+ cmd/list_cmd.go                                    |   5 +-
+ cmd/release.go                                     | 388 +++--------
+ cmd/release_plan.go                                |   6 -
+ cmd/release_subcommands.go                         | 714 +++++++++++++++++++++
+ cmd/release_tui.go                                 | 183 +++---
+ cmd/root.go                                        |  13 +-
+ cmd/run_cmd.go                                     |  85 ++-
+ cmd/workspace.go                                   |   3 +
+ cmd/workspace_create.go                            |  55 ++
+ cmd/workspace_open.go                              |  83 +++
+ cmd/workspace_remove.go                            |  68 ++
+ cmd/workspace_status.go                            | 195 ++++++
+ docs/00-introduction.md                            |  21 +
+ docs/01-overview.md                                |  93 +--
+ docs/02-installation.md                            | 251 +++-----
+ docs/03-binary-management.md                       |  58 ++
+ docs/03-getting-started.md                         | 164 -----
+ docs/04-core-concepts.md                           | 143 -----
+ docs/04-ecosystems.md                              |  33 +
+ docs/05-command-reference.md                       | 687 --------------------
+ docs/05-configuration.md                           | 128 ++++
+ docs/06-command-reference.md                       | 551 ++++++++++++++++
+ docs/06-tutorials.md                               | 281 --------
+ docs/07-configuration.md                           | 234 -------
+ docs/08-architecture.md                            | 202 ------
+ docs/09-contributing.md                            | 335 ----------
+ docs/README.md.tpl                                 |   6 +
+ docs/docgen.config.yml                             |  81 ++-
+ docs/docs.rules                                    |   1 -
+ docs/images/grove-base-readme.svg                  | 345 ++++++++++
+ docs/prompts/00-introduction.md                    |  31 +
+ docs/prompts/01-overview.md                        |  31 +
+ docs/prompts/02-installation.md                    |  29 +
+ docs/prompts/03-binary-management.md               |  28 +
+ docs/prompts/04-ecosystems.md                      |  22 +
+ .../{configuration.md => 05-configuration.md}      |   0
+ ...ommand-reference.md => 06-command-reference.md} |   0
+ docs/prompts/architecture.md                       |  63 --
+ docs/prompts/contributing.md                       |  64 --
+ docs/prompts/core-concepts.md                      |  37 --
+ docs/prompts/getting-started.md                    |  44 --
+ docs/prompts/installation.md                       |  41 --
+ docs/prompts/overview.md                           |  28 -
+ docs/prompts/tutorials.md                          |  48 --
+ pkg/docs/docs.json                                 | 212 ++++++
+ pkg/gh/client.go                                   |  73 +++
+ pkg/reconciler/reconciler.go                       |  62 +-
+ pkg/release/plan.go                                |   1 +
+ pkg/sdk/manager.go                                 | 290 ++++++---
+ tests/e2e/docker_test.sh                           | 329 +++++++++-
+ tests/e2e_mocks/gemapi/main.go                     |  17 +
+ tests/e2e_mocks/gh/main.go                         |  41 ++
+ tests/e2e_mocks/git/main.go                        |  75 +++
+ tests/e2e_mocks/go/main.go                         |  38 ++
+ tests/scenarios.go                                 |   8 +-
+ tests/scenarios_add_repo.go                        |  58 +-
+ tests/scenarios_release_refactor.go                | 549 ++++++++++++++++
+ tests/scenarios_sync_deps_tui.go                   | 504 ---------------
+ tests/scenarios_workspace_aware.go                 |  59 +-
+ tests/scenarios_workspace_bootstrapping.go         | 129 ++++
+ 68 files changed, 5000 insertions(+), 3851 deletions(-)
+```
+
 ## v0.4.0 (2025-09-26)
 
 This release introduces major improvements to the developer experience with workspace-aware tooling and a new log viewer. The `grove` can automatically use binaries from the current workspace, which can be explicitly managed with the new `grove activate` command (4d19dd3, 4897254). A unified `grove logs` command has been added, featuring an interactive TUI for browsing, searching, and analyzing structured logs across the ecosystem (bda1ed4, 617d279). The release process has been significantly refactored to be more robust, with smarter dependency management and changelog handling to prevent common failures (0da8d36, 9453ff3).
