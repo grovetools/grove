@@ -364,6 +364,25 @@ func (c *Creator) generateFromExternalTemplate(opts CreateOptions, data template
 		c.logger.Warn("You can install them manually later with: grove git-hooks install")
 	}
 
+	// Create .grove directory and workspace file
+	c.logger.Info("Creating workspace marker file...")
+	groveDir := filepath.Join(targetPath, ".grove")
+	if err := os.MkdirAll(groveDir, 0755); err != nil {
+		return fmt.Errorf("failed to create .grove directory: %w", err)
+	}
+	
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	workspaceContent := fmt.Sprintf(`branch: main
+plan: %s-main-repo
+created_at: %s
+ecosystem: false
+`, opts.Name, timestamp)
+	
+	workspaceFile := filepath.Join(groveDir, "workspace")
+	if err := os.WriteFile(workspaceFile, []byte(workspaceContent), 0644); err != nil {
+		return fmt.Errorf("failed to create .grove/workspace: %w", err)
+	}
+
 	return nil
 }
 

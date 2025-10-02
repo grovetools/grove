@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/mattsolo1/grove-core/logging"
 	"github.com/spf13/cobra"
@@ -182,14 +183,34 @@ clean:
 		}
 	}
 
+	// Create .grove directory and workspace file
+	if err := os.MkdirAll(".grove", 0755); err != nil {
+		return fmt.Errorf("failed to create .grove directory: %w", err)
+	}
+	
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	workspaceContent := fmt.Sprintf(`branch: main
+plan: %s-ecosystem-root
+created_at: %s
+ecosystem: true
+repos: []
+`, ecosystemName, timestamp)
+	
+	if err := os.WriteFile(".grove/workspace", []byte(workspaceContent), 0644); err != nil {
+		return fmt.Errorf("failed to create .grove/workspace: %w", err)
+	}
+	logger.Info("Created .grove/workspace")
+	pretty.InfoPretty("Created .grove/workspace")
+
 	// Display summary
 	pretty.Success("Grove ecosystem initialized successfully!")
 	pretty.InfoPretty("\nCREATED FILES")
 	pretty.InfoPretty("-------------")
-	pretty.InfoPretty("- grove.yml    : Ecosystem configuration")
-	pretty.InfoPretty("- go.work      : Go workspace file")
-	pretty.InfoPretty("- Makefile     : Build automation")
-	pretty.InfoPretty("- .gitignore   : Git ignore patterns")
+	pretty.InfoPretty("- grove.yml        : Ecosystem configuration")
+	pretty.InfoPretty("- go.work          : Go workspace file")
+	pretty.InfoPretty("- Makefile         : Build automation")
+	pretty.InfoPretty("- .gitignore       : Git ignore patterns")
+	pretty.InfoPretty("- .grove/workspace : Workspace marker file")
 
 	pretty.InfoPretty("\nNEXT STEPS")
 	pretty.InfoPretty("----------")
