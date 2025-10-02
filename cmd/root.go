@@ -20,6 +20,7 @@ func init() {
 	// Add subcommands
 	rootCmd.AddCommand(newActivateCmd())
 	rootCmd.AddCommand(newChangelogCmd())
+	rootCmd.AddCommand(newConfigCmd())
 	rootCmd.AddCommand(newDepsCmd())
 	rootCmd.AddCommand(newDocsCmd())
 	rootCmd.AddCommand(newLogsCmd())
