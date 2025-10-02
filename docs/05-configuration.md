@@ -163,14 +163,31 @@ Grove resolves settings in a specific order. A setting from a higher level overr
 2.  **Environment Variables**
 3.  **Local Override Files** (`grove.override.yml`, `.grove.override.yml`)
 4.  **Workspace `grove.yml`**
-5.  **Ecosystem `grove.yml`**
+5.  **Ecosystem `grove.yml`** (auto-detected when in a workspace)
 6.  **Global Configuration** (`~/.config/grove/grove.yml`)
 7.  **Application Defaults** (Lowest Priority)
 
-**Note:** Within the configuration file hierarchy, the loading order is:
-- Global config is loaded first (from `~/.config/grove/grove.yml`)
-- Project config is merged on top (from `grove.yml`)
-- Local override files are merged last (from `grove.override.yml` or `.grove.override.yml`)
+### Configuration File Hierarchy
+
+The configuration loading process follows this hierarchy:
+
+1. **Global config** (`~/.config/grove/grove.yml`) - loaded first as base
+2. **Ecosystem config** (`grove.yml` with `workspaces` field) - merged if current config is a workspace
+3. **Workspace/Project config** (`grove.yml`) - the config found in current directory or parents
+4. **Local override files** (`grove.override.yml` or `.grove.override.yml`) - merged last with highest priority
+
+**Ecosystem Auto-Detection:**
+- When loading a workspace config (without `workspaces` field), Grove automatically searches upward for an ecosystem config
+- An ecosystem config is identified by the presence of a `workspaces` field
+- This allows ecosystem-wide defaults to be inherited by all workspaces
+
+**Example Hierarchy:**
+```
+~/.config/grove/grove.yml          # Global defaults
+/project/grove.yml                 # Ecosystem config (has workspaces: [...])
+/project/my-workspace/grove.yml    # Workspace config
+/project/my-workspace/grove.override.yml  # Local overrides
+```
 
 ## Environment Variables
 
