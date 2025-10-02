@@ -88,11 +88,6 @@ func getLastTag(repoPath string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-// FlowConfig defines the structure for the 'flow' section in grove.yml.
-type FlowConfig struct {
-	OneshotModel string `yaml:"oneshot_model"`
-}
-
 // promptForRulesEdit checks if a .grove/rules file exists and asks the user if they want to edit it
 // skipPrompt will skip the interactive prompt (useful for TUI mode)
 func promptForRulesEdit(repoPath string, skipPrompt bool) error {
@@ -292,9 +287,9 @@ func generateChangelogWithLLMInteractive(context, newVersion, repoPath string, s
 	// Try to load model from grove.yml configuration
 	coreCfg, err := config.LoadFrom(repoPath)
 	if err == nil {
-		var flowCfg FlowConfig
-		if err := coreCfg.UnmarshalExtension("flow", &flowCfg); err == nil && flowCfg.OneshotModel != "" {
-			model = flowCfg.OneshotModel
+		var llmCfg LLMConfig
+		if err := coreCfg.UnmarshalExtension("llm", &llmCfg); err == nil && llmCfg.DefaultModel != "" {
+			model = llmCfg.DefaultModel
 			fmt.Printf("Using model from grove.yml: %s\n", model)
 		}
 	}
