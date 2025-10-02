@@ -42,10 +42,54 @@ var (
 	releaseLLMChangelog   bool
 	releaseInteractive    bool // New flag for interactive TUI mode
 	releaseSkipCI         bool // Skip CI waits after changelog updates
+	releaseResume         bool // Only process repos that haven't completed successfully
 )
 
 func init() {
 	rootCmd.AddCommand(newReleaseCmd())
+}
+
+// Helper function to check if a git tag exists locally or remotely
+func tagExists(ctx context.Context, repoPath, tag string) (bool, error) {
+	// Check local tags first
+	cmd := exec.CommandContext(ctx, "git", "tag", "-l", tag)
+	cmd.Dir = repoPath
+	output, err := cmd.Output()
+	if err == nil && len(strings.TrimSpace(string(output))) > 0 {
+		return true, nil
+	}
+	
+	// Check remote tags
+	cmd = exec.CommandContext(ctx, "git", "ls-remote", "--tags", "origin", tag)
+	cmd.Dir = repoPath
+	output, err = cmd.Output()
+	if err != nil {
+		return false, err
+	}
+	
+	return len(strings.TrimSpace(string(output))) > 0, nil
+}
+
+// Helper function to check if a repo is fully released
+func isRepoFullyReleased(ctx context.Context, repoPath string, repoPlan *release.RepoReleasePlan) bool {
+	if repoPlan == nil {
+		return false
+	}
+	
+	// Check if all release stages are complete
+	allStagesComplete := repoPlan.ChangelogPushed && repoPlan.CIPassed && repoPlan.TagPushed
+	
+	// If plan says it's complete, verify tag actually exists
+	if allStagesComplete {
+		tagExists, err := tagExists(ctx, repoPath, repoPlan.NextVersion)
+		if err != nil {
+			// If we can't check, assume not complete to be safe
+			return false
+		}
+		return tagExists
+	}
+	
+	return false
 }
 
 func newReleaseCmd() *cobra.Command {
@@ -784,6 +828,27 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 				continue
 			}
 
+			// Enhanced state detection: check if repo is already fully released
+			wsPath := filepath.Join(rootDir, repoName)
+			var repoPlan *release.RepoReleasePlan
+			if plan != nil && plan.Repos != nil {
+				repoPlan = plan.Repos[repoName]
+			}
+			
+			if isRepoFullyReleased(ctx, wsPath, repoPlan) {
+				displayInfo(fmt.Sprintf("✅ %s already fully released (%s), skipping", repoName, version))
+				continue
+			}
+			
+			// If --resume flag is used, provide detailed status
+			if releaseResume && repoPlan != nil {
+				if repoPlan.LastFailedOperation != "" {
+					displayInfo(fmt.Sprintf("🔄 %s needs retry (failed at: %s)", repoName, repoPlan.LastFailedOperation))
+				} else if repoPlan.ChangelogPushed || repoPlan.CIPassed {
+					displayInfo(fmt.Sprintf("🔄 %s partially complete, continuing", repoName))
+				}
+			}
+
 			reposToRelease = append(reposToRelease, repoName)
 		}
 
@@ -937,6 +1002,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 									if plan != nil && plan.Repos != nil {
 										if repoPlan, ok := plan.Repos[repo]; ok {
 											repoPlan.ChangelogPushed = true
+											repoPlan.LastFailedOperation = "ci_wait" // Next operation that could fail
 											release.SavePlan(plan) // Save updated state
 										}
 									}
@@ -955,6 +1021,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 									if plan != nil && plan.Repos != nil {
 										if repoPlan, ok := plan.Repos[repo]; ok {
 											repoPlan.CIPassed = true
+											repoPlan.LastFailedOperation = "" // Clear failure since CI passed
 											release.SavePlan(plan) // Save updated state
 										}
 									}
@@ -994,6 +1061,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 											if plan != nil && plan.Repos != nil {
 												if repoPlan, ok := plan.Repos[repo]; ok {
 													repoPlan.ChangelogPushed = true
+													repoPlan.LastFailedOperation = "ci_wait" // Next operation that could fail
 													release.SavePlan(plan) // Save updated state
 												}
 											}
@@ -1012,6 +1080,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 											if plan != nil && plan.Repos != nil {
 												if repoPlan, ok := plan.Repos[repo]; ok {
 													repoPlan.CIPassed = true
+													repoPlan.LastFailedOperation = "" // Clear failure since CI passed
 													release.SavePlan(plan) // Save updated state
 												}
 											}
@@ -1036,17 +1105,42 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 							}
 							// Mark CI as passed and save plan
 							repoPlan.CIPassed = true
+							repoPlan.LastFailedOperation = "" // Clear failure since CI passed
 							release.SavePlan(plan)
 						} else {
 							displayInfo(fmt.Sprintf("Skipping CI wait for %s (--skip-ci enabled)", repo))
 							// Even with --skip-ci, mark it as passed to avoid future waits
 							repoPlan.CIPassed = true
+							repoPlan.LastFailedOperation = "" // Clear failure since we're skipping CI
 							release.SavePlan(plan)
 						}
 					}
 				}
 
 			createTag:
+				// Check for tag conflicts before creating
+				tagExistsLocal, _ := tagExists(ctx, wsPath, version)
+				if tagExistsLocal {
+					// Tag exists, check if it's in our plan state
+					if plan != nil && plan.Repos != nil {
+						if repoPlan, ok := plan.Repos[repo]; ok && repoPlan.TagPushed {
+							displayInfo(fmt.Sprintf("Tag %s already exists and marked as pushed for %s, skipping tag creation", version, repo))
+							goto releaseWorkflow
+						} else {
+							// Tag exists but not marked in plan - potential conflict
+							displayWarning(fmt.Sprintf("Tag %s exists for %s but not marked as pushed in plan - proceeding anyway", version, repo))
+						}
+					}
+				}
+				
+				// Track operation for error reporting
+				if plan != nil && plan.Repos != nil {
+					if repoPlan, ok := plan.Repos[repo]; ok {
+						repoPlan.LastFailedOperation = "tag_creation"
+						release.SavePlan(plan)
+					}
+				}
+				
 				// Tag the module
 				if err := executeGitCommand(ctx, wsPath, []string{"tag", "-a", version, "-m", fmt.Sprintf("Release %s", version)},
 					fmt.Sprintf("Tag %s", repo), logger); err != nil {
@@ -1060,6 +1154,17 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 					errChan <- err
 					return
 				}
+				
+				// Mark tag as successfully pushed
+				if plan != nil && plan.Repos != nil {
+					if repoPlan, ok := plan.Repos[repo]; ok {
+						repoPlan.TagPushed = true
+						repoPlan.LastFailedOperation = "" // Clear any previous failures
+						release.SavePlan(plan)
+					}
+				}
+
+			releaseWorkflow:
 
 				// Wait for CI workflow to complete (skip in dry-run mode)
 				if !releaseDryRun {

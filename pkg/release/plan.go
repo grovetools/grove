@@ -35,6 +35,10 @@ type RepoReleasePlan struct {
 	ChangelogState      string `json:"changelog_state,omitempty"` // "clean", "dirty", or "none"
 	ChangelogPushed     bool   `json:"changelog_pushed,omitempty"` // Whether changelog has been committed and pushed
 	CIPassed           bool   `json:"ci_passed,omitempty"`        // Whether CI passed after changelog push
+	TagPushed          bool   `json:"tag_pushed,omitempty"`       // Whether release tag has been created and pushed
+	
+	// Release operation tracking
+	LastFailedOperation string `json:"last_failed_operation,omitempty"` // Track which operation failed for better recovery
 	
 	// Git status information
 	Branch              string `json:"branch,omitempty"`
