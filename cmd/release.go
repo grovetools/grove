@@ -2002,9 +2002,9 @@ func checkForOutdatedDependencies(ctx context.Context, rootDir string, workspace
 		}
 	}
 
-	// Display warnings for outdated dependencies
+	// Display info about dependency updates that will occur
 	if len(outdatedDeps) > 0 {
-		displayWarning("⚠️  Outdated Grove dependencies detected:")
+		displayInfo("📦 This release will update dependencies:")
 		for wsName, deps := range outdatedDeps {
 			fmt.Printf("  📦 %s:\n", wsName)
 			for dep, versions := range deps {
