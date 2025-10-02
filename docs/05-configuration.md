@@ -96,6 +96,57 @@ flow:
   summarize_on_complete: true
 ```
 
+### Local Override Configuration
+
+For configuration values that should not be committed to version control (such as API keys, local paths, or developer-specific settings), Grove supports local override files.
+
+**Supported Override Files:**
+
+- `grove.override.yml` / `grove.override.yaml` - Local, uncommitted configuration
+- `.grove.override.yml` / `.grove.override.yaml` - Hidden variant (prefix with `.` to hide from `ls`)
+
+**Best Practice:**
+
+Add override files to your project's `.gitignore` to prevent accidental commits of sensitive information:
+
+```gitignore
+# .gitignore
+
+# Grove local configuration overrides
+grove.override.yml
+grove.override.yaml
+.grove.override.yml
+.grove.override.yaml
+```
+
+**Example Use Case:**
+
+**`grove.yml` (committed to version control):**
+```yaml
+name: my-project
+description: My awesome project
+
+gemini:
+  model: gemini-1.5-flash-latest
+```
+
+**`grove.override.yml` (git-ignored, local only):**
+```yaml
+# Local overrides - API keys and developer-specific settings
+gemini:
+  api_key: gsk_YourSecretApiKeyHere
+  model: gemini-1.5-pro-latest
+
+flow:
+  chat_directory: /Users/me/personal-chats
+```
+
+In this example:
+- The base configuration is in `grove.yml` (committed)
+- Local overrides in `grove.override.yml` provide the API key and override the model
+- The merged configuration will use the API key and model from `grove.override.yml`
+- The `grove.override.yml` file is never committed to version control
+
 ## User-Level Configuration (`~/.grove/`)
 
 The `~/.grove` directory stores user-specific configuration and state. These files are generally managed by `grove` commands.
@@ -110,10 +161,16 @@ Grove resolves settings in a specific order. A setting from a higher level overr
 
 1.  **Command-Line Flags** (Highest Priority)
 2.  **Environment Variables**
-3.  **Workspace `grove.yml`**
-4.  **Ecosystem `grove.yml`**
-5.  **User-Level Configuration** (`~/.grove/` files)
-6.  **Application Defaults** (Lowest Priority)
+3.  **Local Override Files** (`grove.override.yml`, `.grove.override.yml`)
+4.  **Workspace `grove.yml`**
+5.  **Ecosystem `grove.yml`**
+6.  **Global Configuration** (`~/.config/grove/grove.yml`)
+7.  **Application Defaults** (Lowest Priority)
+
+**Note:** Within the configuration file hierarchy, the loading order is:
+- Global config is loaded first (from `~/.config/grove/grove.yml`)
+- Project config is merged on top (from `grove.yml`)
+- Local override files are merged last (from `grove.override.yml` or `.grove.override.yml`)
 
 ## Environment Variables
 
