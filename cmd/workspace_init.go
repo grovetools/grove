@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/logging"
 	"github.com/spf13/cobra"
 )
 
@@ -47,7 +47,8 @@ Examples:
 }
 
 func runWorkspaceInit(cmd *cobra.Command, args []string) error {
-	logger := cli.GetLogger(cmd)
+	logger := logging.NewLogger("ws-init")
+	pretty := logging.NewPrettyLogger()
 
 	// Check if grove.yml already exists
 	if _, err := os.Stat("grove.yml"); err == nil {
@@ -70,6 +71,7 @@ func runWorkspaceInit(cmd *cobra.Command, args []string) error {
 	}
 
 	logger.Infof("Initializing Grove ecosystem '%s'...", ecosystemName)
+	pretty.InfoPretty(fmt.Sprintf("Initializing Grove ecosystem '%s'...", ecosystemName))
 
 	// Create grove.yml
 	groveYMLContent := fmt.Sprintf(`name: %s
@@ -82,6 +84,7 @@ workspaces:
 		return fmt.Errorf("failed to create grove.yml: %w", err)
 	}
 	logger.Info("Created grove.yml")
+	pretty.InfoPretty("Created grove.yml")
 
 	// Create go.work
 	goWorkContent := `go 1.24.4
@@ -93,6 +96,7 @@ use (
 		return fmt.Errorf("failed to create go.work: %w", err)
 	}
 	logger.Info("Created go.work")
+	pretty.InfoPretty("Created go.work")
 
 	// Create .gitignore
 	gitignoreContent := `# Binaries
@@ -122,6 +126,7 @@ Thumbs.db
 		return fmt.Errorf("failed to create .gitignore: %w", err)
 	}
 	logger.Info("Created .gitignore")
+	pretty.InfoPretty("Created .gitignore")
 
 	// Create Makefile
 	makefileContent := `# Grove ecosystem Makefile
@@ -158,10 +163,12 @@ clean:
 		return fmt.Errorf("failed to create Makefile: %w", err)
 	}
 	logger.Info("Created Makefile")
+	pretty.InfoPretty("Created Makefile")
 
 	// Initialize git repository if not already initialized
 	if _, err := os.Stat(".git"); os.IsNotExist(err) {
 		logger.Info("Initializing git repository...")
+		pretty.InfoPretty("Initializing git repository...")
 		gitInit := exec.Command("git", "init")
 		if err := gitInit.Run(); err != nil {
 			return fmt.Errorf("failed to initialize git: %w", err)
@@ -171,27 +178,28 @@ clean:
 		gitAdd := exec.Command("git", "add", "grove.yml", "go.work", ".gitignore", "Makefile")
 		if err := gitAdd.Run(); err != nil {
 			logger.Warnf("Failed to stage initial files: %v", err)
+			pretty.InfoPretty(fmt.Sprintf("Warning: Failed to stage initial files: %v", err))
 		}
 	}
 
 	// Display summary
-	fmt.Println("\n✅ Grove ecosystem initialized successfully!")
-	fmt.Println("\nCREATED FILES")
-	fmt.Println("-------------")
-	fmt.Println("- grove.yml    : Ecosystem configuration")
-	fmt.Println("- go.work      : Go workspace file")
-	fmt.Println("- Makefile     : Build automation")
-	fmt.Println("- .gitignore   : Git ignore patterns")
+	pretty.Success("Grove ecosystem initialized successfully!")
+	pretty.InfoPretty("\nCREATED FILES")
+	pretty.InfoPretty("-------------")
+	pretty.InfoPretty("- grove.yml    : Ecosystem configuration")
+	pretty.InfoPretty("- go.work      : Go workspace file")
+	pretty.InfoPretty("- Makefile     : Build automation")
+	pretty.InfoPretty("- .gitignore   : Git ignore patterns")
 
-	fmt.Println("\nNEXT STEPS")
-	fmt.Println("----------")
-	fmt.Println("1. Add your first repository:")
-	fmt.Printf("   grove add-repo <repo-name> --alias <alias> --ecosystem\n")
-	fmt.Println("")
-	fmt.Println("2. Or add existing repositories as submodules:")
-	fmt.Println("   git submodule add <repo-url> <repo-name>")
-	fmt.Println("")
-	fmt.Println("3. Update go.work and Makefile as needed")
+	pretty.InfoPretty("\nNEXT STEPS")
+	pretty.InfoPretty("----------")
+	pretty.InfoPretty("1. Add your first repository:")
+	pretty.InfoPretty("   grove add-repo <repo-name> --alias <alias> --ecosystem")
+	pretty.InfoPretty("")
+	pretty.InfoPretty("2. Or add existing repositories as submodules:")
+	pretty.InfoPretty("   git submodule add <repo-url> <repo-name>")
+	pretty.InfoPretty("")
+	pretty.InfoPretty("3. Update go.work and Makefile as needed")
 
 	return nil
 }

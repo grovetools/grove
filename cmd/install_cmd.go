@@ -7,7 +7,8 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-meta/pkg/devlinks"
 	"github.com/mattsolo1/grove-meta/pkg/reconciler"
 	"github.com/mattsolo1/grove-meta/pkg/sdk"
@@ -49,7 +50,7 @@ Examples:
 }
 
 func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
-	logger := cli.GetLogger(cmd)
+	logger := logging.NewLogger("install")
 
 	// Auto-detect gh CLI if not explicitly set
 	if !useGH && checkGHAuth() {
@@ -78,11 +79,11 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 	if len(args) == 1 && args[0] == "all" {
 		toolsToProcess = sdk.GetAllTools()
 		versionForAll = "latest"
-		fmt.Println(toolNameStyle.Render("Installing all Grove tools..."))
+		fmt.Println(theme.DefaultTheme.Bold.Render("Installing all Grove tools..."))
 	} else if len(args) == 1 && args[0] == "all@nightly" {
 		toolsToProcess = sdk.GetAllTools()
 		versionForAll = "nightly"
-		fmt.Println(toolNameStyle.Render("Installing nightly builds for all Grove tools..."))
+		fmt.Println(theme.DefaultTheme.Bold.Render("Installing nightly builds for all Grove tools..."))
 	} else {
 		// Resolve dependencies for the requested tools
 		resolvedTools, err := manager.ResolveDependencies(args)
@@ -147,15 +148,15 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 		// Handle nightly builds
 		if version == "nightly" {
 			fmt.Printf("%s %s from main branch...\n",
-				faintStyle.Render("Building"),
-				toolNameStyle.Render(toolName))
+				theme.DefaultTheme.Faint.Render("Building"),
+				theme.DefaultTheme.Bold.Render(toolName))
 
 			builtVersion, err := manager.InstallToolFromSource(toolName)
 			if err != nil {
 				fmt.Printf("%s %s: %s\n",
-					errorStyle.Render("✗"),
-					toolNameStyle.Render(toolName),
-					errorStyle.Render(err.Error()))
+					theme.DefaultTheme.Error.Render("✗"),
+					theme.DefaultTheme.Bold.Render(toolName),
+					theme.DefaultTheme.Error.Render(err.Error()))
 				continue
 			}
 			version = builtVersion
@@ -165,9 +166,9 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 				latestVersion, err := manager.GetLatestVersionTag(toolName)
 				if err != nil {
 					fmt.Printf("%s %s: %s\n",
-						errorStyle.Render("✗"),
-						toolNameStyle.Render(toolName),
-						errorStyle.Render(fmt.Sprintf("Failed to get latest version: %v", err)))
+						theme.DefaultTheme.Error.Render("✗"),
+						theme.DefaultTheme.Bold.Render(toolName),
+						theme.DefaultTheme.Error.Render(fmt.Sprintf("Failed to get latest version: %v", err)))
 					continue
 				}
 				version = latestVersion
@@ -175,10 +176,10 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 				// Check if already up-to-date AND binary exists
 				if currentVersion == version && binaryExists {
 					fmt.Printf("%s %s... %s (%s)\n",
-						faintStyle.Render("Checking"),
-						toolNameStyle.Render(toolName),
-						successStyle.Render("already up to date"),
-						versionStyle.Render(version))
+						theme.DefaultTheme.Faint.Render("Checking"),
+						theme.DefaultTheme.Bold.Render(toolName),
+						theme.DefaultTheme.Success.Render("already up to date"),
+						theme.DefaultTheme.Info.Render(version))
 					continue
 				}
 			}
@@ -194,24 +195,24 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 			}
 
 			fmt.Printf("%s %s %s...\n",
-				faintStyle.Render(action),
-				toolNameStyle.Render(toolName),
-				versionStyle.Render(version))
+				theme.DefaultTheme.Faint.Render(action),
+				theme.DefaultTheme.Bold.Render(toolName),
+				theme.DefaultTheme.Info.Render(version))
 
 			if err := manager.InstallTool(toolName, version); err != nil {
 				// Check for "no binary found" error
 				if strings.Contains(err.Error(), "no binary found") {
 					fmt.Printf("%s %s %s: %s\n",
-						errorStyle.Render("✗"),
-						toolNameStyle.Render(toolName),
-						versionStyle.Render(version),
-						errorStyle.Render(fmt.Sprintf("No binary available for your system (%s/%s)", runtime.GOOS, runtime.GOARCH)))
+						theme.DefaultTheme.Error.Render("✗"),
+						theme.DefaultTheme.Bold.Render(toolName),
+						theme.DefaultTheme.Info.Render(version),
+						theme.DefaultTheme.Error.Render(fmt.Sprintf("No binary available for your system (%s/%s)", runtime.GOOS, runtime.GOARCH)))
 				} else {
 					fmt.Printf("%s %s %s: %s\n",
-						errorStyle.Render("✗"),
-						toolNameStyle.Render(toolName),
-						versionStyle.Render(version),
-						errorStyle.Render(err.Error()))
+						theme.DefaultTheme.Error.Render("✗"),
+						theme.DefaultTheme.Bold.Render(toolName),
+						theme.DefaultTheme.Info.Render(version),
+						theme.DefaultTheme.Error.Render(err.Error()))
 				}
 				continue
 			}
@@ -244,25 +245,25 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 					// Print success message
 					if strings.HasPrefix(version, "nightly-") {
 						fmt.Printf("%s %s %s built from source and is now active\n",
-							successStyle.Render("✅"),
-							toolNameStyle.Render(toolName),
-							versionStyle.Render(version))
+							theme.DefaultTheme.Success.Render("✅"),
+							theme.DefaultTheme.Bold.Render(toolName),
+							theme.DefaultTheme.Info.Render(version))
 					} else if currentVersion == "" {
 						fmt.Printf("%s %s %s installed and active\n",
-							successStyle.Render("✅"),
-							toolNameStyle.Render(toolName),
-							versionStyle.Render(version))
+							theme.DefaultTheme.Success.Render("✅"),
+							theme.DefaultTheme.Bold.Render(toolName),
+							theme.DefaultTheme.Info.Render(version))
 					} else if currentVersion == version {
 						fmt.Printf("%s %s %s reinstalled and active\n",
-							successStyle.Render("✅"),
-							toolNameStyle.Render(toolName),
-							versionStyle.Render(version))
+							theme.DefaultTheme.Success.Render("✅"),
+							theme.DefaultTheme.Bold.Render(toolName),
+							theme.DefaultTheme.Info.Render(version))
 					} else {
 						fmt.Printf("%s %s updated to %s (was %s) and is now active\n",
-							updateStyle.Render("✅"),
-							toolNameStyle.Render(toolName),
-							versionStyle.Render(version),
-							faintStyle.Render(currentVersion))
+							theme.DefaultTheme.Warning.Render("✅"),
+							theme.DefaultTheme.Bold.Render(toolName),
+							theme.DefaultTheme.Info.Render(version),
+							theme.DefaultTheme.Faint.Render(currentVersion))
 					}
 				}
 			}

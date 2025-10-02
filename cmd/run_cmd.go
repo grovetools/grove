@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-meta/pkg/runner"
 	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
@@ -56,7 +57,7 @@ Use -- to separate grove run flags from the command and its arguments.`,
 }
 
 func runCommand(cmd *cobra.Command, args []string) error {
-	logger := cli.GetLogger(cmd)
+	logger := logging.NewLogger("run")
 	opts := cli.GetOptions(cmd)
 
 	// Find root directory with workspaces
@@ -103,7 +104,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		Command:    args[0],
 		Args:       args[1:],
 		JSONMode:   opts.JSONOutput,
-		Logger:     logger,
+		Logger:     logger.Logger,
 		RootDir:    rootDir,
 	}
 
@@ -113,7 +114,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 // runScript is a helper for running shell scripts across workspaces
 func runScript(cmd *cobra.Command, script string) error {
-	logger := cli.GetLogger(cmd)
+	logger := logging.NewLogger("run")
 
 	// Find root directory with workspaces
 	rootDir, err := workspace.FindRoot("")
@@ -144,7 +145,7 @@ func runScript(cmd *cobra.Command, script string) error {
 	// Execute script
 	runnerOpts := runner.Options{
 		Workspaces: workspaces,
-		Logger:     logger,
+		Logger:     logger.Logger,
 		RootDir:    rootDir,
 	}
 

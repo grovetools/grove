@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/logging"
 	"github.com/spf13/cobra"
 )
 
@@ -24,22 +25,26 @@ This command will download and replace the current grove binary with the latest 
   grove self-update --use-gh       # Update using gh CLI (private repos)`
 
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		logger := cli.GetLogger(cmd)
+		logger := logging.NewLogger("self-update")
+		pretty := logging.NewPrettyLogger()
 
 		// Check if running as root (not recommended)
 		if os.Geteuid() == 0 {
 			logger.Warn("Running as root is not recommended")
+			pretty.InfoPretty("Warning: Running as root is not recommended")
 		}
 
 		logger.Info("Updating grove CLI to the latest version...")
+		pretty.InfoPretty("Updating grove CLI to the latest version...")
 
 		// Use the install function to update grove itself
 		if err := runInstall(cmd, []string{"grove"}, useGH); err != nil {
 			return fmt.Errorf("failed to update grove: %w", err)
 		}
 
-		logger.Info("✅ Grove CLI has been updated successfully!")
-		logger.Info("Run 'grove version' to see the new version.")
+		logger.Info("Grove CLI has been updated successfully!")
+		pretty.Success("Grove CLI has been updated successfully!")
+		pretty.InfoPretty("Run 'grove version' to see the new version.")
 
 		return nil
 	}

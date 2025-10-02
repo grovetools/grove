@@ -17,20 +17,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-meta/pkg/reconciler"
 	"github.com/mattsolo1/grove-meta/pkg/sdk"
 	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
 
-// Additional list command specific styles
-var (
-	// Tool name style
-	toolStyle = lipgloss.NewStyle().Bold(true)
-
-	// Repository style
-	repoStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8BE9FD"))
-)
 
 func init() {
 	rootCmd.AddCommand(newListCmd())
@@ -62,7 +56,7 @@ type ToolInfo struct {
 
 func runList(cmd *cobra.Command, args []string) error {
 	opts := cli.GetOptions(cmd)
-	logger := cli.GetLogger(cmd)
+	logger := logging.NewLogger("list")
 
 	// Create SDK manager
 	manager, err := sdk.NewManager()
@@ -246,13 +240,13 @@ func runList(cmd *cobra.Command, args []string) error {
 		// Determine status symbol with styling
 		switch info.Status {
 		case "dev":
-			statusSymbol = devStyle.Render("◆ dev")
+			statusSymbol = theme.DefaultTheme.Highlight.Render("◆ dev")
 		case "release":
-			statusSymbol = releaseStyle.Render("● release")
+			statusSymbol = theme.DefaultTheme.Success.Render("● release")
 		case "nightly":
-			statusSymbol = updateStyle.Render("◆ nightly")
+			statusSymbol = theme.DefaultTheme.Warning.Render("◆ nightly")
 		default:
-			statusSymbol = notInstalledStyle.Render("○ not installed")
+			statusSymbol = theme.DefaultTheme.Muted.Render("○ not installed")
 		}
 
 		if info.Status == "dev" && info.ActiveVersion != "" {
@@ -271,10 +265,10 @@ func runList(cmd *cobra.Command, args []string) error {
 
 		// Build row
 		row := []string{
-			toolStyle.Render(info.Name),
-			repoStyle.Render(info.RepoName),
+			theme.DefaultTheme.Bold.Render(info.Name),
+			theme.DefaultTheme.Info.Render(info.RepoName),
 			statusSymbol,
-			versionStyle.Render(currentVersion),
+			theme.DefaultTheme.Info.Render(currentVersion),
 		}
 
 		if checkUpdates {
@@ -282,13 +276,13 @@ func runList(cmd *cobra.Command, args []string) error {
 			releaseStatus := info.LatestRelease
 			styledReleaseStatus := ""
 			if releaseStatus == "" {
-				styledReleaseStatus = notInstalledStyle.Render("-")
+				styledReleaseStatus = theme.DefaultTheme.Muted.Render("-")
 			} else if displayVersion != "" && displayVersion == info.LatestRelease {
 				// Already at latest, show checkmark
-				styledReleaseStatus = upToDateStyle.Render(fmt.Sprintf("%s ✓", info.LatestRelease))
+				styledReleaseStatus = theme.DefaultTheme.Success.Render(fmt.Sprintf("%s ✓", info.LatestRelease))
 			} else if info.LatestRelease != "" {
 				// Update available
-				styledReleaseStatus = updateAvailableStyle.Render(fmt.Sprintf("%s ↑", info.LatestRelease))
+				styledReleaseStatus = theme.DefaultTheme.Warning.Render(fmt.Sprintf("%s ↑", info.LatestRelease))
 			}
 			row = append(row, styledReleaseStatus)
 		}

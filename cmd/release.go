@@ -18,6 +18,7 @@ import (
 	"github.com/mattsolo1/grove-core/command"
 	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-meta/pkg/depsgraph"
 	"github.com/mattsolo1/grove-meta/pkg/gh"
 	"github.com/mattsolo1/grove-meta/pkg/project"
@@ -1648,15 +1649,13 @@ func displayAndConfirmVersionsWithOrder(rootDir string, versions map[string]stri
 	}
 
 	// Create table with lipgloss
-	re := lipgloss.NewRenderer(os.Stdout)
 
-	baseStyle := re.NewStyle().Padding(0, 1)
-	headerStyle := baseStyle.Copy().Bold(true).Foreground(lipgloss.Color("255"))
+	headerStyle := theme.DefaultTheme.Header.Copy().Padding(0, 1)
 
 	// Create the table
 	t := table.New().
 		Border(lipgloss.NormalBorder()).
-		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
+		BorderStyle(theme.DefaultTheme.Muted).
 		Headers("REPOSITORY", "CURRENT", "PROPOSED", "INCREMENT").
 		Rows(rows...)
 
@@ -1779,15 +1778,13 @@ func displayAndConfirmVersions(versions map[string]string, currentVersions map[s
 	}
 
 	// Create table with lipgloss
-	re := lipgloss.NewRenderer(os.Stdout)
 
-	baseStyle := re.NewStyle().Padding(0, 1)
-	headerStyle := baseStyle.Copy().Bold(true).Foreground(lipgloss.Color("255"))
+	headerStyle := theme.DefaultTheme.Header.Copy().Padding(0, 1)
 
 	// Create the table
 	t := table.New().
 		Border(lipgloss.NormalBorder()).
-		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
+		BorderStyle(theme.DefaultTheme.Muted).
 		Headers("REPOSITORY", "CURRENT", "PROPOSED", "INCREMENT").
 		Rows(rows...)
 

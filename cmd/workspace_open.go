@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
@@ -20,7 +21,8 @@ func NewWorkspaceOpenCmd() *cobra.Command {
 
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		logger := cli.GetLogger(cmd)
+		logger := logging.NewLogger("ws-open")
+		pretty := logging.NewPrettyLogger()
 
 		gitRoot, err := workspace.FindRoot("")
 		if err != nil {
@@ -43,6 +45,7 @@ func NewWorkspaceOpenCmd() *cobra.Command {
 
 		if !exists {
 			logger.Infof("Creating new tmux session '%s'...", sessionName)
+			pretty.InfoPretty(fmt.Sprintf("Creating new tmux session '%s'...", sessionName))
 			opts := tmux.LaunchOptions{
 				SessionName:      sessionName,
 				WorkingDirectory: worktreePath,
@@ -54,6 +57,7 @@ func NewWorkspaceOpenCmd() *cobra.Command {
 		}
 		
 		logger.Infof("Switching to session '%s'...", sessionName)
+		pretty.InfoPretty(fmt.Sprintf("Switching to session '%s'...", sessionName))
 		return tmuxClient.SwitchClient(context.Background(), sessionName)
 	}
 	return cmd

@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-meta/pkg/githooks"
 	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
@@ -29,7 +29,8 @@ func newWorkspaceGitHooksInstallCmd() *cobra.Command {
 		Short: "Install Git hooks in all workspace repositories",
 		Long:  "Installs commit-msg hooks that enforce conventional commit format in all repositories within the workspace.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			logger := cli.GetLogger(cmd)
+			logger := logging.NewLogger("ws-githooks")
+			pretty := logging.NewPrettyLogger()
 
 			// Find the root directory
 			rootDir, err := workspace.FindRoot("")
@@ -66,12 +67,13 @@ func newWorkspaceGitHooksInstallCmd() *cobra.Command {
 			}
 
 			// Print summary
-			fmt.Printf("\nGit hooks installation summary:\n")
-			fmt.Printf("✅ Installed successfully: %d repositories\n", len(succeeded))
+			pretty.Blank()
+			pretty.Section("Git hooks installation summary")
+			pretty.Success(fmt.Sprintf("Installed successfully: %d repositories", len(succeeded)))
 			if len(failed) > 0 {
-				fmt.Printf("❌ Failed: %d repositories\n", len(failed))
+				pretty.ErrorPretty(fmt.Sprintf("Failed: %d repositories", len(failed)), nil)
 				for _, path := range failed {
-					fmt.Printf("   - %s\n", path)
+					pretty.InfoPretty(fmt.Sprintf("   - %s", path))
 				}
 			}
 
@@ -92,7 +94,8 @@ func newWorkspaceGitHooksUninstallCmd() *cobra.Command {
 		Short: "Uninstall Git hooks from all workspace repositories",
 		Long:  "Removes Grove-managed commit-msg hooks from all repositories within the workspace.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			logger := cli.GetLogger(cmd)
+			logger := logging.NewLogger("ws-githooks")
+			pretty := logging.NewPrettyLogger()
 
 			// Find the root directory
 			rootDir, err := workspace.FindRoot("")
@@ -135,12 +138,13 @@ func newWorkspaceGitHooksUninstallCmd() *cobra.Command {
 			}
 
 			// Print summary
-			fmt.Printf("\nGit hooks uninstallation summary:\n")
-			fmt.Printf("✅ Uninstalled successfully: %d repositories\n", len(succeeded))
+			pretty.Blank()
+			pretty.Section("Git hooks uninstallation summary")
+			pretty.Success(fmt.Sprintf("Uninstalled successfully: %d repositories", len(succeeded)))
 			if len(failed) > 0 {
-				fmt.Printf("❌ Failed: %d repositories\n", len(failed))
+				pretty.ErrorPretty(fmt.Sprintf("Failed: %d repositories", len(failed)), nil)
 				for _, path := range failed {
-					fmt.Printf("   - %s\n", path)
+					pretty.InfoPretty(fmt.Sprintf("   - %s", path))
 				}
 			}
 

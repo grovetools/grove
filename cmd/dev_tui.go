@@ -18,8 +18,11 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/tui/components/help"
+	tablecomponent "github.com/mattsolo1/grove-core/tui/components/table"
+	"github.com/mattsolo1/grove-core/tui/keymap"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-meta/pkg/devlinks"
 	"github.com/mattsolo1/grove-meta/pkg/reconciler"
 	"github.com/mattsolo1/grove-meta/pkg/sdk"
@@ -48,54 +51,20 @@ func (w worktreeInfo) Title() string       { return w.name }
 func (w worktreeInfo) Description() string { return w.path }
 func (w worktreeInfo) FilterValue() string { return w.name }
 
-// Define styles to match grove list
-var (
-	// Status styles
-	tuiDevStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF79C6")).Bold(true)
-	tuiReleaseStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B")).Bold(true)
-	tuiNotInstalledStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4"))
-
-	// Version styles
-	tuiVersionStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("#F8F8F2"))
-	tuiUpdateAvailableStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB86C"))
-	tuiUpToDateStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B"))
-
-	// Tool name style
-	tuiToolStyle = lipgloss.NewStyle().Bold(true)
-
-	// Repository style
-	tuiRepoStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8BE9FD"))
-
-	// Selection style
-	tuiSelectedStyle = lipgloss.NewStyle().Background(lipgloss.Color("#44475A")).Bold(true)
-
-	// Help style
-	tuiHelpStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4"))
-)
 
 // Custom key bindings
 type keyMap struct {
-	Up      key.Binding
-	Down    key.Binding
+	keymap.Base
 	Install key.Binding
 	SetDev  key.Binding
 	Reset   key.Binding
 	Refresh key.Binding
-	Help    key.Binding
-	Quit    key.Binding
 	Enter   key.Binding
 	Back    key.Binding
 }
 
 var keys = keyMap{
-	Up: key.NewBinding(
-		key.WithKeys("up", "k"),
-		key.WithHelp("↑/k", "up"),
-	),
-	Down: key.NewBinding(
-		key.WithKeys("down", "j"),
-		key.WithHelp("↓/j", "down"),
-	),
+	Base: keymap.NewBase(),
 	Install: key.NewBinding(
 		key.WithKeys("i"),
 		key.WithHelp("i", "install latest"),
@@ -111,14 +80,6 @@ var keys = keyMap{
 	Refresh: key.NewBinding(
 		key.WithKeys("R"),
 		key.WithHelp("R", "refresh"),
-	),
-	Help: key.NewBinding(
-		key.WithKeys("?"),
-		key.WithHelp("?", "toggle help"),
-	),
-	Quit: key.NewBinding(
-		key.WithKeys("q", "ctrl+c"),
-		key.WithHelp("q", "quit"),
 	),
 	Enter: key.NewBinding(
 		key.WithKeys("enter"),
@@ -143,7 +104,7 @@ type model struct {
 	selectedIndex     int
 	selectedTool      *toolItem
 	worktreeList      list.Model
-	showHelp          bool
+	help              help.Model
 	width             int
 	height            int
 	loading           bool
@@ -198,7 +159,6 @@ func initialModel() (*model, error) {
 		groveHome:     groveHome,
 		mode:          "table",
 		selectedIndex: 0,
-		showHelp:      false,
 		loading:       true,
 		spinner:       s,
 		versionCache:  make(map[string]string),
@@ -382,7 +342,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if i, ok := m.worktreeList.SelectedItem().(worktreeInfo); ok {
 					return m, m.setDevVersion(m.selectedTool, i)
 				}
-			case key.Matches(msg, keys.Quit):
+			case key.Matches(msg, keys.Base.Quit):
 				return m, tea.Quit
 			default:
 				var cmd tea.Cmd
@@ -392,9 +352,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			// Table mode
 			switch {
-			case key.Matches(msg, keys.Quit):
+			case key.Matches(msg, keys.Base.Quit):
 				return m, tea.Quit
-			case key.Matches(msg, keys.Up):
+			case key.Matches(msg, keys.Base.Up):
 				if m.selectedIndex > 0 {
 					m.selectedIndex--
 					// Load dev version if needed
@@ -410,7 +370,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				return m, nil
-			case key.Matches(msg, keys.Down):
+			case key.Matches(msg, keys.Base.Down):
 				if m.selectedIndex < len(m.tools)-1 {
 					m.selectedIndex++
 					// Load dev version if needed
@@ -426,8 +386,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				return m, nil
-			case key.Matches(msg, keys.Help):
-				m.showHelp = !m.showHelp
+			case key.Matches(msg, keys.Base.Help):
+				m.help.ShowAll = !m.help.ShowAll
 				return m, nil
 			case key.Matches(msg, keys.Install):
 				if m.selectedIndex < len(m.tools) {
@@ -576,77 +536,50 @@ func (m *model) View() string {
 		// Apply selection highlighting
 		if i == m.selectedIndex {
 			for j := range row {
-				row[j] = tuiSelectedStyle.Render(row[j])
+				row[j] = theme.DefaultTheme.Selected.Render(row[j])
 			}
 		} else {
 			// Apply normal styling
-			row[0] = tuiToolStyle.Render(row[0])
-			row[1] = tuiRepoStyle.Render(row[1])
+			row[0] = theme.DefaultTheme.Bold.Render(row[0])
+			row[1] = theme.DefaultTheme.Info.Render(row[1])
 			
 			switch tool.status {
 			case "dev":
-				row[2] = tuiDevStyle.Render(statusSymbol)
+				row[2] = theme.DefaultTheme.Warning.Render(statusSymbol)
 			case "release":
-				row[2] = tuiReleaseStyle.Render(statusSymbol)
+				row[2] = theme.DefaultTheme.Success.Render(statusSymbol)
 			default:
-				row[2] = tuiNotInstalledStyle.Render(statusSymbol)
+				row[2] = theme.DefaultTheme.Muted.Render(statusSymbol)
 			}
 			
-			row[3] = tuiVersionStyle.Render(currentVersion)
+			row[3] = theme.DefaultTheme.Bold.Render(currentVersion)
 			
 			if !tool.latestLoaded {
-				row[4] = tuiHelpStyle.Render("...")
+				row[4] = theme.DefaultTheme.Muted.Render("...")
 			} else if releaseStatus == "" {
-				row[4] = tuiNotInstalledStyle.Render("-")
+				row[4] = theme.DefaultTheme.Muted.Render("-")
 			} else if displayVersion != "" && displayVersion == tool.latestRelease {
-				row[4] = tuiUpToDateStyle.Render(styledReleaseStatus)
+				row[4] = theme.DefaultTheme.Success.Render(styledReleaseStatus)
 			} else if tool.latestRelease != "" {
-				row[4] = tuiUpdateAvailableStyle.Render(styledReleaseStatus)
+				row[4] = theme.DefaultTheme.Warning.Render(styledReleaseStatus)
 			}
 		}
 
 		rows = append(rows, row)
 	}
 
-	// Create lipgloss table
-	re := lipgloss.NewRenderer(os.Stdout)
-	baseStyle := re.NewStyle().Padding(0, 1)
-	tableHeaderStyle := baseStyle.Copy().Bold(true).Foreground(lipgloss.Color("255"))
-
-	t := table.New().
-		Border(lipgloss.NormalBorder()).
-		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
-		Headers(headers...).
-		Rows(rows...)
-
-	// Apply header styling
-	t.StyleFunc(func(row, col int) lipgloss.Style {
-		if row == 0 {
-			return tableHeaderStyle
-		}
-		// Return minimal style to preserve pre-styled content
-		return lipgloss.NewStyle().Padding(0, 1)
-	})
+	// Create styled table using grove-core component
+	t := tablecomponent.NewStyledTable()
+	t.Headers(headers...)
+	t.Rows(rows...)
 
 	// Build full view
 	var view strings.Builder
 	view.WriteString(t.String())
 	view.WriteString("\n\n")
 
-	// Add help line
-	if m.showHelp {
-		helpText := []string{
-			"Navigation: ↑/k up • ↓/j down",
-			"Actions: i install • d set dev • r reset",
-			"Other: R refresh • ? toggle help • q quit",
-		}
-		for _, line := range helpText {
-			view.WriteString(tuiHelpStyle.Render(line))
-			view.WriteString("\n")
-		}
-	} else {
-		view.WriteString(tuiHelpStyle.Render("Press ? for help • q to quit"))
-	}
+	// Add help
+	view.WriteString(m.help.View())
 
 	// Add status message if any
 	if m.statusMessage != "" {

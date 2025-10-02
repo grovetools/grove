@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/version"
 	"github.com/mattsolo1/grove-meta/pkg/devlinks"
 	"github.com/mattsolo1/grove-meta/pkg/reconciler"
@@ -97,7 +98,8 @@ Example:
 }
 
 func runVersionList(cmd *cobra.Command, args []string) error {
-	logger := cli.GetLogger(cmd)
+	logger := logging.NewLogger("version")
+	pretty := logging.NewPrettyLogger()
 	opts := cli.GetOptions(cmd)
 
 	// Create SDK manager
@@ -122,6 +124,7 @@ func runVersionList(cmd *cobra.Command, args []string) error {
 
 	if len(versions) == 0 {
 		logger.Info("No versions installed. Use 'grove install' to install tools.")
+		pretty.InfoPretty("No versions installed. Use 'grove install' to install tools.")
 		return nil
 	}
 
@@ -213,7 +216,8 @@ func runVersionList(cmd *cobra.Command, args []string) error {
 }
 
 func runVersionUse(cmd *cobra.Command, args []string) error {
-	logger := cli.GetLogger(cmd)
+	logger := logging.NewLogger("version")
+	pretty := logging.NewPrettyLogger()
 	toolSpec := args[0]
 
 	// Parse tool@version
@@ -238,6 +242,7 @@ func runVersionUse(cmd *cobra.Command, args []string) error {
 
 	// Switch to the version
 	logger.Infof("Switching %s to version %s...", toolName, version)
+	pretty.InfoPretty(fmt.Sprintf("Switching %s to version %s...", toolName, version))
 
 	if err := manager.UseToolVersion(toolName, version); err != nil {
 		return fmt.Errorf("failed to switch version: %w", err)
@@ -248,6 +253,7 @@ func runVersionUse(cmd *cobra.Command, args []string) error {
 	if err == nil {
 		if binInfo, exists := devConfig.Binaries[toolName]; exists && binInfo.Current != "" {
 			logger.Infof("Clearing dev override for %s", toolName)
+			pretty.InfoPretty(fmt.Sprintf("Clearing dev override for %s", toolName))
 			binInfo.Current = ""
 			devlinks.SaveConfig(devConfig)
 		}
@@ -268,12 +274,14 @@ func runVersionUse(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to update symlink: %w", err)
 	}
 
-	logger.Infof("✅ Successfully switched %s to version %s", toolName, version)
+	logger.Infof("Successfully switched %s to version %s", toolName, version)
+	pretty.Success(fmt.Sprintf("Successfully switched %s to version %s", toolName, version))
 	return nil
 }
 
 func runVersionUninstall(cmd *cobra.Command, args []string) error {
-	logger := cli.GetLogger(cmd)
+	logger := logging.NewLogger("version")
+	pretty := logging.NewPrettyLogger()
 	version := args[0]
 
 	// Ensure version starts with 'v'
@@ -309,19 +317,23 @@ func runVersionUninstall(cmd *cobra.Command, args []string) error {
 	activeVersion, _ := manager.GetActiveVersion()
 	if activeVersion == version {
 		logger.Warnf("Version %s is currently active. It will be deactivated.", version)
+		pretty.InfoPretty(fmt.Sprintf("Version %s is currently active. It will be deactivated.", version))
 	}
 
 	// Uninstall the version
 	logger.Infof("Uninstalling version %s...", version)
+	pretty.InfoPretty(fmt.Sprintf("Uninstalling version %s...", version))
 
 	if err := manager.UninstallVersion(version); err != nil {
 		return fmt.Errorf("failed to uninstall version: %w", err)
 	}
 
-	logger.Infof("✅ Successfully uninstalled version %s", version)
+	logger.Infof("Successfully uninstalled version %s", version)
+	pretty.Success(fmt.Sprintf("Successfully uninstalled version %s", version))
 
 	if activeVersion == version {
 		logger.Info("No version is currently active. Use 'grove version use <version>' to activate a version.")
+		pretty.InfoPretty("No version is currently active. Use 'grove version use <version>' to activate a version.")
 	}
 
 	return nil

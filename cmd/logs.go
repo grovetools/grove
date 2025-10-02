@@ -14,7 +14,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/hpcloud/tail"
-	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
@@ -60,7 +61,7 @@ parses the structured log entries, and displays them in a color-coded, readable 
 }
 
 func runLogs(cmd *cobra.Command, args []string) error {
-	logger := cli.GetLogger(cmd)
+	logger := logging.NewLogger("logs")
 	follow, _ := cmd.Flags().GetBool("follow")
 	ecosystem, _ := cmd.Flags().GetBool("ecosystem")
 	compact, _ := cmd.Flags().GetBool("compact")
@@ -581,13 +582,13 @@ func runLogs(cmd *cobra.Command, args []string) error {
 func getLevelStyle(level string) lipgloss.Style {
 	switch strings.ToLower(level) {
 	case "info":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("42")) // Green
+		return theme.DefaultTheme.Success
 	case "warning", "warn":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // Yellow
+		return theme.DefaultTheme.Warning
 	case "error", "fatal", "panic":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true) // Red
+		return theme.DefaultTheme.Error
 	case "debug", "trace":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("245")) // Gray
+		return theme.DefaultTheme.Muted
 	default:
 		return lipgloss.NewStyle()
 	}

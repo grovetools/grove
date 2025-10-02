@@ -21,7 +21,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/hpcloud/tail"
-	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/tui/components/help"
+	"github.com/mattsolo1/grove-core/tui/keymap"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/spf13/cobra"
 )
 
@@ -35,13 +38,29 @@ type logItem struct {
 	rawData   map[string]interface{}
 }
 
+// getThemeLevelStyle returns theme-based styling for log levels
+func getThemeLevelStyle(level string) lipgloss.Style {
+	switch strings.ToLower(level) {
+	case "info":
+		return theme.DefaultTheme.Success
+	case "warning", "warn":
+		return theme.DefaultTheme.Warning
+	case "error", "fatal", "panic":
+		return theme.DefaultTheme.Error
+	case "debug", "trace":
+		return theme.DefaultTheme.Muted
+	default:
+		return lipgloss.NewStyle()
+	}
+}
+
 // Implement list.Item interface
 func (i logItem) Title() string {
 	// Compact view: [workspace] [LEVEL] time [component] message
 	wsStyle := getWorkspaceStyle(i.workspace)
-	levelStyle := getLevelStyle(i.level)
-	timeStyle := lipgloss.NewStyle().Faint(true)
-	componentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Bold(true)
+	levelStyle := getThemeLevelStyle(i.level)
+	timeStyle := theme.DefaultTheme.Faint
+	componentStyle := theme.DefaultTheme.Muted.Copy().Bold(true)
 	
 	return fmt.Sprintf("%s %s %s %s %s",
 		wsStyle.Render(fmt.Sprintf("[%s]", i.workspace)),
@@ -67,15 +86,15 @@ func (i logItem) FormatDetails() string {
 	var lines []string
 	
 	// Header with basic info
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214"))
+	headerStyle := theme.DefaultTheme.Header
 	lines = append(lines, headerStyle.Render("Log Entry Details"))
 	lines = append(lines, "")
 	
 	// Basic info
 	wsStyle := getWorkspaceStyle(i.workspace)
-	levelStyle := getLevelStyle(i.level)
-	timeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	componentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Bold(true)
+	levelStyle := getThemeLevelStyle(i.level)
+	timeStyle := theme.DefaultTheme.Muted
+	componentStyle := theme.DefaultTheme.Muted.Copy().Bold(true)
 	
 	lines = append(lines, fmt.Sprintf("Workspace:  %s", wsStyle.Render(i.workspace)))
 	lines = append(lines, fmt.Sprintf("Level:      %s", levelStyle.Render(strings.ToUpper(i.level))))
@@ -112,9 +131,9 @@ func (i logItem) FormatDetails() string {
 	}
 	
 	// Build the display
-	fieldStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	fileStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	borderStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	fieldStyle := theme.DefaultTheme.Muted
+	fileStyle := theme.DefaultTheme.Muted
+	borderStyle := theme.DefaultTheme.Muted
 	
 	// Add file/func info if present
 	if fileInfo != "" || funcInfo != "" {
@@ -243,11 +262,11 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 	
 	// Apply highlighting
 	if isVisuallySelected {
-		// Visual selection highlighting (bright cyan background for better visibility)
-		str = lipgloss.NewStyle().Background(lipgloss.Color("51")).Foreground(lipgloss.Color("0")).Bold(true).Render(str)
+		// Visual selection highlighting
+		str = theme.DefaultTheme.Selected.Copy().Bold(true).Render(str)
 	} else if index == m.Index() {
 		// Normal cursor highlighting
-		str = lipgloss.NewStyle().Background(lipgloss.Color("#44475A")).Render(str)
+		str = theme.DefaultTheme.Selected.Render(str)
 	}
 	
 	fmt.Fprint(w, str)
@@ -255,8 +274,7 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 
 // keyMap defines all key bindings for the TUI
 type logKeyMap struct {
-	Up       key.Binding
-	Down     key.Binding
+	keymap.Base
 	PageUp   key.Binding
 	PageDown key.Binding
 	HalfUp   key.Binding
@@ -266,20 +284,11 @@ type logKeyMap struct {
 	Expand   key.Binding
 	Search   key.Binding
 	Clear    key.Binding
-	Help     key.Binding
-	Quit     key.Binding
 	Follow   key.Binding
 }
 
 var logKeys = logKeyMap{
-	Up: key.NewBinding(
-		key.WithKeys("up", "k"),
-		key.WithHelp("↑/k", "move up"),
-	),
-	Down: key.NewBinding(
-		key.WithKeys("down", "j"),
-		key.WithHelp("↓/j", "move down"),
-	),
+	Base: keymap.NewBase(),
 	PageUp: key.NewBinding(
 		key.WithKeys("pgup"),
 		key.WithHelp("pgup", "page up"),
@@ -316,14 +325,6 @@ var logKeys = logKeyMap{
 		key.WithKeys("esc"),
 		key.WithHelp("esc", "clear search"),
 	),
-	Help: key.NewBinding(
-		key.WithKeys("?"),
-		key.WithHelp("?", "toggle help"),
-	),
-	Quit: key.NewBinding(
-		key.WithKeys("q", "ctrl+c"),
-		key.WithHelp("q", "quit"),
-	),
 	Follow: key.NewBinding(
 		key.WithKeys("f"),
 		key.WithHelp("f", "toggle follow"),
@@ -337,11 +338,11 @@ type logModel struct {
 	keys          logKeyMap
 	spinner       spinner.Model
 	viewport      viewport.Model
+	help          help.Model
 	loading       bool
 	err           error
 	width         int
 	height        int
-	showHelp      bool
 	followMode    bool
 	logChan       chan TailedLine
 	mu            sync.Mutex
@@ -484,7 +485,7 @@ func (m *logModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Don't intercept keys when filtering is active except for our special ones
 		if m.list.FilterState() == list.Filtering {
 			switch {
-			case key.Matches(msg, logKeys.Quit):
+			case key.Matches(msg, logKeys.Base.Quit):
 				// Allow quitting even during search
 				return m, tea.Quit
 			case key.Matches(msg, logKeys.Clear):
@@ -507,11 +508,11 @@ func (m *logModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			
 			switch {
-			case key.Matches(msg, logKeys.Quit):
+			case key.Matches(msg, logKeys.Base.Quit):
 				return m, tea.Quit
 				
-			case key.Matches(msg, logKeys.Help):
-				m.showHelp = !m.showHelp
+			case key.Matches(msg, logKeys.Base.Help):
+				m.help.ShowAll = !m.help.ShowAll
 				return m, nil
 				
 			case msg.String() == "V": // Shift+V to start visual mode
@@ -717,8 +718,8 @@ func (m *logModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *logModel) View() string {
-	if m.showHelp {
-		return m.helpView()
+	if m.help.ShowAll {
+		return m.help.View()
 	}
 	
 	// If not ready, show loading
@@ -739,21 +740,19 @@ func (m *logModel) View() string {
 	}()
 	
 	// Separator between list and details
-	separatorStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
+	separatorStyle := theme.DefaultTheme.Muted.Copy().
 		Border(lipgloss.NormalBorder(), true, false, false, false)
 	separator := separatorStyle.Render(strings.Repeat("─", m.width-2))
 	
 	// Details view with border
-	detailsStyle := lipgloss.NewStyle().
+	detailsStyle := theme.DefaultTheme.Muted.Copy().
 		Padding(0, 2).
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240"))
+		BorderStyle(lipgloss.RoundedBorder())
 	
 	detailsView := detailsStyle.Render(m.viewport.View())
 	
 	// Status line
-	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	statusStyle := theme.DefaultTheme.Muted
 	
 	followIndicator := ""
 	if m.followMode {
@@ -761,7 +760,7 @@ func (m *logModel) View() string {
 	}
 	
 	filterIndicator := ""
-	searchStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	searchStyle := theme.DefaultTheme.Warning.Copy().Bold(true)
 	if m.list.FilterState() == list.Filtering {
 		filterTerm := m.list.FilterValue()
 		if filterTerm == "" {
@@ -816,42 +815,6 @@ func (m *logModel) View() string {
 	)
 }
 
-func (m *logModel) helpView() string {
-	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214"))
-	
-	help := []string{
-		titleStyle.Render("Grove Logs TUI - Help"),
-		"",
-		helpStyle.Render("Navigation:"),
-		"  j/↓      Move down",
-		"  k/↑      Move up",
-		"  gg       Go to top",
-		"  G        Go to bottom",
-		"  Ctrl+d   Half page down",
-		"  Ctrl+u   Half page up",
-		"",
-		helpStyle.Render("Selection & Copy:"),
-		"  Shift+V  Start visual selection",
-		"  y        Copy selected logs (with details)",
-		"  Esc      Exit visual mode",
-		"",
-		helpStyle.Render("Search & Filter:"),
-		"  /        Search by component",
-		"  Esc      Clear search",
-		"",
-		helpStyle.Render("Actions:"),
-		"  f        Toggle follow mode",
-		"",
-		helpStyle.Render("General:"),
-		"  ?        Toggle this help",
-		"  q        Quit",
-		"",
-		"Press any key to return...",
-	}
-	
-	return strings.Join(help, "\n")
-}
 
 // Workspace color management
 var workspaceColorPalette = []lipgloss.Color{"39", "45", "51", "81", "117", "153", "189", "225"}
@@ -873,7 +836,7 @@ func getWorkspaceStyle(workspace string) lipgloss.Style {
 
 // Run the logs TUI
 func runLogsTUI(cmd *cobra.Command, workspaces []string, follow bool) error {
-	logger := cli.GetLogger(cmd)
+	logger := logging.NewLogger("logs-tui")
 	
 	// Create channel for log lines
 	logChan := make(chan TailedLine, 100)
@@ -934,14 +897,13 @@ func runLogsTUI(cmd *cobra.Command, workspaces []string, follow bool) error {
 	l.DisableQuitKeybindings()  // We handle quit ourselves
 	
 	// Configure pagination style
-	l.Styles.PaginationStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
+	l.Styles.PaginationStyle = theme.DefaultTheme.Muted.Copy().
 		PaddingLeft(2)
 	
 	// Create spinner
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	s.Style = theme.DefaultTheme.Highlight
 	
 	// Initialize model
 	model := &logModel{
@@ -949,6 +911,7 @@ func runLogsTUI(cmd *cobra.Command, workspaces []string, follow bool) error {
 		items:           []logItem{},
 		keys:            logKeys,
 		spinner:         s,
+		help:            help.New(logKeys),
 		loading:         true,
 		followMode:      follow,
 		logChan:         logChan,

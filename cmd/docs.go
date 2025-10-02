@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
@@ -35,7 +36,7 @@ This command is useful for updating all documentation in a single step.`,
   grove docs generate --commit`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			logger := cli.GetLogger(cmd)
+			logger := logging.NewLogger("docs")
 
 			// Find root directory
 			rootDir, err := workspace.FindRoot("")

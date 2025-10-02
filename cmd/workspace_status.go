@@ -15,22 +15,23 @@ import (
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-meta/pkg/gh"
 	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
 
-// Workspace status specific color styles
+// Workspace status specific color styles using theme
 var (
-	cleanStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff00")).Bold(true)
-	dirtyStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffaa00")).Bold(true)
-	untrackedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff4444")).Bold(true)
-	modifiedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffaa00")).Bold(true)
-	stagedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#4ecdc4")).Bold(true)
-	aheadStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#95e1d3")).Bold(true)
-	behindStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#f38181")).Bold(true)
-	grayStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#808080"))
-	// errorStyle is defined in styles.go
+	cleanStyle     = theme.DefaultTheme.Success.Copy().Bold(true)
+	dirtyStyle     = theme.DefaultTheme.Warning.Copy().Bold(true)
+	untrackedStyle = theme.DefaultTheme.Error.Copy().Bold(true)
+	modifiedStyle  = theme.DefaultTheme.Warning.Copy().Bold(true)
+	stagedStyle    = theme.DefaultTheme.Info.Copy().Bold(true)
+	aheadStyle     = theme.DefaultTheme.Success.Copy().Bold(true)
+	behindStyle    = theme.DefaultTheme.Error.Copy().Bold(true)
+	grayStyle      = theme.DefaultTheme.Muted
 )
 
 // JSON output structures
@@ -102,7 +103,7 @@ func newWorkspaceStatusCmd() *cobra.Command {
 }
 
 func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
-	logger := cli.GetLogger(cmd)
+	logger := logging.NewLogger("ws-status")
 	opts := cli.GetOptions(cmd)
 
 	// Parse column selection
@@ -451,7 +452,7 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 		if colMap["git"] {
 			// Handle git error case
 			if ws.GitErr != nil {
-				row = append(row, "-", errorStyle.Render("ERROR"), ws.GitErr.Error())
+				row = append(row, "-", theme.DefaultTheme.Error.Render("ERROR"), ws.GitErr.Error())
 			} else if ws.Git == nil {
 				row = append(row, "-", "-", "-")
 			} else {
@@ -551,11 +552,11 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 					releaseStr = fmt.Sprintf("%s (↑%d)", ws.Release.LatestTag, ws.Release.CommitsAhead)
 					// Style based on how many commits ahead
 					if ws.Release.CommitsAhead > 20 {
-						releaseStr = errorStyle.Render(releaseStr)
+						releaseStr = theme.DefaultTheme.Error.Render(releaseStr)
 					} else if ws.Release.CommitsAhead > 10 {
 						releaseStr = dirtyStyle.Render(releaseStr)
 					} else {
-						releaseStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffff00")).Render(releaseStr)
+						releaseStr = theme.DefaultTheme.Warning.Render(releaseStr)
 					}
 				}
 				row = append(row, releaseStr)
@@ -574,15 +575,13 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create a simple table style
-	re := lipgloss.NewRenderer(os.Stdout)
 
-	baseStyle := re.NewStyle().Padding(0, 1)
-	headerStyle := baseStyle.Copy().Bold(true).Foreground(lipgloss.Color("255"))
+	headerStyle := theme.DefaultTheme.Header.Copy().Padding(0, 1)
 
 	// Create the table
 	t := table.New().
 		Border(lipgloss.NormalBorder()).
-		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
+		BorderStyle(theme.DefaultTheme.Muted).
 		Headers(headers...).
 		Rows(rows...)
 

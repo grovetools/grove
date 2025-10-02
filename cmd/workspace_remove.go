@@ -11,6 +11,7 @@ import (
 
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
@@ -26,14 +27,15 @@ func NewWorkspaceRemoveCmd() *cobra.Command {
 	
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		logger := cli.GetLogger(cmd)
+		logger := logging.NewLogger("ws-remove")
+		pretty := logging.NewPrettyLogger()
 
 		if !force {
-			fmt.Printf("Are you sure you want to remove the workspace '%s'? [y/N]: ", name)
+			pretty.InfoPretty(fmt.Sprintf("Are you sure you want to remove the workspace '%s'? [y/N]: ", name))
 			reader := bufio.NewReader(os.Stdin)
 			input, _ := reader.ReadString('\n')
 			if strings.TrimSpace(strings.ToLower(input)) != "y" {
-				fmt.Println("Aborted.")
+				pretty.InfoPretty("Aborted.")
 				return nil
 			}
 		}
@@ -47,10 +49,12 @@ func NewWorkspaceRemoveCmd() *cobra.Command {
 		manager := git.NewWorktreeManager()
 
 		logger.Infof("Removing worktree '%s'...", name)
+		pretty.InfoPretty(fmt.Sprintf("Removing worktree '%s'...", name))
 		if err := manager.RemoveWorktree(context.Background(), gitRoot, worktreePath); err != nil {
 			// Try with force if there are uncommitted changes
 			if strings.Contains(err.Error(), "uncommitted changes") {
 				logger.Warnf("Worktree has uncommitted changes. Forcing removal...")
+				pretty.InfoPretty("Worktree has uncommitted changes. Forcing removal...")
 				removeCmd := exec.Command("git", "worktree", "remove", "--force", worktreePath)
 				removeCmd.Dir = gitRoot
 				if err := removeCmd.Run(); err != nil {
@@ -61,7 +65,8 @@ func NewWorkspaceRemoveCmd() *cobra.Command {
 			}
 		}
 
-		logger.Infof("✓ Workspace '%s' removed successfully.", name)
+		logger.Infof("Workspace '%s' removed successfully.", name)
+		pretty.Success(fmt.Sprintf("Workspace '%s' removed successfully.", name))
 		return nil
 	}
 	return cmd

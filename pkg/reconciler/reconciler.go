@@ -5,9 +5,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-meta/pkg/devlinks"
-	"github.com/mattsolo1/grove-meta/pkg/logger"
 	"github.com/mattsolo1/grove-meta/pkg/sdk"
+	"github.com/sirupsen/logrus"
 )
 
 // Reconciler manages the intelligent layering of dev links over released versions
@@ -15,6 +16,7 @@ type Reconciler struct {
 	devConfig    *devlinks.Config
 	toolVersions *sdk.ToolVersions
 	groveHome    string
+	logger       *logrus.Entry
 }
 
 // New creates a new reconciler instance (DEPRECATED - use NewWithToolVersions)
@@ -42,6 +44,7 @@ func NewWithToolVersions(toolVersions *sdk.ToolVersions) (*Reconciler, error) {
 		devConfig:    devConfig,
 		toolVersions: toolVersions,
 		groveHome:    groveHome,
+		logger:       logging.NewLogger("reconciler"),
 	}, nil
 }
 
@@ -51,7 +54,7 @@ func NewWithToolVersions(toolVersions *sdk.ToolVersions) (*Reconciler, error) {
 func (r *Reconciler) ReconcileAll(tools []string) error {
 	for _, toolName := range tools {
 		if err := r.Reconcile(toolName); err != nil {
-			logger.Error("Failed to reconcile %s: %v", toolName, err)
+			r.logger.Errorf("Failed to reconcile %s: %v", toolName, err)
 			// Continue with other tools even if one fails
 		}
 	}
@@ -79,7 +82,7 @@ func (r *Reconciler) Reconcile(toolName string) error {
 		if binLinks, exists := r.devConfig.Binaries[checkName]; exists && binLinks.Current != "" {
 			// Dev override is active
 			if linkInfo, ok := binLinks.Links[binLinks.Current]; ok {
-				logger.Info("'%s' is using dev link '%s' (%s)", effectiveAlias, binLinks.Current, linkInfo.Path)
+				r.logger.Infof("'%s' is using dev link '%s' (%s)", effectiveAlias, binLinks.Current, linkInfo.Path)
 				return createOrUpdateSymlink(symlinkPath, linkInfo.Path)
 			}
 		}
@@ -88,7 +91,7 @@ func (r *Reconciler) Reconcile(toolName string) error {
 	// No dev override, fall back to released version
 	toolVersion := r.toolVersions.GetToolVersion(repoName)
 	if toolVersion == "" {
-		logger.Debug("No active version for %s and no dev override", repoName)
+		r.logger.Debugf("No active version for %s and no dev override", repoName)
 		// Remove the symlink if it exists
 		os.Remove(symlinkPath)
 		return nil
@@ -97,12 +100,12 @@ func (r *Reconciler) Reconcile(toolName string) error {
 	// Check if the tool exists in the active version
 	releasedBinPath := filepath.Join(r.groveHome, "versions", toolVersion, "bin", effectiveAlias)
 	if _, err := os.Stat(releasedBinPath); err == nil {
-		logger.Info("'%s' is using released version '%s'", effectiveAlias, toolVersion)
+		r.logger.Infof("'%s' is using released version '%s'", effectiveAlias, toolVersion)
 		return createOrUpdateSymlink(symlinkPath, releasedBinPath)
 	}
 
 	// Tool doesn't exist in the active version
-	logger.Debug("%s not found in version %s", effectiveAlias, toolVersion)
+	r.logger.Debugf("%s not found in version %s", effectiveAlias, toolVersion)
 	os.Remove(symlinkPath)
 	return nil
 }

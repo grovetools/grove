@@ -2,70 +2,57 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
 	grovelogging "github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/tui/theme"
 )
 
 // Define reusable styles for the release command
 var (
 	// Base styles
-	releaseTitleStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("212")).
+	releaseTitleStyle = theme.DefaultTheme.Header.Copy().
 				MarginBottom(1)
 
-	releaseSectionStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("141")).
+	releaseSectionStyle = theme.DefaultTheme.Header.Copy().
 				MarginTop(1).
 				MarginBottom(1)
 
-	releaseSuccessStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("42"))
+	releaseSuccessStyle = theme.DefaultTheme.Success.Copy().
+				Bold(true)
 
-	releaseWarningStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("214"))
+	releaseWarningStyle = theme.DefaultTheme.Warning.Copy().
+				Bold(true)
 
-	releaseErrorStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("196"))
+	releaseErrorStyle = theme.DefaultTheme.Error.Copy().
+				Bold(true)
 
-	releaseInfoStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("247"))
+	releaseInfoStyle = theme.DefaultTheme.Info
 
-	releaseHighlightStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("42"))
+	releaseHighlightStyle = theme.DefaultTheme.Success.Copy().
+				Bold(true)
 
-	releaseDimStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240"))
+	releaseDimStyle = theme.DefaultTheme.Muted
 
 	// Box styles for different phases
 	phaseBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("240")).
+			BorderForeground(theme.DefaultTheme.Muted.GetForeground()).
 			Padding(1, 2)
 
 	successBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("42")).
+			BorderForeground(theme.DefaultTheme.Success.GetForeground()).
 			Padding(1, 2)
 
 	// Progress indicators
-	spinnerStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("212"))
+	spinnerStyle = theme.DefaultTheme.Highlight
 
-	releaseCheckmarkStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("42"))
+	releaseCheckmarkStyle = theme.DefaultTheme.Success
 
-	crossStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196"))
+	crossStyle = theme.DefaultTheme.Error
 )
 
 // Initialize loggers for display functions
@@ -114,10 +101,8 @@ func displayFailed(message string) {
 
 // Create a styled pre-flight checks table
 func displayPreflightTable(headers []string, rows [][]string) {
-	re := lipgloss.NewRenderer(os.Stdout)
 
-	baseStyle := re.NewStyle().Padding(0, 1)
-	headerStyle := baseStyle.Copy().Bold(true).Foreground(lipgloss.Color("255"))
+	headerStyle := theme.DefaultTheme.Header.Copy().Padding(0, 1)
 
 	// Style each row based on status
 	styledRows := make([][]string, 0, len(rows))
@@ -142,7 +127,7 @@ func displayPreflightTable(headers []string, rows [][]string) {
 				styledRow = []string{
 					row[0],
 					row[1],
-					successStyle.Render(status),
+					theme.DefaultTheme.Success.Render(status),
 					releaseInfoStyle.Render(issues),
 				}
 			} else {
@@ -150,7 +135,7 @@ func displayPreflightTable(headers []string, rows [][]string) {
 				styledRow = []string{
 					row[0],
 					row[1],
-					successStyle.Render(status),
+					theme.DefaultTheme.Success.Render(status),
 					releaseDimStyle.Render(issues),
 				}
 			}
@@ -165,10 +150,10 @@ func displayPreflightTable(headers []string, rows [][]string) {
 		} else if strings.Contains(status, "✗") {
 			// Dirty status
 			styledRow = []string{
-				errorStyle.Render(row[0]),
-				errorStyle.Render(row[1]),
-				errorStyle.Render(status),
-				errorStyle.Render(issues),
+				theme.DefaultTheme.Error.Render(row[0]),
+				theme.DefaultTheme.Error.Render(row[1]),
+				theme.DefaultTheme.Error.Render(status),
+				theme.DefaultTheme.Error.Render(issues),
 			}
 		} else {
 			// Unknown/error status
@@ -186,7 +171,7 @@ func displayPreflightTable(headers []string, rows [][]string) {
 	// Create table
 	t := table.New().
 		Border(lipgloss.NormalBorder()).
-		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
+		BorderStyle(theme.DefaultTheme.Muted).
 		Headers(headers...).
 		Rows(styledRows...)
 
@@ -216,7 +201,7 @@ func displayReleaseProgress(title string, items []string) {
 // Display final success message
 func displayFinalSuccess(version string, repoCount int) {
 	content := []string{
-		successStyle.Render("✅ Release Successfully Created"),
+		theme.DefaultTheme.Success.Render("✅ Release Successfully Created"),
 		"",
 		fmt.Sprintf("New ecosystem version: %s", releaseHighlightStyle.Render(version)),
 		fmt.Sprintf("Repositories released: %s", releaseHighlightStyle.Render(fmt.Sprintf("%d", repoCount))),

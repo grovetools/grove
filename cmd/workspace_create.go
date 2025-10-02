@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	meta_workspace "github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
@@ -23,9 +24,9 @@ This command is the new standard for setting up an isolated development environm
 
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		logger := cli.GetLogger(cmd)
+		pretty := logging.NewPrettyLogger()
 
-		logger.Infof("Creating workspace '%s'...", name)
+		pretty.Progress(fmt.Sprintf("Creating workspace '%s'...", name))
 
 		// Find the git root of the current ecosystem.
 		gitRoot, err := meta_workspace.FindRoot("")
@@ -47,8 +48,9 @@ This command is the new standard for setting up an isolated development environm
 			return fmt.Errorf("failed to create workspace: %w", err)
 		}
 		
-		logger.Infof("✓ Workspace '%s' created successfully at: %s", name, worktreePath)
-		logger.Infof("To open a session, run: grove ws open %s", name)
+		pretty.Success(fmt.Sprintf("Workspace '%s' created", name))
+		pretty.Path("Path", worktreePath)
+		pretty.InfoPretty(fmt.Sprintf("To open a session, run: grove ws open %s", name))
 		return nil
 	}
 	return cmd

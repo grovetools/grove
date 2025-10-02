@@ -15,47 +15,17 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"github.com/mattsolo1/grove-core/tui/components/help"
+	"github.com/mattsolo1/grove-core/tui/keymap"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-meta/pkg/release"
 	"github.com/spf13/cobra"
 )
 
-// Define styles for the release TUI
-var (
-	releaseTuiHeaderStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("#FF79C6")).
-				MarginBottom(1)
-
-	releaseTuiStatusPendingStyle = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#FFB86C"))
-
-	releaseTuiStatusApprovedStyle = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#50FA7B"))
-
-	releaseTuiSuggestedStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#8BE9FD"))
-
-	releaseTuiSelectedStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#44475A")).
-				Bold(true)
-
-	releaseTuiHelpStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#6272A4")).
-				MarginTop(1)
-
-	releaseTuiChangelogHeaderStyle = lipgloss.NewStyle().
-					Bold(true).
-					Foreground(lipgloss.Color("#BD93F9")).
-					MarginBottom(1)
-
-	releaseTuiChangelogBodyStyle = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#F8F8F2"))
-)
 
 // Key bindings for the release TUI
 type releaseKeyMap struct {
-	Up              key.Binding
-	Down            key.Binding
+	keymap.Base
 	Toggle          key.Binding
 	Tab             key.Binding
 	SelectAll       key.Binding
@@ -76,20 +46,11 @@ type releaseKeyMap struct {
 	TogglePush      key.Binding
 	ToggleSyncDeps  key.Binding
 	Approve         key.Binding
-	Help            key.Binding
-	Quit            key.Binding
 	Back            key.Binding
 }
 
 var releaseKeys = releaseKeyMap{
-	Up: key.NewBinding(
-		key.WithKeys("up", "k"),
-		key.WithHelp("↑/k", "up"),
-	),
-	Down: key.NewBinding(
-		key.WithKeys("down", "j"),
-		key.WithHelp("↓/j", "down"),
-	),
+	Base: keymap.NewBase(),
 	Toggle: key.NewBinding(
 		key.WithKeys(" ", "x"),
 		key.WithHelp("space/x", "toggle selection"),
@@ -170,14 +131,6 @@ var releaseKeys = releaseKeyMap{
 		key.WithKeys("a"),
 		key.WithHelp("a", "approve"),
 	),
-	Help: key.NewBinding(
-		key.WithKeys("?"),
-		key.WithHelp("?", "toggle help"),
-	),
-	Quit: key.NewBinding(
-		key.WithKeys("q", "ctrl+c"),
-		key.WithHelp("q", "quit"),
-	),
 	Back: key.NewBinding(
 		key.WithKeys("esc"),
 		key.WithHelp("esc", "back"),
@@ -199,6 +152,7 @@ type releaseTuiModel struct {
 	selectedIndex int
 	repoNames     []string // Ordered list of repo names for consistent navigation
 	viewport      viewport.Model
+	help          help.Model
 	width         int
 	height        int
 	err           error
@@ -211,7 +165,6 @@ type releaseTuiModel struct {
 	genCurrent    string        // Current repo being generated
 	genCompleted  int           // Number of completed generations
 	dryRun        bool          // Whether to run in dry-run mode
-	showHelp      bool          // Whether to show help popup
 	shouldApply   bool          // Flag to indicate we should exit and apply
 	push          bool          // Whether to push to remote
 	settingsIndex int           // Currently selected setting in settings view
@@ -242,8 +195,8 @@ func initialReleaseModel(plan *release.ReleasePlan) releaseTuiModel {
 		currentView: viewTable,
 		repoNames:   repoNames,
 		viewport:    viewport.New(80, 20),
+		help:        help.New(releaseKeys),
 		dryRun:      true, // Start in dry-run mode for safety
-		showHelp:    false,
 	}
 }
 
@@ -359,10 +312,10 @@ func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Handle help popup first - only respond to close keys when help is shown
-	if m.showHelp {
+	if m.help.ShowAll {
 		switch msg.String() {
 		case "?", "q", "esc", "ctrl+c":
-			m.showHelp = false
+			m.help.ShowAll = false
 			return m, nil
 		default:
 			// Ignore ALL other keys when help is shown, including 'A'
@@ -371,16 +324,16 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	
 	switch {
-	case key.Matches(msg, m.keys.Quit):
+	case key.Matches(msg, m.keys.Base.Quit):
 		return m, tea.Quit
 
-	case key.Matches(msg, m.keys.Up):
+	case key.Matches(msg, m.keys.Base.Up):
 		if m.selectedIndex > 0 {
 			m.selectedIndex--
 		}
 		return m, nil
 
-	case key.Matches(msg, m.keys.Down):
+	case key.Matches(msg, m.keys.Base.Down):
 		if m.selectedIndex < len(m.repoNames)-1 {
 			m.selectedIndex++
 		}
@@ -818,8 +771,8 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case key.Matches(msg, m.keys.Help):
-		m.showHelp = !m.showHelp
+	case key.Matches(msg, m.keys.Base.Help):
+		m.help.ShowAll = !m.help.ShowAll
 		return m, nil
 
 	}
@@ -833,7 +786,7 @@ func (m releaseTuiModel) updateChangelog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.currentView = viewTable
 		return m, nil
 
-	case key.Matches(msg, m.keys.Quit):
+	case key.Matches(msg, m.keys.Base.Quit):
 		return m, tea.Quit
 	}
 
@@ -851,16 +804,16 @@ func (m releaseTuiModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.currentView = viewTable
 		return m, nil
 
-	case key.Matches(msg, m.keys.Quit):
+	case key.Matches(msg, m.keys.Base.Quit):
 		return m, tea.Quit
 
-	case key.Matches(msg, m.keys.Up) || msg.String() == "k":
+	case key.Matches(msg, m.keys.Base.Up) || msg.String() == "k":
 		if m.settingsIndex > 0 {
 			m.settingsIndex--
 		}
 		return m, nil
 
-	case key.Matches(msg, m.keys.Down) || msg.String() == "j":
+	case key.Matches(msg, m.keys.Base.Down) || msg.String() == "j":
 		if m.settingsIndex < numSettings-1 {
 			m.settingsIndex++
 		}
@@ -923,13 +876,8 @@ func (m releaseTuiModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m releaseTuiModel) View() string {
 	// Show help overlay if active
-	if m.showHelp {
-		helpView := m.renderHelp()
-		return lipgloss.NewStyle().
-			Width(m.width).
-			Height(m.height).
-			Align(lipgloss.Center, lipgloss.Center).
-			Render(helpView)
+	if m.help.ShowAll {
+		return m.help.View()
 	}
 	
 	switch m.currentView {
@@ -942,120 +890,6 @@ func (m releaseTuiModel) View() string {
 	}
 }
 
-// renderHelp renders the help popup with legend and navigation
-func (m releaseTuiModel) renderHelp() string {
-	// Create styles
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("241")).
-		Padding(2, 3).
-		Width(80).
-		Align(lipgloss.Center)
-	
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#FF79C6")).
-		MarginBottom(1)
-	
-	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#8BE9FD")).
-		Bold(true)
-	
-	// Format a key-value pair with consistent spacing
-	formatPair := func(key, desc string) string {
-		// Style the key
-		styledKey := keyStyle.Render(key)
-		// Pad to ensure alignment (10 char width for key column)
-		padding := 10 - len(key)
-		if padding < 0 {
-			padding = 0
-		}
-		return fmt.Sprintf("%s%s %s", styledKey, strings.Repeat(" ", padding), desc)
-	}
-	
-	// Left column - Navigation and Version
-	leftLines := []string{
-		lipgloss.NewStyle().Bold(true).Render("Navigation:"),
-		"",
-		formatPair("↑/↓,j/k", "Navigate repositories"),
-		formatPair("space", "Toggle selection"),
-		formatPair("Tab", "Settings menu"),
-		formatPair("Ctrl+A", "Select all"),
-		formatPair("Ctrl+D", "Deselect all"),
-		formatPair("v", "View changelog"),
-		formatPair("q", "Quit"),
-		"",
-		lipgloss.NewStyle().Bold(true).Render("Version Bump:"),
-		"",
-		formatPair("m", "Major version"),
-		formatPair("n", "Minor version"),
-		formatPair("p", "Patch version"),
-		formatPair("s", "Apply LLM suggestion"),
-		"",
-		lipgloss.NewStyle().Bold(true).Render("Release:"),
-		"",
-		formatPair("a", "Toggle approval"),
-		"",
-		formatPair("?", "Toggle help"),
-	}
-	
-	// Right column - Changelog and Status
-	var rightLines []string
-	if m.plan.Type == "full" {
-		rightLines = []string{
-			lipgloss.NewStyle().Bold(true).Render("Changelog:"),
-			"",
-			formatPair("g", "Generate current"),
-			formatPair("G", "Generate selected"),
-			formatPair("e", "Edit staged"),
-			formatPair("E", "Edit CHANGELOG.md"),
-			formatPair("w", "Write to repo"),
-			"",
-			lipgloss.NewStyle().Bold(true).Render("LLM Rules:"),
-			"",
-			formatPair("r", "Edit rules"),
-			formatPair("R", "Reset to '*'"),
-			"",
-			lipgloss.NewStyle().Bold(true).Render("Status:"),
-			"",
-			"✓         Generated",
-			"⚠         Stale (new commits)",
-			"⏳        Pending",
-			"✓         Approved",
-			"[✓]       Selected",
-		}
-	} else {
-		rightLines = []string{
-			lipgloss.NewStyle().Bold(true).Render("Status:"),
-			"",
-			"✓         Approved",
-			"[✓]       Selected",
-		}
-	}
-	
-	// Ensure both columns have the same number of lines
-	for len(leftLines) < len(rightLines) {
-		leftLines = append(leftLines, "")
-	}
-	for len(rightLines) < len(leftLines) {
-		rightLines = append(rightLines, "")
-	}
-	
-	// Style columns with fixed width
-	leftColumn := lipgloss.NewStyle().Width(35).Render(strings.Join(leftLines, "\n"))
-	rightColumn := lipgloss.NewStyle().Width(35).Render(strings.Join(rightLines, "\n"))
-	
-	// Join columns horizontally
-	columns := lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, rightColumn)
-	
-	// Add title
-	title := titleStyle.Render("🚀 Grove Release Manager - Help")
-	
-	// Combine title and columns
-	content := lipgloss.JoinVertical(lipgloss.Center, title, columns)
-	
-	return boxStyle.Render(content)
-}
 
 func (m releaseTuiModel) viewTable() string {
 	headerText := "🚀 Grove Release Manager"
@@ -1069,12 +903,12 @@ func (m releaseTuiModel) viewTable() string {
 	if len(modes) > 0 {
 		headerText += " [" + strings.Join(modes, " | ") + "]"
 	}
-	header := releaseTuiHeaderStyle.Render(headerText)
+	header := theme.DefaultTheme.Header.Render(headerText)
 
 	// Create table
 	t := table.New().
 		Border(lipgloss.NormalBorder()).
-		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4")))
+		BorderStyle(theme.DefaultTheme.Muted)
 	
 	// Conditionally add headers based on plan type
 	if m.plan.Type == "full" {
@@ -1136,9 +970,9 @@ func (m releaseTuiModel) viewTable() string {
 		if repo.CurrentVersion == repo.NextVersion {
 			statusStr = "-"
 		} else if repo.Status == "Approved" {
-			statusStr = releaseTuiStatusApprovedStyle.Render("✓ Approved")
+			statusStr = theme.DefaultTheme.Success.Render("✓ Approved")
 		} else {
-			statusStr = releaseTuiStatusPendingStyle.Render("⏳ Pending")
+			statusStr = theme.DefaultTheme.Warning.Render("⏳ Pending")
 		}
 
 		// Selection checkbox
@@ -1157,7 +991,7 @@ func (m releaseTuiModel) viewTable() string {
 			changelogStatus = "-"
 		} else if repo.ChangelogState == "dirty" {
 			// Changelog was written and modified by user
-			changelogStatus = lipgloss.NewStyle().Foreground(lipgloss.Color("#8BE9FD")).Bold(true).Render("📝 Modified")
+			changelogStatus = theme.DefaultTheme.Info.Copy().Bold(true).Render("📝 Modified")
 		} else if repo.ChangelogPath != "" {
 			if _, err := os.Stat(repo.ChangelogPath); err == nil {
 				// Check if the changelog is stale (different commit)
@@ -1171,29 +1005,29 @@ func (m releaseTuiModel) viewTable() string {
 						currentCommit := strings.TrimSpace(string(currentCommitBytes))
 						if currentCommit != repo.ChangelogCommit {
 							// Changelog is stale - generated from different commit
-							changelogStatus = lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Render("⚠ Stale")
+							changelogStatus = theme.DefaultTheme.Warning.Render("⚠ Stale")
 						} else {
-							changelogStatus = releaseTuiStatusApprovedStyle.Render("✓ Generated")
+							changelogStatus = theme.DefaultTheme.Success.Render("✓ Generated")
 						}
 					} else {
 						// Couldn't get current commit, assume generated
-						changelogStatus = releaseTuiStatusApprovedStyle.Render("✓ Generated")
+						changelogStatus = theme.DefaultTheme.Success.Render("✓ Generated")
 					}
 				} else {
 					// No commit tracked, assume generated (for backwards compat)
-					changelogStatus = releaseTuiStatusApprovedStyle.Render("✓ Generated")
+					changelogStatus = theme.DefaultTheme.Success.Render("✓ Generated")
 				}
 			} else {
-				changelogStatus = releaseTuiStatusPendingStyle.Render("⏳ Pending")
+				changelogStatus = theme.DefaultTheme.Warning.Render("⏳ Pending")
 			}
 		} else {
-			changelogStatus = releaseTuiStatusPendingStyle.Render("⏳ Pending")
+			changelogStatus = theme.DefaultTheme.Warning.Render("⏳ Pending")
 		}
 
 		// Format Git status
 		var gitStatusStr string
 		if !repo.IsDirty {
-			gitStatusStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B")).Render("✓ Clean")
+			gitStatusStr = theme.DefaultTheme.Success.Render("✓ Clean")
 		} else {
 			// Build status string with counts
 			var parts []string
@@ -1206,7 +1040,7 @@ func (m releaseTuiModel) viewTable() string {
 			if repo.UntrackedCount > 0 {
 				parts = append(parts, fmt.Sprintf("?:%d", repo.UntrackedCount))
 			}
-			gitStatusStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB86C")).Render(strings.Join(parts, " "))
+			gitStatusStr = theme.DefaultTheme.Warning.Render(strings.Join(parts, " "))
 		}
 
 		// Format Changes/Release column
@@ -1242,7 +1076,7 @@ func (m releaseTuiModel) viewTable() string {
 		// Highlight selected row (but not for repos without changes)
 		if i == m.selectedIndex && repo.CurrentVersion != repo.NextVersion {
 			for j, cell := range row {
-				row[j] = releaseTuiSelectedStyle.Render(cell)
+				row[j] = theme.DefaultTheme.Selected.Render(cell)
 			}
 		}
 
@@ -1282,10 +1116,10 @@ func (m releaseTuiModel) viewTable() string {
 
 	// Footer with help hint
 	var footer string
-	if m.showHelp {
+	if m.help.ShowAll {
 		footer = ""
 	} else {
-		footer = releaseTuiHelpStyle.Render("Press ? for help • q to quit")
+		footer = theme.DefaultTheme.Muted.Render("Press ? for help • q to quit")
 	}
 
 	// Show suggestion reasoning for selected repo
@@ -1297,16 +1131,16 @@ func (m releaseTuiModel) viewTable() string {
 			var bumpType string
 			switch strings.ToLower(repo.SuggestedBump) {
 			case "major":
-				bumpType = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF5555")).Render("MAJOR")
+				bumpType = theme.DefaultTheme.Error.Copy().Bold(true).Render("MAJOR")
 			case "minor":
-				bumpType = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFB86C")).Render("MINOR")
+				bumpType = theme.DefaultTheme.Warning.Copy().Bold(true).Render("MINOR")
 			case "patch":
-				bumpType = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#50FA7B")).Render("PATCH")
+				bumpType = theme.DefaultTheme.Success.Copy().Bold(true).Render("PATCH")
 			default:
-				bumpType = lipgloss.NewStyle().Bold(true).Render(strings.ToUpper(repo.SuggestedBump))
+				bumpType = theme.DefaultTheme.Bold.Render(strings.ToUpper(repo.SuggestedBump))
 			}
 			
-			versionChange := lipgloss.NewStyle().Bold(true).Render(
+			versionChange := theme.DefaultTheme.Bold.Render(
 				fmt.Sprintf("%s → %s", repo.CurrentVersion, repo.NextVersion),
 			)
 			
@@ -1346,31 +1180,28 @@ func (m releaseTuiModel) viewTable() string {
 }
 
 func (m releaseTuiModel) viewChangelog() string {
-	header := releaseTuiChangelogHeaderStyle.Render(fmt.Sprintf("📝 Changelog Preview: %s", m.repoNames[m.selectedIndex]))
+	header := theme.DefaultTheme.Header.Render(fmt.Sprintf("📝 Changelog Preview: %s", m.repoNames[m.selectedIndex]))
 	
-	help := releaseTuiHelpStyle.Render("a: approve • esc: back • q: quit")
+	help := theme.DefaultTheme.Muted.Render("a: approve • esc: back • q: quit")
 
 	return fmt.Sprintf("%s\n\n%s\n\n%s", header, m.viewport.View(), help)
 }
 
 func (m releaseTuiModel) viewSettings() string {
 	headerText := "⚙️ Release Settings"
-	header := releaseTuiHeaderStyle.Render(headerText)
+	header := theme.DefaultTheme.Header.Render(headerText)
 	
 	// Create toggle items with current states
 	toggleStyle := lipgloss.NewStyle().
 		Padding(1, 2).
 		MarginBottom(1)
 	
-	activeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("42")).
+	activeStyle := theme.DefaultTheme.Success.Copy().
 		Bold(true)
 		
-	inactiveStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241"))
+	inactiveStyle := theme.DefaultTheme.Muted
 	
-	selectedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("226")).
+	selectedStyle := theme.DefaultTheme.Selected.Copy().
 		Bold(true)
 	
 	// Build settings list
@@ -1414,12 +1245,11 @@ func (m releaseTuiModel) viewSettings() string {
 	// Progress message if any
 	progressMsg := ""
 	if m.genProgress != "" {
-		progressMsg = "\n\n" + lipgloss.NewStyle().
-			Foreground(lipgloss.Color("226")).
+		progressMsg = "\n\n" + theme.DefaultTheme.Warning.
 			Render(m.genProgress)
 	}
 	
-	help := releaseTuiHelpStyle.Render("↑/↓,j/k: navigate • space/enter: toggle • tab/esc: back • q: quit")
+	help := theme.DefaultTheme.Muted.Render("↑/↓,j/k: navigate • space/enter: toggle • tab/esc: back • q: quit")
 	
 	// Combine all elements
 	return fmt.Sprintf("%s\n\n%s%s\n\n%s", header, content, progressMsg, help)

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-meta/pkg/repository"
 	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
@@ -98,7 +98,7 @@ func resolveTemplate(spec string, ecosystem bool) string {
 }
 
 func runAddRepo(cmd *cobra.Command, args []string) error {
-	logger := cli.GetLogger(cmd)
+	logger := logging.NewLogger("add-repo")
 
 	repoName := args[0]
 
@@ -123,7 +123,7 @@ func runAddRepo(cmd *cobra.Command, args []string) error {
 		addRepoDescription = fmt.Sprintf("A new Grove tool - %s", repoName)
 	}
 
-	creator := repository.NewCreator(logger)
+	creator := repository.NewCreator(logger.Logger)
 
 	// Resolve template
 	resolvedTemplate := resolveTemplate(addRepoTemplate, addRepoEcosystem)

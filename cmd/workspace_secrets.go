@@ -7,13 +7,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
 
-// Styles are defined in styles.go
 
 func NewWorkspaceSecretsCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -74,7 +73,8 @@ func newWorkspaceSecretsListCmd() *cobra.Command {
 }
 
 func runWorkspaceSecretsSet(cmd *cobra.Command, args []string) error {
-	logger := cli.GetLogger(cmd)
+	logger := logging.NewLogger("ws-secrets")
+	pretty := logging.NewPrettyLogger()
 	secretName := args[0]
 
 	// Get secret value
@@ -120,6 +120,7 @@ func runWorkspaceSecretsSet(cmd *cobra.Command, args []string) error {
 	}
 
 	logger.WithField("count", len(filteredWorkspaces)).Info("Setting secret across workspaces")
+	pretty.InfoPretty(fmt.Sprintf("Setting secret %s across %d workspaces...", secretName, len(filteredWorkspaces)))
 
 	// Process workspaces concurrently
 	type result struct {
@@ -193,22 +194,22 @@ func runWorkspaceSecretsSet(cmd *cobra.Command, args []string) error {
 
 	for res := range resultChan {
 		if res.success {
-			fmt.Printf("%s %s\n", successStyle.Render("✓"), res.workspace)
+			fmt.Printf("%s %s\n", theme.DefaultTheme.Success.Render("✓"), res.workspace)
 			successCount++
 		} else {
 			errMsg := "unknown error"
 			if res.err != nil {
 				errMsg = res.err.Error()
 			}
-			fmt.Printf("%s %s: %s\n", failStyle.Render("✗"), res.workspace, errMsg)
+			fmt.Printf("%s %s: %s\n", theme.DefaultTheme.Error.Render("✗"), res.workspace, errMsg)
 			failCount++
 		}
 	}
 
 	fmt.Println(strings.Repeat("-", 50))
 	fmt.Printf("Summary: %s succeeded, %s failed\n",
-		successStyle.Render(fmt.Sprintf("%d", successCount)),
-		failStyle.Render(fmt.Sprintf("%d", failCount)))
+		theme.DefaultTheme.Success.Render(fmt.Sprintf("%d", successCount)),
+		theme.DefaultTheme.Error.Render(fmt.Sprintf("%d", failCount)))
 
 	if failCount > 0 {
 		return fmt.Errorf("failed to set secret in %d repositories", failCount)
@@ -218,7 +219,8 @@ func runWorkspaceSecretsSet(cmd *cobra.Command, args []string) error {
 }
 
 func runWorkspaceSecretsDelete(cmd *cobra.Command, args []string) error {
-	logger := cli.GetLogger(cmd)
+	logger := logging.NewLogger("ws-secrets")
+	pretty := logging.NewPrettyLogger()
 	secretName := args[0]
 
 	// Get workspace filters
@@ -245,6 +247,7 @@ func runWorkspaceSecretsDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	logger.WithField("count", len(filteredWorkspaces)).Info("Deleting secret from workspaces")
+	pretty.InfoPretty(fmt.Sprintf("Deleting secret %s from %d workspaces...", secretName, len(filteredWorkspaces)))
 
 	// Process workspaces concurrently
 	type result struct {
@@ -318,22 +321,22 @@ func runWorkspaceSecretsDelete(cmd *cobra.Command, args []string) error {
 
 	for res := range resultChan {
 		if res.success {
-			fmt.Printf("%s %s\n", successStyle.Render("✓"), res.workspace)
+			fmt.Printf("%s %s\n", theme.DefaultTheme.Success.Render("✓"), res.workspace)
 			successCount++
 		} else {
 			errMsg := "unknown error"
 			if res.err != nil {
 				errMsg = res.err.Error()
 			}
-			fmt.Printf("%s %s: %s\n", failStyle.Render("✗"), res.workspace, errMsg)
+			fmt.Printf("%s %s: %s\n", theme.DefaultTheme.Error.Render("✗"), res.workspace, errMsg)
 			failCount++
 		}
 	}
 
 	fmt.Println(strings.Repeat("-", 50))
 	fmt.Printf("Summary: %s succeeded, %s failed\n",
-		successStyle.Render(fmt.Sprintf("%d", successCount)),
-		failStyle.Render(fmt.Sprintf("%d", failCount)))
+		theme.DefaultTheme.Success.Render(fmt.Sprintf("%d", successCount)),
+		theme.DefaultTheme.Error.Render(fmt.Sprintf("%d", failCount)))
 
 	if failCount > 0 {
 		return fmt.Errorf("failed to delete secret in %d repositories", failCount)
@@ -343,7 +346,8 @@ func runWorkspaceSecretsDelete(cmd *cobra.Command, args []string) error {
 }
 
 func runWorkspaceSecretsList(cmd *cobra.Command, args []string) error {
-	logger := cli.GetLogger(cmd)
+	logger := logging.NewLogger("ws-secrets")
+	pretty := logging.NewPrettyLogger()
 
 	// Find root directory with workspaces
 	rootDir, err := workspace.FindRoot("")
@@ -358,6 +362,7 @@ func runWorkspaceSecretsList(cmd *cobra.Command, args []string) error {
 	}
 
 	logger.WithField("count", len(workspaces)).Info("Listing secrets for workspaces")
+	pretty.InfoPretty(fmt.Sprintf("Listing secrets for %d workspaces...", len(workspaces)))
 
 	// Process workspaces
 	for _, ws := range workspaces {
@@ -368,7 +373,7 @@ func runWorkspaceSecretsList(cmd *cobra.Command, args []string) error {
 		cmd.Dir = ws
 		output, err := cmd.Output()
 		if err != nil {
-			fmt.Printf("\n%s %s: failed to get repository URL\n", failStyle.Render("✗"), wsName)
+			fmt.Printf("\n%s %s: failed to get repository URL\n", theme.DefaultTheme.Error.Render("✗"), wsName)
 			continue
 		}
 
@@ -390,18 +395,18 @@ func runWorkspaceSecretsList(cmd *cobra.Command, args []string) error {
 		}
 
 		if owner == "" || repo == "" {
-			fmt.Printf("\n%s %s: could not parse repository URL\n", failStyle.Render("✗"), wsName)
+			fmt.Printf("\n%s %s: could not parse repository URL\n", theme.DefaultTheme.Error.Render("✗"), wsName)
 			continue
 		}
 
 		// List secrets using gh CLI
-		fmt.Printf("\n%s:\n", lipgloss.NewStyle().Bold(true).Render(wsName))
+		fmt.Printf("\n%s:\n", theme.DefaultTheme.Bold.Render(wsName))
 		cmd = exec.Command("gh", "secret", "list", "--repo", fmt.Sprintf("%s/%s", owner, repo))
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		err = cmd.Run()
 		if err != nil {
-			fmt.Printf("  %s Failed to list secrets: %v\n", failStyle.Render("✗"), err)
+			fmt.Printf("  %s Failed to list secrets: %v\n", theme.DefaultTheme.Error.Render("✗"), err)
 		}
 	}
 
