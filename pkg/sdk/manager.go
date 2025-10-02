@@ -36,7 +36,6 @@ type ToolInfo struct {
 
 // toolRegistry maps a tool's canonical repository name to its information
 var toolRegistry = map[string]ToolInfo{
-	"grove-canopy":                {Alias: "canopy"},
 	"grove-claude-logs":           {Alias: "clogs"},
 	"grove-core":                  {Alias: "core"},
 	"grove-context":               {Alias: "cx"},
