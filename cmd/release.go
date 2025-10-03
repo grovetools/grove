@@ -1230,13 +1230,22 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 					return
 				}
 
+				// For RC releases, push the rc-nightly branch first so the tag has a home
+				if plan.Type == "rc" {
+					if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", "rc-nightly"},
+						fmt.Sprintf("Push rc-nightly branch for %s", repo), logger); err != nil {
+						errChan <- err
+						return
+					}
+				}
+
 				// Push the tag
 				if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", version},
 					fmt.Sprintf("Push tag for %s", repo), logger); err != nil {
 					errChan <- err
 					return
 				}
-				
+
 				// Mark tag as successfully pushed
 				if plan != nil && plan.Repos != nil {
 					if repoPlan, ok := plan.Repos[repo]; ok {
