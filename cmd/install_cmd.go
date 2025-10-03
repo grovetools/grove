@@ -73,10 +73,10 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 		return fmt.Errorf("failed to create directory structure: %w", err)
 	}
 
-	// Expand "all" to list of all tools, handling all@nightly specially
+	// Expand "all" to list of all tools, handling all@version specially
 	var toolsToProcess []string
 	var versionForAll string
-	
+
 	if len(args) == 1 && args[0] == "all" {
 		toolsToProcess = sdk.GetAllTools()
 		versionForAll = "latest"
@@ -85,6 +85,10 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 		toolsToProcess = sdk.GetAllTools()
 		versionForAll = "nightly"
 		fmt.Println(theme.DefaultTheme.Bold.Render("Installing nightly builds for all Grove tools..."))
+	} else if len(args) == 1 && args[0] == "all@source" {
+		toolsToProcess = sdk.GetAllTools()
+		versionForAll = "source"
+		fmt.Println(theme.DefaultTheme.Bold.Render("Building all Grove tools from source..."))
 	} else {
 		// Resolve dependencies for the requested tools
 		resolvedTools, err := manager.ResolveDependencies(args)
