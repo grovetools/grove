@@ -922,6 +922,39 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 					"version": version,
 				}).Info("Releasing module")
 
+				// For RC releases, checkout/create rc-nightly branch
+				if !releaseDryRun && plan.Type == "rc" {
+					// Check if rc-nightly branch exists on remote
+					checkCmd := exec.CommandContext(ctx, "git", "ls-remote", "--heads", "origin", "rc-nightly")
+					checkCmd.Dir = wsPath
+					checkOutput, _ := checkCmd.Output()
+
+					if len(checkOutput) > 0 {
+						// Branch exists remotely, fetch and checkout
+						displayInfo(fmt.Sprintf("Checking out rc-nightly branch for %s...", repo))
+						if err := executeGitCommand(ctx, wsPath, []string{"fetch", "origin", "rc-nightly"}, "Fetch rc-nightly", logger); err != nil {
+							errChan <- fmt.Errorf("failed to fetch rc-nightly for %s: %w", repo, err)
+							return
+						}
+						if err := executeGitCommand(ctx, wsPath, []string{"checkout", "rc-nightly"}, "Checkout rc-nightly", logger); err != nil {
+							errChan <- fmt.Errorf("failed to checkout rc-nightly for %s: %w", repo, err)
+							return
+						}
+						// Reset to origin/rc-nightly to ensure clean state
+						if err := executeGitCommand(ctx, wsPath, []string{"reset", "--hard", "origin/rc-nightly"}, "Reset rc-nightly", logger); err != nil {
+							errChan <- fmt.Errorf("failed to reset rc-nightly for %s: %w", repo, err)
+							return
+						}
+					} else {
+						// Branch doesn't exist, create from main
+						displayInfo(fmt.Sprintf("Creating rc-nightly branch from main for %s...", repo))
+						if err := executeGitCommand(ctx, wsPath, []string{"checkout", "-b", "rc-nightly", "origin/main"}, "Create rc-nightly from main", logger); err != nil {
+							errChan <- fmt.Errorf("failed to create rc-nightly for %s: %w", repo, err)
+							return
+						}
+					}
+				}
+
 				// Update dependencies if this is not the first level (skip in dry-run mode)
 				if levelIndex > 0 && !releaseDryRun {
 					logger.WithFields(logrus.Fields{
@@ -941,12 +974,18 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 					// After updating dependencies, check for changes and push them
 					status, _ := git.GetStatus(wsPath)
 					if status.IsDirty {
-						displayInfo(fmt.Sprintf("Pushing dependency updates for %s...", repo))
-						if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", "HEAD:main"}, "Push dependency updates", logger); err != nil {
+						// Determine target branch based on release type
+						targetBranch := "main"
+						if plan.Type == "rc" {
+							targetBranch = "rc-nightly"
+						}
+
+						displayInfo(fmt.Sprintf("Pushing dependency updates for %s to %s...", repo, targetBranch))
+						if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", "HEAD:" + targetBranch}, "Push dependency updates", logger); err != nil {
 							errChan <- fmt.Errorf("failed to push dependency updates for %s: %w", repo, err)
 							return
 						}
-						// Wait for CI on main to complete
+						// Wait for CI to complete (only for non-RC or if not skipping)
 						if !releaseSkipCI {
 							displayInfo(fmt.Sprintf("Waiting for CI to pass for %s after dependency updates...", repo))
 							if err := gh.WaitForCIWorkflow(ctx, wsPath); err != nil {

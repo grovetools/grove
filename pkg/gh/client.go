@@ -440,7 +440,7 @@ func WaitForCIWorkflow(ctx context.Context, repoPath string) error {
 	
 	// Poll for the CI run for this commit to appear
 	var runID string
-	findTimeout := time.After(5 * time.Minute)
+	findTimeout := time.After(15 * time.Minute)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
