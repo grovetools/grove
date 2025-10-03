@@ -535,27 +535,64 @@ func executeGitCommand(ctx context.Context, dir string, args []string, descripti
 
 	logger.WithField("command", fmt.Sprintf("git %s", strings.Join(args, " "))).Info(description)
 
-	cmdBuilder := command.NewSafeBuilder()
-	cmd, err := cmdBuilder.Build(ctx, "git", args...)
-	if err != nil {
-		return fmt.Errorf("failed to build git command: %w", err)
+	// Retry logic for git lock errors
+	maxRetries := 3
+	retryDelay := 500 * time.Millisecond
+
+	var lastErr error
+	var output []byte
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			logger.WithFields(logrus.Fields{
+				"attempt": attempt + 1,
+				"max":     maxRetries,
+			}).Warn("Retrying git command due to lock error")
+			time.Sleep(retryDelay)
+			retryDelay *= 2 // Exponential backoff
+		}
+
+		cmdBuilder := command.NewSafeBuilder()
+		cmd, err := cmdBuilder.Build(ctx, "git", args...)
+		if err != nil {
+			return fmt.Errorf("failed to build git command: %w", err)
+		}
+
+		execCmd := cmd.Exec()
+		execCmd.Dir = dir
+
+		// Capture combined output to display git's actual error messages
+		output, lastErr = execCmd.CombinedOutput()
+
+		// Check if it's a lock error
+		if lastErr != nil {
+			outputStr := string(output)
+			if strings.Contains(outputStr, "index.lock") || strings.Contains(outputStr, "Unable to create") {
+				// This is a lock error, retry
+				if len(output) > 0 && attempt == 0 {
+					// Print error on first attempt
+					fmt.Print(outputStr)
+				}
+				continue
+			}
+			// Not a lock error, fail immediately
+			break
+		}
+
+		// Success
+		if len(output) > 0 {
+			fmt.Print(string(output))
+		}
+		return nil
 	}
 
-	execCmd := cmd.Exec()
-	execCmd.Dir = dir
-
-	// Capture combined output to display git's actual error messages
-	output, err := execCmd.CombinedOutput()
-
-	// Always print the output if there's any (preserves existing behavior for successful commands)
+	// All retries exhausted or non-lock error
 	if len(output) > 0 {
 		fmt.Print(string(output))
 	}
 
-	if err != nil {
-		// The error message from git has already been printed above
-		// Return a wrapped error for proper error handling
-		return fmt.Errorf("git command failed: %w", err)
+	if lastErr != nil {
+		return fmt.Errorf("git command failed: %w", lastErr)
 	}
 
 	return nil
