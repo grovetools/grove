@@ -66,10 +66,14 @@ jobs:
 
       - name: Create GitHub Release
         run: |
+          IS_PRERELEASE=false
+          if [[ "${{ github.ref_name }}" == *-* ]]; then
+            IS_PRERELEASE=true
+          fi
           gh release create ${{ github.ref_name }} \
             --notes-file release-notes.md \
             --draft=false \
-            --prerelease=false
+            --prerelease=$IS_PRERELEASE
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
