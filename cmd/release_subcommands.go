@@ -33,34 +33,30 @@ Use --rc flag to create a Release Candidate plan that skips changelog
 and documentation updates.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			
+
 			// Clear any existing plan first
 			if err := release.ClearPlan(); err != nil {
 				return fmt.Errorf("failed to clear existing plan: %w", err)
 			}
-			
+
 			// Set the RC flag if requested
-			// Note: We'll need to handle this in runReleasePlan
 			if isRC {
-				// This would be handled by setting a Type field in the plan
 				fmt.Println("Generating Release Candidate plan...")
 			}
-			
-			plan, err := runReleasePlan(ctx)
+
+			plan, err := runReleasePlan(ctx, isRC)
 			if err != nil {
+				// If runReleasePlan returns a "no changes" error, we should inform the user and exit cleanly.
+				if strings.Contains(err.Error(), "no repositories have changes") {
+					fmt.Println("No repositories have changes since their last release. Nothing to plan.")
+					return nil
+				}
 				return err
 			}
-			
-			// Set the plan type based on the --rc flag
-			if isRC {
-				plan.Type = "rc"
-			} else {
-				plan.Type = "full"
-			}
-			
-			// Save the plan again with the type
+
+			// The plan type is now set within runReleasePlan, so we just need to save it.
 			if err := release.SavePlan(plan); err != nil {
-				return fmt.Errorf("failed to save release plan type: %w", err)
+				return fmt.Errorf("failed to save release plan: %w", err)
 			}
 			
 			// Display summary

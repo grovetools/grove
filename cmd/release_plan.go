@@ -18,7 +18,7 @@ import (
 )
 
 // runReleasePlan generates a release plan without executing it
-func runReleasePlan(ctx context.Context) (*release.ReleasePlan, error) {
+func runReleasePlan(ctx context.Context, isRC bool) (*release.ReleasePlan, error) {
 	// Create logger directly with proper name
 	logger := grovelogging.NewLogger("grove-meta").Logger
 
@@ -71,7 +71,7 @@ func runReleasePlan(ctx context.Context) (*release.ReleasePlan, error) {
 	}
 
 	// Calculate versions for all workspaces
-	versions, currentVersions, commitsSinceTag, err := calculateNextVersions(ctx, rootDir, workspaces, releaseMajor, releaseMinor, releasePatch, logger)
+	versions, currentVersions, commitsSinceTag, err := calculateNextVersions(ctx, rootDir, workspaces, releaseMajor, releaseMinor, releasePatch, isRC, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate versions: %w", err)
 	}
@@ -140,6 +140,13 @@ func runReleasePlan(ctx context.Context) (*release.ReleasePlan, error) {
 		ParentCurrentVersion: parentCurrentVersion,
 	}
 
+	// Set plan type
+	if isRC {
+		plan.Type = "rc"
+	} else {
+		plan.Type = "full"
+	}
+
 	// Create staging directory
 	stagingDir, err := getStagingDirPath()
 	if err != nil {
@@ -166,8 +173,8 @@ func runReleasePlan(ctx context.Context) (*release.ReleasePlan, error) {
 		var suggestedBump, suggestionReasoning string
 		changelogContent := ""
 
-		// Only generate changelog for repos with changes
-		if hasRepoChanges && releaseLLMChangelog {
+		// Only generate changelog for repos with changes, and not for RC releases
+		if hasRepoChanges && releaseLLMChangelog && !isRC {
 			displayInfo(fmt.Sprintf("Generating LLM changelog for %s...", repo))
 
 			// Get commit range

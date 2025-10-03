@@ -404,7 +404,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.SelectMajor):
-		if m.selectedIndex < len(m.repoNames) {
+		if m.plan.Type != "rc" && m.selectedIndex < len(m.repoNames) {
 			repoName := m.repoNames[m.selectedIndex]
 			if repo, ok := m.plan.Repos[repoName]; ok {
 				oldVersion := repo.NextVersion
@@ -421,7 +421,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.SelectMinor):
-		if m.selectedIndex < len(m.repoNames) {
+		if m.plan.Type != "rc" && m.selectedIndex < len(m.repoNames) {
 			repoName := m.repoNames[m.selectedIndex]
 			if repo, ok := m.plan.Repos[repoName]; ok {
 				oldVersion := repo.NextVersion
@@ -438,7 +438,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.SelectPatch):
-		if m.selectedIndex < len(m.repoNames) {
+		if m.plan.Type != "rc" && m.selectedIndex < len(m.repoNames) {
 			repoName := m.repoNames[m.selectedIndex]
 			if repo, ok := m.plan.Repos[repoName]; ok {
 				oldVersion := repo.NextVersion
@@ -456,7 +456,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.ApplySuggestion):
 		// Apply the LLM's suggested version bump
-		if m.selectedIndex < len(m.repoNames) {
+		if m.plan.Type != "rc" && m.selectedIndex < len(m.repoNames) {
 			repoName := m.repoNames[m.selectedIndex]
 			if repo, ok := m.plan.Repos[repoName]; ok {
 				// Only apply if there's a suggestion
@@ -520,7 +520,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.EditRepoChangelog):
 		// Edit the repository's actual CHANGELOG.md file
-		if m.selectedIndex < len(m.repoNames) {
+		if m.plan.Type == "full" && m.selectedIndex < len(m.repoNames) {
 			repoName := m.repoNames[m.selectedIndex]
 			repoPath := filepath.Join(m.plan.RootDir, repoName)
 			changelogPath := filepath.Join(repoPath, "CHANGELOG.md")
@@ -713,7 +713,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.GenerateAll):
-		if !m.generating {
+		if m.plan.Type == "full" && !m.generating {
 			// Build queue of repos that need changelogs
 			var queue []string
 			for _, repoName := range m.repoNames {

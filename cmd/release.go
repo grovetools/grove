@@ -619,7 +619,7 @@ func expandReposWithDependencies(repos []string, graph *depsgraph.Graph) ([]stri
 	return result, autoDeps
 }
 
-func calculateNextVersions(ctx context.Context, rootDir string, workspaces []string, major, minor, patch []string, logger *logrus.Logger) (map[string]string, map[string]string, map[string]int, error) {
+func calculateNextVersions(ctx context.Context, rootDir string, workspaces []string, major, minor, patch []string, isRC bool, logger *logrus.Logger) (map[string]string, map[string]string, map[string]int, error) {
 	versions := make(map[string]string)
 	currentVersions := make(map[string]string)
 	commitsSinceTag := make(map[string]int)
@@ -720,24 +720,50 @@ func calculateNextVersions(ctx context.Context, rootDir string, workspaces []str
 			commitsSinceTag[repoName] = commitCount
 		}
 
-		// Determine bump type (default to patch)
-		bumpType, ok := bumpTypes[repoName]
-		if !ok {
-			bumpType = "patch"
-		}
+		if isRC {
+			// For RC releases, always use next patch and append a pre-release identifier.
+			newVersion := currentVersion.IncPatch()
 
-		// Calculate new version
-		var newVersion semver.Version
-		switch bumpType {
-		case "major":
-			newVersion = currentVersion.IncMajor()
-		case "minor":
-			newVersion = currentVersion.IncMinor()
-		case "patch":
-			newVersion = currentVersion.IncPatch()
-		}
+			// Get short commit SHA
+			shaCmd, err := cmdBuilder.Build(ctx, "git", "rev-parse", "--short", "HEAD")
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("failed to build git command for SHA: %w", err)
+			}
+			shaExec := shaCmd.Exec()
+			shaExec.Dir = wsPath
+			shaOutput, err := shaExec.Output()
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("failed to get short SHA for %s: %w", repoName, err)
+			}
+			shortSHA := strings.TrimSpace(string(shaOutput))
 
-		versions[repoName] = "v" + newVersion.String()
+			// Construct pre-release version, e.g., v0.1.2-nightly.a1b2c3d
+			preReleaseID := fmt.Sprintf("nightly.%s", shortSHA)
+			finalVersion, err := newVersion.SetPrerelease(preReleaseID)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("failed to set prerelease version for %s: %w", repoName, err)
+			}
+			versions[repoName] = "v" + finalVersion.String()
+		} else {
+			// Determine bump type (default to patch)
+			bumpType, ok := bumpTypes[repoName]
+			if !ok {
+				bumpType = "patch"
+			}
+
+			// Calculate new version
+			var newVersion semver.Version
+			switch bumpType {
+			case "major":
+				newVersion = currentVersion.IncMajor()
+			case "minor":
+				newVersion = currentVersion.IncMinor()
+			case "patch":
+				newVersion = currentVersion.IncPatch()
+			}
+
+			versions[repoName] = "v" + newVersion.String()
+		}
 	}
 
 	return versions, currentVersions, commitsSinceTag, nil
