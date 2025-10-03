@@ -298,8 +298,9 @@ func (m *Manager) SetToolVersion(tool, version string) error {
 
 // GitHubRelease represents a GitHub release
 type GitHubRelease struct {
-	TagName string `json:"tag_name"`
-	Assets  []struct {
+	TagName    string `json:"tag_name"`
+	Prerelease bool   `json:"prerelease"`
+	Assets     []struct {
 		Name               string `json:"name"`
 		BrowserDownloadURL string `json:"browser_download_url"`
 	} `json:"assets"`
@@ -371,6 +372,68 @@ func (m *Manager) getLatestVersionTagWithGH(repoName string) (string, error) {
 	}
 
 	return result.TagName, nil
+}
+
+// GetLatestPrereleaseVersionTag fetches the latest pre-release (RC/nightly) tag from GitHub
+func (m *Manager) GetLatestPrereleaseVersionTag(toolName string) (string, error) {
+	repoName, err := resolveRepoName(toolName)
+	if err != nil {
+		return "", err
+	}
+
+	if m.useGH {
+		// Use gh CLI to list releases including pre-releases
+		cmd := exec.Command("gh", "release", "list", "--repo", fmt.Sprintf("%s/%s", GitHubOwner, repoName), "--limit", "20", "--json", "tagName,isPrerelease")
+		output, err := cmd.Output()
+		if err != nil {
+			return "", fmt.Errorf("gh CLI failed to list releases: %w", err)
+		}
+
+		var releases []struct {
+			TagName      string `json:"tagName"`
+			IsPrerelease bool   `json:"isPrerelease"`
+		}
+
+		if err := json.Unmarshal(output, &releases); err != nil {
+			return "", fmt.Errorf("failed to parse gh output: %w", err)
+		}
+
+		// Find the first pre-release
+		for _, release := range releases {
+			if release.IsPrerelease {
+				return release.TagName, nil
+			}
+		}
+
+		return "", fmt.Errorf("no pre-release versions found for %s", toolName)
+	}
+
+	// Use GitHub API to list releases
+	url := fmt.Sprintf("%s/repos/%s/%s/releases", GitHubAPI, GitHubOwner, repoName)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch releases: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+	}
+
+	var releases []GitHubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
+		return "", fmt.Errorf("failed to decode releases data: %w", err)
+	}
+
+	// Find the first pre-release
+	for _, release := range releases {
+		if release.Prerelease {
+			return release.TagName, nil
+		}
+	}
+
+	return "", fmt.Errorf("no pre-release versions found for %s", toolName)
 }
 
 // GetRelease fetches release information for a specific tool and version

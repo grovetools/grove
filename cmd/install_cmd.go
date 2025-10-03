@@ -28,15 +28,16 @@ func newInstallCmd() *cobra.Command {
 		Long: `Install one or more Grove tools from GitHub releases.
 
 You can specify a specific version using the @ syntax, or install the latest version.
-Use 'all' to install all available tools, or 'all@nightly' to install nightly builds of all tools.
+Use 'all' to install all available tools, or 'all@nightly' to install latest RC builds of all tools.
 
 Examples:
-  grove install cx           # Install latest version of cx
+  grove install cx           # Install latest stable version of cx
   grove install cx@v0.1.0    # Install specific version of cx
-  grove install cx@nightly   # Build and install cx from main branch
+  grove install cx@nightly   # Install latest pre-release (RC/nightly) of cx
+  grove install cx@source    # Build and install cx from main branch
   grove install cx nb flow   # Install multiple tools
   grove install all          # Install all available tools
-  grove install all@nightly  # Install nightly builds of all tools
+  grove install all@nightly  # Install latest RC builds of all tools
   grove install --use-gh cx  # Use gh CLI for private repo access`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -145,8 +146,8 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 			}
 		}
 
-		// Handle nightly builds
-		if version == "nightly" {
+		// Handle source builds
+		if version == "source" {
 			fmt.Printf("%s %s from main branch...\n",
 				theme.DefaultTheme.Faint.Render("Building"),
 				theme.DefaultTheme.Bold.Render(toolName))
@@ -160,6 +161,27 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 				continue
 			}
 			version = builtVersion
+		} else if version == "nightly" {
+			// Get the latest pre-release (RC/nightly) version
+			latestPrerelease, err := manager.GetLatestPrereleaseVersionTag(toolName)
+			if err != nil {
+				fmt.Printf("%s %s: %s\n",
+					theme.DefaultTheme.Error.Render("✗"),
+					theme.DefaultTheme.Bold.Render(toolName),
+					theme.DefaultTheme.Error.Render(fmt.Sprintf("Failed to get latest nightly version: %v", err)))
+				continue
+			}
+			version = latestPrerelease
+
+			// Check if already up-to-date AND binary exists
+			if currentVersion == version && binaryExists {
+				fmt.Printf("%s %s... %s (%s)\n",
+					theme.DefaultTheme.Faint.Render("Checking"),
+					theme.DefaultTheme.Bold.Render(toolName),
+					theme.DefaultTheme.Success.Render("already up to date"),
+					theme.DefaultTheme.Info.Render(version))
+				continue
+			}
 		} else {
 			// Get actual version tag if "latest" specified
 			if version == "latest" {
