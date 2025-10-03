@@ -721,8 +721,21 @@ func calculateNextVersions(ctx context.Context, rootDir string, workspaces []str
 		}
 
 		if isRC {
-			// For RC releases, always use next patch and append a pre-release identifier.
-			newVersion := currentVersion.IncPatch()
+			// For RC releases, determine the base version
+			var newVersion semver.Version
+
+			// If current version is a pre-release (RC tag), reuse its base version
+			if currentVersion.Prerelease() != "" {
+				// Current tag is an RC tag (e.g., v0.4.1-nightly.abc), reuse v0.4.1
+				baseVer, _ := semver.NewVersion(fmt.Sprintf("%d.%d.%d",
+					currentVersion.Major(),
+					currentVersion.Minor(),
+					currentVersion.Patch()))
+				newVersion = *baseVer
+			} else {
+				// Current version is stable (e.g., v0.4.0), increment patch for RC
+				newVersion = currentVersion.IncPatch()
+			}
 
 			// Get short commit SHA
 			shaCmd, err := cmdBuilder.Build(ctx, "git", "rev-parse", "--short", "HEAD")
