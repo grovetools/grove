@@ -1,3 +1,5 @@
+## v0.5.1-nightly.19d8276 (2025-10-03)
+
 ## v0.5.0 (2025-10-01)
 
 This release introduces a major refactoring of the release process into a stateful, multi-stage workflow with `plan`, `tui`, and `apply` commands. It includes comprehensive safety commands like `undo-tag` and `rollback` (e797144, 5b03682, 68bb37c). The release orchestration is now more robust, featuring incremental pushing and CI validation after each step (db11744). New workspace management commands have been added for creating, opening, and removing worktrees (e3ad8d7, 63bfd0d), along with a command to bootstrap new ecosystems from scratch (`grove ws init`) (492542e). Command-line functionality is enhanced with include/exclude filtering for `grove run` and `grove ws status` (fec1660, 701c40d), and improved flag handling for `grove run` (9adb039). Tooling and documentation have been improved with a standalone `grove docs generate` command (c732139), automatic dependency resolution during installation (021672d), and simplified, more succinct documentation with TOC generation (8031430, 07ac4a0).
@@ -620,4 +622,3 @@ Beyond the release TUI, this version adds a new `grove workspace list` command t
 ### Tests
 
 * add grove-tend scenario for conventional commits and changelog
-
