@@ -922,31 +922,34 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 					"version": version,
 				}).Info("Releasing module")
 
-				// For RC releases, checkout/create rc-nightly branch
+				// For RC releases, checkout/create rc-nightly branch (always reset to main)
 				if !releaseDryRun && plan.Type == "rc" {
-					// Check if rc-nightly branch exists on remote
-					checkCmd := exec.CommandContext(ctx, "git", "ls-remote", "--heads", "origin", "rc-nightly")
-					checkCmd.Dir = wsPath
-					checkOutput, _ := checkCmd.Output()
+					// Fetch latest main to ensure we're up to date
+					displayInfo(fmt.Sprintf("Fetching latest main for %s...", repo))
+					if err := executeGitCommand(ctx, wsPath, []string{"fetch", "origin", "main"}, "Fetch main", logger); err != nil {
+						errChan <- fmt.Errorf("failed to fetch main for %s: %w", repo, err)
+						return
+					}
 
-					if len(checkOutput) > 0 {
-						// Branch exists remotely, fetch and checkout
-						displayInfo(fmt.Sprintf("Checking out rc-nightly branch for %s...", repo))
-						if err := executeGitCommand(ctx, wsPath, []string{"fetch", "origin", "rc-nightly"}, "Fetch rc-nightly", logger); err != nil {
-							errChan <- fmt.Errorf("failed to fetch rc-nightly for %s: %w", repo, err)
-							return
-						}
+					// Check if rc-nightly branch exists locally
+					checkLocalCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "rc-nightly")
+					checkLocalCmd.Dir = wsPath
+					localExists := checkLocalCmd.Run() == nil
+
+					if localExists {
+						// Branch exists locally, checkout and reset to main
+						displayInfo(fmt.Sprintf("Resetting rc-nightly to main for %s...", repo))
 						if err := executeGitCommand(ctx, wsPath, []string{"checkout", "rc-nightly"}, "Checkout rc-nightly", logger); err != nil {
 							errChan <- fmt.Errorf("failed to checkout rc-nightly for %s: %w", repo, err)
 							return
 						}
-						// Reset to origin/rc-nightly to ensure clean state
-						if err := executeGitCommand(ctx, wsPath, []string{"reset", "--hard", "origin/rc-nightly"}, "Reset rc-nightly", logger); err != nil {
-							errChan <- fmt.Errorf("failed to reset rc-nightly for %s: %w", repo, err)
+						// Hard reset to origin/main to get latest code
+						if err := executeGitCommand(ctx, wsPath, []string{"reset", "--hard", "origin/main"}, "Reset rc-nightly to main", logger); err != nil {
+							errChan <- fmt.Errorf("failed to reset rc-nightly to main for %s: %w", repo, err)
 							return
 						}
 					} else {
-						// Branch doesn't exist, create from main
+						// Branch doesn't exist locally, create from main
 						displayInfo(fmt.Sprintf("Creating rc-nightly branch from main for %s...", repo))
 						if err := executeGitCommand(ctx, wsPath, []string{"checkout", "-b", "rc-nightly", "origin/main"}, "Create rc-nightly from main", logger); err != nil {
 							errChan <- fmt.Errorf("failed to create rc-nightly for %s: %w", repo, err)
