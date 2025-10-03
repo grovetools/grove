@@ -585,7 +585,7 @@ func (m *Manager) InstallTool(toolName, versionTag string) error {
 	return nil
 }
 
-// InstallToolFromSource clones and builds a tool from its main branch
+// InstallToolFromSource clones and builds a tool from its main branch using a Go workspace
 func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
 	// Ensure directories exist
 	if err := m.EnsureDirs(); err != nil {
@@ -593,44 +593,91 @@ func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
 	}
 
 	// Get tool info using FindTool
-	repoName, _, effectiveAlias, found := FindTool(toolName)
+	repoName, toolInfo, effectiveAlias, found := FindTool(toolName)
 	if !found {
 		return "", fmt.Errorf("unknown tool: %s", toolName)
 	}
 
-	// Create temporary directory for building
-	tempDir, err := os.MkdirTemp("", "grove-build-*")
-	if err != nil {
-		return "", fmt.Errorf("failed to create temp directory: %w", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	// Clone the repository using gh CLI
-	repoSlug := fmt.Sprintf("%s/%s", GitHubOwner, repoName)
-	cloneCmd := exec.Command("gh", "repo", "clone", repoSlug, tempDir, "--", "--depth=1")
-	if output, err := cloneCmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("failed to clone repository: %w\nOutput: %s", err, string(output))
+	// Use a persistent workspace directory in ~/.grove/source-workspace
+	workspaceDir := filepath.Join(m.baseDir, "source-workspace")
+	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create workspace directory: %w", err)
 	}
 
-	// Get the short commit SHA
-	shaCmd := exec.Command("git", "-C", tempDir, "rev-parse", "--short", "HEAD")
+	// Collect all repos we need to clone (tool + its dependencies)
+	reposToClone := make(map[string]bool)
+	reposToClone[repoName] = true
+
+	// Add dependencies
+	for _, dep := range toolInfo.Dependencies {
+		depRepoName, _, _, found := FindTool(dep)
+		if found {
+			reposToClone[depRepoName] = true
+		}
+	}
+
+	// Clone all required repos
+	for repo := range reposToClone {
+		repoPath := filepath.Join(workspaceDir, repo)
+
+		// Check if already cloned, if so pull latest
+		if _, err := os.Stat(repoPath); err == nil {
+			// Already exists, pull latest
+			pullCmd := exec.Command("git", "-C", repoPath, "pull", "--ff-only")
+			if err := pullCmd.Run(); err != nil {
+				// If pull fails, remove and re-clone
+				os.RemoveAll(repoPath)
+			} else {
+				continue // Successfully pulled
+			}
+		}
+
+		// Clone the repository
+		repoSlug := fmt.Sprintf("%s/%s", GitHubOwner, repo)
+		cloneCmd := exec.Command("gh", "repo", "clone", repoSlug, repoPath, "--", "--depth=1")
+		if output, err := cloneCmd.CombinedOutput(); err != nil {
+			return "", fmt.Errorf("failed to clone %s: %w\nOutput: %s", repo, err, string(output))
+		}
+	}
+
+	// Create go.work file
+	goWorkPath := filepath.Join(workspaceDir, "go.work")
+	var workContent strings.Builder
+	workContent.WriteString("go 1.24\n\n")
+	workContent.WriteString("use (\n")
+	for repo := range reposToClone {
+		workContent.WriteString(fmt.Sprintf("\t./%s\n", repo))
+	}
+	workContent.WriteString(")\n")
+
+	if err := os.WriteFile(goWorkPath, []byte(workContent.String()), 0644); err != nil {
+		return "", fmt.Errorf("failed to create go.work: %w", err)
+	}
+
+	// Build in the workspace context
+	buildDir := filepath.Join(workspaceDir, repoName)
+
+	// Get the short commit SHA from the main tool repo
+	shaCmd := exec.Command("git", "-C", buildDir, "rev-parse", "--short", "HEAD")
 	shaOutput, err := shaCmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get commit SHA: %w", err)
 	}
 	sha := strings.TrimSpace(string(shaOutput))
-	versionTag := fmt.Sprintf("nightly-%s", sha)
+	versionTag := fmt.Sprintf("source-%s", sha)
 
-	// Build the binary using make
+	// Build the binary using make with workspace
 	buildCmd := exec.Command("make", "build")
-	buildCmd.Dir = tempDir
-	buildCmd.Env = append(os.Environ(), "GOPRIVATE=github.com/mattsolo1/*")
+	buildCmd.Dir = buildDir
+	buildCmd.Env = append(os.Environ(),
+		"GOPRIVATE=github.com/mattsolo1/*",
+		fmt.Sprintf("GOWORK=%s", goWorkPath))
 	if output, err := buildCmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("build failed: %w\nOutput: %s", err, string(output))
 	}
 
 	// Discover the built binary using workspace package
-	binaries, err := workspace.DiscoverLocalBinaries(tempDir)
+	binaries, err := workspace.DiscoverLocalBinaries(buildDir)
 	if err != nil {
 		return "", fmt.Errorf("failed to discover built binary: %w", err)
 	}
