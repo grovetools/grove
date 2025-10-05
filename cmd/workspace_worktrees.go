@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-meta/pkg/aggregator"
+	"github.com/mattsolo1/grove-meta/pkg/discovery"
 	"github.com/spf13/cobra"
 )
 
@@ -115,7 +116,19 @@ func runWorkspaceWorktrees(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return aggregator.Run(collector, renderer)
+	// Discover all projects to get their paths
+	projects, err := discovery.DiscoverProjects()
+	if err != nil {
+		return fmt.Errorf("failed to discover workspaces: %w", err)
+	}
+
+	// Extract paths
+	var workspacePaths []string
+	for _, p := range projects {
+		workspacePaths = append(workspacePaths, p.Path)
+	}
+
+	return aggregator.Run(collector, renderer, workspacePaths)
 }
 
 func formatWorktree(wt git.WorktreeWithStatus) string {

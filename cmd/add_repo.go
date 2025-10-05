@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-meta/pkg/repository"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -78,7 +78,7 @@ func resolveTemplate(spec string, ecosystem bool) string {
 		// Only use local templates when in ecosystem mode
 		if ecosystem {
 			// Try to find grove ecosystem root
-			rootDir, err := workspace.FindRoot("")
+			rootDir, err := workspace.FindEcosystemRoot("")
 			if err == nil {
 				// We're in an ecosystem - check for local template
 				localTemplateName := strings.TrimPrefix(alias, "mattsolo1/")

@@ -18,10 +18,12 @@ import (
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/theme"
+	"github.com/mattsolo1/grove-meta/pkg/discovery"
 	"github.com/mattsolo1/grove-meta/pkg/reconciler"
 	"github.com/mattsolo1/grove-meta/pkg/sdk"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
+	meta_workspace "github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -97,10 +99,11 @@ func runList(cmd *cobra.Command, args []string) error {
 	toolMap := make(map[string]string) // toolName -> repoName
 
 	// Try to discover from workspaces first
-	if rootDir, err := workspace.FindRoot(""); err == nil {
-		if workspaces, err := workspace.Discover(rootDir); err == nil {
-			for _, wsPath := range workspaces {
-				if binaries, err := workspace.DiscoverLocalBinaries(wsPath); err == nil {
+	if _, err := workspace.FindEcosystemRoot(""); err == nil {
+		if projects, err := discovery.DiscoverProjects(); err == nil {
+			for _, proj := range projects {
+				wsPath := proj.Path
+				if binaries, err := meta_workspace.DiscoverLocalBinaries(wsPath); err == nil {
 					for _, binary := range binaries {
 						repoName := filepath.Base(wsPath)
 						toolMap[binary.Name] = repoName

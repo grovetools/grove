@@ -12,7 +12,7 @@ import (
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -40,7 +40,7 @@ func NewWorkspaceRemoveCmd() *cobra.Command {
 			}
 		}
 
-		gitRoot, err := workspace.FindRoot("")
+		gitRoot, err := workspace.FindEcosystemRoot("")
 		if err != nil {
 			return err
 		}

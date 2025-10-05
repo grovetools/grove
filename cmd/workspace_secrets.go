@@ -8,8 +8,9 @@ import (
 	"sync"
 
 	"github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
+	"github.com/mattsolo1/grove-meta/pkg/discovery"
 	"github.com/spf13/cobra"
 )
 
@@ -100,16 +101,20 @@ func runWorkspaceSecretsSet(cmd *cobra.Command, args []string) error {
 	includePatterns, _ := cmd.Flags().GetStringArray("include")
 	excludePatterns, _ := cmd.Flags().GetStringArray("exclude")
 
-	// Find root directory with workspaces
-	rootDir, err := workspace.FindRoot("")
-	if err != nil {
-		return fmt.Errorf("failed to find workspace root: %w", err)
-	}
-
-	// Discover workspaces
-	workspaces, err := workspace.Discover(rootDir)
+	// Discover projects
+	projects, err := discovery.DiscoverProjects()
 	if err != nil {
 		return fmt.Errorf("failed to discover workspaces: %w", err)
+	}
+	var workspaces []string
+	for _, p := range projects {
+		workspaces = append(workspaces, p.Path)
+	}
+
+	// Get ecosystem root for display names
+	rootDir, err := workspace.FindEcosystemRoot("")
+	if err != nil {
+		return fmt.Errorf("failed to find workspace root: %w", err)
 	}
 
 	// Filter workspaces
@@ -136,7 +141,7 @@ func runWorkspaceSecretsSet(cmd *cobra.Command, args []string) error {
 		wg.Add(1)
 		go func(wsPath string) {
 			defer wg.Done()
-			wsName := workspace.GetWorkspaceName(wsPath, rootDir)
+			wsName := discovery.GetWorkspaceName(wsPath, rootDir)
 
 			// Get the repository URL
 			cmd := exec.Command("git", "config", "--get", "remote.origin.url")
@@ -227,16 +232,20 @@ func runWorkspaceSecretsDelete(cmd *cobra.Command, args []string) error {
 	includePatterns, _ := cmd.Flags().GetStringArray("include")
 	excludePatterns, _ := cmd.Flags().GetStringArray("exclude")
 
-	// Find root directory with workspaces
-	rootDir, err := workspace.FindRoot("")
-	if err != nil {
-		return fmt.Errorf("failed to find workspace root: %w", err)
-	}
-
-	// Discover workspaces
-	workspaces, err := workspace.Discover(rootDir)
+	// Discover projects
+	projects, err := discovery.DiscoverProjects()
 	if err != nil {
 		return fmt.Errorf("failed to discover workspaces: %w", err)
+	}
+	var workspaces []string
+	for _, p := range projects {
+		workspaces = append(workspaces, p.Path)
+	}
+
+	// Get ecosystem root for display names
+	rootDir, err := workspace.FindEcosystemRoot("")
+	if err != nil {
+		return fmt.Errorf("failed to find workspace root: %w", err)
 	}
 
 	// Filter workspaces
@@ -263,7 +272,7 @@ func runWorkspaceSecretsDelete(cmd *cobra.Command, args []string) error {
 		wg.Add(1)
 		go func(wsPath string) {
 			defer wg.Done()
-			wsName := workspace.GetWorkspaceName(wsPath, rootDir)
+			wsName := discovery.GetWorkspaceName(wsPath, rootDir)
 
 			// Get the repository URL
 			cmd := exec.Command("git", "config", "--get", "remote.origin.url")
@@ -349,16 +358,20 @@ func runWorkspaceSecretsList(cmd *cobra.Command, args []string) error {
 	logger := logging.NewLogger("ws-secrets")
 	pretty := logging.NewPrettyLogger()
 
-	// Find root directory with workspaces
-	rootDir, err := workspace.FindRoot("")
-	if err != nil {
-		return fmt.Errorf("failed to find workspace root: %w", err)
-	}
-
-	// Discover workspaces
-	workspaces, err := workspace.Discover(rootDir)
+	// Discover projects
+	projects, err := discovery.DiscoverProjects()
 	if err != nil {
 		return fmt.Errorf("failed to discover workspaces: %w", err)
+	}
+	var workspaces []string
+	for _, p := range projects {
+		workspaces = append(workspaces, p.Path)
+	}
+
+	// Get ecosystem root for display names
+	rootDir, err := workspace.FindEcosystemRoot("")
+	if err != nil {
+		return fmt.Errorf("failed to find workspace root: %w", err)
 	}
 
 	logger.WithField("count", len(workspaces)).Info("Listing secrets for workspaces")
@@ -366,7 +379,7 @@ func runWorkspaceSecretsList(cmd *cobra.Command, args []string) error {
 
 	// Process workspaces
 	for _, ws := range workspaces {
-		wsName := workspace.GetWorkspaceName(ws, rootDir)
+		wsName := discovery.GetWorkspaceName(ws, rootDir)
 
 		// Get the repository URL
 		cmd := exec.Command("git", "config", "--get", "remote.origin.url")
@@ -418,7 +431,7 @@ func filterWorkspaces(workspaces []string, rootDir string, includePatterns, excl
 	var filtered []string
 
 	for _, ws := range workspaces {
-		wsName := workspace.GetWorkspaceName(ws, rootDir)
+		wsName := discovery.GetWorkspaceName(ws, rootDir)
 
 		// Check exclude patterns first
 		excluded := false

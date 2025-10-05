@@ -7,8 +7,9 @@ import (
 
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-meta/pkg/discovery"
 	"github.com/mattsolo1/grove-meta/pkg/runner"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -61,17 +62,22 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	opts := cli.GetOptions(cmd)
 
 	// Find root directory with workspaces
-	rootDir, err := workspace.FindRoot("")
+	rootDir, err := workspace.FindEcosystemRoot("")
 	if err != nil {
 		return fmt.Errorf("failed to find workspace root: %w", err)
 	}
 
 	logger.WithField("root", rootDir).Debug("Found workspace root")
 
-	// Discover workspaces
-	workspaces, err := workspace.Discover(rootDir)
+	// Discover projects using the new centralized helper
+	projects, err := discovery.DiscoverProjects()
 	if err != nil {
 		return fmt.Errorf("failed to discover workspaces: %w", err)
+	}
+
+	var workspaces []string
+	for _, p := range projects {
+		workspaces = append(workspaces, p.Path)
 	}
 
 	if len(workspaces) == 0 {
@@ -80,7 +86,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 	// Apply filter if provided
 	if runFilter != "" {
-		workspaces = workspace.FilterWorkspaces(workspaces, runFilter)
+		workspaces = discovery.FilterWorkspaces(workspaces, runFilter)
 		if len(workspaces) == 0 {
 			return fmt.Errorf("no workspaces matched filter: %s", runFilter)
 		}
@@ -117,15 +123,20 @@ func runScript(cmd *cobra.Command, script string) error {
 	logger := logging.NewLogger("run")
 
 	// Find root directory with workspaces
-	rootDir, err := workspace.FindRoot("")
+	rootDir, err := workspace.FindEcosystemRoot("")
 	if err != nil {
 		return fmt.Errorf("failed to find workspace root: %w", err)
 	}
 
-	// Discover workspaces
-	workspaces, err := workspace.Discover(rootDir)
+	// Discover projects using the new centralized helper
+	projects, err := discovery.DiscoverProjects()
 	if err != nil {
 		return fmt.Errorf("failed to discover workspaces: %w", err)
+	}
+
+	var workspaces []string
+	for _, p := range projects {
+		workspaces = append(workspaces, p.Path)
 	}
 
 	if len(workspaces) == 0 {
@@ -134,7 +145,7 @@ func runScript(cmd *cobra.Command, script string) error {
 
 	// Apply filter if provided
 	if runFilter != "" {
-		workspaces = workspace.FilterWorkspaces(workspaces, runFilter)
+		workspaces = discovery.FilterWorkspaces(workspaces, runFilter)
 	}
 
 	// Apply exclude filter if provided

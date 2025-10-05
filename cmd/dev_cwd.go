@@ -8,7 +8,7 @@ import (
 
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-meta/pkg/devlinks"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
+	meta_workspace "github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -47,7 +47,7 @@ needing to run this command.`
 		}
 
 		// Discover binaries in the current directory
-		discoveredBinaries, err := workspace.DiscoverLocalBinaries(absPath)
+		discoveredBinaries, err := meta_workspace.DiscoverLocalBinaries(absPath)
 		if err != nil {
 			return fmt.Errorf("failed to discover binaries: %w", err)
 		}
@@ -66,7 +66,7 @@ needing to run this command.`
 		}
 
 		// Track which binaries were successfully registered
-		var registeredBinaries []workspace.BinaryMeta
+		var registeredBinaries []meta_workspace.BinaryMeta
 
 		// Register each discovered binary
 		for _, binary := range discoveredBinaries {

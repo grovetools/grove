@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/mattsolo1/grove-core/cli"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
+	meta_workspace "github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -96,7 +96,7 @@ When inside a workspace, Grove automatically uses binaries from that workspace.`
 			}
 			
 			// Try to discover binaries, but don't fail if we can't
-			binaries, err := workspace.DiscoverLocalBinaries(workspaceRoot)
+			binaries, err := meta_workspace.DiscoverLocalBinaries(workspaceRoot)
 			if err != nil {
 				// Just warn, don't fail - workspace detection still succeeded
 				fmt.Printf("\nNote: Could not discover binaries: %v\n", err)

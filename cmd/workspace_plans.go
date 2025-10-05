@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/mattsolo1/grove-meta/pkg/aggregator"
+	"github.com/mattsolo1/grove-meta/pkg/discovery"
 	"github.com/spf13/cobra"
 )
 
@@ -182,7 +184,19 @@ func runWorkspacePlans(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return aggregator.Run(collector, renderer)
+	// Discover all projects to get their paths
+	projects, err := discovery.DiscoverProjects()
+	if err != nil {
+		return fmt.Errorf("failed to discover workspaces: %w", err)
+	}
+
+	// Extract paths
+	var workspacePaths []string
+	for _, p := range projects {
+		workspacePaths = append(workspacePaths, p.Path)
+	}
+
+	return aggregator.Run(collector, renderer, workspacePaths)
 }
 
 func formatPlan(plan Plan) string {
@@ -295,8 +309,8 @@ func renderPlansTable(results map[string][]Plan) error {
 		Border(lipgloss.RoundedBorder()).
 		BorderStyle(lipgloss.NewStyle().
 			Foreground(lipgloss.Color("81"))).
-		Headers("WORKSPACE", "TITLE", "STATUS", "UPDATED").
-		Width(120).
+		Headers("REPOSITORY", "TITLE", "STATUS", "UPDATED").
+		Width(160).
 		StyleFunc(func(row, col int) lipgloss.Style {
 			if row == 0 {
 				// Header row - left align instead of center
@@ -313,7 +327,7 @@ func renderPlansTable(results map[string][]Plan) error {
 				Padding(0, 1)
 			
 			switch col {
-			case 0: // Workspace column
+			case 0: // Repository column
 				return workspaceStyle.Copy().
 					Align(lipgloss.Left).
 					Padding(0, 1)
@@ -336,6 +350,9 @@ func renderPlansTable(results map[string][]Plan) error {
 	for _, pw := range allPlans {
 		plan := pw.Plan
 
+		// Extract repository name from full workspace path
+		repoName := filepath.Base(pw.Workspace)
+
 		// Format time with enhanced styling
 		timeStr := ""
 		if !plan.UpdatedAt.IsZero() {
@@ -356,7 +373,7 @@ func renderPlansTable(results map[string][]Plan) error {
 		// Format status with grove-flow consistent icons and colors
 		statusStr := ""
 		statusDisplay := plan.Status
-		
+
 		switch strings.ToLower(plan.Status) {
 		case "pending", "pending_user":
 			statusStr = planStatusPendingStyle.Render("⏳ " + statusDisplay)
@@ -389,21 +406,16 @@ func renderPlansTable(results map[string][]Plan) error {
 			}
 		}
 
-		// Format title - use ID if title is empty, truncate if too long
+		// Format title - don't truncate, let table handle wrapping
 		titleStr := plan.Title
 		if titleStr == "" {
 			// Use ID as fallback if no title
 			titleStr = plan.ID
-			if len(titleStr) > 30 {
-				titleStr = titleStr[:27] + "..."
-			}
-		} else if len(titleStr) > 40 {
-			titleStr = titleStr[:37] + "..."
 		}
 
 		// Add the row to the table (trim any extra spaces)
 		t.Row(
-			strings.TrimSpace(pw.Workspace),
+			strings.TrimSpace(repoName),
 			strings.TrimSpace(titleStr),
 			statusStr,  // Don't trim statusStr as it has styled content
 			strings.TrimSpace(timeStr),

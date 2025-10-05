@@ -7,7 +7,6 @@ import (
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
-	meta_workspace "github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -29,7 +28,7 @@ This command is the new standard for setting up an isolated development environm
 		pretty.Progress(fmt.Sprintf("Creating workspace '%s'...", name))
 
 		// Find the git root of the current ecosystem.
-		gitRoot, err := meta_workspace.FindRoot("")
+		gitRoot, err := workspace.FindEcosystemRoot("")
 		if err != nil {
 			return fmt.Errorf("could not find ecosystem root: %w", err)
 		}

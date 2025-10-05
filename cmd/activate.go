@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/mattsolo1/grove-core/cli"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
+	meta_workspace "github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -72,7 +72,7 @@ If you're not in a workspace, it will inform you without modifying PATH.`
 		}
 		
 		// Discover workspace binaries
-		binaries, err := workspace.DiscoverLocalBinaries(workspaceRoot)
+		binaries, err := meta_workspace.DiscoverLocalBinaries(workspaceRoot)
 		if err != nil {
 			return fmt.Errorf("failed to discover binaries: %w", err)
 		}

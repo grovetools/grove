@@ -5,8 +5,9 @@ import (
 
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-meta/pkg/discovery"
 	"github.com/mattsolo1/grove-meta/pkg/githooks"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -33,15 +34,19 @@ func newWorkspaceGitHooksInstallCmd() *cobra.Command {
 			pretty := logging.NewPrettyLogger()
 
 			// Find the root directory
-			rootDir, err := workspace.FindRoot("")
+			rootDir, err := workspace.FindEcosystemRoot("")
 			if err != nil {
 				return fmt.Errorf("failed to find workspace root: %w", err)
 			}
 
 			// Discover all workspaces
-			workspaces, err := workspace.Discover(rootDir)
+			projects, err := discovery.DiscoverProjects()
 			if err != nil {
 				return fmt.Errorf("failed to discover workspaces: %w", err)
+			}
+			var workspaces []string
+			for _, p := range projects {
+				workspaces = append(workspaces, p.Path)
 			}
 
 			// Include the root repository itself
@@ -98,7 +103,7 @@ func newWorkspaceGitHooksUninstallCmd() *cobra.Command {
 			pretty := logging.NewPrettyLogger()
 
 			// Find the root directory
-			rootDir, err := workspace.FindRoot("")
+			rootDir, err := workspace.FindEcosystemRoot("")
 			if err != nil {
 				return fmt.Errorf("failed to find workspace root: %w", err)
 			}
@@ -110,9 +115,13 @@ func newWorkspaceGitHooksUninstallCmd() *cobra.Command {
 			}
 
 			// Discover all workspaces
-			workspaces, err := workspace.Discover(rootDir)
+			projects, err := discovery.DiscoverProjects()
 			if err != nil {
 				return fmt.Errorf("failed to discover workspaces: %w", err)
+			}
+			var workspaces []string
+			for _, p := range projects {
+				workspaces = append(workspaces, p.Path)
 			}
 
 			// Include the root repository itself

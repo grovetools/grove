@@ -10,7 +10,7 @@ import (
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-meta/cmd/internal"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
+	meta_workspace "github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -111,9 +111,9 @@ func delegateToTool(toolName string, args []string) error {
 	if workspaceRoot := findWorkspaceRoot(); workspaceRoot != "" {
 		logger.WithField("workspace", workspaceRoot).Debug("Found workspace root")
 		// Try to find the binary in this workspace
-		workspaceBinaries, err := workspace.DiscoverLocalBinaries(workspaceRoot)
+		workspaceBinaries, err := meta_workspace.DiscoverLocalBinaries(workspaceRoot)
 		if err == nil {
-			var foundBinary *workspace.BinaryMeta
+			var foundBinary *meta_workspace.BinaryMeta
 			for i, binary := range workspaceBinaries {
 				if binary.Name == toolName {
 					// Check if the binary actually exists

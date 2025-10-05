@@ -10,8 +10,9 @@ import (
 	"strings"
 
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-meta/pkg/depsgraph"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
+	"github.com/mattsolo1/grove-meta/pkg/discovery"
 	"github.com/spf13/cobra"
 )
 
@@ -116,12 +117,18 @@ func runDepsBump(moduleSpec string, commit, push bool) error {
 	fmt.Printf("Bumping dependency %s to %s...\n\n", modulePath, version)
 
 	// Find all workspaces
-	rootDir, err := workspace.FindRoot("")
+	// Discover projects using the new centralized helper
+	projects, err := discovery.DiscoverProjects()
 	if err != nil {
-		return fmt.Errorf("failed to find workspace root: %w", err)
+		return fmt.Errorf("failed to discover workspaces: %w", err)
+	}
+	var workspaces []string
+	for _, p := range projects {
+		workspaces = append(workspaces, p.Path)
 	}
 
-	workspaces, err := workspace.Discover(rootDir)
+	// Also need the root dir for context
+	rootDir, err := workspace.FindEcosystemRoot("")
 	if err != nil {
 		return fmt.Errorf("failed to discover workspaces: %w", err)
 	}
@@ -324,12 +331,18 @@ func runDepsSync(commit, push bool) error {
 	fmt.Println()
 
 	// Find all workspaces
-	rootDir, err := workspace.FindRoot("")
+	// Discover projects using the new centralized helper
+	projects, err := discovery.DiscoverProjects()
 	if err != nil {
-		return fmt.Errorf("failed to find workspace root: %w", err)
+		return fmt.Errorf("failed to discover workspaces: %w", err)
+	}
+	var workspaces []string
+	for _, p := range projects {
+		workspaces = append(workspaces, p.Path)
 	}
 
-	workspaces, err := workspace.Discover(rootDir)
+	// Also need the root dir for context
+	rootDir, err := workspace.FindEcosystemRoot("")
 	if err != nil {
 		return fmt.Errorf("failed to discover workspaces: %w", err)
 	}
@@ -550,16 +563,20 @@ Examples:
 }
 
 func runDepsTree(focusRepo string, showVersions, showExternal bool, filterRepos []string) error {
-	// Find workspace root
-	rootDir, err := workspace.FindRoot("")
-	if err != nil {
-		return fmt.Errorf("failed to find workspace root: %w", err)
-	}
-
-	// Discover all workspaces
-	workspaces, err := workspace.Discover(rootDir)
+	// Discover projects using the new centralized helper
+	projects, err := discovery.DiscoverProjects()
 	if err != nil {
 		return fmt.Errorf("failed to discover workspaces: %w", err)
+	}
+	var workspaces []string
+	for _, p := range projects {
+		workspaces = append(workspaces, p.Path)
+	}
+
+	// Also need the root dir for context
+	rootDir, err := workspace.FindEcosystemRoot("")
+	if err != nil {
+		return fmt.Errorf("failed to find workspace root: %w", err)
 	}
 
 	// Build dependency graph

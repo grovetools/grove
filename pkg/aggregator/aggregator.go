@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/sirupsen/logrus"
 )
 
@@ -23,18 +22,7 @@ type WorkspaceResult[T any] struct {
 }
 
 // Run executes a collector function across all workspaces and renders the results
-func Run[T any](collector CollectorFunc[T], renderer RendererFunc[T]) error {
-	// Find root directory
-	rootDir, err := workspace.FindRoot("")
-	if err != nil {
-		return fmt.Errorf("failed to find root: %w", err)
-	}
-
-	workspaces, err := workspace.Discover(rootDir)
-	if err != nil {
-		return fmt.Errorf("failed to discover workspaces: %w", err)
-	}
-
+func Run[T any](collector CollectorFunc[T], renderer RendererFunc[T], workspaces []string) error {
 	if len(workspaces) == 0 {
 		return fmt.Errorf("no workspaces found")
 	}
@@ -48,7 +36,8 @@ func Run[T any](collector CollectorFunc[T], renderer RendererFunc[T]) error {
 		go func(path string) {
 			defer wg.Done()
 
-			name := workspace.GetWorkspaceName(path, rootDir)
+			// Use base name for workspace name since rootDir is not available
+			name := path
 			data, err := collector(path, name)
 			results <- WorkspaceResult[T]{
 				Name:  name,
@@ -80,18 +69,7 @@ func Run[T any](collector CollectorFunc[T], renderer RendererFunc[T]) error {
 }
 
 // RunWithErrors is like Run but includes workspaces with errors in the results
-func RunWithErrors[T any](collector CollectorFunc[T], renderer func(map[string]WorkspaceResult[T]) error) error {
-	// Find root directory
-	rootDir, err := workspace.FindRoot("")
-	if err != nil {
-		return fmt.Errorf("failed to find root: %w", err)
-	}
-
-	workspaces, err := workspace.Discover(rootDir)
-	if err != nil {
-		return fmt.Errorf("failed to discover workspaces: %w", err)
-	}
-
+func RunWithErrors[T any](collector CollectorFunc[T], renderer func(map[string]WorkspaceResult[T]) error, rootDir string, workspaces []string) error {
 	if len(workspaces) == 0 {
 		return fmt.Errorf("no workspaces found")
 	}
@@ -105,7 +83,8 @@ func RunWithErrors[T any](collector CollectorFunc[T], renderer func(map[string]W
 		go func(path string) {
 			defer wg.Done()
 
-			name := workspace.GetWorkspaceName(path, rootDir)
+			// Use path as name for now - will be refined by caller if needed
+			name := path
 			data, err := collector(path, name)
 			results <- WorkspaceResult[T]{
 				Name:  name,

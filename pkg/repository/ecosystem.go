@@ -9,7 +9,8 @@ import (
 	"strings"
 
 	"github.com/mattsolo1/grove-core/config"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-meta/pkg/discovery"
 	"github.com/sirupsen/logrus"
 )
 
@@ -21,7 +22,7 @@ type Ecosystem struct {
 // removeFromGoWork removes a repository from the go.work file
 func (e *Ecosystem) removeFromGoWork(repoName string) error {
 	// Find the grove root
-	rootDir, err := workspace.FindRoot("")
+	rootDir, err := workspace.FindEcosystemRoot("")
 	if err != nil {
 		return fmt.Errorf("failed to find grove root: %w", err)
 	}
@@ -92,7 +93,7 @@ func (e *Ecosystem) removeFromGoWork(repoName string) error {
 // updateGoWork updates the go.work file to include the new module
 func updateGoWork(repoName string) error {
 	// Find the grove root
-	rootDir, err := workspace.FindRoot("")
+	rootDir, err := workspace.FindEcosystemRoot("")
 	if err != nil {
 		return fmt.Errorf("failed to find grove root: %w", err)
 	}
@@ -209,7 +210,7 @@ func updateGoWork(repoName string) error {
 // validateGroveYML checks if grove.yml exists and has the expected structure
 func validateGroveYML() error {
 	// Try to find the grove root
-	_, err := workspace.FindRoot("")
+	_, err := workspace.FindEcosystemRoot("")
 	if err != nil {
 		return fmt.Errorf("not in a grove workspace: %w", err)
 	}
@@ -243,16 +244,14 @@ func deriveAliasFromRepoName(repoName string) string {
 
 // checkBinaryAliasConflict checks if the binary alias is already in use
 func checkBinaryAliasConflict(alias string) error {
-	// Find grove.yml root
-	rootDir, err := workspace.FindRoot("")
-	if err != nil {
-		return fmt.Errorf("failed to find grove root: %w", err)
-	}
-
 	// Discover all workspaces
-	workspaces, err := workspace.Discover(rootDir)
+	projects, err := discovery.DiscoverProjects()
 	if err != nil {
 		return fmt.Errorf("failed to discover workspaces: %w", err)
+	}
+	var workspaces []string
+	for _, p := range projects {
+		workspaces = append(workspaces, p.Path)
 	}
 
 	// Check each workspace's grove.yml for binary aliases
@@ -373,7 +372,7 @@ func extractMakefileList(lines []string, startIdx int) []string {
 // updateRootMakefile updates the root Makefile to include a new repository
 func updateRootMakefile(repoName, binaryAlias string) error {
 	// Find the grove root
-	rootDir, err := workspace.FindRoot("")
+	rootDir, err := workspace.FindEcosystemRoot("")
 	if err != nil {
 		return fmt.Errorf("failed to find grove root: %w", err)
 	}

@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-meta/pkg/discovery"
 	"github.com/spf13/cobra"
 )
 
@@ -24,7 +26,7 @@ func NewWorkspaceOpenCmd() *cobra.Command {
 		logger := logging.NewLogger("ws-open")
 		pretty := logging.NewPrettyLogger()
 
-		gitRoot, err := workspace.FindRoot("")
+		gitRoot, err := workspace.FindEcosystemRoot("")
 		if err != nil {
 			return err
 		}
@@ -40,7 +42,9 @@ func NewWorkspaceOpenCmd() *cobra.Command {
 			return err
 		}
 
-		sessionName := tmux.SanitizeForTmuxSession(name)
+		// Sanitize session name by replacing invalid characters
+		sessionName := strings.ReplaceAll(name, ".", "-")
+		sessionName = strings.ReplaceAll(sessionName, ":", "-")
 		exists, _ := tmuxClient.SessionExists(context.Background(), sessionName)
 
 		if !exists {
@@ -66,22 +70,22 @@ func NewWorkspaceOpenCmd() *cobra.Command {
 // findWorktreePath finds the actual path to a worktree by checking multiple possible locations
 func findWorktreePath(gitRoot, name string) (string, error) {
 	// First, try to discover workspaces to find the repo that might contain the worktree
-	workspaces, err := workspace.Discover(gitRoot)
+	projects, err := discovery.DiscoverProjects()
 	if err == nil {
 		// Check each workspace for the worktree
-		for _, wsPath := range workspaces {
-			worktreePath := filepath.Join(wsPath, ".grove-worktrees", name)
+		for _, p := range projects {
+			worktreePath := filepath.Join(p.Path, ".grove-worktrees", name)
 			if _, err := os.Stat(worktreePath); err == nil {
 				return worktreePath, nil
 			}
 		}
 	}
-	
+
 	// Fall back to ecosystem root convention
 	worktreePath := filepath.Join(gitRoot, ".grove-worktrees", name)
 	if _, err := os.Stat(worktreePath); err == nil {
 		return worktreePath, nil
 	}
-	
+
 	return "", fmt.Errorf("worktree '%s' not found in any workspace or ecosystem root", name)
 }

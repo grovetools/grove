@@ -9,7 +9,7 @@ import (
 
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
+	"github.com/mattsolo1/grove-meta/pkg/discovery"
 	"github.com/spf13/cobra"
 )
 
@@ -38,16 +38,14 @@ This command is useful for updating all documentation in a single step.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			logger := logging.NewLogger("docs")
 
-			// Find root directory
-			rootDir, err := workspace.FindRoot("")
-			if err != nil {
-				return fmt.Errorf("failed to find workspace root: %w", err)
-			}
-
-			// Discover workspaces
-			workspaces, err := workspace.Discover(rootDir)
+			// Discover projects
+			projects, err := discovery.DiscoverProjects()
 			if err != nil {
 				return fmt.Errorf("failed to discover workspaces: %w", err)
+			}
+			var workspaces []string
+			for _, p := range projects {
+				workspaces = append(workspaces, p.Path)
 			}
 
 			logger.Infof("Found %d workspaces. Generating documentation...", len(workspaces))

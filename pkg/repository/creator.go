@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-meta/pkg/gh"
 	"github.com/mattsolo1/grove-meta/pkg/templates"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/sirupsen/logrus"
 )
 
@@ -97,7 +97,7 @@ func (c *Creator) Create(opts CreateOptions) error {
 	// Phase 2.6: Add to go.work temporarily for Go projects only (in ecosystem mode)
 	if projectType == "go" && opts.Ecosystem {
 		// Snapshot go.work before modifying it
-		rootDir, err := workspace.FindRoot("")
+		rootDir, err := workspace.FindEcosystemRoot("")
 		if err == nil {
 			goWorkPath := filepath.Join(rootDir, "go.work")
 			if content, err := os.ReadFile(goWorkPath); err == nil {
@@ -812,7 +812,7 @@ func (c *Creator) rollback(state *creationState, opts CreateOptions, targetPath 
 		// Restore go.work if we have a snapshot
 		if opts.Ecosystem && state.originalGoWorkContent != nil {
 			c.logger.Info("Restoring go.work from snapshot...")
-			rootDir, err := workspace.FindRoot("")
+			rootDir, err := workspace.FindEcosystemRoot("")
 			if err == nil {
 				goWorkPath := filepath.Join(rootDir, "go.work")
 				if err := os.WriteFile(goWorkPath, state.originalGoWorkContent, 0644); err != nil {

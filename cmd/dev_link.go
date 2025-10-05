@@ -8,7 +8,7 @@ import (
 
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-meta/pkg/devlinks"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
+	meta_workspace "github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -40,7 +40,7 @@ available for use with 'grove dev use'.`
 		}
 
 		// Discover binaries in the worktree
-		discoveredBinaries, err := workspace.DiscoverLocalBinaries(absWorktreePath)
+		discoveredBinaries, err := meta_workspace.DiscoverLocalBinaries(absWorktreePath)
 		if err != nil {
 			return fmt.Errorf("failed to discover binaries: %w", err)
 		}

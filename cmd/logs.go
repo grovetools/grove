@@ -16,7 +16,8 @@ import (
 	"github.com/hpcloud/tail"
 	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-meta/pkg/discovery"
 	"github.com/spf13/cobra"
 )
 
@@ -85,14 +86,18 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	
 	if ecosystem {
 		// Show all workspaces in ecosystem
-		rootDir, err := workspace.FindRoot("")
+		_, err := workspace.FindEcosystemRoot("")
 		if err != nil {
 			return fmt.Errorf("failed to find workspace root: %w", err)
 		}
 
-		allWorkspaces, err := workspace.Discover(rootDir)
+		projects, err := discovery.DiscoverProjects()
 		if err != nil {
 			return fmt.Errorf("failed to discover workspaces: %w", err)
+		}
+		var allWorkspaces []string
+		for _, p := range projects {
+			allWorkspaces = append(allWorkspaces, p.Path)
 		}
 		workspaces = allWorkspaces
 		
@@ -112,14 +117,18 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		}
 	} else if len(args) > 0 {
 		// Show specific workspaces by filter
-		rootDir, err := workspace.FindRoot("")
+		_, err := workspace.FindEcosystemRoot("")
 		if err != nil {
 			return fmt.Errorf("failed to find workspace root: %w", err)
 		}
 
-		allWorkspaces, err := workspace.Discover(rootDir)
+		projects, err := discovery.DiscoverProjects()
 		if err != nil {
 			return fmt.Errorf("failed to discover workspaces: %w", err)
+		}
+		var allWorkspaces []string
+		for _, p := range projects {
+			allWorkspaces = append(allWorkspaces, p.Path)
 		}
 		
 		for _, ws := range allWorkspaces {

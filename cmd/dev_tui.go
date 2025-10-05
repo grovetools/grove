@@ -19,14 +19,16 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/components/help"
 	tablecomponent "github.com/mattsolo1/grove-core/tui/components/table"
 	"github.com/mattsolo1/grove-core/tui/keymap"
 	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-meta/pkg/devlinks"
+	"github.com/mattsolo1/grove-meta/pkg/discovery"
 	"github.com/mattsolo1/grove-meta/pkg/reconciler"
 	"github.com/mattsolo1/grove-meta/pkg/sdk"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
+	meta_workspace "github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -181,10 +183,11 @@ func (m *model) loadToolsQuickly() tea.Msg {
 	toolMap := make(map[string]string) // toolName -> repoName
 
 	// Try to discover from workspaces first
-	if rootDir, err := workspace.FindRoot(""); err == nil {
-		if workspaces, err := workspace.Discover(rootDir); err == nil {
-			for _, wsPath := range workspaces {
-				if binaries, err := workspace.DiscoverLocalBinaries(wsPath); err == nil {
+	if _, err := workspace.FindEcosystemRoot(""); err == nil {
+		if projects, err := discovery.DiscoverProjects(); err == nil {
+			for _, proj := range projects {
+				wsPath := proj.Path
+				if binaries, err := meta_workspace.DiscoverLocalBinaries(wsPath); err == nil{
 					for _, binary := range binaries {
 						repoName := filepath.Base(wsPath)
 						toolMap[binary.Name] = repoName
@@ -713,7 +716,7 @@ func (m *model) discoverWorktreesFull(toolName, repoName string) []worktreeInfo 
 func (m *model) setDevVersion(tool *toolItem, worktree worktreeInfo) tea.Cmd {
 	return func() tea.Msg {
 		// Discover binaries in the worktree
-		binaries, err := workspace.DiscoverLocalBinaries(worktree.path)
+		binaries, err := meta_workspace.DiscoverLocalBinaries(worktree.path)
 		if err != nil {
 			return errMsg{err: fmt.Errorf("failed to discover binaries: %w", err)}
 		}

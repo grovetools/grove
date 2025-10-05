@@ -13,7 +13,8 @@ import (
 	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-meta/pkg/depsgraph"
 	"github.com/mattsolo1/grove-meta/pkg/release"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-meta/pkg/discovery"
 )
 
 // runReleasePlan generates a release plan without executing it
@@ -24,15 +25,19 @@ func runReleasePlan(ctx context.Context) (*release.ReleasePlan, error) {
 	displayPhase("Preparing Release Plan")
 
 	// Find the root directory
-	rootDir, err := workspace.FindRoot("")
+	rootDir, err := workspace.FindEcosystemRoot("")
 	if err != nil {
 		return nil, fmt.Errorf("failed to find workspace root: %w", err)
 	}
 
 	// Discover all workspaces
-	workspaces, err := workspace.Discover(rootDir)
+	projects, err := discovery.DiscoverProjects()
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover workspaces: %w", err)
+	}
+	var workspaces []string
+	for _, p := range projects {
+		workspaces = append(workspaces, p.Path)
 	}
 	displayInfo(fmt.Sprintf("Discovered workspaces: %d", len(workspaces)))
 
@@ -377,9 +382,13 @@ func runReleaseApply(ctx context.Context) error {
 	}
 
 	// Reconstruct the dependency graph
-	workspaces, err := workspace.Discover(plan.RootDir)
+	projects, err := discovery.DiscoverProjects()
 	if err != nil {
 		return fmt.Errorf("failed to discover workspaces: %w", err)
+	}
+	var workspaces []string
+	for _, p := range projects {
+		workspaces = append(workspaces, p.Path)
 	}
 
 	graph, err := depsgraph.BuildGraph(plan.RootDir, workspaces)
