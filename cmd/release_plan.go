@@ -544,6 +544,50 @@ func checkoutRCNightly(ctx context.Context, projects []*workspace.ProjectInfo) e
 		wsPath := project.Path
 		repoName := filepath.Base(wsPath)
 
+		// First, ensure we're on main to check its status
+		checkoutMainCmd := exec.CommandContext(ctx, "git", "-C", wsPath, "checkout", "main")
+		if output, err := checkoutMainCmd.CombinedOutput(); err != nil {
+			displayError(fmt.Sprintf("Failed to checkout main for %s: %s", repoName, string(output)))
+			errorCount++
+			continue
+		}
+
+		// Check if main has unpushed commits
+		statusCmd := exec.CommandContext(ctx, "git", "-C", wsPath, "status", "--porcelain", "--branch")
+		statusOutput, err := statusCmd.Output()
+		if err != nil {
+			displayError(fmt.Sprintf("Failed to get git status for %s: %v", repoName, err))
+			errorCount++
+			continue
+		}
+
+		statusStr := string(statusOutput)
+		if strings.Contains(statusStr, "[ahead") {
+			displayError(fmt.Sprintf("%s: main has unpushed commits - please push before running RC release", repoName))
+			errorCount++
+			continue
+		}
+
+		// Fetch latest from origin to ensure main is up-to-date
+		fetchCmd := exec.CommandContext(ctx, "git", "-C", wsPath, "fetch", "origin", "main")
+		if output, err := fetchCmd.CombinedOutput(); err != nil {
+			displayError(fmt.Sprintf("Failed to fetch origin/main for %s: %s", repoName, string(output)))
+			errorCount++
+			continue
+		}
+
+		// Check if main is behind origin/main
+		behindCmd := exec.CommandContext(ctx, "git", "-C", wsPath, "rev-list", "--count", "main..origin/main")
+		behindOutput, err := behindCmd.Output()
+		if err == nil {
+			behindCount := strings.TrimSpace(string(behindOutput))
+			if behindCount != "0" {
+				displayError(fmt.Sprintf("%s: main is behind origin/main by %s commits - please pull first", repoName, behindCount))
+				errorCount++
+				continue
+			}
+		}
+
 		// Check if rc-nightly branch exists
 		branchCmd := exec.CommandContext(ctx, "git", "-C", wsPath, "rev-parse", "--verify", "rc-nightly")
 		branchExists := branchCmd.Run() == nil
