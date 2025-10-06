@@ -716,6 +716,14 @@ func calculateNextVersions(ctx context.Context, rootDir string, workspaces []str
 			currentVersions[repoName] = currentTag
 			currentVersion, err = semver.NewVersion(currentTag)
 			if err != nil {
+				// Skip repos with non-semver tags (like grove-ecosystem with calendar versioning)
+				// For RC releases, we'll just keep the existing tag
+				if isRC {
+					logger.WithFields(logrus.Fields{"repo": repoName, "tag": currentTag}).Warn("Skipping non-semver repo for RC release")
+					versions[repoName] = currentTag
+					commitsSinceTag[repoName] = 0
+					continue
+				}
 				return nil, nil, nil, fmt.Errorf("failed to parse version %s for %s: %w", currentTag, repoName, err)
 			}
 
