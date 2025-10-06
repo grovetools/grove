@@ -86,9 +86,34 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 		versionForAll = "nightly"
 		fmt.Println(theme.DefaultTheme.Bold.Render("Installing nightly builds for all Grove tools..."))
 	} else if len(args) == 1 && args[0] == "all@source" {
-		toolsToProcess = sdk.GetAllTools()
-		versionForAll = "source"
+		// Special handling for all@source - clone all repos first, then build
 		fmt.Println(theme.DefaultTheme.Bold.Render("Building all Grove tools from source..."))
+		if err := manager.InstallAllToolsFromSource(); err != nil {
+			return err
+		}
+
+		// Reconcile symlinks for all tools
+		fmt.Println(theme.DefaultTheme.Bold.Render("\nActivating tools..."))
+		tv, err := sdk.LoadToolVersions(os.Getenv("HOME") + "/.grove")
+		if err != nil {
+			logger.WithError(err).Warn("Could not load tool versions for reconciliation")
+			tv = &sdk.ToolVersions{Versions: make(map[string]string)}
+		}
+
+		r, err := reconciler.NewWithToolVersions(tv)
+		if err != nil {
+			return fmt.Errorf("failed to create reconciler: %w", err)
+		}
+
+		allTools := sdk.GetAllTools()
+		for _, toolName := range allTools {
+			if err := r.Reconcile(toolName); err != nil {
+				logger.WithError(err).Debugf("Failed to reconcile symlink for %s", toolName)
+			}
+		}
+
+		fmt.Println(theme.DefaultTheme.Success.Render("\n✅ All tools built and activated successfully!"))
+		return nil
 	} else {
 		// Resolve dependencies for the requested tools
 		resolvedTools, err := manager.ResolveDependencies(args)

@@ -585,6 +585,176 @@ func (m *Manager) InstallTool(toolName, versionTag string) error {
 	return nil
 }
 
+// InstallAllToolsFromSource clones all Grove tools and builds them in a shared workspace
+func (m *Manager) InstallAllToolsFromSource() error {
+	// Ensure directories exist
+	if err := m.EnsureDirs(); err != nil {
+		return err
+	}
+
+	// Use a persistent workspace directory
+	workspaceDir := filepath.Join(m.baseDir, "source-workspace")
+	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+		return fmt.Errorf("failed to create workspace directory: %w", err)
+	}
+
+	// Get all tools
+	allTools := GetAllTools()
+
+	// Collect all unique repos (tools + their dependencies)
+	allRepos := make(map[string]ToolInfo)
+	for _, toolName := range allTools {
+		repoName, toolInfo, _, found := FindTool(toolName)
+		if found {
+			allRepos[repoName] = toolInfo
+			// Add dependencies
+			for _, dep := range toolInfo.Dependencies {
+				depRepoName, depInfo, _, depFound := FindTool(dep)
+				if depFound {
+					allRepos[depRepoName] = depInfo
+				}
+			}
+		}
+	}
+
+	fmt.Printf("Cloning %d repositories into workspace: %s\n", len(allRepos), workspaceDir)
+
+	// Clone all repos
+	for repo := range allRepos {
+		repoPath := filepath.Join(workspaceDir, repo)
+
+		// Check if already cloned
+		if _, err := os.Stat(repoPath); err == nil {
+			fmt.Printf("  Updating %s...\n", repo)
+			pullCmd := exec.Command("git", "-C", repoPath, "pull", "--ff-only")
+			if err := pullCmd.Run(); err != nil {
+				// If pull fails, remove and re-clone
+				os.RemoveAll(repoPath)
+			} else {
+				continue
+			}
+		}
+
+		fmt.Printf("  Cloning %s...\n", repo)
+		repoSlug := fmt.Sprintf("%s/%s", GitHubOwner, repo)
+		cloneCmd := exec.Command("gh", "repo", "clone", repoSlug, repoPath, "--", "--depth=1")
+		if output, err := cloneCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to clone %s: %w\nOutput: %s", repo, err, string(output))
+		}
+	}
+
+	// Create go.work file (only include repos with go.mod)
+	fmt.Println("\nCreating Go workspace...")
+	goWorkPath := filepath.Join(workspaceDir, "go.work")
+	var workContent strings.Builder
+	workContent.WriteString("go 1.24.4\n\n")
+	workContent.WriteString("use (\n")
+	for repo := range allRepos {
+		// Check if repo has a go.mod file
+		goModPath := filepath.Join(workspaceDir, repo, "go.mod")
+		if _, err := os.Stat(goModPath); err == nil {
+			workContent.WriteString(fmt.Sprintf("\t./%s\n", repo))
+		}
+	}
+	workContent.WriteString(")\n\n")
+	workContent.WriteString("replace github.com/fsnotify/fsevents => ./grove-proxy/internal/fsevents-stub\n")
+
+	if err := os.WriteFile(goWorkPath, []byte(workContent.String()), 0644); err != nil {
+		return fmt.Errorf("failed to create go.work: %w", err)
+	}
+
+	// Build each tool
+	fmt.Println("\nBuilding tools...")
+	for _, toolName := range allTools {
+		repoName, _, effectiveAlias, found := FindTool(toolName)
+		if !found {
+			continue
+		}
+
+		buildDir := filepath.Join(workspaceDir, repoName)
+
+		// Check if repo has binaries defined in grove.yml
+		binaries, err := workspace.DiscoverLocalBinaries(buildDir)
+		if err != nil {
+			// Skip repos that don't produce binaries (like grove-core)
+			fmt.Printf("  ⊘ %s skipped (not a binary tool)\n", toolName)
+			continue
+		}
+
+		fmt.Printf("  Building %s...\n", toolName)
+
+		// Build with workspace
+		buildCmd := exec.Command("make", "build")
+		buildCmd.Dir = buildDir
+		buildCmd.Env = append(os.Environ(),
+			"GOPRIVATE=github.com/mattsolo1/*",
+			fmt.Sprintf("GOWORK=%s", goWorkPath))
+
+		if output, err := buildCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("build failed for %s: %w\nOutput: %s", toolName, err, string(output))
+		}
+
+		// Get commit SHA for version tag
+		shaCmd := exec.Command("git", "-C", buildDir, "rev-parse", "--short", "HEAD")
+		shaOutput, err := shaCmd.Output()
+		if err != nil {
+			return fmt.Errorf("failed to get commit SHA for %s: %w", toolName, err)
+		}
+		sha := strings.TrimSpace(string(shaOutput))
+		versionTag := fmt.Sprintf("source-%s", sha)
+
+		// Use the first binary found (most repos have only one)
+		if len(binaries) == 0 {
+			return fmt.Errorf("no binaries found for %s", toolName)
+		}
+
+		binaryPath := binaries[0].Path
+
+		// Install binary
+		versionBinDir := filepath.Join(m.baseDir, VersionsDir, versionTag, BinDir)
+		if err := os.MkdirAll(versionBinDir, 0755); err != nil {
+			return fmt.Errorf("failed to create version directory: %w", err)
+		}
+
+		targetPath := filepath.Join(versionBinDir, effectiveAlias)
+		sourceFile, err := os.Open(binaryPath)
+		if err != nil {
+			return fmt.Errorf("failed to open built binary: %w", err)
+		}
+		defer sourceFile.Close()
+
+		destFile, err := os.Create(targetPath)
+		if err != nil {
+			return fmt.Errorf("failed to create target binary: %w", err)
+		}
+		defer destFile.Close()
+
+		if _, err := io.Copy(destFile, sourceFile); err != nil {
+			return fmt.Errorf("failed to copy binary: %w", err)
+		}
+
+		if err := os.Chmod(targetPath, 0755); err != nil {
+			return fmt.Errorf("failed to make %s executable: %w", effectiveAlias, err)
+		}
+
+		// Activate this version
+		if err := m.UseToolVersion(toolName, versionTag); err != nil {
+			return fmt.Errorf("failed to activate %s: %w", toolName, err)
+		}
+
+		// Run `grove dev cwd` in the build directory
+		devCmd := exec.Command("grove", "dev", "cwd")
+		devCmd.Dir = buildDir
+		if output, err := devCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to run 'grove dev cwd' for %s: %w\nOutput: %s", toolName, err, string(output))
+		}
+
+		fmt.Printf("    ✓ %s installed as %s\n", toolName, versionTag)
+	}
+
+	return nil
+}
+
 // InstallToolFromSource clones and builds a tool from its main branch using a Go workspace
 func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
 	// Ensure directories exist
@@ -640,10 +810,10 @@ func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
 		}
 	}
 
-	// Create go.work file
+	// Create go.work file with correct version
 	goWorkPath := filepath.Join(workspaceDir, "go.work")
 	var workContent strings.Builder
-	workContent.WriteString("go 1.24\n\n")
+	workContent.WriteString("go 1.24.4\n\n")
 	workContent.WriteString("use (\n")
 	for repo := range reposToClone {
 		workContent.WriteString(fmt.Sprintf("\t./%s\n", repo))
