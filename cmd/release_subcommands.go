@@ -263,6 +263,14 @@ The rc-nightly branches are reset to main during 'grove release apply --rc'.`,
 						errorCount++
 						continue
 					}
+
+					// Rebase on main to get latest changes
+					fmt.Printf("  ⟳  %s: rebasing on main\n", repoName)
+					rebaseCmd := exec.CommandContext(ctx, "git", "-C", wsPath, "rebase", "main")
+					if output, err := rebaseCmd.CombinedOutput(); err != nil {
+						fmt.Printf("  ⚠️  %s: rebase failed (may need manual resolution): %s\n", repoName, string(output))
+						// Don't increment errorCount - this is not fatal, user can resolve manually
+					}
 				}
 
 				successCount++
