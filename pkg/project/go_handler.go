@@ -62,6 +62,12 @@ func (h *GoHandler) ParseDependencies(workspacePath string) ([]Dependency, error
 func (h *GoHandler) UpdateDependency(workspacePath string, dep Dependency) error {
 	ctx := context.Background()
 
+	// First, remove any replace directive for this dependency from go.mod
+	goModPath := filepath.Join(workspacePath, "go.mod")
+	if err := h.removeReplaceDirective(goModPath, dep.Name); err != nil {
+		return fmt.Errorf("failed to remove replace directive: %w", err)
+	}
+
 	// Update to new version using go get
 	cmd := exec.CommandContext(ctx, "go", "get", fmt.Sprintf("%s@%s", dep.Name, dep.Version))
 	cmd.Dir = workspacePath
@@ -85,6 +91,41 @@ func (h *GoHandler) UpdateDependency(workspacePath string, dep Dependency) error
 
 	if output, err := tidyCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("go mod tidy failed: %w (output: %s)", err, output)
+	}
+
+	return nil
+}
+
+// removeReplaceDirective removes a replace directive for a module from go.mod
+func (h *GoHandler) removeReplaceDirective(goModPath, modulePath string) error {
+	data, err := os.ReadFile(goModPath)
+	if err != nil {
+		return fmt.Errorf("failed to read go.mod: %w", err)
+	}
+
+	modFile, err := modfile.Parse(goModPath, data, nil)
+	if err != nil {
+		return fmt.Errorf("failed to parse go.mod: %w", err)
+	}
+
+	// Check if there's a replace directive for this module
+	for _, replace := range modFile.Replace {
+		if replace.Old.Path == modulePath {
+			// Drop the replace directive
+			if err := modFile.DropReplace(replace.Old.Path, replace.Old.Version); err != nil {
+				return fmt.Errorf("failed to drop replace directive: %w", err)
+			}
+		}
+	}
+
+	// Write back the modified go.mod
+	newData, err := modFile.Format()
+	if err != nil {
+		return fmt.Errorf("failed to format go.mod: %w", err)
+	}
+
+	if err := os.WriteFile(goModPath, newData, 0644); err != nil {
+		return fmt.Errorf("failed to write go.mod: %w", err)
 	}
 
 	return nil

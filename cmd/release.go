@@ -1022,7 +1022,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 						"repo": repo,
 						"wsPath": wsPath,
 					}).Info("[orchestrateRelease] Calling updateDependencies")
-					if err := updateDependencies(ctx, wsPath, versions, graph, logger); err != nil {
+					if err := updateDependencies(ctx, wsPath, versions, graph, plan.Type, logger); err != nil {
 						logger.WithFields(logrus.Fields{
 							"repo": repo,
 							"error": err,
@@ -1366,10 +1366,11 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 	return nil
 }
 
-func updateDependencies(ctx context.Context, modulePath string, releasedVersions map[string]string, graph *depsgraph.Graph, logger *logrus.Logger) error {
+func updateDependencies(ctx context.Context, modulePath string, releasedVersions map[string]string, graph *depsgraph.Graph, planType string, logger *logrus.Logger) error {
 	logger.WithFields(logrus.Fields{
 		"modulePath": modulePath,
 		"releasedVersions": releasedVersions,
+		"planType": planType,
 	}).Info("[updateDependencies] Starting dependency update")
 	
 	// Load grove.yml to get project type
@@ -1447,17 +1448,34 @@ func updateDependencies(ctx context.Context, modulePath string, releasedVersions
 			// Dependency is not in current release batch, fetch latest version
 			// Only fetch latest for Go projects (others don't have a module proxy)
 			if projectType == project.TypeGo {
-				latestVersion, err := getLatestModuleVersion(dep.Name)
-				if err != nil {
-					logger.WithError(err).Warnf("Failed to get latest version for %s, keeping current version", dep.Name)
-					continue
+				var latestVersion string
+				var err error
+
+				// For RC releases, fetch latest prerelease version; otherwise fetch latest stable
+				if planType == "rc" {
+					latestVersion, err = getLatestPrereleaseModuleVersion(dep.Name)
+					if err != nil {
+						logger.WithError(err).Warnf("Failed to get latest prerelease version for %s, keeping current version", dep.Name)
+						continue
+					}
+					logger.WithFields(logrus.Fields{
+						"dep": dep.Name,
+						"workspace": depWorkspaceName,
+						"version": latestVersion,
+					}).Info("Using latest prerelease version from module proxy")
+				} else {
+					latestVersion, err = getLatestModuleVersion(dep.Name)
+					if err != nil {
+						logger.WithError(err).Warnf("Failed to get latest version for %s, keeping current version", dep.Name)
+						continue
+					}
+					logger.WithFields(logrus.Fields{
+						"dep": dep.Name,
+						"workspace": depWorkspaceName,
+						"version": latestVersion,
+					}).Info("Using latest version from module proxy")
 				}
 				targetVersion = latestVersion
-				logger.WithFields(logrus.Fields{
-					"dep": dep.Name,
-					"workspace": depWorkspaceName,
-					"version": latestVersion,
-				}).Info("Using latest version from module proxy")
 			} else {
 				// For non-Go projects, skip if not in release batch
 				continue

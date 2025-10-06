@@ -252,6 +252,47 @@ func getLatestModuleVersion(modulePath string) (string, error) {
 	return modInfo.Version, nil
 }
 
+func getLatestPrereleaseModuleVersion(modulePath string) (string, error) {
+	// Use go list to get all versions
+	cmd := exec.Command("go", "list", "-m", "-versions", "-json", modulePath)
+
+	// Set up environment for private modules
+	cmd.Env = append(os.Environ(),
+		"GOPRIVATE=github.com/mattsolo1/*",
+		"GOPROXY=direct",
+	)
+
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("go list failed: %w", err)
+	}
+
+	// Parse JSON output
+	var modInfo struct {
+		Versions []string `json:"Versions"`
+	}
+	if err := json.Unmarshal(output, &modInfo); err != nil {
+		return "", fmt.Errorf("failed to parse go list output: %w", err)
+	}
+
+	// Find the latest prerelease version (versions with "-" in them)
+	var latestPrerelease string
+	for i := len(modInfo.Versions) - 1; i >= 0; i-- {
+		version := modInfo.Versions[i]
+		// Prerelease versions contain a hyphen (e.g., v0.4.1-nightly.abc)
+		if strings.Contains(version, "-") {
+			latestPrerelease = version
+			break
+		}
+	}
+
+	if latestPrerelease == "" {
+		return "", fmt.Errorf("no prerelease version found")
+	}
+
+	return latestPrerelease, nil
+}
+
 func runGoGet(workspacePath, modulePath, version string) error {
 	cmd := exec.Command("go", "get", modulePath+"@"+version)
 	cmd.Dir = workspacePath
