@@ -12,9 +12,9 @@ import (
 	"github.com/mattsolo1/grove-core/git"
 	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-meta/pkg/depsgraph"
+	"github.com/mattsolo1/grove-meta/pkg/discovery"
 	"github.com/mattsolo1/grove-meta/pkg/release"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-meta/pkg/discovery"
 )
 
 // runReleasePlan generates a release plan without executing it
@@ -40,6 +40,14 @@ func runReleasePlan(ctx context.Context, isRC bool) (*release.ReleasePlan, error
 		workspaces = append(workspaces, p.Path)
 	}
 	displayInfo(fmt.Sprintf("Discovered workspaces: %d", len(workspaces)))
+
+	// For RC releases, checkout all workspaces to rc-nightly
+	if isRC {
+		displayProgress("Checking out workspaces to rc-nightly...")
+		if err := checkoutRCNightly(ctx, projects); err != nil {
+			return nil, fmt.Errorf("failed to checkout rc-nightly: %w", err)
+		}
+	}
 
 	// Build dependency graph with ALL workspaces
 	displayProgress("Building dependency graph...")
@@ -525,5 +533,51 @@ func runReleaseApply(ctx context.Context) error {
 		logger.WithError(err).Warn("Failed to clear release plan")
 	}
 
+	return nil
+}
+
+// checkoutRCNightly checks out all workspaces to rc-nightly branch
+func checkoutRCNightly(ctx context.Context, projects []*workspace.ProjectInfo) error {
+	errorCount := 0
+
+	for _, project := range projects {
+		wsPath := project.Path
+		repoName := filepath.Base(wsPath)
+
+		// Check if rc-nightly branch exists
+		branchCmd := exec.CommandContext(ctx, "git", "-C", wsPath, "rev-parse", "--verify", "rc-nightly")
+		branchExists := branchCmd.Run() == nil
+
+		if !branchExists {
+			// Create rc-nightly from main
+			createCmd := exec.CommandContext(ctx, "git", "-C", wsPath, "checkout", "-b", "rc-nightly", "main")
+			if output, err := createCmd.CombinedOutput(); err != nil {
+				displayError(fmt.Sprintf("Failed to create rc-nightly for %s: %s", repoName, string(output)))
+				errorCount++
+				continue
+			}
+		} else {
+			// Checkout existing rc-nightly
+			checkoutCmd := exec.CommandContext(ctx, "git", "-C", wsPath, "checkout", "rc-nightly")
+			if output, err := checkoutCmd.CombinedOutput(); err != nil {
+				displayError(fmt.Sprintf("Failed to checkout rc-nightly for %s: %s", repoName, string(output)))
+				errorCount++
+				continue
+			}
+
+			// Rebase on main to get latest changes
+			rebaseCmd := exec.CommandContext(ctx, "git", "-C", wsPath, "rebase", "main")
+			if output, err := rebaseCmd.CombinedOutput(); err != nil {
+				displayWarning(fmt.Sprintf("%s: rebase failed (may need manual resolution): %s", repoName, string(output)))
+				// Don't increment errorCount - this is not fatal, user can resolve manually
+			}
+		}
+	}
+
+	if errorCount > 0 {
+		return fmt.Errorf("failed to checkout %d workspaces", errorCount)
+	}
+
+	displaySuccess("All workspaces checked out to rc-nightly")
 	return nil
 }

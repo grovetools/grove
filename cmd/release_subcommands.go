@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-meta/pkg/discovery"
 	"github.com/mattsolo1/grove-meta/pkg/release"
 	"github.com/spf13/cobra"
 )
@@ -205,91 +204,6 @@ Use this to abort a release in progress and start fresh.`,
 		},
 	}
 	
-	return cmd
-}
-
-// newReleaseCheckoutCmd creates the 'grove release checkout' subcommand
-func newReleaseCheckoutCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "checkout",
-		Short: "Checkout all workspaces to rc-nightly branch",
-		Long: `Checkout all workspaces to the rc-nightly branch, creating the branch if needed.
-
-This prepares your local environment for RC releases by ensuring all repos are on
-the rc-nightly branch. This makes it easy to:
-- See the state of each repo during RC release
-- Debug issues in the rc-nightly context
-- Make manual fixes if needed
-- Resume failed RC releases
-
-The rc-nightly branches are reset to main during 'grove release apply --rc'.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := context.Background()
-
-			// Discover all workspaces
-			projects, err := discovery.DiscoverProjects()
-			if err != nil {
-				return fmt.Errorf("failed to discover workspaces: %w", err)
-			}
-
-			fmt.Printf("Checking out %d workspaces to rc-nightly...\n\n", len(projects))
-
-			successCount := 0
-			errorCount := 0
-
-			for _, project := range projects {
-				wsPath := project.Path
-				repoName := filepath.Base(wsPath)
-
-				// Check if rc-nightly branch exists
-				branchCmd := exec.CommandContext(ctx, "git", "-C", wsPath, "rev-parse", "--verify", "rc-nightly")
-				branchExists := branchCmd.Run() == nil
-
-				if !branchExists {
-					// Create rc-nightly from main
-					fmt.Printf("  📝 %s: creating rc-nightly from main\n", repoName)
-					createCmd := exec.CommandContext(ctx, "git", "-C", wsPath, "checkout", "-b", "rc-nightly", "main")
-					if output, err := createCmd.CombinedOutput(); err != nil {
-						fmt.Printf("  ❌ %s: failed to create rc-nightly: %s\n", repoName, string(output))
-						errorCount++
-						continue
-					}
-				} else {
-					// Checkout existing rc-nightly
-					fmt.Printf("  ✓ %s: switching to rc-nightly\n", repoName)
-					checkoutCmd := exec.CommandContext(ctx, "git", "-C", wsPath, "checkout", "rc-nightly")
-					if output, err := checkoutCmd.CombinedOutput(); err != nil {
-						fmt.Printf("  ❌ %s: failed to checkout rc-nightly: %s\n", repoName, string(output))
-						errorCount++
-						continue
-					}
-
-					// Rebase on main to get latest changes
-					fmt.Printf("  ⟳  %s: rebasing on main\n", repoName)
-					rebaseCmd := exec.CommandContext(ctx, "git", "-C", wsPath, "rebase", "main")
-					if output, err := rebaseCmd.CombinedOutput(); err != nil {
-						fmt.Printf("  ⚠️  %s: rebase failed (may need manual resolution): %s\n", repoName, string(output))
-						// Don't increment errorCount - this is not fatal, user can resolve manually
-					}
-				}
-
-				successCount++
-			}
-
-			fmt.Printf("\n✅ Checked out %d workspaces to rc-nightly", successCount)
-			if errorCount > 0 {
-				fmt.Printf(" (%d errors)", errorCount)
-			}
-			fmt.Println()
-
-			fmt.Println("\nNext steps:")
-			fmt.Println("  grove release plan --rc     # Create RC release plan")
-			fmt.Println("  grove release apply         # Execute RC release")
-
-			return nil
-		},
-	}
-
 	return cmd
 }
 
