@@ -103,14 +103,16 @@ The release process is divided into distinct commands:
   plan       - Generate a release plan analyzing all repositories for changes
   tui        - Review and approve the release plan interactively (or use 'review')
   apply      - Execute the approved release plan
+  checkout   - Checkout all workspaces to rc-nightly branch
   clear-plan - Clear the current release plan and start over
   undo-tag   - Remove tags locally and optionally from remote
   rollback   - Rollback commits in repositories from the release plan
 
 Typical workflow:
-  1. grove release plan              # Generate release plan
-  2. grove release tui               # Review and approve
-  3. grove release apply              # Execute the release
+  1. grove release checkout          # (RC only) Switch all repos to rc-nightly
+  2. grove release plan --rc         # Generate RC release plan
+  3. grove release tui               # Review and approve
+  4. grove release apply             # Execute the release
 
 Recovery commands:
   grove release undo-tag --from-plan --remote  # Remove all tags from failed release
@@ -143,6 +145,7 @@ Examples:
 	cmd.AddCommand(newReleaseTuiCmd())
 	cmd.AddCommand(newReleaseReviewCmd()) // Alias for TUI
 	cmd.AddCommand(newReleaseApplyCmd())
+	cmd.AddCommand(newReleaseCheckoutCmd())
 	cmd.AddCommand(newReleaseClearPlanCmd())
 	cmd.AddCommand(newReleaseUndoTagCmd())
 	cmd.AddCommand(newReleaseRollbackCmd())
