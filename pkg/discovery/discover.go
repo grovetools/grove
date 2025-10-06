@@ -65,16 +65,23 @@ func DiscoverProjectsInEcosystem(ecosystemRoot string, includeWorktrees bool) ([
 		}
 	}
 
+	// Normalize ecosystem root for case-insensitive comparison (macOS has case-insensitive filesystem)
+	ecosystemRootLower := strings.ToLower(ecosystemRoot)
+
 	// Filter to only projects within the specified ecosystem
 	var scopedProjects []*workspace.ProjectInfo
 	for _, p := range allProjects {
+		// Normalize paths for comparison
+		parentPathLower := strings.ToLower(p.ParentEcosystemPath)
+		projectPathLower := strings.ToLower(p.Path)
+
 		// Include if:
 		// 1. The project's ParentEcosystemPath matches our ecosystem root, OR
 		// 2. The project path itself starts with the ecosystem root, OR
 		// 3. The project IS the ecosystem root
-		if p.ParentEcosystemPath == ecosystemRoot ||
-		   strings.HasPrefix(p.Path, ecosystemRoot) ||
-		   p.Path == ecosystemRoot {
+		if parentPathLower == ecosystemRootLower ||
+		   strings.HasPrefix(projectPathLower, ecosystemRootLower) ||
+		   projectPathLower == ecosystemRootLower {
 
 			// If not including worktrees, skip:
 			// - Projects marked as worktrees
