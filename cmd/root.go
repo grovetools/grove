@@ -25,6 +25,7 @@ func init() {
 	rootCmd.AddCommand(newDocsCmd())
 	rootCmd.AddCommand(newLogsCmd())
 	rootCmd.AddCommand(newRunCmd())
+	rootCmd.AddCommand(newStarshipCmd())
 	rootCmd.AddCommand(internal.NewInternalCmd())
 
 	// Set up the root command's RunE to handle tool delegation
