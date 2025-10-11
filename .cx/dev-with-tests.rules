@@ -1,0 +1,14 @@
+# Development rules: Code with tests
+
+# Include all Go source files
+**/*.go
+
+# Main/build/config files
+main.go
+Makefile
+go.mod
+grove.yml
+!go.sum
+
+# Exclude docs
+!docs

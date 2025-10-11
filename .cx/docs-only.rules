@@ -1,0 +1,8 @@
+# Documentation only rules
+# For working on documentation
+
+# Include all docs directory content
+docs/**
+
+# Exclude SVG files
+!**/*.svg
