@@ -537,7 +537,7 @@ func runReleaseApply(ctx context.Context) error {
 }
 
 // checkoutRCNightly checks out all workspaces to rc-nightly branch
-func checkoutRCNightly(ctx context.Context, projects []*workspace.ProjectInfo) error {
+func checkoutRCNightly(ctx context.Context, projects []*workspace.WorkspaceNode) error {
 	errorCount := 0
 
 	for _, project := range projects {

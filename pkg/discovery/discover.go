@@ -10,32 +10,28 @@ import (
 
 // DiscoverProjects is a centralized helper that finds all main workspace projects
 // (excluding worktrees) within the current ecosystem using the discovery service from grove-core.
-func DiscoverProjects() ([]*workspace.ProjectInfo, error) {
+func DiscoverProjects() ([]*workspace.WorkspaceNode, error) {
 	return DiscoverProjectsInEcosystem("", false)
 }
 
 // DiscoverAllProjects discovers all projects including worktrees within the current ecosystem.
-func DiscoverAllProjects() ([]*workspace.ProjectInfo, error) {
+func DiscoverAllProjects() ([]*workspace.WorkspaceNode, error) {
 	return DiscoverProjectsInEcosystem("", true)
 }
 
 // DiscoverProjectsInEcosystem discovers projects scoped to a specific ecosystem root.
 // If ecosystemRoot is empty, it finds the current ecosystem root or parent ecosystem.
 // If includeWorktrees is false, worktrees are excluded from the results.
-func DiscoverProjectsInEcosystem(ecosystemRoot string, includeWorktrees bool) ([]*workspace.ProjectInfo, error) {
-	// Initialize the discovery service from grove-core
+func DiscoverProjectsInEcosystem(ecosystemRoot string, includeWorktrees bool) ([]*workspace.WorkspaceNode, error) {
+	// Initialize logger
 	logger := logrus.New()
 	logger.SetLevel(logrus.WarnLevel) // Suppress noisy output
-	discoveryService := workspace.NewDiscoveryService(logger)
 
-	// Discover all entities (ecosystems, projects, etc.)
-	discoveryResult, err := discoveryService.DiscoverAll()
+	// Use the new GetProjects API which handles discovery and transformation
+	allProjects, err := workspace.GetProjects(logger)
 	if err != nil {
 		return nil, err
 	}
-
-	// Transform the raw results into the flat ProjectInfo list used by UIs and commands
-	allProjects := workspace.TransformToProjectInfo(discoveryResult)
 
 	// If no ecosystem root specified, determine it from the current context
 	if ecosystemRoot == "" {
@@ -69,7 +65,7 @@ func DiscoverProjectsInEcosystem(ecosystemRoot string, includeWorktrees bool) ([
 	ecosystemRootLower := strings.ToLower(ecosystemRoot)
 
 	// Filter to only projects within the specified ecosystem
-	var scopedProjects []*workspace.ProjectInfo
+	var scopedProjects []*workspace.WorkspaceNode
 	for _, p := range allProjects {
 		// Normalize paths for comparison
 		parentPathLower := strings.ToLower(p.ParentEcosystemPath)
@@ -84,10 +80,10 @@ func DiscoverProjectsInEcosystem(ecosystemRoot string, includeWorktrees bool) ([
 		   projectPathLower == ecosystemRootLower {
 
 			// If not including worktrees, skip:
-			// - Projects marked as worktrees
-			// - Projects whose path contains /.grove-worktrees/ (inside a worktree)
+			// - Nodes marked as worktrees
+			// - Nodes whose path contains /.grove-worktrees/ (inside a worktree)
 			if !includeWorktrees {
-				if p.IsWorktree || strings.Contains(p.Path, "/.grove-worktrees/") {
+				if p.IsWorktree() || strings.Contains(p.Path, "/.grove-worktrees/") {
 					continue
 				}
 			}

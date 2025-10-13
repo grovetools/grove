@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/config"
+	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/theme"
@@ -148,7 +148,7 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 		for _, p := range filteredPaths {
 			pathMap[p] = true
 		}
-		var filteredProjects []*workspace.ProjectInfo
+		var filteredProjects []*workspace.WorkspaceNode
 		for _, p := range projects {
 			if pathMap[p.Path] {
 				filteredProjects = append(filteredProjects, p)
@@ -164,30 +164,6 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 
 	logger.WithField("count", len(projects)).Debug("Discovered workspaces")
 
-	// Use EnrichProjects to fetch Git status for all projects at once if requested
-	if colMap["git"] {
-		enrichOpts := &workspace.EnrichmentOptions{
-			FetchGitStatus: true,
-		}
-		ctx := cmd.Context()
-		if ctx == nil {
-			ctx = context.Background()
-		}
-		if err := workspace.EnrichProjects(ctx, projects, enrichOpts); err != nil {
-			logger.WithError(err).Error("Failed to enrich projects with Git status")
-			return fmt.Errorf("failed to enrich projects: %w", err)
-		}
-
-		// Debug: Check if GitStatus was set
-		enrichedCount := 0
-		for _, p := range projects {
-			if p.GitStatus != nil {
-				enrichedCount++
-			}
-		}
-		logger.WithField("enrichedCount", enrichedCount).WithField("totalProjects", len(projects)).Debug("Git status enrichment complete")
-	}
-
 	// ContextStats represents the structure from grove-context
 	type ContextStats struct {
 		TotalFiles  int   `json:"total_files"`
@@ -201,17 +177,19 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 		CommitsAhead int
 	}
 
-	// statusInfo embeds ProjectInfo and adds additional fields
+	// statusInfo embeds WorkspaceNode and adds additional fields
 	type statusInfo struct {
-		*workspace.ProjectInfo
-		Type    string // Project type (go, maturin, etc.)
-		Context *ContextStats
-		Release *ReleaseInfo
-		MainCI  string
-		MyPRs   string
-		CxErr   error
-		RelErr  error
-		CIErr   error
+		*workspace.WorkspaceNode
+		Type      string // Project type (go, maturin, etc.)
+		GitStatus *git.StatusInfo
+		Context   *ContextStats
+		Release   *ReleaseInfo
+		MainCI    string
+		MyPRs     string
+		GitErr    error
+		CxErr     error
+		RelErr    error
+		CIErr     error
 	}
 
 	// Process workspaces concurrently
@@ -220,11 +198,11 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 
 	for _, proj := range projects {
 		wg.Add(1)
-		go func(p *workspace.ProjectInfo) {
+		go func(p *workspace.WorkspaceNode) {
 			defer wg.Done()
 
 			status := statusInfo{
-				ProjectInfo: p,
+				WorkspaceNode: p,
 			}
 
 			wsPath := p.Path
@@ -239,6 +217,16 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 				}
 			}
 			status.Type = projectType
+
+			// Get git status if requested
+			if colMap["git"] {
+				gitStatus, err := git.GetStatus(wsPath)
+				if err != nil {
+					status.GitErr = err
+				} else {
+					status.GitStatus = gitStatus
+				}
+			}
 
 			// Get context stats if requested
 			if colMap["cx"] {
@@ -392,20 +380,17 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 				jsonWs.Errors = errors
 			}
 
-			// Add git info if requested and available (from enriched ProjectInfo)
+			// Add git info if requested and available
 			if colMap["git"] && ws.GitStatus != nil {
-				// GitStatus is ExtendedGitStatus which embeds *git.StatusInfo
-				if extStatus, ok := ws.GitStatus.(*workspace.ExtendedGitStatus); ok && extStatus.StatusInfo != nil {
-					jsonWs.Git = &GitStatusJSON{
-						Branch:         extStatus.Branch,
-						IsDirty:        extStatus.IsDirty,
-						HasUpstream:    extStatus.HasUpstream,
-						AheadCount:     extStatus.AheadCount,
-						BehindCount:    extStatus.BehindCount,
-						ModifiedCount:  extStatus.ModifiedCount,
-						StagedCount:    extStatus.StagedCount,
-						UntrackedCount: extStatus.UntrackedCount,
-					}
+				jsonWs.Git = &GitStatusJSON{
+					Branch:         ws.GitStatus.Branch,
+					IsDirty:        ws.GitStatus.IsDirty,
+					HasUpstream:    ws.GitStatus.HasUpstream,
+					AheadCount:     ws.GitStatus.AheadCount,
+					BehindCount:    ws.GitStatus.BehindCount,
+					ModifiedCount:  ws.GitStatus.ModifiedCount,
+					StagedCount:    ws.GitStatus.StagedCount,
+					UntrackedCount: ws.GitStatus.UntrackedCount,
 				}
 			}
 
@@ -485,12 +470,11 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 
 		// Add git columns if requested
 		if colMap["git"] {
-			// Use GitStatus from enriched ProjectInfo (ExtendedGitStatus)
-			extStatus, ok := ws.GitStatus.(*workspace.ExtendedGitStatus)
-			if !ok || extStatus == nil || extStatus.StatusInfo == nil {
+			// Use GitStatus fetched in goroutine
+			if ws.GitStatus == nil {
 				row = append(row, "-", "-", "-")
 			} else {
-				status := extStatus.StatusInfo
+				status := ws.GitStatus
 
 				// Format status column with pre-styling
 				statusStr := "✓ Clean"
