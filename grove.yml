@@ -1,4 +1,4 @@
-name: grove
+name: grove-meta
 description: Grove package manager and command delegator
 binary:
   name: grove
