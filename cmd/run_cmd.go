@@ -57,20 +57,96 @@ Use -- to separate grove run flags from the command and its arguments.`,
 	return cmd
 }
 
+// discoverTargetProjects determines the appropriate scope of projects based on the current context.
+// If run from within an EcosystemWorktree, it returns only the constituents of that worktree.
+// Otherwise, it returns all projects in the root ecosystem or standalone project group.
+func discoverTargetProjects() ([]*workspace.WorkspaceNode, string, error) {
+	// Get current working directory
+	cwd, err := filepath.Abs(".")
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get current directory: %w", err)
+	}
+
+	// Use GetProjectByPath to perform a fast lookup and identify the current workspace node
+	currentNode, err := workspace.GetProjectByPath(cwd)
+	if err != nil {
+		// If we can't determine the current context, fall back to discovering all projects
+		logger := logging.NewLogger("run")
+		logger.WithField("error", err).Debug("Could not determine current workspace context, falling back to full discovery")
+
+		projects, err := discovery.DiscoverProjects()
+		if err != nil {
+			return nil, "", err
+		}
+
+		rootDir, _ := workspace.FindEcosystemRoot("")
+		if rootDir == "" {
+			rootDir = cwd
+		}
+		return projects, rootDir, nil
+	}
+
+	// Get all projects to filter from
+	allProjects, err := discovery.DiscoverAllProjects()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to discover all projects: %w", err)
+	}
+
+	// Determine the scope for the run command
+	var scopeRoot string
+	var filteredProjects []*workspace.WorkspaceNode
+
+	// Check if we're in an EcosystemWorktree or a child of one
+	if currentNode.Kind == workspace.KindEcosystemWorktree {
+		// We're in an EcosystemWorktree, scope to its constituents
+		scopeRoot = currentNode.Path
+
+		// Filter projects to only those within this worktree
+		// Exclude the worktree root itself, only include its sub-projects
+		for _, p := range allProjects {
+			// Include only if:
+			// 1. The project path starts with the scopeRoot (is inside the worktree)
+			// 2. The project path is not the scopeRoot itself (exclude the worktree root)
+			if strings.HasPrefix(strings.ToLower(p.Path), strings.ToLower(scopeRoot+string(filepath.Separator))) {
+				filteredProjects = append(filteredProjects, p)
+			}
+		}
+	} else if currentNode.Kind == workspace.KindEcosystemWorktreeSubProject ||
+	          currentNode.Kind == workspace.KindEcosystemWorktreeSubProjectWorktree {
+		// We're in a sub-project within an EcosystemWorktree
+		// Find the parent EcosystemWorktree and use it as scope
+		scopeRoot = currentNode.ParentEcosystemPath
+
+		// Filter projects to only those within the parent worktree
+		for _, p := range allProjects {
+			if strings.HasPrefix(strings.ToLower(p.Path), strings.ToLower(scopeRoot+string(filepath.Separator))) {
+				filteredProjects = append(filteredProjects, p)
+			}
+		}
+	} else {
+		// Not in an EcosystemWorktree context, use standard discovery
+		// This preserves the existing behavior for root ecosystems and standalone projects
+		projects, err := discovery.DiscoverProjects()
+		if err != nil {
+			return nil, "", err
+		}
+
+		rootDir, _ := workspace.FindEcosystemRoot("")
+		if rootDir == "" {
+			rootDir = cwd
+		}
+		return projects, rootDir, nil
+	}
+
+	return filteredProjects, scopeRoot, nil
+}
+
 func runCommand(cmd *cobra.Command, args []string) error {
 	logger := logging.NewLogger("run")
 	opts := cli.GetOptions(cmd)
 
-	// Find root directory with workspaces
-	rootDir, err := workspace.FindEcosystemRoot("")
-	if err != nil {
-		return fmt.Errorf("failed to find workspace root: %w", err)
-	}
-
-	logger.WithField("root", rootDir).Debug("Found workspace root")
-
-	// Discover projects using the new centralized helper
-	projects, err := discovery.DiscoverProjects()
+	// Discover projects using the new context-aware helper
+	projects, rootDir, err := discoverTargetProjects()
 	if err != nil {
 		return fmt.Errorf("failed to discover workspaces: %w", err)
 	}
@@ -122,14 +198,8 @@ func runCommand(cmd *cobra.Command, args []string) error {
 func runScript(cmd *cobra.Command, script string) error {
 	logger := logging.NewLogger("run")
 
-	// Find root directory with workspaces
-	rootDir, err := workspace.FindEcosystemRoot("")
-	if err != nil {
-		return fmt.Errorf("failed to find workspace root: %w", err)
-	}
-
-	// Discover projects using the new centralized helper
-	projects, err := discovery.DiscoverProjects()
+	// Discover projects using the new context-aware helper
+	projects, rootDir, err := discoverTargetProjects()
 	if err != nil {
 		return fmt.Errorf("failed to discover workspaces: %w", err)
 	}
