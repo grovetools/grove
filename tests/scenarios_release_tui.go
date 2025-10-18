@@ -225,7 +225,7 @@ func ReleaseTUISelectionScenario() *harness.Scenario {
 					groveBinary = ctx.GroveBinary // fallback to default
 					fmt.Printf("Using fallback binary: %s\n", groveBinary)
 				}
-				session, err := ctx.StartTUI(groveBinary, "release", "tui", "--fresh")
+				session, err := ctx.StartTUI(groveBinary, []string{"release", "tui", "--fresh"})
 				if err != nil {
 					return fmt.Errorf("failed to start TUI: %w", err)
 				}

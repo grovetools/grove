@@ -41,7 +41,7 @@ exec "%s" "$@"
 					return fmt.Errorf("failed to chmod grove wrapper: %w", err)
 				}
 				
-				session, err := ctx.StartTUI(wrapperPath, "release", "tui", "--fresh")
+				session, err := ctx.StartTUI(wrapperPath, []string{"release", "tui", "--fresh"})
 				if err != nil {
 					return fmt.Errorf("failed to start TUI: %w", err)
 				}
@@ -148,7 +148,7 @@ exec "%s" "$@"
 					return fmt.Errorf("failed to chmod grove wrapper: %w", err)
 				}
 				
-				session, err := ctx.StartTUI(wrapperPath, "release", "tui", "--fresh")
+				session, err := ctx.StartTUI(wrapperPath, []string{"release", "tui", "--fresh"})
 				if err != nil {
 					return err
 				}
