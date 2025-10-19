@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -67,22 +66,28 @@ func SyncDepsReleaseScenario() *harness.Scenario {
 						os.Unsetenv("GH_MOCK_CI_STATUS")
 					}()
 
-					// Run release command - only patch lib-a, let --with-deps pull in app-b
-					// Dependencies will be synced automatically
-					cmd := command.New(ctx.GroveBinary, "release",
-						"--with-deps", // Include dependencies
+					// Step 1: Generate release plan (dependencies should be automatically included)
+					planCmd := ctx.Command(ctx.GroveBinary, "release", "plan",
 						"--patch", "lib-a", // Only specify lib-a
-						"--yes",
 						"--verbose",
 						"--skip-parent").Dir(ecosystemDir)
-					result := cmd.Run()
-					if result.Error != nil {
-						return fmt.Errorf("release command failed unexpectedly: %w\n%s", result.Error, result.Stderr)
+					planResult := planCmd.Run()
+					if planResult.Error != nil {
+						return fmt.Errorf("release plan command failed unexpectedly: %w\n%s", planResult.Error, planResult.Stderr)
+					}
+
+					// Step 2: Apply the release plan
+					applyCmd := ctx.Command(ctx.GroveBinary, "release", "apply",
+						"--yes",
+						"--skip-parent").Dir(ecosystemDir)
+					applyResult := applyCmd.Run()
+					if applyResult.Error != nil {
+						return fmt.Errorf("release apply command failed unexpectedly: %w\n%s", applyResult.Error, applyResult.Stderr)
 					}
 
 					// Assertions
 					// 1. Upstream (lib-a) was released
-					latestTagCmdA := command.New("git", "describe", "--tags", "--abbrev=0").Dir(libAPath)
+					latestTagCmdA := ctx.Command("git", "describe", "--tags", "--abbrev=0").Dir(libAPath)
 					tagResultA := latestTagCmdA.Run()
 					if tagResultA.Error != nil {
 						return fmt.Errorf("failed to get lib-a latest tag: %w", tagResultA.Error)
@@ -98,7 +103,7 @@ func SyncDepsReleaseScenario() *harness.Scenario {
 					// For now, we'll just verify that app-b was part of the release plan
 
 					// 3. Downstream (app-b) was also released
-					latestTagCmdB := command.New("git", "describe", "--tags", "--abbrev=0").Dir(appBPath)
+					latestTagCmdB := ctx.Command("git", "describe", "--tags", "--abbrev=0").Dir(appBPath)
 					tagResultB := latestTagCmdB.Run()
 					if tagResultB.Error != nil {
 						return fmt.Errorf("failed to get app-b latest tag: %w", tagResultB.Error)
@@ -158,13 +163,21 @@ func SyncDepsReleaseScenario() *harness.Scenario {
 						os.Unsetenv("GH_MOCK_CI_STATUS")
 					}()
 
-					// Run release command - explicitly include both repos for CI failure test
-					cmd := command.New(ctx.GroveBinary, "release",
+					// Step 1: Generate release plan for both repos
+					planCmd := ctx.Command(ctx.GroveBinary, "release", "plan",
 						"--sync-deps",
 						"--patch", "lib-a,app-b", // Include both to ensure CI failure affects the release
+						"--skip-parent").Dir(ecosystemDir)
+					planResult := planCmd.Run()
+					if planResult.Error != nil {
+						return fmt.Errorf("release plan command failed unexpectedly: %w\n%s", planResult.Error, planResult.Stderr)
+					}
+
+					// Step 2: Try to apply the release plan - this should fail due to CI
+					applyCmd := ctx.Command(ctx.GroveBinary, "release", "apply",
 						"--yes",
 						"--skip-parent").Dir(ecosystemDir)
-					result := cmd.Run()
+					result := applyCmd.Run()
 
 					// Assert that the command failed
 					if result.Error == nil {
@@ -177,7 +190,7 @@ func SyncDepsReleaseScenario() *harness.Scenario {
 
 					// Assertions
 					// 1. Upstream (lib-a) was tagged (tagging happens before CI watch)
-					latestTagCmdA := command.New("git", "describe", "--tags", "--abbrev=0").Dir(libAPath)
+					latestTagCmdA := ctx.Command("git", "describe", "--tags", "--abbrev=0").Dir(libAPath)
 					tagResultA := latestTagCmdA.Run()
 					if tagResultA.Error != nil {
 						return fmt.Errorf("failed to get lib-a latest tag: %w", tagResultA.Error)
@@ -190,7 +203,7 @@ func SyncDepsReleaseScenario() *harness.Scenario {
 					// 2. Check downstream (app-b) status
 					// Note: Depending on when CI fails, app-b might or might not be tagged
 					// The important thing is that the overall release command failed
-					latestTagCmdB := command.New("git", "describe", "--tags", "--abbrev=0").Dir(appBPath)
+					latestTagCmdB := ctx.Command("git", "describe", "--tags", "--abbrev=0").Dir(appBPath)
 					tagResultB := latestTagCmdB.Run()
 					if tagResultB.Error == nil {
 						latestTagB := strings.TrimSpace(tagResultB.Stdout)
@@ -208,7 +221,12 @@ func SyncDepsReleaseScenario() *harness.Scenario {
 // setupSyncDepsEcosystem is a helper function to create a mock ecosystem for testing.
 func setupSyncDepsEcosystem(ctx *harness.Context, testName string) (ecosystemDir, libAPath, appBPath string, err error) {
 	ecosystemDir = ctx.NewDir(testName)
-	
+
+	// Setup global grove config for workspace discovery
+	if err = setupGlobalGroveConfig(ctx, ctx.RootDir); err != nil {
+		return
+	}
+
 	// Ensure the directory exists
 	if err = os.MkdirAll(ecosystemDir, 0755); err != nil {
 		return
@@ -243,7 +261,7 @@ func setupSyncDepsEcosystem(ctx *harness.Context, testName string) (ecosystemDir
 		return
 	}
 	// Add a GitHub-compatible remote URL to satisfy CI monitoring
-	if res := command.New("git", "remote", "add", "origin", "https://github.com/test/lib-a.git").Dir(libAPath).Run(); res.Error != nil {
+	if res := ctx.Command("git", "remote", "add", "origin", "https://github.com/test/lib-a.git").Dir(libAPath).Run(); res.Error != nil {
 		// Ignore error, it's okay if this fails
 	}
 	if err = fs.WriteString(filepath.Join(libAPath, "grove.yml"), "name: lib-a\n"); err != nil {
@@ -258,7 +276,7 @@ func setupSyncDepsEcosystem(ctx *harness.Context, testName string) (ecosystemDir
 	if err = git.Commit(libAPath, "Initial commit for lib-a"); err != nil {
 		return
 	}
-	if res := command.New("git", "tag", "v0.1.0").Dir(libAPath).Run(); res.Error != nil {
+	if res := ctx.Command("git", "tag", "v0.1.0").Dir(libAPath).Run(); res.Error != nil {
 		err = res.Error
 		return
 	}
@@ -302,7 +320,7 @@ func setupSyncDepsEcosystem(ctx *harness.Context, testName string) (ecosystemDir
 		return
 	}
 	// Add a GitHub-compatible remote URL to satisfy CI monitoring
-	if res := command.New("git", "remote", "add", "origin", "https://github.com/test/app-b.git").Dir(appBPath).Run(); res.Error != nil {
+	if res := ctx.Command("git", "remote", "add", "origin", "https://github.com/test/app-b.git").Dir(appBPath).Run(); res.Error != nil {
 		// Ignore error, it's okay if this fails
 	}
 	if err = fs.WriteString(filepath.Join(appBPath, "grove.yml"), "name: app-b\n"); err != nil {
@@ -317,7 +335,7 @@ func setupSyncDepsEcosystem(ctx *harness.Context, testName string) (ecosystemDir
 	if err = git.Commit(appBPath, "Initial commit for app-b"); err != nil {
 		return
 	}
-	if res := command.New("git", "tag", "v0.1.0").Dir(appBPath).Run(); res.Error != nil {
+	if res := ctx.Command("git", "tag", "v0.1.0").Dir(appBPath).Run(); res.Error != nil {
 		err = res.Error
 		return
 	}
@@ -349,11 +367,11 @@ func setupSyncDepsEcosystem(ctx *harness.Context, testName string) (ecosystemDir
 	}
 
 	// Add as submodules to root
-	if res := command.New("git", "submodule", "add", "./lib-a").Dir(ecosystemDir).Run(); res.Error != nil {
+	if res := ctx.Command("git", "submodule", "add", "./lib-a").Dir(ecosystemDir).Run(); res.Error != nil {
 		err = res.Error
 		return
 	}
-	if res := command.New("git", "submodule", "add", "./app-b").Dir(ecosystemDir).Run(); res.Error != nil {
+	if res := ctx.Command("git", "submodule", "add", "./app-b").Dir(ecosystemDir).Run(); res.Error != nil {
 		err = res.Error
 		return
 	}

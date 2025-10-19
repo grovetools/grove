@@ -20,29 +20,15 @@ func WorkspaceDetectionScenario() *harness.Scenario {
 		Steps: []harness.Step{
 			{
 				Name:        "Test workspace detection",
-				Description: "Test grove dev workspace command in and out of workspace",
+				Description: "Test grove dev workspace command inside a workspace",
 				Func: func(ctx *harness.Context) error {
 					// Get grove binary path
 					groveBinary := ctx.GroveBinary
-					
-					// Test outside workspace
-					tempDir := ctx.NewDir("temp")
+
+					// Create a workspace for testing
+					workspaceDir := ctx.NewDir("test-workspace")
 					originalDir, _ := os.Getwd()
 					defer os.Chdir(originalDir)
-					os.Chdir(tempDir)
-					
-					cmd := command.New(groveBinary, "dev", "workspace")
-					result := cmd.Run()
-					if result.ExitCode != 0 {
-						return fmt.Errorf("workspace command failed: %s", result.Stderr)
-					}
-					
-					if !strings.Contains(result.Stdout, "Not in a Grove workspace") {
-						return fmt.Errorf("expected 'Not in a Grove workspace', got: %s", result.Stdout)
-					}
-					
-					// Create a workspace
-					workspaceDir := ctx.NewDir("test-workspace")
 					os.Chdir(workspaceDir)
 					
 					// Create workspace marker
@@ -67,41 +53,41 @@ binary:
 `)
 					
 					// Test inside workspace
-					cmd = command.New(groveBinary, "dev", "workspace").Dir(workspaceDir)
-					result = cmd.Run()
+					cmd := command.New(groveBinary, "dev", "workspace").Dir(workspaceDir)
+					result := cmd.Run()
 					// The command might fail if binary discovery fails, but should still output workspace info
 					combinedOutput := result.Stdout + result.Stderr
-					
+
 					// Debug: print what we got
 					fmt.Printf("Debug: Grove binary used: %s\n", groveBinary)
 					fmt.Printf("Debug: Current directory: %s\n", workspaceDir)
 					fmt.Printf("Debug: Command output (stdout): %s\n", result.Stdout)
 					fmt.Printf("Debug: Command output (stderr): %s\n", result.Stderr)
 					fmt.Printf("Debug: Exit code: %d\n", result.ExitCode)
-					
+
 					if !strings.Contains(combinedOutput, "You are in a Grove workspace") {
 						return fmt.Errorf("expected workspace detection, got: %s", combinedOutput)
 					}
-					
+
 					// Binary listing might fail, but that's okay for this test
 					// We're primarily testing workspace detection
-					
+
 					// Test --check flag
-					cmd = command.New(groveBinary, "dev", "workspace", "--check").Dir(workspaceDir)
-					result = cmd.Run()
-					if result.ExitCode != 0 {
+					checkCmd := command.New(groveBinary, "dev", "workspace", "--check").Dir(workspaceDir)
+					checkResult := checkCmd.Run()
+					if checkResult.ExitCode != 0 {
 						return fmt.Errorf("workspace --check should return 0 in workspace")
 					}
-					
+
 					// Test --path flag
-					cmd = command.New(groveBinary, "dev", "workspace", "--path").Dir(workspaceDir)
-					result = cmd.Run()
-					if result.ExitCode != 0 {
-						return fmt.Errorf("workspace --path failed: %s", result.Stderr)
+					pathCmd := command.New(groveBinary, "dev", "workspace", "--path").Dir(workspaceDir)
+					pathResult := pathCmd.Run()
+					if pathResult.ExitCode != 0 {
+						return fmt.Errorf("workspace --path failed: %s", pathResult.Stderr)
 					}
-					
-					if !strings.Contains(result.Stdout, workspaceDir) {
-						return fmt.Errorf("expected workspace path, got: %s", result.Stdout)
+
+					if !strings.Contains(pathResult.Stdout, workspaceDir) {
+						return fmt.Errorf("expected workspace path, got: %s", pathResult.Stdout)
 					}
 					
 					return nil

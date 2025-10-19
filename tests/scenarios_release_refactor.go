@@ -15,6 +15,40 @@ func setupMockEcosystemStep() harness.Step {
 		ecosystemDir := ctx.NewDir("mock-ecosystem")
 		ctx.Set("ecosystem_dir", ecosystemDir)
 
+		// Setup global grove config for workspace discovery
+		if err := setupGlobalGroveConfig(ctx, ctx.RootDir); err != nil {
+			return err
+		}
+
+		// Ensure the directory exists
+		if err := os.MkdirAll(ecosystemDir, 0755); err != nil {
+			return fmt.Errorf("failed to create ecosystem dir: %w", err)
+		}
+
+		// Initialize ecosystem root as git repo
+		ecoGit := func(args ...string) error {
+			cmd := ctx.Command("git", args...).Dir(ecosystemDir)
+			res := cmd.Run()
+			return res.Error
+		}
+
+		if err := ecoGit("init"); err != nil {
+			return err
+		}
+
+		// Create ecosystem grove.yml
+		groveYmlContent := "name: grove-ecosystem\nworkspaces:\n  - \"*\"\n"
+		if err := os.WriteFile(filepath.Join(ecosystemDir, "grove.yml"), []byte(groveYmlContent), 0644); err != nil {
+			return err
+		}
+
+		if err := ecoGit("add", "grove.yml"); err != nil {
+			return err
+		}
+		if err := ecoGit("commit", "-m", "Initial ecosystem setup"); err != nil {
+			return err
+		}
+
 		// Create mock repositories
 		repos := map[string]string{
 			"lib-a": "",
@@ -77,7 +111,21 @@ func setupMockEcosystemStep() harness.Step {
 			if err := git("commit", "-m", "feat: new feature"); err != nil {
 				return err
 			}
+
+			// Add as submodule to ecosystem
+			if err := ecoGit("submodule", "add", "./"+name); err != nil {
+				return err
+			}
 		}
+
+		// Commit submodules to ecosystem
+		if err := ecoGit("add", ".gitmodules"); err != nil {
+			return err
+		}
+		if err := ecoGit("commit", "-m", "Add project submodules"); err != nil {
+			return err
+		}
+
 		return nil
 	})
 }
@@ -124,7 +172,7 @@ func StreamlinedFullReleaseScenario() *harness.Scenario {
 				}
 
 				// Assert that release_plan.json exists
-				planPath := filepath.Join(ctx.RootDir, ".grove", "release_plan.json")
+				planPath := filepath.Join(ecosystemDir, ".grove", "release_plan.json")
 				if _, err := os.Stat(planPath); os.IsNotExist(err) {
 					return fmt.Errorf("release_plan.json not created at %s", planPath)
 				}
@@ -285,7 +333,7 @@ func StreamlinedRCReleaseScenario() *harness.Scenario {
 				}
 
 				// Assert that release_plan.json exists
-				planPath := filepath.Join(ctx.RootDir, ".grove", "release_plan.json")
+				planPath := filepath.Join(ecosystemDir, ".grove", "release_plan.json")
 				if _, err := os.Stat(planPath); os.IsNotExist(err) {
 					return fmt.Errorf("release_plan.json not created at %s", planPath)
 				}
@@ -407,7 +455,7 @@ func StreamlinedFailureScenario() *harness.Scenario {
 					return fmt.Errorf("grove release plan failed: %v\nOutput: %s", res.Error, res.Stdout)
 				}
 
-				planPath := filepath.Join(ctx.RootDir, ".grove", "release_plan.json")
+				planPath := filepath.Join(ecosystemDir, ".grove", "release_plan.json")
 				ctx.Set("release_plan_path", planPath)
 				return nil
 			}),
