@@ -90,15 +90,21 @@ func runSchemaGenerate(cmd *cobra.Command, args []string) error {
 	properties := schema["properties"].(map[string]interface{})
 
 	// 3. Discover all projects and look for their schemas
-	projects, err := discovery.DiscoverProjects()
+	// Use DiscoverAllProjects to include worktrees when developing in a worktree context
+	projects, err := discovery.DiscoverAllProjects()
 	if err != nil {
 		return fmt.Errorf("failed to discover projects: %w", err)
 	}
 
+	fmt.Printf("Discovered %d projects\n", len(projects))
+
 	foundCount := 0
 	for _, proj := range projects {
-		// Convention: look for <repo-name>.schema.json in the project root
-		schemaFileName := fmt.Sprintf("%s.schema.json", proj.Name)
+		// The key for the extension is the repo name without 'grove-' prefix, if it exists
+		extKey := strings.TrimPrefix(proj.Name, "grove-")
+
+		// Convention: look for <extension-key>.schema.json in the project root
+		schemaFileName := fmt.Sprintf("%s.schema.json", extKey)
 		localSchemaPath := filepath.Join(proj.Path, schemaFileName)
 
 		if _, err := os.Stat(localSchemaPath); err == nil {
@@ -106,9 +112,6 @@ func runSchemaGenerate(cmd *cobra.Command, args []string) error {
 			if err != nil {
 				return err
 			}
-
-			// The key for the extension is the repo name without 'grove-' prefix, if it exists
-			extKey := strings.TrimPrefix(proj.Name, "grove-")
 
 			fmt.Printf("  -> Found schema for '%s' at %s\n", extKey, relPath)
 			properties[extKey] = map[string]interface{}{
@@ -123,7 +126,7 @@ func runSchemaGenerate(cmd *cobra.Command, args []string) error {
 	}
 
 	// 4. Finalize and write the composed schema
-	schema["additionalProperties"] = false
+	schema["additionalProperties"] = true
 	schema["title"] = "Grove Local Development Schema"
 	schema["description"] = "Composed schema for the local ecosystem."
 
