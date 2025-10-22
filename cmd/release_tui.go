@@ -14,7 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
+	tablecomponent "github.com/mattsolo1/grove-core/tui/components/table"
 	"github.com/mattsolo1/grove-core/tui/components/help"
 	"github.com/mattsolo1/grove-core/tui/keymap"
 	"github.com/mattsolo1/grove-core/tui/theme"
@@ -906,7 +906,7 @@ func (m releaseTuiModel) viewTable() string {
 	header := theme.DefaultTheme.Header.Render(headerText)
 
 	// Create table
-	t := table.New().
+	t := tablecomponent.NewStyledTable().
 		Border(lipgloss.NormalBorder()).
 		BorderStyle(theme.DefaultTheme.Muted)
 	

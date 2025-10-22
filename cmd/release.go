@@ -14,7 +14,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
+	tablecomponent "github.com/mattsolo1/grove-core/tui/components/table"
 	"github.com/mattsolo1/grove-core/command"
 	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/git"
@@ -1806,7 +1806,7 @@ func displayAndConfirmVersionsWithOrder(rootDir string, versions map[string]stri
 	headerStyle := theme.DefaultTheme.Header.Copy().Padding(0, 1)
 
 	// Create the table
-	t := table.New().
+	t := tablecomponent.NewStyledTable().
 		Border(lipgloss.NormalBorder()).
 		BorderStyle(theme.DefaultTheme.Muted).
 		Headers("REPOSITORY", "CURRENT", "PROPOSED", "INCREMENT").
@@ -1935,7 +1935,7 @@ func displayAndConfirmVersions(versions map[string]string, currentVersions map[s
 	headerStyle := theme.DefaultTheme.Header.Copy().Padding(0, 1)
 
 	// Create the table
-	t := table.New().
+	t := tablecomponent.NewStyledTable().
 		Border(lipgloss.NormalBorder()).
 		BorderStyle(theme.DefaultTheme.Muted).
 		Headers("REPOSITORY", "CURRENT", "PROPOSED", "INCREMENT").

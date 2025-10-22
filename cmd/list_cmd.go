@@ -14,8 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
+	tablecomponent "github.com/mattsolo1/grove-core/tui/components/table"
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
@@ -293,25 +292,10 @@ func runList(cmd *cobra.Command, args []string) error {
 		rows = append(rows, row)
 	}
 
-	// Create lipgloss table
-	re := lipgloss.NewRenderer(os.Stdout)
-	baseStyle := re.NewStyle().Padding(0, 1)
-	tableHeaderStyle := baseStyle.Copy().Bold(true).Foreground(lipgloss.Color("255"))
-
-	t := table.New().
-		Border(lipgloss.NormalBorder()).
-		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
+	// Create styled table
+	t := tablecomponent.NewStyledTable().
 		Headers(headers...).
 		Rows(rows...)
-
-	// Apply header styling
-	t.StyleFunc(func(row, col int) lipgloss.Style {
-		if row == 0 {
-			return tableHeaderStyle
-		}
-		// Return minimal style to preserve pre-styled content
-		return lipgloss.NewStyle().Padding(0, 1)
-	})
 
 	fmt.Println(t)
 

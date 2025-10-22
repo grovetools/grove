@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
+	tablecomponent "github.com/mattsolo1/grove-core/tui/components/table"
 	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/tui/theme"
 )
@@ -102,8 +102,6 @@ func displayFailed(message string) {
 // Create a styled pre-flight checks table
 func displayPreflightTable(headers []string, rows [][]string) {
 
-	headerStyle := theme.DefaultTheme.Header.Copy().Padding(0, 1)
-
 	// Style each row based on status
 	styledRows := make([][]string, 0, len(rows))
 	for _, row := range rows {
@@ -168,20 +166,10 @@ func displayPreflightTable(headers []string, rows [][]string) {
 		styledRows = append(styledRows, styledRow)
 	}
 
-	// Create table
-	t := table.New().
-		Border(lipgloss.NormalBorder()).
-		BorderStyle(theme.DefaultTheme.Muted).
+	// Create styled table
+	t := tablecomponent.NewStyledTable().
 		Headers(headers...).
 		Rows(styledRows...)
-
-	// Apply header styling
-	t.StyleFunc(func(row, col int) lipgloss.Style {
-		if row == 0 {
-			return headerStyle
-		}
-		return lipgloss.NewStyle().Padding(0, 1)
-	})
 
 	prettyLog.InfoPretty(t.String())
 }

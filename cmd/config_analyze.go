@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
+	tablecomponent "github.com/mattsolo1/grove-core/tui/components/table"
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/tui/theme"
@@ -295,7 +295,7 @@ func displayAnalysis(origins map[string]ValueSource, filePaths map[config.Config
 	}
 
 	// Create and render table
-	tbl := table.New().
+	tbl := tablecomponent.NewStyledTable().
 		Border(lipgloss.NormalBorder()).
 		BorderStyle(t.Muted).
 		Headers("CONFIGURATION KEY", "VALUE", "SOURCE").

@@ -10,8 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
+	tablecomponent "github.com/mattsolo1/grove-core/tui/components/table"
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/git"
@@ -592,25 +591,10 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 		rows = append(rows, row)
 	}
 
-	// Create a simple table style
-
-	headerStyle := theme.DefaultTheme.Header.Copy().Padding(0, 1)
-
-	// Create the table
-	t := table.New().
-		Border(lipgloss.NormalBorder()).
-		BorderStyle(theme.DefaultTheme.Muted).
+	// Create styled table
+	t := tablecomponent.NewStyledTable().
 		Headers(headers...).
 		Rows(rows...)
-
-	// Apply styling - only for headers since content is pre-styled
-	t.StyleFunc(func(row, col int) lipgloss.Style {
-		if row == 0 {
-			return headerStyle
-		}
-		// Return minimal style to preserve pre-styled content
-		return lipgloss.NewStyle().Padding(0, 1)
-	})
 
 	fmt.Println(t)
 	return nil
