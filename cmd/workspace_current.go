@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
+	tablecomponent "github.com/mattsolo1/grove-core/tui/components/table"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-meta/pkg/aggregator"
 	"github.com/mattsolo1/grove-meta/pkg/discovery"
 	"github.com/spf13/cobra"
@@ -17,29 +18,22 @@ import (
 
 var (
 	// Styles for current notes display
-	currentHeaderStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("213")).
+	currentHeaderStyle = theme.DefaultTheme.Header.Copy().
 				MarginTop(1).
 				MarginBottom(0)
 
-	currentTitleStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("255"))
+	currentTitleStyle = lipgloss.NewStyle()
 
-	currentMetaStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("245")).
-				Italic(true)
+	currentMetaStyle = theme.DefaultTheme.Muted.Copy().Italic(true)
 
 	currentBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("213")).
+			BorderForeground(theme.DefaultTheme.Accent.GetForeground()).
 			Padding(0, 1).
 			MarginLeft(2).
 			MarginBottom(1)
 
-	noCurrentStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("242")).
-			Italic(true)
+	noCurrentStyle = theme.DefaultTheme.Faint.Copy().Italic(true)
 )
 
 // Note represents a simplified version of a notebook note
@@ -213,7 +207,7 @@ func renderCurrentTable(results map[string][]CurrentNote) error {
 	})
 
 	// Create table
-	t := table.New().
+	t := tablecomponent.NewStyledTable().
 		Border(lipgloss.NormalBorder()).
 		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
 		Headers("WORKSPACE", "TITLE", "ID", "MODIFIED").

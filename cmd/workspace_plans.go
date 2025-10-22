@@ -10,7 +10,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
+	tablecomponent "github.com/mattsolo1/grove-core/tui/components/table"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-meta/pkg/aggregator"
 	"github.com/mattsolo1/grove-meta/pkg/discovery"
 	"github.com/spf13/cobra"
@@ -18,48 +19,32 @@ import (
 
 var (
 	// Styles for plans display
-	plansHeaderStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("81")).
+	plansHeaderStyle = theme.DefaultTheme.Header.Copy().
 				MarginTop(1).
 				MarginBottom(0)
 
-	planTitleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("255"))
+	planTitleStyle = lipgloss.NewStyle()
 
-	planStatusPendingStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("226")).
-				Bold(true)
+	planStatusPendingStyle = theme.DefaultTheme.Warning
 
-	planStatusRunningStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("33")).
-				Bold(true)
+	planStatusRunningStyle = theme.DefaultTheme.Info
 
-	planStatusCompletedStyle = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("34")).
-					Bold(true)
+	planStatusCompletedStyle = theme.DefaultTheme.Success
 
-	planStatusFailedStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("196")).
-				Bold(true)
+	planStatusFailedStyle = theme.DefaultTheme.Error
 
-	planStatusReviewStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("12")).
-				Bold(true)
+	planStatusReviewStyle = theme.DefaultTheme.Info
 
-	planMetaStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("245"))
+	planMetaStyle = theme.DefaultTheme.Muted
 
 	plansBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("81")).
+			BorderForeground(theme.DefaultTheme.Info.GetForeground()).
 			Padding(0, 1).
 			MarginLeft(2).
 			MarginBottom(1)
 
-	noPlansStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("242")).
-			Italic(true)
+	noPlansStyle = theme.DefaultTheme.Faint.Copy().Italic(true)
 
 	plansTableView bool
 )
@@ -305,7 +290,7 @@ func renderPlansTable(results map[string][]Plan) error {
 		Foreground(lipgloss.Color("243"))
 
 	// Create table with enhanced styling
-	t := table.New().
+	t := tablecomponent.NewStyledTable().
 		Border(lipgloss.RoundedBorder()).
 		BorderStyle(lipgloss.NewStyle().
 			Foreground(lipgloss.Color("81"))).

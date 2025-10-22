@@ -241,7 +241,14 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}()
 
 	// 4. Process and render logs
-	colorPalette := []lipgloss.Color{"39", "45", "51", "81", "117", "153", "189", "225"}
+	// Use theme colors for workspace coloring
+	colorPalette := []lipgloss.Color{
+		theme.DefaultTheme.Info.GetForeground(),
+		theme.DefaultTheme.Accent.GetForeground(),
+		theme.DefaultTheme.Success.GetForeground(),
+		theme.DefaultTheme.Warning.GetForeground(),
+		theme.DefaultTheme.Error.GetForeground(),
+	}
 	workspaceColors := make(map[string]lipgloss.Style)
 	colorIndex := 0
 
@@ -276,9 +283,9 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		// Styling
 		wsStyle := workspaceColors[tailedLine.Workspace]
 		levelStyle := getLevelStyle(level)
-		timeStyle := lipgloss.NewStyle().Faint(true)
-		componentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Bold(true)
-		fieldStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+		timeStyle := theme.DefaultTheme.Faint
+		componentStyle := theme.DefaultTheme.Muted.Copy().Bold(true)
+		fieldStyle := theme.DefaultTheme.Muted
 
 		// Build the base log line
 		baseLine := fmt.Sprintf("%s %s %s %s %s",

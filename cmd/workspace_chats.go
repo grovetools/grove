@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
+	tablecomponent "github.com/mattsolo1/grove-core/tui/components/table"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-meta/pkg/aggregator"
 	"github.com/mattsolo1/grove-meta/pkg/discovery"
 	"github.com/spf13/cobra"
@@ -17,36 +18,26 @@ import (
 
 var (
 	// Styles for chats display
-	chatsHeaderStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("219")).
+	chatsHeaderStyle = theme.DefaultTheme.Header.Copy().
 				MarginTop(1).
 				MarginBottom(0)
 
-	chatTitleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("255"))
+	chatTitleStyle = lipgloss.NewStyle()
 
-	chatModelStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("219")).
-			Bold(true)
+	chatModelStyle = theme.DefaultTheme.Accent
 
-	chatMetaStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("245"))
+	chatMetaStyle = theme.DefaultTheme.Muted
 
 	chatsBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("219")).
+			BorderForeground(theme.DefaultTheme.Accent.GetForeground()).
 			Padding(0, 1).
 			MarginLeft(2).
 			MarginBottom(1)
 
-	noChatsStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("242")).
-			Italic(true)
+	noChatsStyle = theme.DefaultTheme.Faint.Copy().Italic(true)
 
-	chatActiveStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("46")).
-			Bold(true)
+	chatActiveStyle = theme.DefaultTheme.Success
 )
 
 // Chat represents a simplified version of a flow chat
@@ -296,7 +287,7 @@ func renderChatsTable(results map[string][]Chat) error {
 	})
 
 	// Create table
-	t := table.New().
+	t := tablecomponent.NewStyledTable().
 		Border(lipgloss.NormalBorder()).
 		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
 		Headers("WORKSPACE", "TITLE", "STATUS", "MODEL", "UPDATED").
