@@ -75,8 +75,8 @@ func NewWorkspacePlansCmd() *cobra.Command {
 func runWorkspacePlans(cmd *cobra.Command, args []string) error {
 	// Collector function to get plans for each workspace
 	collector := func(workspacePath string, workspaceName string) ([]Plan, error) {
-		// Run flow plan list --json
-		flowCmd := exec.Command("flow", "plan", "list", "--json")
+		// Run 'grove flow plan list --json' for workspace-awareness
+		flowCmd := exec.Command("grove", "flow", "plan", "list", "--json")
 		flowCmd.Dir = workspacePath
 
 		output, err := flowCmd.Output()

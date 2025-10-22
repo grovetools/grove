@@ -237,14 +237,14 @@ func autoPopulateRules(repoPath string) error {
 	
 	fmt.Printf("Auto-populating rules from files changed since %s...\n", lastTag)
 	
-	// Run cx from-git since command
-	cmd := exec.Command("cx", "from-git", "since", "--since", lastTag)
+	// Run 'grove cx from-git' for workspace-awareness
+	cmd := exec.Command("grove", "cx", "from-git", "--since", lastTag)
 	cmd.Dir = repoPath
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to run cx from-git since: %w", err)
+		return fmt.Errorf("failed to run grove cx from-git: %w", err)
 	}
 	
 	fmt.Printf("Successfully populated rules file with changed files\n")
@@ -370,9 +370,10 @@ Generate the JSON object now:`, newVersion, currentDate, context)
 		fmt.Printf("Logging output to: %s\n", logPath)
 	}
 	
-	gemapiCmd := exec.Command("gemapi", args...)
+	// Use 'grove gemapi' for workspace-awareness
+	gemapiCmd := exec.Command("grove", append([]string{"gemapi"}, args...)...)
 	gemapiCmd.Dir = repoPath // Set working directory to the repository being analyzed
-	
+
 	// Redirect stderr to log file to prevent TUI mangling
 	gemapiCmd.Stderr = logFile
 

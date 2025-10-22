@@ -63,7 +63,7 @@ This command is useful for updating all documentation in a single step.`,
 				}
 
 				// Run 'docgen generate'
-				docgenCmd := exec.Command("docgen", "generate")
+				docgenCmd := exec.Command("grove", "docgen", "generate")
 				docgenCmd.Dir = wsPath
 				output, err := docgenCmd.CombinedOutput()
 				if err != nil {

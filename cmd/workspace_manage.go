@@ -11,7 +11,7 @@ func NewWorkspaceManageCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "manage",
 		Short: "Interactively manage notes in the current workspace",
-		Long: `A convenient alias for 'nb manage'. Provides an interactive TUI to view
+		Long: `A convenient alias for 'grove nb manage'. Provides an interactive TUI to view
 and archive notes in the current workspace context.
 
 This command allows you to:
@@ -19,8 +19,8 @@ This command allows you to:
 - Select multiple notes for bulk operations
 - Archive selected notes`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Execute nb manage command
-			nbCmd := exec.Command("nb", "manage")
+			// Execute 'grove nb manage' for workspace-awareness
+			nbCmd := exec.Command("grove", "nb", "manage")
 			nbCmd.Stdin = os.Stdin
 			nbCmd.Stdout = os.Stdout
 			nbCmd.Stderr = os.Stderr

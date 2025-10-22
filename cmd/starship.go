@@ -33,8 +33,8 @@ func runAggregatedStarshipStatus(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		// Call tool's starship status
-		out, err := exec.Command(tool, "starship", "status").Output()
+		// Call tool's starship status via 'grove' for workspace-awareness
+		out, err := exec.Command("grove", tool, "starship", "status").Output()
 		if err != nil {
 			continue
 		}

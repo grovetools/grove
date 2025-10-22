@@ -64,8 +64,8 @@ func NewWorkspaceIssuesCmd() *cobra.Command {
 func runWorkspaceIssues(cmd *cobra.Command, args []string) error {
 	// Collector function to get issues for each workspace
 	collector := func(workspacePath string, workspaceName string) ([]Note, error) {
-		// Run nb list --type issues --json
-		nbCmd := exec.Command("nb", "list", "--type", "issues", "--json")
+		// Run 'grove nb list' for workspace-awareness
+		nbCmd := exec.Command("grove", "nb", "list", "--type", "issues", "--json")
 		nbCmd.Dir = workspacePath
 
 		output, err := nbCmd.Output()

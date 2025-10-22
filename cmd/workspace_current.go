@@ -66,8 +66,8 @@ func NewWorkspaceCurrentCmd() *cobra.Command {
 func runWorkspaceCurrent(cmd *cobra.Command, args []string) error {
 	// Collector function to get current notes for each workspace
 	collector := func(workspacePath string, workspaceName string) ([]CurrentNote, error) {
-		// Run nb list --type current --json
-		nbCmd := exec.Command("nb", "list", "--type", "current", "--json")
+		// Run 'grove nb list' for workspace-awareness
+		nbCmd := exec.Command("grove", "nb", "list", "--type", "current", "--json")
 		nbCmd.Dir = workspacePath
 
 		output, err := nbCmd.Output()

@@ -125,8 +125,9 @@ func runLlmRequest(cmd *cobra.Command, args []string) error {
 	// Add positional arguments
 	delegateArgs = append(delegateArgs, args...)
 
-	// 4. Execute the target binary
-	execCmd := exec.Command(targetBinary, delegateArgs...)
+	// 4. Execute the target binary via 'grove' for workspace-awareness
+	finalArgs := append([]string{targetBinary}, delegateArgs...)
+	execCmd := exec.Command("grove", finalArgs...)
 	execCmd.Stdin = os.Stdin
 	execCmd.Stdout = os.Stdout
 	execCmd.Stderr = os.Stderr

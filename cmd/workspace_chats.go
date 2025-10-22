@@ -71,8 +71,8 @@ func NewWorkspaceChatsCmd() *cobra.Command {
 func runWorkspaceChats(cmd *cobra.Command, args []string) error {
 	// Collector function to get chats for each workspace
 	collector := func(workspacePath string, workspaceName string) ([]Chat, error) {
-		// Run flow chat list --json
-		flowCmd := exec.Command("flow", "chat", "list", "--json")
+		// Run 'grove flow chat list --json' for workspace-awareness
+		flowCmd := exec.Command("grove", "flow", "chat", "list", "--json")
 		flowCmd.Dir = workspacePath
 
 		output, err := flowCmd.Output()
