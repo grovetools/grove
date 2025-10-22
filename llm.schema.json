@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mattsolo1/grove-meta/pkg/llmconfig/llm-config",
+  "properties": {
+    "default_model": {
+      "type": "string"
+    }
+  },
+  "type": "object",
+  "title": "Grove LLM Configuration",
+  "description": "Schema for the 'llm' extension in grove.yml."
+}

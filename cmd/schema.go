@@ -100,14 +100,16 @@ func runSchemaGenerate(cmd *cobra.Command, args []string) error {
 
 	foundCount := 0
 	for _, proj := range projects {
-		// The key for the extension is the repo name without 'grove-' prefix, if it exists
-		extKey := strings.TrimPrefix(proj.Name, "grove-")
+		// Scan for any *.schema.json files in the project root
+		files, err := filepath.Glob(filepath.Join(proj.Path, "*.schema.json"))
+		if err != nil {
+			continue
+		}
 
-		// Convention: look for <extension-key>.schema.json in the project root
-		schemaFileName := fmt.Sprintf("%s.schema.json", extKey)
-		localSchemaPath := filepath.Join(proj.Path, schemaFileName)
+		for _, localSchemaPath := range files {
+			schemaFileName := filepath.Base(localSchemaPath)
+			extKey := strings.TrimSuffix(schemaFileName, ".schema.json")
 
-		if _, err := os.Stat(localSchemaPath); err == nil {
 			relPath, err := filepath.Rel(ecosystemRoot, localSchemaPath)
 			if err != nil {
 				return err
