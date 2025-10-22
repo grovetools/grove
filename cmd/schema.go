@@ -148,9 +148,21 @@ func runSchemaGenerate(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("\n✅ Unified local schema generated at: %s\n", outputPath)
-	fmt.Println("\nTo enable IDE support, add this line to your root grove.yml:")
-	relSchema, _ := filepath.Rel(ecosystemRoot, outputPath)
-	fmt.Printf("# yaml-language-server: $schema=%s\n", relSchema)
+
+	// Also write to ~/.grove/grove.schema.json for global config file support
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		globalGroveDir := filepath.Join(homeDir, ".grove")
+		if err := os.MkdirAll(globalGroveDir, 0755); err == nil {
+			globalSchemaPath := filepath.Join(globalGroveDir, "grove.schema.json")
+			if err := os.WriteFile(globalSchemaPath, outputBytes, 0644); err == nil {
+				fmt.Printf("✅ Global schema generated at: %s\n", globalSchemaPath)
+			}
+		}
+	}
+
+	fmt.Println("\nThe grove-nvim plugin will automatically detect and use this schema.")
+	fmt.Println("No manual configuration needed for grove.yml files!")
 
 	return nil
 }
