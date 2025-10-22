@@ -243,11 +243,11 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	// 4. Process and render logs
 	// Use theme colors for workspace coloring
 	colorPalette := []lipgloss.Color{
-		theme.DefaultTheme.Info.GetForeground(),
-		theme.DefaultTheme.Accent.GetForeground(),
-		theme.DefaultTheme.Success.GetForeground(),
-		theme.DefaultTheme.Warning.GetForeground(),
-		theme.DefaultTheme.Error.GetForeground(),
+		theme.DefaultTheme.Info.GetForeground().(lipgloss.Color),
+		theme.DefaultTheme.Accent.GetForeground().(lipgloss.Color),
+		theme.DefaultTheme.Success.GetForeground().(lipgloss.Color),
+		theme.DefaultTheme.Warning.GetForeground().(lipgloss.Color),
+		theme.DefaultTheme.Error.GetForeground().(lipgloss.Color),
 	}
 	workspaceColors := make(map[string]lipgloss.Style)
 	colorIndex := 0
