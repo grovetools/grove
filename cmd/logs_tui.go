@@ -59,7 +59,7 @@ func (i logItem) Title() string {
 	// Compact view: [workspace] [LEVEL] time [component] message
 	wsStyle := getWorkspaceStyle(i.workspace)
 	levelStyle := getThemeLevelStyle(i.level)
-	timeStyle := theme.DefaultTheme.Faint
+	timeStyle := theme.DefaultTheme.Muted
 	componentStyle := theme.DefaultTheme.Muted.Copy().Bold(true)
 	
 	return fmt.Sprintf("%s %s %s %s %s",

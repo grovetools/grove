@@ -32,8 +32,8 @@ type configItem struct {
 
 // Implement list.Item interface
 func (i configItem) Title() string {
-	keyStyle := theme.DefaultTheme.Highlight.Copy().Bold(true)
-	return keyStyle.Render(i.key)
+	// Config keys use bold for emphasis without explicit color
+	return theme.DefaultTheme.Bold.Render(i.key)
 }
 
 func (i configItem) Description() string {
@@ -70,10 +70,9 @@ func (i configItem) FormatDetails() string {
 	lines = append(lines, "")
 
 	// Key info
-	keyStyle := theme.DefaultTheme.Highlight.Copy().Bold(true)
 	sourceStyle := getSourceStyle(i.source)
 
-	lines = append(lines, fmt.Sprintf("Key:        %s", keyStyle.Render(i.key)))
+	lines = append(lines, fmt.Sprintf("Key:        %s", theme.DefaultTheme.Bold.Render(i.key)))
 	lines = append(lines, fmt.Sprintf("Group:      %s", theme.DefaultTheme.Muted.Render(i.group)))
 
 	sourceName := string(i.source)
@@ -113,7 +112,7 @@ func getSourceStyle(source config.ConfigSource) lipgloss.Style {
 	case config.SourceGlobal:
 		return theme.DefaultTheme.Muted
 	case config.SourceDefault:
-		return theme.DefaultTheme.Faint
+		return theme.DefaultTheme.Muted
 	default:
 		return theme.DefaultTheme.Error
 	}

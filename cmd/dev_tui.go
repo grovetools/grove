@@ -542,9 +542,9 @@ func (m *model) View() string {
 				row[j] = theme.DefaultTheme.Selected.Render(row[j])
 			}
 		} else {
-			// Apply normal styling
+			// Apply normal styling - use weight for hierarchy, not explicit colors
 			row[0] = theme.DefaultTheme.Bold.Render(row[0])
-			row[1] = theme.DefaultTheme.Info.Render(row[1])
+			row[1] = theme.DefaultTheme.Muted.Render(row[1])
 			
 			switch tool.status {
 			case "dev":

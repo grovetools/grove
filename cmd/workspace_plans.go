@@ -44,7 +44,7 @@ var (
 			MarginLeft(2).
 			MarginBottom(1)
 
-	noPlansStyle = theme.DefaultTheme.Faint.Copy().Italic(true)
+	noPlansStyle = theme.DefaultTheme.Muted.Copy().Italic(true)
 
 	plansTableView bool
 )

@@ -33,7 +33,7 @@ var (
 			MarginLeft(2).
 			MarginBottom(1)
 
-	noCurrentStyle = theme.DefaultTheme.Faint.Copy().Italic(true)
+	noCurrentStyle = theme.DefaultTheme.Muted.Copy().Italic(true)
 )
 
 // Note represents a simplified version of a notebook note

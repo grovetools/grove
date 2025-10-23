@@ -178,7 +178,7 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 		// Handle source builds
 		if version == "source" {
 			fmt.Printf("%s %s from main branch...\n",
-				theme.DefaultTheme.Faint.Render("Building"),
+				theme.DefaultTheme.Muted.Render("Building"),
 				theme.DefaultTheme.Bold.Render(toolName))
 
 			builtVersion, err := manager.InstallToolFromSource(toolName)
@@ -205,7 +205,7 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 			// Check if already up-to-date AND binary exists
 			if currentVersion == version && binaryExists {
 				fmt.Printf("%s %s... %s (%s)\n",
-					theme.DefaultTheme.Faint.Render("Checking"),
+					theme.DefaultTheme.Muted.Render("Checking"),
 					theme.DefaultTheme.Bold.Render(toolName),
 					theme.DefaultTheme.Success.Render("already up to date"),
 					theme.DefaultTheme.Info.Render(version))
@@ -227,7 +227,7 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 				// Check if already up-to-date AND binary exists
 				if currentVersion == version && binaryExists {
 					fmt.Printf("%s %s... %s (%s)\n",
-						theme.DefaultTheme.Faint.Render("Checking"),
+						theme.DefaultTheme.Muted.Render("Checking"),
 						theme.DefaultTheme.Bold.Render(toolName),
 						theme.DefaultTheme.Success.Render("already up to date"),
 						theme.DefaultTheme.Info.Render(version))
@@ -246,7 +246,7 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 			}
 
 			fmt.Printf("%s %s %s...\n",
-				theme.DefaultTheme.Faint.Render(action),
+				theme.DefaultTheme.Muted.Render(action),
 				theme.DefaultTheme.Bold.Render(toolName),
 				theme.DefaultTheme.Info.Render(version))
 
@@ -314,7 +314,7 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 							theme.DefaultTheme.Warning.Render("✅"),
 							theme.DefaultTheme.Bold.Render(toolName),
 							theme.DefaultTheme.Info.Render(version),
-							theme.DefaultTheme.Faint.Render(currentVersion))
+							theme.DefaultTheme.Muted.Render(currentVersion))
 					}
 				}
 			}

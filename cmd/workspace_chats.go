@@ -35,7 +35,7 @@ var (
 			MarginLeft(2).
 			MarginBottom(1)
 
-	noChatsStyle = theme.DefaultTheme.Faint.Copy().Italic(true)
+	noChatsStyle = theme.DefaultTheme.Muted.Copy().Italic(true)
 
 	chatActiveStyle = theme.DefaultTheme.Success
 )

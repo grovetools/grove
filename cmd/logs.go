@@ -283,7 +283,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		// Styling
 		wsStyle := workspaceColors[tailedLine.Workspace]
 		levelStyle := getLevelStyle(level)
-		timeStyle := theme.DefaultTheme.Faint
+		timeStyle := theme.DefaultTheme.Muted
 		componentStyle := theme.DefaultTheme.Muted.Copy().Bold(true)
 		fieldStyle := theme.DefaultTheme.Muted
 
