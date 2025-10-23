@@ -233,7 +233,7 @@ var configKeys = configKeyMap{
 
 // ShortHelp returns a short help text for display in the status line
 func (k configKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Base.Help, k.Base.Quit}
+	return []key.Binding{k.Base.Quit}
 }
 
 // FullHelp returns the full help keybindings
