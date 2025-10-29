@@ -100,14 +100,14 @@ func discoverTargetProjects() ([]*workspace.WorkspaceNode, string, error) {
 	if currentNode.Kind == workspace.KindEcosystemWorktree {
 		// We're in an EcosystemWorktree, scope to its constituents
 		scopeRoot = currentNode.Path
+		scopeRootLower := strings.ToLower(scopeRoot)
 
-		// Filter projects to only those within this worktree
-		// Exclude the worktree root itself, only include its sub-projects
+		// Filter to include both regular sub-projects and linked worktrees (the preferred state)
 		for _, p := range allProjects {
-			// Include only if:
-			// 1. The project path starts with the scopeRoot (is inside the worktree)
-			// 2. The project path is not the scopeRoot itself (exclude the worktree root)
-			if strings.HasPrefix(strings.ToLower(p.Path), strings.ToLower(scopeRoot+string(filepath.Separator))) {
+			parentPathLower := strings.ToLower(p.ParentEcosystemPath)
+			if parentPathLower == scopeRootLower &&
+			   (p.Kind == workspace.KindEcosystemWorktreeSubProject ||
+			    p.Kind == workspace.KindEcosystemWorktreeSubProjectWorktree) {
 				filteredProjects = append(filteredProjects, p)
 			}
 		}
@@ -116,10 +116,14 @@ func discoverTargetProjects() ([]*workspace.WorkspaceNode, string, error) {
 		// We're in a sub-project within an EcosystemWorktree
 		// Find the parent EcosystemWorktree and use it as scope
 		scopeRoot = currentNode.ParentEcosystemPath
+		scopeRootLower := strings.ToLower(scopeRoot)
 
-		// Filter projects to only those within the parent worktree
+		// Filter to include both regular sub-projects and linked worktrees
 		for _, p := range allProjects {
-			if strings.HasPrefix(strings.ToLower(p.Path), strings.ToLower(scopeRoot+string(filepath.Separator))) {
+			parentPathLower := strings.ToLower(p.ParentEcosystemPath)
+			if parentPathLower == scopeRootLower &&
+			   (p.Kind == workspace.KindEcosystemWorktreeSubProject ||
+			    p.Kind == workspace.KindEcosystemWorktreeSubProjectWorktree) {
 				filteredProjects = append(filteredProjects, p)
 			}
 		}
@@ -135,7 +139,20 @@ func discoverTargetProjects() ([]*workspace.WorkspaceNode, string, error) {
 		if rootDir == "" {
 			rootDir = cwd
 		}
-		return projects, rootDir, nil
+
+		// Filter to only direct children of the current ecosystem
+		// Use the workspace model to only include KindEcosystemSubProject nodes
+		rootDirLower := strings.ToLower(rootDir)
+		for _, p := range projects {
+			parentPathLower := strings.ToLower(p.ParentEcosystemPath)
+
+			// Only include direct ecosystem children (main repos, not worktrees)
+			if parentPathLower == rootDirLower && p.Kind == workspace.KindEcosystemSubProject {
+				filteredProjects = append(filteredProjects, p)
+			}
+		}
+
+		return filteredProjects, rootDir, nil
 	}
 
 	return filteredProjects, scopeRoot, nil
