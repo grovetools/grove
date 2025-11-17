@@ -242,13 +242,13 @@ func runList(cmd *cobra.Command, args []string) error {
 		// Determine status symbol with styling
 		switch info.Status {
 		case "dev":
-			statusSymbol = theme.DefaultTheme.Highlight.Render("◆ dev")
+			statusSymbol = theme.DefaultTheme.Highlight.Render(theme.IconWorktree + " dev")
 		case "release":
-			statusSymbol = theme.DefaultTheme.Success.Render("● release")
+			statusSymbol = theme.DefaultTheme.Success.Render(theme.IconRepo + " release")
 		case "nightly":
-			statusSymbol = theme.DefaultTheme.Warning.Render("◆ nightly")
+			statusSymbol = theme.DefaultTheme.Warning.Render(theme.IconWorktree + " nightly")
 		default:
-			statusSymbol = theme.DefaultTheme.Muted.Render("○ not installed")
+			statusSymbol = theme.DefaultTheme.Muted.Render(theme.IconUnselect + " not installed")
 		}
 
 		if info.Status == "dev" && info.ActiveVersion != "" {
@@ -281,10 +281,10 @@ func runList(cmd *cobra.Command, args []string) error {
 				styledReleaseStatus = theme.DefaultTheme.Muted.Render("-")
 			} else if displayVersion != "" && displayVersion == info.LatestRelease {
 				// Already at latest, show checkmark
-				styledReleaseStatus = theme.DefaultTheme.Success.Render(fmt.Sprintf("%s ✓", info.LatestRelease))
+				styledReleaseStatus = theme.DefaultTheme.Success.Render(fmt.Sprintf("%s %s", info.LatestRelease, theme.IconSuccess))
 			} else if info.LatestRelease != "" {
 				// Update available
-				styledReleaseStatus = theme.DefaultTheme.Warning.Render(fmt.Sprintf("%s ↑", info.LatestRelease))
+				styledReleaseStatus = theme.DefaultTheme.Warning.Render(fmt.Sprintf("%s %s", info.LatestRelease, theme.IconArrowUp))
 			}
 			row = append(row, styledReleaseStatus)
 		}

@@ -112,7 +112,7 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 			}
 		}
 
-		fmt.Println(theme.DefaultTheme.Success.Render("\n✅ All tools built and activated successfully!"))
+		fmt.Println(theme.DefaultTheme.Success.Render(fmt.Sprintf("\n%s All tools built and activated successfully!", theme.IconSuccess)))
 		return nil
 	} else {
 		// Resolve dependencies for the requested tools
@@ -184,7 +184,7 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 			builtVersion, err := manager.InstallToolFromSource(toolName)
 			if err != nil {
 				fmt.Printf("%s %s: %s\n",
-					theme.DefaultTheme.Error.Render("✗"),
+					theme.DefaultTheme.Error.Render(theme.IconError),
 					theme.DefaultTheme.Bold.Render(toolName),
 					theme.DefaultTheme.Error.Render(err.Error()))
 				continue
@@ -195,7 +195,7 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 			latestPrerelease, err := manager.GetLatestPrereleaseVersionTag(toolName)
 			if err != nil {
 				fmt.Printf("%s %s: %s\n",
-					theme.DefaultTheme.Error.Render("✗"),
+					theme.DefaultTheme.Error.Render(theme.IconError),
 					theme.DefaultTheme.Bold.Render(toolName),
 					theme.DefaultTheme.Error.Render(fmt.Sprintf("Failed to get latest nightly version: %v", err)))
 				continue
@@ -254,13 +254,13 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 				// Check for "no binary found" error
 				if strings.Contains(err.Error(), "no binary found") {
 					fmt.Printf("%s %s %s: %s\n",
-						theme.DefaultTheme.Error.Render("✗"),
+						theme.DefaultTheme.Error.Render(theme.IconError),
 						theme.DefaultTheme.Bold.Render(toolName),
 						theme.DefaultTheme.Info.Render(version),
 						theme.DefaultTheme.Error.Render(fmt.Sprintf("No binary available for your system (%s/%s)", runtime.GOOS, runtime.GOARCH)))
 				} else {
 					fmt.Printf("%s %s %s: %s\n",
-						theme.DefaultTheme.Error.Render("✗"),
+						theme.DefaultTheme.Error.Render(theme.IconError),
 						theme.DefaultTheme.Bold.Render(toolName),
 						theme.DefaultTheme.Info.Render(version),
 						theme.DefaultTheme.Error.Render(err.Error()))
@@ -296,22 +296,22 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 					// Print success message
 					if strings.HasPrefix(version, "nightly-") {
 						fmt.Printf("%s %s %s built from source and is now active\n",
-							theme.DefaultTheme.Success.Render("✅"),
+							theme.DefaultTheme.Success.Render(theme.IconSuccess),
 							theme.DefaultTheme.Bold.Render(toolName),
 							theme.DefaultTheme.Info.Render(version))
 					} else if currentVersion == "" {
 						fmt.Printf("%s %s %s installed and active\n",
-							theme.DefaultTheme.Success.Render("✅"),
+							theme.DefaultTheme.Success.Render(theme.IconSuccess),
 							theme.DefaultTheme.Bold.Render(toolName),
 							theme.DefaultTheme.Info.Render(version))
 					} else if currentVersion == version {
 						fmt.Printf("%s %s %s reinstalled and active\n",
-							theme.DefaultTheme.Success.Render("✅"),
+							theme.DefaultTheme.Success.Render(theme.IconSuccess),
 							theme.DefaultTheme.Bold.Render(toolName),
 							theme.DefaultTheme.Info.Render(version))
 					} else {
 						fmt.Printf("%s %s updated to %s (was %s) and is now active\n",
-							theme.DefaultTheme.Warning.Render("✅"),
+							theme.DefaultTheme.Success.Render(theme.IconSuccess),
 							theme.DefaultTheme.Bold.Render(toolName),
 							theme.DefaultTheme.Info.Render(version),
 							theme.DefaultTheme.Muted.Render(currentVersion))
@@ -330,7 +330,7 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 
 	if !strings.Contains(path, groveBin) {
 		logger.Warn("")
-		logger.Warn("⚠️  IMPORTANT: Add Grove to your PATH")
+		logger.Warnf("%s IMPORTANT: Add Grove to your PATH", theme.IconWarning)
 		logger.Warn("")
 		logger.Warnf("Add the following line to your shell profile (~/.zshrc, ~/.bashrc, etc.):")
 		logger.Warnf("  export PATH=\"%s:$PATH\"", groveBin)

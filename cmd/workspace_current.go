@@ -123,7 +123,7 @@ func runWorkspaceCurrent(cmd *cobra.Command, args []string) error {
 			}
 
 			// Print workspace header
-			header := currentHeaderStyle.Render(fmt.Sprintf("📌 %s (%d current)", wsName, len(notes)))
+			header := currentHeaderStyle.Render(fmt.Sprintf("%s %s (%d current)", theme.IconNote, wsName, len(notes)))
 			fmt.Println(header)
 
 			// Build content for this workspace
@@ -232,7 +232,7 @@ func renderCurrentTable(results map[string][]CurrentNote) error {
 			timeStr = formatTimeAgo(note.ModifiedAt)
 			// Highlight recent modifications (within last day)
 			if time.Since(note.ModifiedAt) < 24*time.Hour {
-				timeStr = "● " + timeStr
+				timeStr = theme.IconBullet + " " + timeStr
 			}
 		}
 

@@ -162,7 +162,7 @@ func runWorkspaceChats(cmd *cobra.Command, args []string) error {
 			}
 
 			// Print workspace header
-			header := chatsHeaderStyle.Render(fmt.Sprintf("💬 %s (%d chats)", wsName, len(chats)))
+			header := chatsHeaderStyle.Render(fmt.Sprintf("%s %s (%d chats)", theme.IconChat, wsName, len(chats)))
 			fmt.Println(header)
 
 			// Build content for this workspace
@@ -224,7 +224,7 @@ func formatChat(chat Chat) string {
 
 		// Check if recently active (within last hour)
 		if time.Since(chat.UpdatedAt) < time.Hour {
-			timeAgo = chatActiveStyle.Render("● " + timeAgo)
+			timeAgo = chatActiveStyle.Render(theme.IconBullet + " " + timeAgo)
 		}
 
 		meta := chatMetaStyle.Render(fmt.Sprintf("%s • %s", idStr, timeAgo))
@@ -318,7 +318,7 @@ func renderChatsTable(results map[string][]Chat) error {
 			timeStr = formatTimeAgo(chat.UpdatedAt)
 			// Highlight recently active
 			if time.Since(chat.UpdatedAt) < time.Hour {
-				timeStr = "● " + timeStr
+				timeStr = theme.IconBullet + " " + timeStr
 			}
 		}
 

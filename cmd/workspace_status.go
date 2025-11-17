@@ -476,10 +476,10 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 				status := ws.GitStatus
 
 				// Format status column with pre-styling
-				statusStr := "✓ Clean"
+				statusStr := theme.IconSuccess + " Clean"
 				styledStatus := cleanStyle.Render(statusStr)
 				if status.IsDirty {
-					statusStr = "● Dirty"
+					statusStr = theme.IconWarning + " Dirty"
 					styledStatus = dirtyStyle.Render(statusStr)
 				}
 
@@ -492,10 +492,10 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 						aheadStr := ""
 						behindStr := ""
 						if status.AheadCount > 0 {
-							aheadStr = aheadStyle.Render(fmt.Sprintf("↑%d", status.AheadCount))
+							aheadStr = aheadStyle.Render(fmt.Sprintf("%s%d", theme.IconArrowUp, status.AheadCount))
 						}
 						if status.BehindCount > 0 {
-							behindStr = behindStyle.Render(fmt.Sprintf("↓%d", status.BehindCount))
+							behindStr = behindStyle.Render(fmt.Sprintf("%s%d", theme.IconArrowDown, status.BehindCount))
 						}
 						if aheadStr != "" && behindStr != "" {
 							changes = append(changes, aheadStr+"/"+behindStr)
@@ -566,7 +566,7 @@ func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
 			if ws.Release != nil && ws.RelErr == nil {
 				releaseStr := ws.Release.LatestTag
 				if ws.Release.CommitsAhead > 0 {
-					releaseStr = fmt.Sprintf("%s (↑%d)", ws.Release.LatestTag, ws.Release.CommitsAhead)
+					releaseStr = fmt.Sprintf("%s (%s%d)", ws.Release.LatestTag, theme.IconArrowUp, ws.Release.CommitsAhead)
 					// Style based on how many commits ahead
 					if ws.Release.CommitsAhead > 20 {
 						releaseStr = theme.DefaultTheme.Error.Render(releaseStr)

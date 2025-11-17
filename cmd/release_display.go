@@ -63,7 +63,7 @@ var (
 
 // Phase display helpers
 func displayPhase(title string) {
-	prettyLog.InfoPretty(fmt.Sprintf("🚀 %s", title))
+	prettyLog.InfoPretty(fmt.Sprintf("%s %s", theme.IconSparkle, title))
 }
 
 func displaySection(title string) {
@@ -88,7 +88,7 @@ func displayInfo(message string) {
 
 // Progress display helpers
 func displayProgress(message string) {
-	prettyLog.InfoPretty(fmt.Sprintf("◆ %s", message))
+	prettyLog.InfoPretty(fmt.Sprintf("%s %s", theme.IconWorktree, message))
 }
 
 func displayComplete(message string) {
@@ -118,7 +118,7 @@ func displayPreflightTable(headers []string, rows [][]string) {
 		}
 
 		var styledRow []string
-		if strings.Contains(status, "✓") {
+		if strings.Contains(status, theme.IconSuccess) {
 			// Clean status
 			if issues != "" && strings.Contains(issues, "will push") {
 				// Has pending push
@@ -137,7 +137,7 @@ func displayPreflightTable(headers []string, rows [][]string) {
 					releaseDimStyle.Render(issues),
 				}
 			}
-		} else if strings.Contains(status, "○") || strings.Contains(status, "Changelog") {
+		} else if strings.Contains(status, theme.IconUnselect) || strings.Contains(status, "Changelog") {
 			// Changelog-only status (orange)
 			styledRow = []string{
 				row[0],
@@ -145,7 +145,7 @@ func displayPreflightTable(headers []string, rows [][]string) {
 				releaseWarningStyle.Render(status),
 				releaseInfoStyle.Render(issues),
 			}
-		} else if strings.Contains(status, "✗") {
+		} else if strings.Contains(status, theme.IconError) {
 			// Dirty status
 			styledRow = []string{
 				theme.DefaultTheme.Error.Render(row[0]),
@@ -189,7 +189,7 @@ func displayReleaseProgress(title string, items []string) {
 // Display final success message
 func displayFinalSuccess(version string, repoCount int) {
 	content := []string{
-		theme.DefaultTheme.Success.Render("✅ Release Successfully Created"),
+		theme.DefaultTheme.Success.Render(theme.IconSuccess + " Release Successfully Created"),
 		"",
 		fmt.Sprintf("New ecosystem version: %s", releaseHighlightStyle.Render(version)),
 		fmt.Sprintf("Repositories released: %s", releaseHighlightStyle.Render(fmt.Sprintf("%d", repoCount))),
@@ -209,7 +209,7 @@ func displayFinalSuccess(version string, repoCount int) {
 
 // Display release summary with better formatting
 func displayReleaseSummary(releaseLevels [][]string, versions map[string]string, currentVersions map[string]string, hasChanges map[string]bool) {
-	displaySection("📋 Release Order (by dependency level)")
+	displaySection(fmt.Sprintf("%s Release Order (by dependency level)", theme.IconPlan))
 
 	levelCount := 0
 	for _, level := range releaseLevels {
@@ -244,6 +244,6 @@ func displayReleaseSummary(releaseLevels [][]string, versions map[string]string,
 	}
 
 	if levelCount == 1 {
-		displayInfo("\n📝 Note: All repositories are independent and will be released in parallel.")
+		displayInfo(fmt.Sprintf("\n%s Note: All repositories are independent and will be released in parallel.", theme.IconNote))
 	}
 }

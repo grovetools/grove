@@ -150,7 +150,7 @@ func runWorkspacePlans(cmd *cobra.Command, args []string) error {
 			}
 
 			// Print workspace header
-			header := plansHeaderStyle.Render(fmt.Sprintf("📋 %s (%d plans)", wsName, len(plans)))
+			header := plansHeaderStyle.Render(fmt.Sprintf("%s %s (%d plans)", theme.IconPlan, wsName, len(plans)))
 			fmt.Println(header)
 
 			// Build content for this workspace
@@ -197,31 +197,31 @@ func formatPlan(plan Plan) string {
 	
 	switch strings.ToLower(plan.Status) {
 	case "pending", "pending_user":
-		statusStr = planStatusPendingStyle.Render("⏳ " + statusDisplay)
+		statusStr = planStatusPendingStyle.Render(theme.IconPending + " " + statusDisplay)
 	case "pending_llm":
-		statusStr = planStatusRunningStyle.Render("🤖 " + statusDisplay)
+		statusStr = planStatusRunningStyle.Render(theme.IconInteractiveAgent + " " + statusDisplay)
 	case "running", "in_progress":
-		statusStr = planStatusRunningStyle.Render("⚡ " + statusDisplay)
+		statusStr = planStatusRunningStyle.Render(theme.IconRunning + " " + statusDisplay)
 	case "completed", "done":
-		statusStr = planStatusCompletedStyle.Render("✓ " + statusDisplay)
-	case "failed", "error", "blocked":
-		statusStr = planStatusFailedStyle.Render("✗ " + statusDisplay)
+		statusStr = planStatusCompletedStyle.Render(theme.IconSuccess + " " + statusDisplay)
+	case "failed", "error":
+		statusStr = planStatusFailedStyle.Render(theme.IconError + " " + statusDisplay)
+	case "blocked":
+		statusStr = planStatusFailedStyle.Render(theme.IconStatusBlocked + " " + statusDisplay)
 	case "needs_review":
-		statusStr = planStatusReviewStyle.Render("👁 " + statusDisplay)
+		statusStr = planStatusReviewStyle.Render(theme.IconStatusNeedsReview + " " + statusDisplay)
 	default:
 		// Handle composite statuses (e.g., "1 completed, 2 pending")
 		if strings.Contains(plan.Status, "blocked") {
-			statusStr = planStatusFailedStyle.Render("🚫 " + statusDisplay)
+			statusStr = planStatusFailedStyle.Render(theme.IconStatusBlocked + " " + statusDisplay)
 		} else if strings.Contains(plan.Status, "completed") && strings.Contains(plan.Status, "pending") {
-			statusStr = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("220")).
-				Render("🚧 " + statusDisplay)
+			statusStr = theme.DefaultTheme.Warning.Render(theme.IconWarning + " " + statusDisplay)
 		} else if strings.Contains(plan.Status, "running") {
-			statusStr = planStatusRunningStyle.Render("⚡ " + statusDisplay)
+			statusStr = planStatusRunningStyle.Render(theme.IconRunning + " " + statusDisplay)
 		} else if strings.Contains(plan.Status, "completed") {
-			statusStr = planStatusCompletedStyle.Render("✓ " + statusDisplay)
+			statusStr = planStatusCompletedStyle.Render(theme.IconSuccess + " " + statusDisplay)
 		} else if strings.Contains(plan.Status, "pending") {
-			statusStr = planStatusPendingStyle.Render("⏳ " + statusDisplay)
+			statusStr = planStatusPendingStyle.Render(theme.IconPending + " " + statusDisplay)
 		} else {
 			statusStr = planMetaStyle.Render(statusDisplay)
 		}
@@ -361,31 +361,31 @@ func renderPlansTable(results map[string][]Plan) error {
 
 		switch strings.ToLower(plan.Status) {
 		case "pending", "pending_user":
-			statusStr = planStatusPendingStyle.Render("⏳ " + statusDisplay)
+			statusStr = planStatusPendingStyle.Render(theme.IconPending + " " + statusDisplay)
 		case "pending_llm":
-			statusStr = planStatusRunningStyle.Render("🤖 " + statusDisplay)
+			statusStr = planStatusRunningStyle.Render(theme.IconInteractiveAgent + " " + statusDisplay)
 		case "running", "in_progress":
-			statusStr = planStatusRunningStyle.Render("⚡ " + statusDisplay)
+			statusStr = planStatusRunningStyle.Render(theme.IconRunning + " " + statusDisplay)
 		case "completed", "done":
-			statusStr = planStatusCompletedStyle.Render("✓ " + statusDisplay)
-		case "failed", "error", "blocked":
-			statusStr = planStatusFailedStyle.Render("✗ " + statusDisplay)
+			statusStr = planStatusCompletedStyle.Render(theme.IconSuccess + " " + statusDisplay)
+		case "failed", "error":
+			statusStr = planStatusFailedStyle.Render(theme.IconError + " " + statusDisplay)
+		case "blocked":
+			statusStr = planStatusFailedStyle.Render(theme.IconStatusBlocked + " " + statusDisplay)
 		case "needs_review":
-			statusStr = planStatusReviewStyle.Render("👁 " + statusDisplay)
+			statusStr = planStatusReviewStyle.Render(theme.IconStatusNeedsReview + " " + statusDisplay)
 		default:
 			// Handle composite statuses (e.g., "1 completed, 2 pending")
 			if strings.Contains(plan.Status, "blocked") {
-				statusStr = planStatusFailedStyle.Render("🚫 " + statusDisplay)
+				statusStr = planStatusFailedStyle.Render(theme.IconStatusBlocked + " " + statusDisplay)
 			} else if strings.Contains(plan.Status, "completed") && strings.Contains(plan.Status, "pending") {
-				statusStr = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("220")).
-					Render("🚧 " + statusDisplay)
+				statusStr = theme.DefaultTheme.Warning.Render(theme.IconWarning + " " + statusDisplay)
 			} else if strings.Contains(plan.Status, "running") {
-				statusStr = planStatusRunningStyle.Render("⚡ " + statusDisplay)
+				statusStr = planStatusRunningStyle.Render(theme.IconRunning + " " + statusDisplay)
 			} else if strings.Contains(plan.Status, "completed") {
-				statusStr = planStatusCompletedStyle.Render("✓ " + statusDisplay)
+				statusStr = planStatusCompletedStyle.Render(theme.IconSuccess + " " + statusDisplay)
 			} else if strings.Contains(plan.Status, "pending") {
-				statusStr = planStatusPendingStyle.Render("⏳ " + statusDisplay)
+				statusStr = planStatusPendingStyle.Render(theme.IconPending + " " + statusDisplay)
 			} else {
 				statusStr = planMetaStyle.Render(statusDisplay)
 			}
@@ -412,15 +412,17 @@ func renderPlansTable(results map[string][]Plan) error {
 		Bold(true).
 		Foreground(lipgloss.Color("81")).
 		MarginBottom(1).
-		Render(fmt.Sprintf("📋 Flow Plans Across All Workspaces (%d total)", len(allPlans)))
+		Render(fmt.Sprintf("%s Flow Plans Across All Workspaces (%d total)", theme.IconPlan, len(allPlans)))
 	
 	// Add a legend below the table
 	legendStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("243")).
 		MarginTop(1)
 	
-	legend := legendStyle.Render(
-		"Legend: ✓ Completed  ⚡ Running  ✗ Failed  🚫 Blocked  👁 Review  ⏳ Pending  🤖 LLM  🚧 Mixed  ● Recent (< 1hr)")
+	legend := legendStyle.Render(fmt.Sprintf(
+		"Legend: %s Completed  %s Running  %s Failed  %s Blocked  %s Review  %s Pending  %s LLM  %s Mixed  %s Recent (< 1hr)",
+		theme.IconSuccess, theme.IconRunning, theme.IconError, theme.IconStatusBlocked, theme.IconStatusNeedsReview,
+		theme.IconPending, theme.IconInteractiveAgent, theme.IconWarning, theme.IconBullet))
 	
 	fmt.Println(tableTitle)
 	fmt.Println(t)

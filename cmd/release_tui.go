@@ -272,7 +272,7 @@ func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				// All done
 				m.generating = false
-				m.genProgress = fmt.Sprintf("✅ Generated changelogs for %d repositories", m.genCompleted)
+				m.genProgress = fmt.Sprintf("%s Generated changelogs for %d repositories", theme.IconSuccess, m.genCompleted)
 				m.genQueue = nil
 				m.genCurrent = ""
 				m.genCompleted = 0
@@ -286,7 +286,7 @@ func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.err != nil {
 				m.genProgress = fmt.Sprintf("❌ Failed to generate changelog for %s: %v", msg.repoName, msg.err)
 			} else {
-				m.genProgress = fmt.Sprintf("✅ Changelog generated for %s", msg.repoName)
+				m.genProgress = fmt.Sprintf("%s Changelog generated for %s", theme.IconSuccess, msg.repoName)
 			}
 			// Clear progress message after 3 seconds
 			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
@@ -372,7 +372,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if selectedCount > 0 {
-			m.genProgress = fmt.Sprintf("✓ Selected %d repositories", selectedCount)
+			m.genProgress = fmt.Sprintf("%s Selected %d repositories", theme.IconSuccess, selectedCount)
 			// Save the updated plan
 			release.SavePlan(m.plan)
 			return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
@@ -394,7 +394,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if deselectedCount > 0 {
-			m.genProgress = fmt.Sprintf("✓ Deselected %d repositories", deselectedCount)
+			m.genProgress = fmt.Sprintf("%s Deselected %d repositories", theme.IconSuccess, deselectedCount)
 			// Save the updated plan
 			release.SavePlan(m.plan)
 			return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
@@ -413,7 +413,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				// Update the staged changelog if it exists
 				if repo.ChangelogPath != "" {
 					if err := updateStagedChangelogVersion(repo.ChangelogPath, oldVersion, repo.NextVersion); err != nil {
-						m.genProgress = fmt.Sprintf("⚠️  Failed to update changelog version: %v", err)
+						m.genProgress = fmt.Sprintf("%s Failed to update changelog version: %v", theme.IconWarning, err)
 					}
 				}
 			}
@@ -430,7 +430,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				// Update the staged changelog if it exists
 				if repo.ChangelogPath != "" {
 					if err := updateStagedChangelogVersion(repo.ChangelogPath, oldVersion, repo.NextVersion); err != nil {
-						m.genProgress = fmt.Sprintf("⚠️  Failed to update changelog version: %v", err)
+						m.genProgress = fmt.Sprintf("%s Failed to update changelog version: %v", theme.IconWarning, err)
 					}
 				}
 			}
@@ -447,7 +447,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				// Update the staged changelog if it exists
 				if repo.ChangelogPath != "" {
 					if err := updateStagedChangelogVersion(repo.ChangelogPath, oldVersion, repo.NextVersion); err != nil {
-						m.genProgress = fmt.Sprintf("⚠️  Failed to update changelog version: %v", err)
+						m.genProgress = fmt.Sprintf("%s Failed to update changelog version: %v", theme.IconWarning, err)
 					}
 				}
 			}
@@ -467,13 +467,13 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					// Update the staged changelog if it exists
 					if repo.ChangelogPath != "" {
 						if err := updateStagedChangelogVersion(repo.ChangelogPath, oldVersion, repo.NextVersion); err != nil {
-							m.genProgress = fmt.Sprintf("⚠️  Failed to update changelog version: %v", err)
+							m.genProgress = fmt.Sprintf("%s Failed to update changelog version: %v", theme.IconWarning, err)
 							return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 								return clearProgressMsg{}
 							})
 						}
 					}
-					m.genProgress = fmt.Sprintf("✅ Applied %s version bump to %s", 
+					m.genProgress = fmt.Sprintf("%s Applied %s version bump to %s", theme.IconSuccess, 
 						strings.ToUpper(repo.SuggestedBump), repoName)
 					// Save the updated plan
 					release.SavePlan(m.plan)
@@ -482,7 +482,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						return clearProgressMsg{}
 					})
 				} else {
-					m.genProgress = "⚠️ No suggestion available. Generate changelog first with 'g'"
+					m.genProgress = fmt.Sprintf("%s No suggestion available. Generate changelog first with 'g'", theme.IconWarning)
 					return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 						return clearProgressMsg{}
 					})
@@ -508,7 +508,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					if _, err := os.Stat(changelogPath); err == nil {
 						return m, editFileCmd(changelogPath)
 					} else {
-						m.genProgress = "⚠️ No changelog found. Generate one first with 'g'"
+						m.genProgress = fmt.Sprintf("%s No changelog found. Generate one first with 'g'", theme.IconWarning)
 						return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 							return clearProgressMsg{}
 						})
@@ -609,7 +609,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						repo.ChangelogState = "clean"
 						release.SavePlan(m.plan)
 						
-						m.genProgress = fmt.Sprintf("✅ Changelog written to %s", changelogPath)
+						m.genProgress = fmt.Sprintf("%s Changelog written to %s", theme.IconSuccess, changelogPath)
 						
 						// Open in editor for further editing
 						return m, tea.Batch(
@@ -624,7 +624,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						return clearProgressMsg{}
 					})
 				} else {
-					m.genProgress = "⚠️ No changelog generated yet. Press 'g' to generate first."
+					m.genProgress = fmt.Sprintf("%s No changelog generated yet. Press 'g' to generate first.", theme.IconWarning)
 					return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 						return clearProgressMsg{}
 					})
@@ -660,9 +660,9 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		
 		if resetCount > 0 {
-			m.genProgress = fmt.Sprintf("✅ Reset rules to '*' for %d repositories", resetCount)
+			m.genProgress = fmt.Sprintf("%s Reset rules to '*' for %d repositories", theme.IconSuccess, resetCount)
 		} else {
-			m.genProgress = "⚠️ No repositories selected"
+			m.genProgress = fmt.Sprintf("%s No repositories selected", theme.IconWarning)
 		}
 		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 			return clearProgressMsg{}
@@ -756,10 +756,10 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if repo.CurrentVersion != repo.NextVersion {
 					if repo.Status == "Approved" {
 						repo.Status = "Pending Review"
-						m.genProgress = fmt.Sprintf("⏳ Unapproved %s", repoName)
+						m.genProgress = fmt.Sprintf("%s Unapproved %s", theme.IconPending, repoName)
 					} else {
 						repo.Status = "Approved"
-						m.genProgress = fmt.Sprintf("✅ Approved %s for release", repoName)
+						m.genProgress = fmt.Sprintf("%s Approved %s for release", theme.IconSuccess, repoName)
 					}
 					// Save the updated plan
 					release.SavePlan(m.plan)
@@ -825,9 +825,9 @@ func (m releaseTuiModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case 0: // Dry-run
 			m.dryRun = !m.dryRun
 			if m.dryRun {
-				m.genProgress = "🔍 DRY-RUN MODE: Commands will be shown but not executed"
+				m.genProgress = fmt.Sprintf("%s DRY-RUN MODE: Commands will be shown but not executed", theme.IconFilter)
 			} else {
-				m.genProgress = "⚠️ LIVE MODE: Commands will be executed for real"
+				m.genProgress = fmt.Sprintf("%s LIVE MODE: Commands will be executed for real", theme.IconWarning)
 			}
 			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 				return clearProgressMsg{}
@@ -836,9 +836,9 @@ func (m releaseTuiModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case 1: // Push
 			m.push = !m.push
 			if m.push {
-				m.genProgress = "🚀 PUSH ENABLED: Will push to remote after release"
+				m.genProgress = fmt.Sprintf("%s PUSH ENABLED: Will push to remote after release", theme.IconSparkle)
 			} else {
-				m.genProgress = "📦 PUSH DISABLED: Changes will stay local"
+				m.genProgress = fmt.Sprintf("%s PUSH DISABLED: Changes will stay local", theme.IconArchive)
 			}
 			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 				return clearProgressMsg{}
@@ -849,9 +849,9 @@ func (m releaseTuiModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.settingsIndex = 0 // Jump to dry-run setting
 		m.dryRun = !m.dryRun
 		if m.dryRun {
-			m.genProgress = "🔍 DRY-RUN MODE: Commands will be shown but not executed"
+			m.genProgress = fmt.Sprintf("%s DRY-RUN MODE: Commands will be shown but not executed", theme.IconFilter)
 		} else {
-			m.genProgress = "⚠️ LIVE MODE: Commands will be executed for real"
+			m.genProgress = fmt.Sprintf("%s LIVE MODE: Commands will be executed for real", theme.IconWarning)
 		}
 		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 			return clearProgressMsg{}
@@ -861,9 +861,9 @@ func (m releaseTuiModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.settingsIndex = 1 // Jump to push setting
 		m.push = !m.push
 		if m.push {
-			m.genProgress = "🚀 PUSH ENABLED: Will push to remote after release"
+			m.genProgress = fmt.Sprintf("%s PUSH ENABLED: Will push to remote after release", theme.IconSparkle)
 		} else {
-			m.genProgress = "📦 PUSH DISABLED: Changes will stay local"
+			m.genProgress = fmt.Sprintf("%s PUSH DISABLED: Changes will stay local", theme.IconArchive)
 		}
 		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 			return clearProgressMsg{}
@@ -892,7 +892,7 @@ func (m releaseTuiModel) View() string {
 
 
 func (m releaseTuiModel) viewTable() string {
-	headerText := "🚀 Grove Release Manager"
+	headerText := theme.IconSparkle + " Grove Release Manager"
 	var modes []string
 	if m.dryRun {
 		modes = append(modes, "DRY-RUN")
@@ -970,15 +970,15 @@ func (m releaseTuiModel) viewTable() string {
 		if repo.CurrentVersion == repo.NextVersion {
 			statusStr = "-"
 		} else if repo.Status == "Approved" {
-			statusStr = theme.DefaultTheme.Success.Render("✓ Approved")
+			statusStr = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Approved")
 		} else {
-			statusStr = theme.DefaultTheme.Warning.Render("⏳ Pending")
+			statusStr = theme.DefaultTheme.Warning.Render(theme.IconPending + " Pending")
 		}
 
 		// Selection checkbox
-		checkbox := "[ ]"
+		checkbox := "[" + theme.IconUnselect + "]"
 		if repo.Selected {
-			checkbox = "[✓]"
+			checkbox = "[" + theme.IconSuccess + "]"
 		}
 		// Only show checkbox for repos with changes
 		if repo.CurrentVersion == repo.NextVersion {
@@ -991,7 +991,7 @@ func (m releaseTuiModel) viewTable() string {
 			changelogStatus = "-"
 		} else if repo.ChangelogState == "dirty" {
 			// Changelog was written and modified by user
-			changelogStatus = theme.DefaultTheme.Info.Copy().Bold(true).Render("📝 Modified")
+			changelogStatus = theme.DefaultTheme.Info.Copy().Bold(true).Render(theme.IconNote + " Modified")
 		} else if repo.ChangelogPath != "" {
 			if _, err := os.Stat(repo.ChangelogPath); err == nil {
 				// Check if the changelog is stale (different commit)
@@ -1005,29 +1005,29 @@ func (m releaseTuiModel) viewTable() string {
 						currentCommit := strings.TrimSpace(string(currentCommitBytes))
 						if currentCommit != repo.ChangelogCommit {
 							// Changelog is stale - generated from different commit
-							changelogStatus = theme.DefaultTheme.Warning.Render("⚠ Stale")
+							changelogStatus = theme.DefaultTheme.Warning.Render(theme.IconWarning + " Stale")
 						} else {
-							changelogStatus = theme.DefaultTheme.Success.Render("✓ Generated")
+							changelogStatus = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Generated")
 						}
 					} else {
 						// Couldn't get current commit, assume generated
-						changelogStatus = theme.DefaultTheme.Success.Render("✓ Generated")
+						changelogStatus = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Generated")
 					}
 				} else {
 					// No commit tracked, assume generated (for backwards compat)
-					changelogStatus = theme.DefaultTheme.Success.Render("✓ Generated")
+					changelogStatus = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Generated")
 				}
 			} else {
-				changelogStatus = theme.DefaultTheme.Warning.Render("⏳ Pending")
+				changelogStatus = theme.DefaultTheme.Warning.Render(theme.IconPending + " Pending")
 			}
 		} else {
-			changelogStatus = theme.DefaultTheme.Warning.Render("⏳ Pending")
+			changelogStatus = theme.DefaultTheme.Warning.Render(theme.IconPending + " Pending")
 		}
 
 		// Format Git status
 		var gitStatusStr string
 		if !repo.IsDirty {
-			gitStatusStr = theme.DefaultTheme.Success.Render("✓ Clean")
+			gitStatusStr = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Clean")
 		} else {
 			// Build status string with counts
 			var parts []string
@@ -1046,7 +1046,7 @@ func (m releaseTuiModel) viewTable() string {
 		// Format Changes/Release column
 		changesReleaseStr := repo.CurrentVersion
 		if repo.CommitsSinceLastTag > 0 {
-			changesReleaseStr = fmt.Sprintf("%s (↑%d)", repo.CurrentVersion, repo.CommitsSinceLastTag)
+			changesReleaseStr = fmt.Sprintf("%s (%s%d)", repo.CurrentVersion, theme.IconArrowUp, repo.CommitsSinceLastTag)
 		}
 
 		var row []string
@@ -1180,7 +1180,7 @@ func (m releaseTuiModel) viewTable() string {
 }
 
 func (m releaseTuiModel) viewChangelog() string {
-	header := theme.DefaultTheme.Header.Render(fmt.Sprintf("📝 Changelog Preview: %s", m.repoNames[m.selectedIndex]))
+	header := theme.DefaultTheme.Header.Render(fmt.Sprintf("%s Changelog Preview: %s", theme.IconNote, m.repoNames[m.selectedIndex]))
 	
 	help := theme.DefaultTheme.Muted.Render("a: approve • esc: back • q: quit")
 
@@ -1188,7 +1188,7 @@ func (m releaseTuiModel) viewChangelog() string {
 }
 
 func (m releaseTuiModel) viewSettings() string {
-	headerText := "⚙️ Release Settings"
+	headerText := theme.IconShell + " Release Settings"
 	header := theme.DefaultTheme.Header.Render(headerText)
 	
 	// Create toggle items with current states
@@ -1509,8 +1509,8 @@ func checkChangelogDirty(rootDir, repoName string, repo *release.RepoReleasePlan
 		if !strings.Contains(string(currentContent), expectedHeader) {
 			// Warning: changelog was modified but doesn't contain expected version
 			// This is still considered dirty, but might need a warning
-			fmt.Printf("⚠️  Warning: Changelog for %s was modified but doesn't contain expected version header '%s'\n", 
-				repoName, expectedHeader)
+			fmt.Printf("%s  Warning: Changelog for %s was modified but doesn't contain expected version header '%s'\n",
+				theme.IconWarning, repoName, expectedHeader)
 		}
 	}
 	

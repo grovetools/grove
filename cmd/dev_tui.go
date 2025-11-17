@@ -500,11 +500,11 @@ func (m *model) View() string {
 		// Determine status symbol with styling
 		switch tool.status {
 		case "dev":
-			statusSymbol = "◆ dev"
+			statusSymbol = theme.IconWorktree + " dev"
 		case "release":
-			statusSymbol = "● release"
+			statusSymbol = theme.IconRepo + " release"
 		default:
-			statusSymbol = "○ not installed"
+			statusSymbol = theme.IconUnselect + " not installed"
 		}
 
 		if tool.status == "dev" && tool.activeVersion != "" {
@@ -523,9 +523,9 @@ func (m *model) View() string {
 		} else if releaseStatus == "" {
 			styledReleaseStatus = "-"
 		} else if displayVersion != "" && displayVersion == tool.latestRelease {
-			styledReleaseStatus = fmt.Sprintf("%s ✓", tool.latestRelease)
+			styledReleaseStatus = fmt.Sprintf("%s %s", tool.latestRelease, theme.IconSuccess)
 		} else if tool.latestRelease != "" {
-			styledReleaseStatus = fmt.Sprintf("%s ↑", tool.latestRelease)
+			styledReleaseStatus = fmt.Sprintf("%s %s", tool.latestRelease, theme.IconArrowUp)
 		}
 
 		row := []string{

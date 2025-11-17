@@ -139,10 +139,10 @@ func (i logItem) FormatDetails() string {
 	if fileInfo != "" || funcInfo != "" {
 		lines = append(lines, borderStyle.Render("┌─ Source:"))
 		if fileInfo != "" {
-			lines = append(lines, fileStyle.Render(fmt.Sprintf("│ 📁 %s", fileInfo)))
+			lines = append(lines, fileStyle.Render(fmt.Sprintf("│ %s %s", theme.IconArchive, fileInfo)))
 		}
 		if funcInfo != "" {
-			lines = append(lines, fileStyle.Render(fmt.Sprintf("│ ⚙️  %s", funcInfo)))
+			lines = append(lines, fileStyle.Render(fmt.Sprintf("│ %s %s", theme.IconShell, funcInfo)))
 		}
 	}
 	
