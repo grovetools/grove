@@ -91,7 +91,7 @@ func (r *Reconciler) Reconcile(toolName string) error {
 	// No dev override, fall back to released version
 	toolVersion := r.toolVersions.GetToolVersion(repoName)
 	if toolVersion == "" {
-		r.logger.Debugf("No active version for %s and no dev override", repoName)
+		r.logger.Debugf("No active version for %s and no dev override, removing symlink", repoName)
 		// Remove the symlink if it exists
 		os.Remove(symlinkPath)
 		return nil
