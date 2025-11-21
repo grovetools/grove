@@ -23,7 +23,6 @@ func init() {
 	rootCmd.AddCommand(newConfigCmd())
 	rootCmd.AddCommand(newDepsCmd())
 	rootCmd.AddCommand(newDocsCmd())
-	rootCmd.AddCommand(newLogsCmd())
 	rootCmd.AddCommand(newRunCmd())
 	rootCmd.AddCommand(newSchemaCmd())
 	rootCmd.AddCommand(newStarshipCmd())
