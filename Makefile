@@ -103,15 +103,11 @@ build-e2e-mocks:
 	@go build -o tests/bin/go ./tests/e2e_mocks/go
 
 # Build the custom tend binary for grove-meta E2E tests
-test-e2e-build:
-	@echo "Building E2E test binary $(E2E_BINARY_NAME)..."
-	@go build $(LDFLAGS) -o $(BIN_DIR)/$(E2E_BINARY_NAME) ./tests/e2e
-
 # Run E2E tests. Depends on the main 'grove' binary and the test runner.
 # Pass arguments via ARGS, e.g., make test-e2e ARGS="run -i"
-test-e2e: build build-e2e-mocks test-e2e-build
+test-e2e: build
 	@echo "Running E2E tests..."
-	@PATH="$(abspath $(BIN_DIR)):$$PATH" $(BIN_DIR)/$(E2E_BINARY_NAME) run $(ARGS)
+	@tend run $(ARGS)
 
 # Run Docker-based E2E tests
 test-e2e-docker: build-all
@@ -139,5 +135,5 @@ help:
 	@echo "  make check       - Run all checks"
 	@echo "  make dev         - Build with race detector"
 	@echo "  make build-all   - Build for multiple platforms"
-	@echo "  make test-e2e-build   - Build the E2E test runner binary"
+	@echo "  make test-e2e ARGS=...- Run E2E test runner binary"
 	@echo "  make test-e2e ARGS=...- Run E2E tests (e.g., ARGS=\"run -i add-repo-dry-run\")"
