@@ -93,16 +93,7 @@ build-all:
 	done
 
 # --- E2E Testing ---
-# Build E2E mock binaries
-build-e2e-mocks:
-	@echo "Building E2E mocks..."
-	@mkdir -p tests/bin
-	@go build -o tests/bin/git ./tests/e2e_mocks/git
-	@go build -o tests/bin/gh ./tests/e2e_mocks/gh
-	@go build -o tests/bin/gemapi ./tests/e2e_mocks/gemapi
-	@go build -o tests/bin/go ./tests/e2e_mocks/go
-
-# Build the custom tend binary for grove-meta E2E tests
+# Mocks are built automatically by tend from tests/e2e/mocks/src/
 # Run E2E tests. Depends on the main 'grove' binary and the test runner.
 # Pass arguments via ARGS, e.g., make test-e2e ARGS="run -i"
 test-e2e: build

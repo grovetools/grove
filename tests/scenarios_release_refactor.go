@@ -152,10 +152,10 @@ func StreamlinedFullReleaseScenario() *harness.Scenario {
 		Tags:        []string{"release", "refactor", "full"},
 		Steps: []harness.Step{
 			harness.SetupMocks(
-				harness.Mock{CommandName: "git", BinaryPath: "tests/bin/git"},
-				harness.Mock{CommandName: "gh", BinaryPath: "tests/bin/gh"},
-				harness.Mock{CommandName: "gemapi", BinaryPath: "tests/bin/gemapi"},
-				harness.Mock{CommandName: "go", BinaryPath: "tests/bin/go"},
+				harness.Mock{CommandName: "git"},
+				harness.Mock{CommandName: "gh"},
+				harness.Mock{CommandName: "gemapi"},
+				harness.Mock{CommandName: "go"},
 			),
 			setupMockEcosystemStep(),
 			harness.NewStep("Run 'grove release plan'", func(ctx *harness.Context) error {
@@ -314,10 +314,10 @@ func StreamlinedRCReleaseScenario() *harness.Scenario {
 		Tags:        []string{"release", "refactor", "rc"},
 		Steps: []harness.Step{
 			harness.SetupMocks(
-				harness.Mock{CommandName: "git", BinaryPath: "tests/bin/git"},
-				harness.Mock{CommandName: "gh", BinaryPath: "tests/bin/gh"},
-				harness.Mock{CommandName: "gemapi", BinaryPath: "tests/bin/gemapi"},
-				harness.Mock{CommandName: "go", BinaryPath: "tests/bin/go"},
+				harness.Mock{CommandName: "git"},
+				harness.Mock{CommandName: "gh"},
+				harness.Mock{CommandName: "gemapi"},
+				harness.Mock{CommandName: "go"},
 			),
 			setupMockEcosystemStep(),
 			harness.NewStep("Run 'grove release plan --rc'", func(ctx *harness.Context) error {
@@ -437,10 +437,10 @@ func StreamlinedFailureScenario() *harness.Scenario {
 		Tags:        []string{"release", "refactor", "failure"},
 		Steps: []harness.Step{
 			harness.SetupMocks(
-				harness.Mock{CommandName: "git", BinaryPath: "tests/bin/git"},
-				harness.Mock{CommandName: "gh", BinaryPath: "tests/bin/gh"},
-				harness.Mock{CommandName: "gemapi", BinaryPath: "tests/bin/gemapi"},
-				harness.Mock{CommandName: "go", BinaryPath: "tests/bin/go"},
+				harness.Mock{CommandName: "git"},
+				harness.Mock{CommandName: "gh"},
+				harness.Mock{CommandName: "gemapi"},
+				harness.Mock{CommandName: "go"},
 			),
 			setupMockEcosystemStep(),
 			harness.NewStep("Run 'grove release plan'", func(ctx *harness.Context) error {
