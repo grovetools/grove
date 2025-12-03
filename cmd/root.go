@@ -9,8 +9,10 @@ import (
 
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-meta/cmd/internal"
 	"github.com/mattsolo1/grove-meta/pkg/delegation"
+	"github.com/mattsolo1/grove-meta/pkg/overrides"
 	meta_workspace "github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
@@ -85,31 +87,21 @@ func Execute() error {
 	return rootCmd.Execute()
 }
 
-// findWorkspaceRoot searches upward from the current directory for a
-// .grove/workspace marker file, indicating we're in a managed workspace.
-// This supports both Grove ecosystem worktrees and user monorepos.
+// findWorkspaceRoot uses grove-core's workspace detection to find the workspace root.
+// This properly handles all workspace types: standalone projects, ecosystem roots,
+// worktrees, and sub-projects.
 func findWorkspaceRoot() string {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return ""
 	}
 
-	dir := cwd
-	for {
-		// Check for the new generic marker
-		markerPath := filepath.Join(dir, ".grove", "workspace")
-		if _, err := os.Stat(markerPath); err == nil {
-			return dir
-		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
+	node, err := workspace.GetProjectByPath(cwd)
+	if err != nil {
+		return ""
 	}
 
-	return ""
+	return node.Path
 }
 
 // delegateToTool attempts to run an installed Grove tool.
@@ -128,10 +120,26 @@ func delegateToTool(toolName string, args []string) error {
 	var cmdEnv []string // Environment for the command
 	delegationMode := delegation.GetMode()
 
-	// PRIORITY 1: Check for explicit workspace delegation opt-in.
-	if delegationMode == delegation.ModeWorkspace {
+	// Check if we're in a workspace for potential overrides
+	workspaceRoot := findWorkspaceRoot()
+
+	// PRIORITY 1: Check for workspace-specific binary overrides
+	if workspaceRoot != "" {
+		if overridePath := overrides.GetBinaryOverride(workspaceRoot, toolName); overridePath != "" {
+			// Verify the override binary still exists
+			if _, err := os.Stat(overridePath); err == nil {
+				toolPath = overridePath
+				logger.WithField("path", toolPath).Debug("Using workspace override binary")
+			} else {
+				logger.WithField("path", overridePath).Warn("Workspace override binary not found, ignoring")
+			}
+		}
+	}
+
+	// PRIORITY 2: Check for workspace-local binaries (if delegation mode is workspace)
+	if toolPath == "" && delegationMode == delegation.ModeWorkspace {
 		logger.Debug("Delegation mode is workspace; attempting workspace-aware binary discovery.")
-		if workspaceRoot := findWorkspaceRoot(); workspaceRoot != "" {
+		if workspaceRoot != "" {
 			logger.WithField("workspace", workspaceRoot).Debug("Found workspace root")
 			// Try to find the binary in this workspace
 			workspaceBinaries, err := meta_workspace.DiscoverLocalBinaries(workspaceRoot)
@@ -185,7 +193,7 @@ func delegateToTool(toolName string, args []string) error {
 		}
 	}
 
-	// PRIORITY 2 (DEFAULT): Fall back to the globally managed binary.
+	// PRIORITY 3 (DEFAULT): Fall back to the globally managed binary.
 	// This block is executed if the opt-in is not active, or if a local binary
 	// was not found in the workspace.
 	if toolPath == "" {

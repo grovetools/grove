@@ -28,6 +28,7 @@ These commands are distinct from 'grove version' which manages official releases
 	cmd.AddCommand(newDevTuiCmd())
 	cmd.AddCommand(newDevWorkspaceCmd())
 	cmd.AddCommand(newDevDelegateCmd())
+	cmd.AddCommand(newDevPointCmd())
 
 	return cmd
 }
