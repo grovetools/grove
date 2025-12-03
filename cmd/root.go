@@ -10,6 +10,7 @@ import (
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-meta/cmd/internal"
+	"github.com/mattsolo1/grove-meta/pkg/delegation"
 	meta_workspace "github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
@@ -17,6 +18,23 @@ import (
 var rootCmd = cli.NewStandardCommand("grove", "Grove workspace orchestrator and tool manager")
 
 func init() {
+	// Set long description
+	rootCmd.Long = `Grove workspace orchestrator and tool manager.
+
+Grove acts as a command delegator. When you run 'grove <tool>', it finds and
+executes the specified tool.
+
+Delegation Behavior:
+  By default, grove uses a 'global-first' strategy, always using the globally
+  configured binaries (as shown in 'grove list' or 'grove dev current').
+
+  To switch to 'workspace-aware' delegation, run:
+    grove dev delegate workspace
+
+  This will make grove prioritize binaries from your current workspace, which is
+  useful for local development. To switch back to global-first, run:
+    grove dev delegate global`
+
 	// Add subcommands
 	rootCmd.AddCommand(newActivateCmd())
 	rootCmd.AddCommand(newChangelogCmd())
@@ -94,12 +112,13 @@ func findWorkspaceRoot() string {
 	return ""
 }
 
-// delegateToTool attempts to run an installed Grove tool, prioritizing
-// binaries from the current workspace if one is detected.
+// delegateToTool attempts to run an installed Grove tool.
+// By default, it uses globally managed binaries (global-first).
+// Set GROVE_DELEGATION_MODE=workspace to opt-in to workspace-aware delegation.
 func delegateToTool(toolName string, args []string) error {
 	logger := logging.NewLogger("grove-meta")
 	logger.WithField("tool", toolName).Debug("Delegating to tool")
-	
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %w", err)
@@ -107,69 +126,75 @@ func delegateToTool(toolName string, args []string) error {
 
 	var toolPath string
 	var cmdEnv []string // Environment for the command
-	
-	// First check if we're in a workspace
-	if workspaceRoot := findWorkspaceRoot(); workspaceRoot != "" {
-		logger.WithField("workspace", workspaceRoot).Debug("Found workspace root")
-		// Try to find the binary in this workspace
-		workspaceBinaries, err := meta_workspace.DiscoverLocalBinaries(workspaceRoot)
-		if err == nil {
-			var foundBinary *meta_workspace.BinaryMeta
-			for i, binary := range workspaceBinaries {
-				if binary.Name == toolName {
-					// Check if the binary actually exists
-					if _, err := os.Stat(binary.Path); err == nil {
-						foundBinary = &workspaceBinaries[i]
-						break
-					}
-				}
-			}
-			
-			if foundBinary != nil {
-				toolPath = foundBinary.Path
-				logger.WithField("path", toolPath).Debug("Using workspace binary")
-				
-				// Build PATH with all workspace bin directories first for correct inter-tool calls
-				var binDirs []string
-				seenDirs := make(map[string]bool)
-				for _, b := range workspaceBinaries {
-					binDir := filepath.Dir(b.Path)
-					if !seenDirs[binDir] {
-						binDirs = append(binDirs, binDir)
-						seenDirs[binDir] = true
-					}
-				}
-				if len(binDirs) > 0 {
-					currentPath := os.Getenv("PATH")
-					newPath := strings.Join(binDirs, string(os.PathListSeparator)) + string(os.PathListSeparator) + currentPath
-					
-					cmdEnv = os.Environ()
-					// Update PATH in the environment
-					pathSet := false
-					for i, env := range cmdEnv {
-						if strings.HasPrefix(env, "PATH=") {
-							cmdEnv[i] = "PATH=" + newPath
-							pathSet = true
+	delegationMode := delegation.GetMode()
+
+	// PRIORITY 1: Check for explicit workspace delegation opt-in.
+	if delegationMode == delegation.ModeWorkspace {
+		logger.Debug("Delegation mode is workspace; attempting workspace-aware binary discovery.")
+		if workspaceRoot := findWorkspaceRoot(); workspaceRoot != "" {
+			logger.WithField("workspace", workspaceRoot).Debug("Found workspace root")
+			// Try to find the binary in this workspace
+			workspaceBinaries, err := meta_workspace.DiscoverLocalBinaries(workspaceRoot)
+			if err == nil {
+				var foundBinary *meta_workspace.BinaryMeta
+				for i, binary := range workspaceBinaries {
+					if binary.Name == toolName {
+						// Check if the binary actually exists
+						if _, err := os.Stat(binary.Path); err == nil {
+							foundBinary = &workspaceBinaries[i]
 							break
 						}
 					}
-					if !pathSet {
-						cmdEnv = append(cmdEnv, "PATH="+newPath)
+				}
+
+				if foundBinary != nil {
+					toolPath = foundBinary.Path
+					logger.WithField("path", toolPath).Debug("Using workspace binary")
+
+					// Build PATH with all workspace bin directories first for correct inter-tool calls
+					var binDirs []string
+					seenDirs := make(map[string]bool)
+					for _, b := range workspaceBinaries {
+						binDir := filepath.Dir(b.Path)
+						if !seenDirs[binDir] {
+							binDirs = append(binDirs, binDir)
+							seenDirs[binDir] = true
+						}
 					}
-					cmdEnv = append(cmdEnv, "GROVE_WORKSPACE_ROOT="+workspaceRoot)
+					if len(binDirs) > 0 {
+						currentPath := os.Getenv("PATH")
+						newPath := strings.Join(binDirs, string(os.PathListSeparator)) + string(os.PathListSeparator) + currentPath
+
+						cmdEnv = os.Environ()
+						// Update PATH in the environment
+						pathSet := false
+						for i, env := range cmdEnv {
+							if strings.HasPrefix(env, "PATH=") {
+								cmdEnv[i] = "PATH=" + newPath
+								pathSet = true
+								break
+							}
+						}
+						if !pathSet {
+							cmdEnv = append(cmdEnv, "PATH="+newPath)
+						}
+						cmdEnv = append(cmdEnv, "GROVE_WORKSPACE_ROOT="+workspaceRoot)
+					}
 				}
 			}
 		}
 	}
-	
-	// If not found in workspace (or not in a workspace), fall back to the standard location
+
+	// PRIORITY 2 (DEFAULT): Fall back to the globally managed binary.
+	// This block is executed if the opt-in is not active, or if a local binary
+	// was not found in the workspace.
 	if toolPath == "" {
 		toolPath = filepath.Join(homeDir, ".grove", "bin", toolName)
 		logger.WithField("path", toolPath).Debug("Using global binary")
-		
+
 		// Check if the tool exists
 		if _, err := os.Stat(toolPath); os.IsNotExist(err) {
-			return fmt.Errorf("unknown tool: %s. Run 'grove install %s' or check if you are in the correct workspace.", toolName, toolName)
+			return fmt.Errorf("unknown tool: %s. Run 'grove install %s' or check spelling.", toolName, toolName)
 		}
 	}
 

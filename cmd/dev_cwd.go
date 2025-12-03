@@ -16,20 +16,16 @@ func newDevCwdCmd() *cobra.Command {
 	cmd := cli.NewStandardCommand("cwd", "Globally activate binaries from current directory")
 
 	cmd.Long = `Globally register and activate all binaries from the current working directory.
-This command combines 'grove dev link' and 'grove dev use' for all binaries in the current
-directory, making them the global default.
+This command combines 'grove dev link' and 'grove dev use' for all binaries found
+in the current directory, making them the global default.
 
-NOTE: With automatic workspace detection, this command is now primarily useful for forcing
-a specific worktree's binaries to be used globally across your entire system. When you're
-working inside a workspace, Grove automatically uses that workspace's binaries without
-needing to run this command.`
+This is the primary way to set your globally-managed development binaries to a
+specific version built from a local worktree.`
 
-	cmd.Example = `  # Force global activation of binaries from current directory
+	cmd.Example = `  # The binaries from your current worktree will now be the default
+  # when you run 'grove <tool>' from anywhere on your system.
   cd ~/grove-ecosystem/.grove-worktrees/my-feature
-  grove dev cwd
-  
-  # The automatic alternative (no command needed):
-  # Simply 'cd' into any workspace and Grove will automatically use its binaries`
+  grove dev cwd`
 
 	cmd.Args = cobra.NoArgs
 
