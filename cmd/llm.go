@@ -8,6 +8,7 @@ import (
 
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/config"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -70,6 +71,9 @@ Model determination precedence:
 }
 
 func runLlmRequest(cmd *cobra.Command, args []string) error {
+	// 0. Get request ID from environment for tracing
+	requestID := os.Getenv("GROVE_REQUEST_ID")
+
 	// 1. Determine model
 	model, _ := cmd.Flags().GetString("model")
 	if model == "" {
@@ -98,6 +102,14 @@ func runLlmRequest(cmd *cobra.Command, args []string) error {
 	} else {
 		return fmt.Errorf("unrecognized model provider for '%s'. Model must start with 'gpt-', 'o1-', 'o3-', or 'gemini-'", model)
 	}
+
+	// Log delegation decision
+	log := cli.GetLogger(cmd)
+	log.WithFields(logrus.Fields{
+		"request_id":   requestID,
+		"model":        model,
+		"delegated_to": targetBinary,
+	}).Info("Delegating LLM request to provider")
 
 	// 3. Construct arguments for delegation
 	var delegateArgs []string
@@ -130,6 +142,11 @@ func runLlmRequest(cmd *cobra.Command, args []string) error {
 	execCmd.Stdin = os.Stdin
 	execCmd.Stdout = os.Stdout
 	execCmd.Stderr = os.Stderr
+
+	// Propagate request ID to the child process
+	if requestID != "" {
+		execCmd.Env = append(os.Environ(), "GROVE_REQUEST_ID="+requestID)
+	}
 
 	return execCmd.Run()
 }
