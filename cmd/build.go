@@ -343,9 +343,12 @@ func runTuiBuild(jobs []build.BuildJob) error {
 		if !buildInteractive {
 			// Print failure details using pretty logging
 			pretty := logging.NewPrettyLogger()
-			pretty.Divider()
+
+			// Print summary with visual distinction using equals dividers
+			pretty.Blank()
+			fmt.Println(strings.Repeat("=", 60))
 			pretty.ErrorPretty(fmt.Sprintf("Build failed: %d/%d projects failed", fm.failCount, len(fm.projects)), nil)
-			pretty.Divider()
+			fmt.Println(strings.Repeat("=", 60))
 
 			// For single project builds, skip showing output again (already shown in streaming logs)
 			if len(fm.projects) > 1 {
