@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,6 +34,25 @@ var (
 	buildDryRun      bool
 	buildInteractive bool
 )
+
+// Workspace color management - uses theme's AccentColors palette
+var (
+	workspaceColorMap   = make(map[string]lipgloss.Style)
+	workspaceColorIndex = 0
+)
+
+func getWorkspaceStyle(workspace string) lipgloss.Style {
+	if style, ok := workspaceColorMap[workspace]; ok {
+		return style
+	}
+
+	color := theme.DefaultTheme.AccentColors[workspaceColorIndex%len(theme.DefaultTheme.AccentColors)]
+	style := lipgloss.NewStyle().Foreground(color).Bold(true)
+	workspaceColorMap[workspace] = style
+	workspaceColorIndex++
+
+	return style
+}
 
 func newBuildCmd() *cobra.Command {
 	cmd := cli.NewStandardCommand("build", "Build all Grove packages in parallel")
@@ -255,7 +275,9 @@ type tuiModel struct {
 	jobs          []build.BuildJob
 	list          list.Model
 	spinner       spinner.Model
-	viewport      viewport.Model
+	logViewport   viewport.Model
+	logLines      []string
+	maxLogLines   int
 	viewMode      string // "list" or "logs"
 	width, height int
 	err           error
@@ -266,15 +288,7 @@ type tuiModel struct {
 	runningCount  int
 	eventsChan    <-chan build.BuildEvent
 	jobIndexMap   map[string]int
-}
-
-type buildStartedMsg struct {
-	index int
-}
-
-type buildFinishedMsg struct {
-	index  int
-	result build.BuildResult
+	viewport      viewport.Model // For full-screen log inspection
 }
 
 type buildsStartedMsg struct {
@@ -304,11 +318,16 @@ func runTuiBuild(jobs []build.BuildJob) error {
 	l.SetShowPagination(false)
 	l.SetShowHelp(false)
 
+	logViewport := viewport.New(0, 0)
+	logViewport.SetContent("Waiting for build output...")
+
 	m := tuiModel{
 		projects:    projects,
 		jobs:        jobs,
 		list:        l,
 		spinner:     s,
+		logViewport: logViewport,
+		maxLogLines: 200, // Keep last 200 lines
 		viewMode:    "list",
 		interactive: buildInteractive,
 	}
@@ -328,13 +347,16 @@ func runTuiBuild(jobs []build.BuildJob) error {
 			pretty.ErrorPretty(fmt.Sprintf("Build failed: %d/%d projects failed", fm.failCount, len(fm.projects)), nil)
 			pretty.Divider()
 
-			for _, p := range fm.projects {
-				if p.status == "failed" {
-					pretty.Blank()
-					pretty.Status("error", fmt.Sprintf("%s (failed in %v)", p.name, p.duration.Round(time.Millisecond)))
-					pretty.Divider()
-					if len(p.output) > 0 {
-						pretty.Code(p.output)
+			// For single project builds, skip showing output again (already shown in streaming logs)
+			if len(fm.projects) > 1 {
+				for _, p := range fm.projects {
+					if p.status == "failed" {
+						pretty.Blank()
+						pretty.Status("error", fmt.Sprintf("%s (failed in %v)", p.name, p.duration.Round(time.Millisecond)))
+						pretty.Divider()
+						if len(p.output) > 0 {
+							pretty.Code(p.output)
+						}
 					}
 				}
 			}
@@ -374,15 +396,7 @@ func (m tuiModel) waitForBuildEventCmd() tea.Cmd {
 			// Channel closed, all builds done
 			return nil
 		}
-
-		if index, ok := m.jobIndexMap[event.Job.Name]; ok {
-			if event.Type == "start" {
-				return buildStartedMsg{index: index}
-			} else if event.Type == "finish" && event.Result != nil {
-				return buildFinishedMsg{index: index, result: *event.Result}
-			}
-		}
-		return nil
+		return event
 	}
 }
 
@@ -390,16 +404,44 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		// Only use the height needed for projects + header (title + status line)
-		// Each project takes 1 line, plus 4 lines for list chrome (title, etc)
-		neededHeight := len(m.projects) + 4
-		listHeight := neededHeight
-		if listHeight > msg.Height-2 {
-			listHeight = msg.Height - 2
-		}
-		m.list.SetSize(msg.Width, listHeight)
+		headerHeight := 1
+		bottomPadding := 3
+
+		// for full-screen log inspection
 		m.viewport.Width = msg.Width
 		m.viewport.Height = msg.Height - 2
+
+		// Single project: vertical layout
+		if len(m.projects) == 1 {
+			// List takes minimal space (just the one line + chrome)
+			listHeight := 2
+			m.list.SetSize(msg.Width, listHeight)
+
+			// Logs use fixed height (about 6 lines)
+			logHeight := 6
+			m.logViewport.Width = msg.Width
+			m.logViewport.Height = logHeight
+		} else {
+			// Multiple projects: horizontal layout
+			// Calculate list height (min 3, max available height)
+			listHeight := len(m.projects) + 1
+			if listHeight < 3 {
+				listHeight = 3
+			}
+			if listHeight > msg.Height-headerHeight-bottomPadding {
+				listHeight = msg.Height - headerHeight - bottomPadding
+			}
+
+			// Split width: 50% for list, 50% for logs
+			listWidth := msg.Width / 2
+			logWidth := msg.Width - listWidth
+
+			m.list.SetSize(listWidth, listHeight)
+
+			// for streaming log view - match list height
+			m.logViewport.Width = logWidth - 2 // -2 for border
+			m.logViewport.Height = listHeight
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -434,44 +476,64 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Start listening for events
 		return m, m.waitForBuildEventCmd()
 
-	case buildStartedMsg:
-		m.projects[msg.index].status = "running"
-		m.runningCount++
-		items := m.list.Items()
-		items[msg.index] = m.projects[msg.index]
+	case build.BuildEvent:
+		var cmds []tea.Cmd
 
-		// Continue listening for events
-		return m, tea.Batch(m.list.SetItems(items), m.waitForBuildEventCmd())
+		switch msg.Type {
+		case "start":
+			if index, ok := m.jobIndexMap[msg.Job.Name]; ok {
+				m.projects[index].status = "running"
+				m.runningCount++
+				items := m.list.Items()
+				items[index] = m.projects[index]
+				cmds = append(cmds, m.list.SetItems(items))
+			}
 
-	case buildFinishedMsg:
-		m.projects[msg.index].duration = msg.result.Duration
-		m.projects[msg.index].output = string(msg.result.Output)
-		m.runningCount--
-		if msg.result.Err != nil {
-			m.projects[msg.index].status = "failed"
-			m.failCount++
-		} else {
-			m.projects[msg.index].status = "success"
-			m.successCount++
-		}
-		items := m.list.Items()
-		items[msg.index] = m.projects[msg.index]
+		case "finish":
+			if index, ok := m.jobIndexMap[msg.Job.Name]; ok {
+				result := msg.Result
+				m.projects[index].duration = result.Duration
+				m.projects[index].output = string(result.Output)
+				m.runningCount--
+				if result.Err != nil {
+					m.projects[index].status = "failed"
+					m.failCount++
+				} else {
+					m.projects[index].status = "success"
+					m.successCount++
+				}
+				items := m.list.Items()
+				items[index] = m.projects[index]
+				cmds = append(cmds, m.list.SetItems(items))
 
-		if m.successCount+m.failCount == len(m.projects) {
-			m.finished = true
-			// Auto-quit unless in interactive mode
-			if !m.interactive {
-				return m, tea.Quit
+				if m.successCount+m.failCount == len(m.projects) {
+					m.finished = true
+					if !m.interactive {
+						cmds = append(cmds, tea.Quit)
+					}
+				}
+			}
+
+		case "output":
+			if _, ok := m.jobIndexMap[msg.Job.Name]; ok {
+				// Find color for workspace name
+				wsStyle := getWorkspaceStyle(msg.Job.Name)
+				// Format line
+				line := fmt.Sprintf("%s %s", wsStyle.Render(fmt.Sprintf("[%s]", msg.Job.Name)), msg.OutputLine)
+				m.logLines = append(m.logLines, line)
+				if len(m.logLines) > m.maxLogLines {
+					m.logLines = m.logLines[len(m.logLines)-m.maxLogLines:]
+				}
+				m.logViewport.SetContent(strings.Join(m.logLines, "\n"))
+				m.logViewport.GotoBottom()
 			}
 		}
 
-		// Continue listening if not finished
-		var nextCmd tea.Cmd
+		// Continue listening for events if not finished
 		if !m.finished {
-			nextCmd = m.waitForBuildEventCmd()
+			cmds = append(cmds, m.waitForBuildEventCmd())
 		}
-
-		return m, tea.Batch(m.list.SetItems(items), nextCmd)
+		return m, tea.Batch(cmds...)
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -491,20 +553,71 @@ func (m tuiModel) View() string {
 	}
 
 	// Update list delegate for dynamic rendering
-	m.list.SetDelegate(projectDelegate{spinner: m.spinner, totalProjects: len(m.projects)})
+	m.list.SetDelegate(projectDelegate{
+		spinner:       m.spinner,
+		totalProjects: len(m.projects),
+		finished:      m.finished,
+		interactive:   m.interactive,
+	})
 
 	header := fmt.Sprintf("Building %d projects... Running: %d, Success: %d, Failed: %d",
 		len(m.projects), m.runningCount, m.successCount, m.failCount)
 	if m.finished {
-		header = fmt.Sprintf("Build finished! Success: %d, Failed: %d (Press q to quit)", m.successCount, m.failCount)
+		if m.interactive {
+			header = fmt.Sprintf("Build finished! Success: %d, Failed: %d (Press 'q' to quit, 'enter' to view logs)", m.successCount, m.failCount)
+		} else {
+			header = fmt.Sprintf("Build finished! Success: %d, Failed: %d", m.successCount, m.failCount)
+		}
 	}
 
-	return fmt.Sprintf("  %s\n%s", header, m.list.View())
+	var mainContent string
+
+	// For single project, show logs below; for multiple projects, show logs to the right
+	if len(m.projects) == 1 {
+		// Show all log lines directly without a viewport
+		logStyle := lipgloss.NewStyle().
+			Foreground(theme.DefaultTheme.Muted.GetForeground())
+
+		logContent := strings.Join(m.logLines, "\n")
+		if logContent == "" {
+			logContent = "Waiting for build output..."
+		}
+		logView := logStyle.Render(logContent)
+
+		mainContent = lipgloss.JoinVertical(lipgloss.Left,
+			m.list.View(),
+			"",
+			logView,
+		)
+	} else {
+		logViewStyle := lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder(), false, false, false, true).
+			BorderForeground(theme.DefaultTheme.Muted.GetForeground()).
+			Foreground(theme.DefaultTheme.Muted.GetForeground()).
+			PaddingTop(1)
+
+		logView := logViewStyle.Render(m.logViewport.View())
+
+		mainContent = lipgloss.JoinHorizontal(lipgloss.Top,
+			m.list.View(),
+			logView,
+		)
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		header,
+		mainContent,
+		"",
+		"",
+		"",
+	)
 }
 
 type projectDelegate struct {
 	spinner       spinner.Model
 	totalProjects int
+	finished      bool
+	interactive   bool
 }
 
 func (d projectDelegate) Height() int                               { return 1 }
@@ -530,7 +643,8 @@ func (d projectDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	line := fmt.Sprintf("%s %s %s", statusIcon, p.name, durationStr)
 	if d.totalProjects > 1 {
-		if index == m.Index() {
+		// Only show arrow if builds are finished and in interactive mode
+		if d.finished && d.interactive && index == m.Index() {
 			line = "  " + theme.IconArrowRightBold + " " + line
 		} else {
 			line = "    " + line

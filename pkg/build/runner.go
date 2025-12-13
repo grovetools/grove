@@ -1,7 +1,10 @@
 package build
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -25,9 +28,10 @@ type BuildResult struct {
 
 // BuildEvent represents an event during the build process
 type BuildEvent struct {
-	Job      BuildJob
-	Type     string // "start" or "finish"
-	Result   *BuildResult // nil for start events
+	Job        BuildJob
+	Type       string // "start", "finish", or "output"
+	Result     *BuildResult // nil for start and output events
+	OutputLine string       // For "output" events
 }
 
 // Run executes a list of build jobs concurrently and returns a channel of results.
@@ -137,14 +141,64 @@ func RunWithEvents(ctx context.Context, jobs []BuildJob, numWorkers int, continu
 				start := time.Now()
 				cmd := exec.CommandContext(runCtx, "make", "build")
 				cmd.Dir = job.Path
-				// Set environment to ensure consistent behavior
 				cmd.Env = append(os.Environ(), "TERM=xterm-256color")
-				output, err := cmd.CombinedOutput()
+
+				// Get pipes for stdout and stderr
+				stdoutPipe, _ := cmd.StdoutPipe()
+				stderrPipe, _ := cmd.StderrPipe()
+
+				// Buffer to capture full output
+				var outputBuf bytes.Buffer
+
+				// MultiReader to read from both pipes
+				multiReader := io.MultiReader(stdoutPipe, stderrPipe)
+
+				// Scanner to read line by line
+				scanner := bufio.NewScanner(multiReader)
+
+				// Goroutine to stream output
+				var streamWg sync.WaitGroup
+				streamWg.Add(1)
+				go func() {
+					defer streamWg.Done()
+					for scanner.Scan() {
+						line := scanner.Text()
+						outputBuf.WriteString(line + "\n")
+						eventsChan <- BuildEvent{
+							Job:        job,
+							Type:       "output",
+							OutputLine: line,
+						}
+					}
+				}()
+
+				err := cmd.Start()
+				if err != nil {
+					// Send finish event with start error
+					eventsChan <- BuildEvent{
+						Job:  job,
+						Type: "finish",
+						Result: &BuildResult{
+							Job:      job,
+							Err:      err,
+							Duration: time.Since(start),
+						},
+					}
+					if !continueOnError {
+						once.Do(cancel)
+					}
+					continue
+				}
+
+				// Wait for streaming to finish, then for command to exit
+				streamWg.Wait()
+				err = cmd.Wait()
+
 				duration := time.Since(start)
 
 				result := BuildResult{
 					Job:      job,
-					Output:   output,
+					Output:   outputBuf.Bytes(),
 					Err:      err,
 					Duration: duration,
 				}
