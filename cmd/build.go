@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +17,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-meta/pkg/build"
 	"github.com/mattsolo1/grove-meta/pkg/discovery"
@@ -25,25 +25,30 @@ import (
 )
 
 var (
-	buildVerbose  bool
-	buildJobs     int
-	buildFilter   string
-	buildExclude  string
-	buildFailFast bool
-	buildDryRun   bool
+	buildVerbose     bool
+	buildJobs        int
+	buildFilter      string
+	buildExclude     string
+	buildFailFast    bool
+	buildDryRun      bool
+	buildInteractive bool
 )
 
 func newBuildCmd() *cobra.Command {
 	cmd := cli.NewStandardCommand("build", "Build all Grove packages in parallel")
-	cmd.Long = `Builds all discovered Grove packages in parallel, providing a real-time status UI.
+	cmd.Long = `Builds Grove packages in parallel with a real-time status UI.
 
-By default, all builds continue even if one fails, allowing you to see the complete
-status of your ecosystem. Use --fail-fast for CI environments where you want to
-stop immediately on the first failure.
+The build scope is context-aware based on your current directory:
+- **Ecosystem root:** Builds all sub-projects within the ecosystem.
+- **Sub-project or Standalone project:** Builds only the current project.
+
+By default, all builds continue even if one fails. Use --fail-fast for CI environments
+where you want to stop immediately on the first failure.
 
 This command replaces the root 'make build' for a faster and more informative build experience.`
 
 	cmd.RunE = runBuild
+	cmd.SilenceUsage = true
 
 	cmd.Flags().BoolVarP(&buildVerbose, "verbose", "v", false, "Stream raw build output instead of using the TUI")
 	cmd.Flags().IntVarP(&buildJobs, "jobs", "j", runtime.NumCPU(), "Number of parallel builds")
@@ -51,6 +56,7 @@ This command replaces the root 'make build' for a faster and more informative bu
 	cmd.Flags().StringVar(&buildExclude, "exclude", "", "Comma-separated glob patterns to exclude projects")
 	cmd.Flags().BoolVar(&buildFailFast, "fail-fast", false, "Stop all builds immediately when one fails (useful for CI)")
 	cmd.Flags().BoolVar(&buildDryRun, "dry-run", false, "Show what would be built without actually building")
+	cmd.Flags().BoolVarP(&buildInteractive, "interactive", "i", false, "Keep TUI open after builds complete for inspection")
 
 	return cmd
 }
@@ -191,8 +197,10 @@ func runVerboseBuild(jobs []build.BuildJob) error {
 	var successCount, failCount int
 	var printMutex sync.Mutex
 	totalJobs := len(jobs)
+	pretty := logging.NewPrettyLogger()
 
-	fmt.Printf("Starting parallel build of %d projects (using %d workers)...\n\n", totalJobs, buildJobs)
+	pretty.Progress(fmt.Sprintf("Starting parallel build of %d projects (using %d workers)", totalJobs, buildJobs))
+	pretty.Blank()
 
 	for result := range resultsChan {
 		printMutex.Lock()
@@ -200,7 +208,7 @@ func runVerboseBuild(jobs []build.BuildJob) error {
 		progress := fmt.Sprintf("[%d/%d]", completed, totalJobs)
 
 		fmt.Printf("\n%s Building %s...\n", progress, result.Job.Name)
-		fmt.Println(strings.Repeat("-", 60))
+		pretty.Divider()
 
 		if len(result.Output) > 0 {
 			os.Stdout.Write(result.Output)
@@ -208,19 +216,20 @@ func runVerboseBuild(jobs []build.BuildJob) error {
 
 		if result.Err != nil {
 			failCount++
-			fmt.Printf("%s Failed (%v)\n", theme.IconError, result.Duration.Round(time.Millisecond))
+			pretty.Status("error", fmt.Sprintf("Failed (%v)", result.Duration.Round(time.Millisecond)))
 			if result.Err.Error() != "exit status 1" && result.Err.Error() != "exit status 2" {
-				fmt.Printf("  Error: %v\n", result.Err)
+				pretty.ErrorPretty("Error", result.Err)
 			}
 		} else {
 			successCount++
-			fmt.Printf("%s Success (%v)\n", theme.IconSuccess, result.Duration.Round(time.Millisecond))
+			pretty.Status("success", fmt.Sprintf("Success (%v)", result.Duration.Round(time.Millisecond)))
 		}
 		printMutex.Unlock()
 	}
 
-	fmt.Println(strings.Repeat("=", 60))
-	fmt.Printf("Build finished. Success: %d, Failed: %d\n", successCount, failCount)
+	pretty.Blank()
+	pretty.Divider()
+	pretty.InfoPretty(fmt.Sprintf("Build finished. Success: %d, Failed: %d", successCount, failCount))
 	if failCount > 0 {
 		return fmt.Errorf("%d builds failed", failCount)
 	}
@@ -251,6 +260,7 @@ type tuiModel struct {
 	width, height int
 	err           error
 	finished      bool
+	interactive   bool
 	successCount  int
 	failCount     int
 	runningCount  int
@@ -287,28 +297,48 @@ func runTuiBuild(jobs []build.BuildJob) error {
 		items[i] = p
 	}
 
-	l := list.New(items, list.NewDefaultDelegate(), 0, 0)
-	l.Title = "Grove Build Status"
+	l := list.New(items, list.NewDefaultDelegate(), 0, len(projects)+4)
+	l.Title = ""
+	l.SetShowTitle(false)
 	l.SetShowStatusBar(false)
 	l.SetShowPagination(false)
 	l.SetShowHelp(false)
 
 	m := tuiModel{
-		projects: projects,
-		jobs:     jobs,
-		list:     l,
-		spinner:  s,
-		viewMode: "list",
+		projects:    projects,
+		jobs:        jobs,
+		list:        l,
+		spinner:     s,
+		viewMode:    "list",
+		interactive: buildInteractive,
 	}
 
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m)
 	finalModel, err := p.Run()
 	if err != nil {
 		return err
 	}
 
-	// After TUI exits, check for errors
+	// After TUI exits, check for errors and print failures if not in interactive mode
 	if fm, ok := finalModel.(tuiModel); ok && fm.failCount > 0 {
+		if !buildInteractive {
+			// Print failure details using pretty logging
+			pretty := logging.NewPrettyLogger()
+			pretty.Divider()
+			pretty.ErrorPretty(fmt.Sprintf("Build failed: %d/%d projects failed", fm.failCount, len(fm.projects)), nil)
+			pretty.Divider()
+
+			for _, p := range fm.projects {
+				if p.status == "failed" {
+					pretty.Blank()
+					pretty.Status("error", fmt.Sprintf("%s (failed in %v)", p.name, p.duration.Round(time.Millisecond)))
+					pretty.Divider()
+					if len(p.output) > 0 {
+						pretty.Code(p.output)
+					}
+				}
+			}
+		}
 		return fmt.Errorf("%d builds failed", fm.failCount)
 	}
 
@@ -360,7 +390,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.list.SetSize(msg.Width, msg.Height-2)
+		// Only use the height needed for projects + header (title + status line)
+		// Each project takes 1 line, plus 4 lines for list chrome (title, etc)
+		neededHeight := len(m.projects) + 4
+		listHeight := neededHeight
+		if listHeight > msg.Height-2 {
+			listHeight = msg.Height - 2
+		}
+		m.list.SetSize(msg.Width, listHeight)
 		m.viewport.Width = msg.Width
 		m.viewport.Height = msg.Height - 2
 		return m, nil
@@ -422,6 +459,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.successCount+m.failCount == len(m.projects) {
 			m.finished = true
+			// Auto-quit unless in interactive mode
+			if !m.interactive {
+				return m, tea.Quit
+			}
 		}
 
 		// Continue listening if not finished
@@ -450,7 +491,7 @@ func (m tuiModel) View() string {
 	}
 
 	// Update list delegate for dynamic rendering
-	m.list.SetDelegate(projectDelegate{spinner: m.spinner})
+	m.list.SetDelegate(projectDelegate{spinner: m.spinner, totalProjects: len(m.projects)})
 
 	header := fmt.Sprintf("Building %d projects... Running: %d, Success: %d, Failed: %d",
 		len(m.projects), m.runningCount, m.successCount, m.failCount)
@@ -458,11 +499,12 @@ func (m tuiModel) View() string {
 		header = fmt.Sprintf("Build finished! Success: %d, Failed: %d (Press q to quit)", m.successCount, m.failCount)
 	}
 
-	return fmt.Sprintf("%s\n%s", header, m.list.View())
+	return fmt.Sprintf("  %s\n%s", header, m.list.View())
 }
 
 type projectDelegate struct {
-	spinner spinner.Model
+	spinner       spinner.Model
+	totalProjects int
 }
 
 func (d projectDelegate) Height() int                               { return 1 }
@@ -487,8 +529,12 @@ func (d projectDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	}
 
 	line := fmt.Sprintf("%s %s %s", statusIcon, p.name, durationStr)
-	if index == m.Index() {
-		line = theme.DefaultTheme.Selected.Render("> " + line)
+	if d.totalProjects > 1 {
+		if index == m.Index() {
+			line = "  " + theme.IconArrowRightBold + " " + line
+		} else {
+			line = "    " + line
+		}
 	} else {
 		line = "  " + line
 	}
