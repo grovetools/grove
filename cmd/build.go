@@ -18,6 +18,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-meta/pkg/build"
@@ -111,9 +112,18 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	// Create build jobs
 	var jobs []build.BuildJob
 	for _, wsPath := range workspaces {
+		cfg, err := config.LoadFrom(wsPath)
+		var buildCmd []string
+		if err == nil && cfg.BuildCmd != "" {
+			buildCmd = strings.Fields(cfg.BuildCmd)
+		} else {
+			buildCmd = []string{"make", "build"}
+		}
+
 		jobs = append(jobs, build.BuildJob{
-			Name: filepath.Base(wsPath),
-			Path: wsPath,
+			Name:    filepath.Base(wsPath),
+			Path:    wsPath,
+			Command: buildCmd,
 		})
 	}
 

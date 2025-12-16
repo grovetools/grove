@@ -14,8 +14,9 @@ import (
 
 // BuildJob represents a single project to be built.
 type BuildJob struct {
-	Name string // e.g., "grove-core"
-	Path string // Absolute path to the project directory
+	Name    string   // e.g., "grove-core"
+	Path    string   // Absolute path to the project directory
+	Command []string // The build command to execute, e.g., ["make", "build"]
 }
 
 // BuildResult contains the outcome of a single build job.
@@ -63,7 +64,14 @@ func Run(ctx context.Context, jobs []BuildJob, numWorkers int, continueOnError b
 				}
 
 				start := time.Now()
-				cmd := exec.CommandContext(runCtx, "make", "build")
+
+				var cmd *exec.Cmd
+				if len(job.Command) == 0 {
+					cmd = exec.CommandContext(runCtx, "make", "build")
+				} else {
+					cmd = exec.CommandContext(runCtx, job.Command[0], job.Command[1:]...)
+				}
+
 				cmd.Dir = job.Path
 				// Set environment to ensure consistent behavior
 				cmd.Env = append(os.Environ(), "TERM=xterm-256color")
@@ -139,7 +147,14 @@ func RunWithEvents(ctx context.Context, jobs []BuildJob, numWorkers int, continu
 				eventsChan <- BuildEvent{Job: job, Type: "start"}
 
 				start := time.Now()
-				cmd := exec.CommandContext(runCtx, "make", "build")
+
+				var cmd *exec.Cmd
+				if len(job.Command) == 0 {
+					cmd = exec.CommandContext(runCtx, "make", "build")
+				} else {
+					cmd = exec.CommandContext(runCtx, job.Command[0], job.Command[1:]...)
+				}
+
 				cmd.Dir = job.Path
 				cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 
