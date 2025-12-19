@@ -50,5 +50,3 @@ require (
 	golang.org/x/sys v0.36.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
 )
-
-replace github.com/mattsolo1/grove-core v0.4.0 => /Users/solom4/code/grove-ecosystem/grove-core
