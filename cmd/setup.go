@@ -911,7 +911,7 @@ func (m *setupModel) viewTmuxBindingsStep() string {
 	content.WriteString(theme.DefaultTheme.Muted.Render("  ~/.config/tmux/popups.conf\n"))
 	content.WriteString(theme.DefaultTheme.Muted.Render("  ~/.config/tmux/tmux.conf (append source-file)"))
 	content.WriteString("\n\n")
-	content.WriteString("Press Enter to continue or b to go back.")
+	content.WriteString("Press Enter to continue or esc to go back.")
 
 	return boxStyle.Render(content.String())
 }
@@ -932,7 +932,7 @@ func (m *setupModel) viewNeovimPluginStep() string {
 	content.WriteString(theme.DefaultTheme.Muted.Render("  - Grove flow integration (<leader>gf)\n"))
 	content.WriteString(theme.DefaultTheme.Muted.Render("  - Grove notebook access (<leader>gn)\n"))
 	content.WriteString("\n")
-	content.WriteString("Press Enter to continue or b to go back.")
+	content.WriteString("Press Enter to continue or esc to go back.")
 
 	return boxStyle.Render(content.String())
 }
