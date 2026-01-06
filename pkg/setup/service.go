@@ -205,15 +205,21 @@ func expandPath(path string) string {
 	return path
 }
 
-// GlobalConfigPath returns the path to the global grove configuration file
+// GlobalConfigPath returns the path to the global grove configuration file.
+// It checks XDG_CONFIG_HOME first for compatibility with the test harness
+// and grove-core's config loading, then falls back to ~/.config.
 func GlobalConfigPath() string {
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		// Fall back to home directory
-		homeDir, _ := os.UserHomeDir()
-		return filepath.Join(homeDir, ".config", "grove", "grove.yml")
+	// Check XDG_CONFIG_HOME first (matches grove-core behavior)
+	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
+		return filepath.Join(xdgConfig, "grove", "grove.yml")
 	}
-	return filepath.Join(configDir, "grove", "grove.yml")
+
+	// Fall back to ~/.config
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".config", "grove", "grove.yml")
+	}
+	return filepath.Join(homeDir, ".config", "grove", "grove.yml")
 }
 
 // GroveHomeDir returns the path to the ~/.grove directory

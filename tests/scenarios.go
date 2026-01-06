@@ -35,6 +35,21 @@ func AllScenarios() []*harness.Scenario {
 		// StreamlinedFullReleaseScenario(),
 		// StreamlinedRCReleaseScenario(),
 		// StreamlinedFailureScenario(),
+
+		// Setup Wizard scenarios - CLI tests
+		SetupWizardCLIDefaultsScenario(),
+		SetupWizardCLIDryRunScenario(),
+		SetupWizardCLIOnlyScenario(),
+		SetupWizardEcosystemFilesScenario(),
+		SetupWizardNotebookConfigScenario(),
+		SetupWizardConfigPreservationScenario(),
+		SetupWizardTmuxIdempotentScenario(),
+		// Setup Wizard scenarios - TUI tests (local only)
+		SetupWizardTUIComponentSelectionScenario(),
+		// SetupWizardTUINavigationScenario(),    // TODO: Fix timing/back button issues
+		// SetupWizardTUIFullWorkflowScenario(),  // TODO: Fix summary screen detection
+		SetupWizardTUIDeselectAllScenario(),
+		SetupWizardTUIQuitScenario(),
 	}
 }
 
