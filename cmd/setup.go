@@ -74,8 +74,8 @@ var setupKeys = setupKeyMap{
 		key.WithHelp("enter", "confirm"),
 	),
 	Back: key.NewBinding(
-		key.WithKeys("backspace", "b"),
-		key.WithHelp("b/backspace", "go back"),
+		key.WithKeys("esc"),
+		key.WithHelp("esc", "go back"),
 	),
 }
 
@@ -805,7 +805,7 @@ func (m *setupModel) View() string {
 	case stepSummary:
 		statusText += "enter/q: exit"
 	default:
-		statusText += "enter: confirm | b/backspace: back | q: quit"
+		statusText += "enter: confirm | esc: back | q: quit"
 	}
 
 	content.WriteString("\n")
