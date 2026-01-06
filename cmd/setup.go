@@ -305,6 +305,8 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.componentList.SetSize(msg.Width-4, msg.Height-8)
 		m.methodList.SetSize(msg.Width-4, 6)
+		// Account for box border (2) + padding (4) + some margin
+		m.textInput.Width = msg.Width - 12
 		m.ready = true
 		return m, nil
 	}
@@ -828,15 +830,15 @@ func (m *setupModel) viewEcosystemStep() string {
 		Width(m.width - 4)
 
 	if m.currentInput == inputPath {
-		content.WriteString("Enter the path for your Grove ecosystem:\n\n")
+		content.WriteString("Where should your ecosystem be created?\n\n")
 		content.WriteString(m.textInput.View())
 		content.WriteString("\n\n")
-		content.WriteString(theme.DefaultTheme.Muted.Render("This directory will contain your Grove projects."))
+		content.WriteString(theme.DefaultTheme.Muted.Render("The filesystem directory where your projects will live."))
 	} else {
-		content.WriteString("Enter a name for your ecosystem:\n\n")
+		content.WriteString("What should this ecosystem be called?\n\n")
 		content.WriteString(m.textInput.View())
 		content.WriteString("\n\n")
-		content.WriteString(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Path: %s", m.ecosystemPath)))
+		content.WriteString(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Used in config files to identify this ecosystem. Path: %s", m.ecosystemPath)))
 	}
 
 	return boxStyle.Render(content.String())

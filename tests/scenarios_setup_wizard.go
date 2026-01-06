@@ -410,7 +410,7 @@ func SetupWizardTUINavigationScenario() *harness.Scenario {
 				}
 
 				// Wait for ecosystem step
-				if err := session.WaitForText("Enter the path for your Grove ecosystem", 5*time.Second); err != nil {
+				if err := session.WaitForText("Where should your ecosystem be created", 5*time.Second); err != nil {
 					content, _ := session.Capture(tui.WithCleanedOutput())
 					return fmt.Errorf("ecosystem step not reached: %w\nContent:\n%s", err, content)
 				}
@@ -444,7 +444,7 @@ func SetupWizardTUINavigationScenario() *harness.Scenario {
 				}
 
 				// Should be back at Ecosystem name input
-				if err := session.WaitForText("Enter a name for your ecosystem", 5*time.Second); err != nil {
+				if err := session.WaitForText("What should this ecosystem be called", 5*time.Second); err != nil {
 					content, _ := session.Capture(tui.WithCleanedOutput())
 					return fmt.Errorf("ecosystem name step not reached: %w\nContent:\n%s", err, content)
 				}
@@ -505,7 +505,7 @@ func SetupWizardTUIFullWorkflowScenario() *harness.Scenario {
 				}
 
 				// Accept default ecosystem path
-				if err := session.WaitForText("Enter the path for your Grove ecosystem", 5*time.Second); err != nil {
+				if err := session.WaitForText("Where should your ecosystem be created", 5*time.Second); err != nil {
 					return err
 				}
 				if err := session.Type("Enter"); err != nil {
@@ -513,7 +513,7 @@ func SetupWizardTUIFullWorkflowScenario() *harness.Scenario {
 				}
 
 				// Accept default ecosystem name
-				if err := session.WaitForText("Enter a name for your ecosystem", 5*time.Second); err != nil {
+				if err := session.WaitForText("What should this ecosystem be called", 5*time.Second); err != nil {
 					return err
 				}
 				if err := session.Type("Enter"); err != nil {
@@ -672,7 +672,7 @@ func SetupWizardTUIQuitScenario() *harness.Scenario {
 					return err
 				}
 
-				return session.WaitForText("Enter the path for your Grove ecosystem", 5*time.Second)
+				return session.WaitForText("Where should your ecosystem be created", 5*time.Second)
 			}),
 			harness.NewStep("Quit with 'q'", func(ctx *harness.Context) error {
 				session := ctx.Get("tui_session").(*tui.Session)
