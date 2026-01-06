@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -36,6 +35,7 @@ type wizardStep int
 const (
 	stepSelectComponents wizardStep = iota
 	stepEcosystem
+	stepFirstProject
 	stepNotebook
 	stepGeminiKey
 	stepTmuxBindings
@@ -159,6 +159,10 @@ type setupModel struct {
 	// Ecosystem step state
 	ecosystemPath  string
 	ecosystemName  string
+
+	// First project step state
+	firstProjectName string
+	skipFirstProject bool
 
 	// Notebook step state
 	notebookPath   string
@@ -288,6 +292,8 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateComponentSelection(msg)
 		case stepEcosystem:
 			return m.updateEcosystemStep(msg)
+		case stepFirstProject:
+			return m.updateFirstProjectStep(msg)
 		case stepNotebook:
 			return m.updateNotebookStep(msg)
 		case stepGeminiKey:
@@ -360,6 +366,7 @@ func (m *setupModel) buildOrderedSteps() {
 			switch c.id {
 			case "ecosystem":
 				m.orderedSteps = append(m.orderedSteps, stepEcosystem)
+				m.orderedSteps = append(m.orderedSteps, stepFirstProject)
 			case "notebook":
 				m.orderedSteps = append(m.orderedSteps, stepNotebook)
 			case "gemini":
@@ -379,6 +386,10 @@ func (m *setupModel) prepareStepInput() {
 		m.currentInput = inputPath
 		m.textInput.SetValue(m.ecosystemPath)
 		m.textInput.Placeholder = "Path to ecosystem directory"
+	case stepFirstProject:
+		m.currentInput = inputName
+		m.textInput.SetValue(m.firstProjectName)
+		m.textInput.Placeholder = "my-project"
 	case stepNotebook:
 		m.currentInput = inputPath
 		m.textInput.SetValue(m.notebookPath)
@@ -426,6 +437,25 @@ func (m *setupModel) updateEcosystemStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.ecosystemName = m.textInput.Value()
 			m.nextStep()
 		}
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}
+
+func (m *setupModel) updateFirstProjectStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keys.Base.Quit):
+		return m, tea.Quit
+	case key.Matches(msg, m.keys.Back):
+		m.prevStep()
+		return m, nil
+	case key.Matches(msg, m.keys.Confirm):
+		m.firstProjectName = m.textInput.Value()
+		m.skipFirstProject = m.firstProjectName == ""
+		m.nextStep()
 		return m, nil
 	}
 
@@ -536,6 +566,9 @@ func (m *setupModel) executeSetup() {
 	// Execute each selected configuration step
 	if m.selectedSteps["ecosystem"] {
 		m.setupEcosystem()
+		if !m.skipFirstProject && m.firstProjectName != "" {
+			m.setupFirstProject()
+		}
 	}
 	if m.selectedSteps["notebook"] {
 		m.setupNotebook()
@@ -557,89 +590,37 @@ func (m *setupModel) setupEcosystem() {
 
 	// Create grove.yml for ecosystem
 	groveYMLContent := fmt.Sprintf(`name: %s
-description: Grove ecosystem
+description: A Grove ecosystem
 workspaces:
   - "*"
 `, m.ecosystemName)
 	m.service.WriteFile(filepath.Join(m.ecosystemPath, "grove.yml"), []byte(groveYMLContent), 0644)
 
-	// Create go.work
-	goWorkContent := `go 1.24.4
-
-use (
-)
-`
-	m.service.WriteFile(filepath.Join(m.ecosystemPath, "go.work"), []byte(goWorkContent), 0644)
-
 	// Create .gitignore
-	gitignoreContent := `# Binaries
-bin/
-*.exe
-
-# Test and coverage
-*.test
-*.out
-coverage.html
-
-# OS files
+	gitignoreContent := `# OS files
 .DS_Store
 Thumbs.db
 
-# IDE files
-.vscode/
-.idea/
+# Editor files
 *.swp
 *.swo
-
-# Temporary files
-*.tmp
-*.bak
+*~
 `
 	m.service.WriteFile(filepath.Join(m.ecosystemPath, ".gitignore"), []byte(gitignoreContent), 0644)
 
-	// Create Makefile
-	makefileContent := `# Grove ecosystem Makefile
+	// Create README.md
+	readmeContent := fmt.Sprintf(`# %s
 
-.PHONY: all build test clean
+A Grove ecosystem for managing related projects.
 
-PACKAGES ?=
-BINARIES ?=
+## Getting Started
 
-all: build
+Add projects to this directory and they will be automatically discovered by Grove tools.
+`, m.ecosystemName)
+	m.service.WriteFile(filepath.Join(m.ecosystemPath, "README.md"), []byte(readmeContent), 0644)
 
-build:
-	@echo "Building all packages..."
-	@for pkg in $(PACKAGES); do \
-		echo "Building $$pkg..."; \
-		$(MAKE) -C $$pkg build || exit 1; \
-	done
-
-test:
-	@echo "Testing all packages..."
-	@for pkg in $(PACKAGES); do \
-		echo "Testing $$pkg..."; \
-		$(MAKE) -C $$pkg test || exit 1; \
-	done
-
-clean:
-	@echo "Cleaning all packages..."
-	@for pkg in $(PACKAGES); do \
-		echo "Cleaning $$pkg..."; \
-		$(MAKE) -C $$pkg clean || exit 1; \
-	done
-`
-	m.service.WriteFile(filepath.Join(m.ecosystemPath, "Makefile"), []byte(makefileContent), 0644)
-
-	// Create .grove/workspace marker
-	m.service.MkdirAll(filepath.Join(m.ecosystemPath, ".grove"), 0755)
-	timestamp := time.Now().UTC().Format(time.RFC3339)
-	workspaceContent := fmt.Sprintf(`branch: main
-plan: %s-ecosystem-root
-created_at: %s
-ecosystem: true
-repos: []
-`, m.ecosystemName, timestamp)
-	m.service.WriteFile(filepath.Join(m.ecosystemPath, ".grove", "workspace"), []byte(workspaceContent), 0644)
+	// Initialize git repository
+	m.service.RunGitInit(m.ecosystemPath)
 
 	// Update global config with ecosystem path
 	root, err := m.yamlHandler.LoadGlobalConfig()
@@ -651,6 +632,29 @@ repos: []
 		}, "groves", m.ecosystemName)
 		m.yamlHandler.SaveGlobalConfig(root)
 	}
+}
+
+func (m *setupModel) setupFirstProject() {
+	projectPath := filepath.Join(m.ecosystemPath, m.firstProjectName)
+
+	// Create project directory
+	m.service.MkdirAll(projectPath, 0755)
+
+	// Create grove.yml for the project
+	groveYMLContent := fmt.Sprintf(`name: %s
+description: A Grove project
+`, m.firstProjectName)
+	m.service.WriteFile(filepath.Join(projectPath, "grove.yml"), []byte(groveYMLContent), 0644)
+
+	// Create README.md
+	readmeContent := fmt.Sprintf(`# %s
+
+A Grove project.
+`, m.firstProjectName)
+	m.service.WriteFile(filepath.Join(projectPath, "README.md"), []byte(readmeContent), 0644)
+
+	// Initialize git repository
+	m.service.RunGitInit(projectPath)
 }
 
 func (m *setupModel) setupNotebook() {
@@ -681,21 +685,23 @@ func (m *setupModel) setupTmuxBindings() {
 	popupsContent := `# Grove tmux popup bindings
 # Source this file from your tmux.conf: source-file ~/.config/tmux/popups.conf
 
-# Popup dimensions
-POPUP_WIDTH="90%"
-POPUP_HEIGHT="85%"
+# --- Popup Settings ---
+set -g popup-border-lines none
 
-# Claude Code popup (prefix + c)
-bind-key c display-popup -E -w "$POPUP_WIDTH" -h "$POPUP_HEIGHT" -d "#{pane_current_path}" "claude"
+# --- Grove Flow Plan Status ---
+bind-key -n C-p run-shell "PATH=$PATH:$HOME/.grove/bin flow tmux status"
 
-# Grove flow popup (prefix + f)
-bind-key f display-popup -E -w "$POPUP_WIDTH" -h "$POPUP_HEIGHT" -d "#{pane_current_path}" "grove flow"
+# --- Gmux Session Switcher ---
+bind-key -n C-f display-popup -w 100% -h 98% -x C -y C -E "HOME=$HOME PATH=$PATH:$HOME/.grove/bin gmux sz"
 
-# Grove notebook popup (prefix + n)
-bind-key n display-popup -E -w "$POPUP_WIDTH" -h "$POPUP_HEIGHT" -d "#{pane_current_path}" "grove nb"
+# --- Context (cx) View ---
+bind-key -n M-v display-popup -w 100% -h 98% -x C -y C -E "PATH=$PATH:$HOME/.grove/bin cx view"
 
-# Context builder popup (prefix + x)
-bind-key x display-popup -E -w "$POPUP_WIDTH" -h "$POPUP_HEIGHT" -d "#{pane_current_path}" "cx"
+# --- NB (Notes) TUI ---
+bind-key -n C-n run-shell "PATH=$PATH:$HOME/.grove/bin nb tmux tui"
+
+# --- Core Editor ---
+bind-key -n C-e run-shell "PATH=$PATH:$HOME/.grove/bin core tmux editor"
 `
 	m.service.WriteFile("~/.config/tmux/popups.conf", []byte(popupsContent), 0644)
 
@@ -765,6 +771,11 @@ func (m *setupModel) View() string {
 		content.WriteString("\n\n")
 		content.WriteString(m.viewEcosystemStep())
 
+	case stepFirstProject:
+		content.WriteString(headerStyle.Render("First Project"))
+		content.WriteString("\n\n")
+		content.WriteString(m.viewFirstProjectStep())
+
 	case stepNotebook:
 		content.WriteString(headerStyle.Render("Notebook Directory"))
 		content.WriteString("\n\n")
@@ -823,25 +834,73 @@ func (m *setupModel) viewComponentSelection() string {
 func (m *setupModel) viewEcosystemStep() string {
 	var content strings.Builder
 
+	// Explanation box
+	explainStyle := lipgloss.NewStyle().
+		Foreground(theme.DefaultTheme.Muted.GetForeground()).
+		MarginBottom(1)
+
+	explanation := `An ecosystem is a meta-repo where projects can be explored and managed as a group.
+It enables coordinated worktree creation, cross-project context, and shared commands
+across several possibly related git repositories.`
+
+	content.WriteString(explainStyle.Render(explanation))
+	content.WriteString("\n\n")
+
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(theme.DefaultTheme.Muted.GetForeground()).
 		Padding(1, 2).
 		Width(m.width - 4)
 
+	var boxContent strings.Builder
 	if m.currentInput == inputPath {
-		content.WriteString("Where should your ecosystem be created?\n\n")
-		content.WriteString(m.textInput.View())
-		content.WriteString("\n\n")
-		content.WriteString(theme.DefaultTheme.Muted.Render("The filesystem directory where your projects will live."))
+		boxContent.WriteString("Where should your ecosystem be created?\n\n")
+		boxContent.WriteString(m.textInput.View())
+		boxContent.WriteString("\n\n")
+		boxContent.WriteString(theme.DefaultTheme.Muted.Render("The filesystem directory where your projects will live."))
 	} else {
-		content.WriteString("What should this ecosystem be called?\n\n")
-		content.WriteString(m.textInput.View())
-		content.WriteString("\n\n")
-		content.WriteString(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Used in config files to identify this ecosystem. Path: %s", m.ecosystemPath)))
+		boxContent.WriteString("What should this ecosystem be called?\n\n")
+		boxContent.WriteString(m.textInput.View())
+		boxContent.WriteString("\n\n")
+		boxContent.WriteString(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Used in config files to identify this ecosystem. Path: %s", m.ecosystemPath)))
 	}
 
-	return boxStyle.Render(content.String())
+	content.WriteString(boxStyle.Render(boxContent.String()))
+	return content.String()
+}
+
+func (m *setupModel) viewFirstProjectStep() string {
+	var content strings.Builder
+
+	// Explanation
+	explainStyle := lipgloss.NewStyle().
+		Foreground(theme.DefaultTheme.Muted.GetForeground()).
+		MarginBottom(1)
+
+	explanation := `You can create your first project inside the ecosystem now.
+Leave blank and press Enter to skip this step.`
+
+	content.WriteString(explainStyle.Render(explanation))
+	content.WriteString("\n\n")
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.DefaultTheme.Muted.GetForeground()).
+		Padding(1, 2).
+		Width(m.width - 4)
+
+	var boxContent strings.Builder
+	boxContent.WriteString("What should your first project be called?\n\n")
+	boxContent.WriteString(m.textInput.View())
+	boxContent.WriteString("\n\n")
+	projectPath := filepath.Join(m.ecosystemPath, m.textInput.Value())
+	if m.textInput.Value() == "" {
+		projectPath = filepath.Join(m.ecosystemPath, "<project-name>")
+	}
+	boxContent.WriteString(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Will be created at: %s", projectPath)))
+
+	content.WriteString(boxStyle.Render(boxContent.String()))
+	return content.String()
 }
 
 func (m *setupModel) viewNotebookStep() string {
@@ -893,48 +952,60 @@ func (m *setupModel) viewGeminiKeyStep() string {
 func (m *setupModel) viewTmuxBindingsStep() string {
 	var content strings.Builder
 
+	explainStyle := lipgloss.NewStyle().
+		Foreground(theme.DefaultTheme.Muted.GetForeground()).
+		MarginBottom(1)
+
+	explanation := `This will add Grove popup bindings to your tmux config directory.
+You can source or incorporate them into your config as you see fit.`
+
+	content.WriteString(explainStyle.Render(explanation))
+	content.WriteString("\n\n")
+
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(theme.DefaultTheme.Muted.GetForeground()).
 		Padding(1, 2).
 		Width(m.width - 4)
 
-	content.WriteString("The following tmux bindings will be configured:\n\n")
+	var boxContent strings.Builder
+	boxContent.WriteString("Files to be created:\n\n")
+	boxContent.WriteString(theme.DefaultTheme.Muted.Render("  ~/.config/tmux/popups.conf\n"))
+	boxContent.WriteString(theme.DefaultTheme.Muted.Render("  (source-file line appended to tmux.conf)\n"))
+	boxContent.WriteString("\n")
+	boxContent.WriteString("Press Enter to continue or esc to go back.")
 
-	bindingsStyle := theme.DefaultTheme.Muted
-	content.WriteString(bindingsStyle.Render("  prefix + c  →  Claude Code popup\n"))
-	content.WriteString(bindingsStyle.Render("  prefix + f  →  Grove flow popup\n"))
-	content.WriteString(bindingsStyle.Render("  prefix + n  →  Grove notebook popup\n"))
-	content.WriteString(bindingsStyle.Render("  prefix + x  →  Context builder popup\n"))
-	content.WriteString("\n")
-	content.WriteString(theme.DefaultTheme.Muted.Render("Files to be created/modified:\n"))
-	content.WriteString(theme.DefaultTheme.Muted.Render("  ~/.config/tmux/popups.conf\n"))
-	content.WriteString(theme.DefaultTheme.Muted.Render("  ~/.config/tmux/tmux.conf (append source-file)"))
-	content.WriteString("\n\n")
-	content.WriteString("Press Enter to continue or esc to go back.")
-
-	return boxStyle.Render(content.String())
+	content.WriteString(boxStyle.Render(boxContent.String()))
+	return content.String()
 }
 
 func (m *setupModel) viewNeovimPluginStep() string {
 	var content strings.Builder
 
+	explainStyle := lipgloss.NewStyle().
+		Foreground(theme.DefaultTheme.Muted.GetForeground()).
+		MarginBottom(1)
+
+	explanation := `This will add a Grove plugin config to your Neovim config directory.
+You can require or incorporate it into your plugin setup as you see fit.`
+
+	content.WriteString(explainStyle.Render(explanation))
+	content.WriteString("\n\n")
+
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(theme.DefaultTheme.Muted.GetForeground()).
 		Padding(1, 2).
 		Width(m.width - 4)
 
-	content.WriteString("The grove-nvim plugin configuration will be created:\n\n")
-	content.WriteString(theme.DefaultTheme.Muted.Render("  ~/.config/nvim/lua/plugins/grove.lua\n\n"))
-	content.WriteString("Features:\n")
-	content.WriteString(theme.DefaultTheme.Muted.Render("  - Context file jumping (<leader>gc)\n"))
-	content.WriteString(theme.DefaultTheme.Muted.Render("  - Grove flow integration (<leader>gf)\n"))
-	content.WriteString(theme.DefaultTheme.Muted.Render("  - Grove notebook access (<leader>gn)\n"))
-	content.WriteString("\n")
-	content.WriteString("Press Enter to continue or esc to go back.")
+	var boxContent strings.Builder
+	boxContent.WriteString("File to be created:\n\n")
+	boxContent.WriteString(theme.DefaultTheme.Muted.Render("  ~/.config/nvim/lua/plugins/grove.lua\n"))
+	boxContent.WriteString("\n")
+	boxContent.WriteString("Press Enter to continue or esc to go back.")
 
-	return boxStyle.Render(content.String())
+	content.WriteString(boxStyle.Render(boxContent.String()))
+	return content.String()
 }
 
 func (m *setupModel) viewSummary() string {
@@ -1069,18 +1140,34 @@ func runSetupDefaults(service *setup.Service, selectedOnly map[string]bool, logg
 		service.MkdirAll(ecosystemPath, 0755)
 
 		groveYMLContent := fmt.Sprintf(`name: %s
-description: Grove ecosystem
+description: A Grove ecosystem
 workspaces:
   - "*"
 `, ecosystemName)
 		service.WriteFile(filepath.Join(ecosystemPath, "grove.yml"), []byte(groveYMLContent), 0644)
 
-		goWorkContent := `go 1.24.4
+		gitignoreContent := `# OS files
+.DS_Store
+Thumbs.db
 
-use (
-)
+# Editor files
+*.swp
+*.swo
+*~
 `
-		service.WriteFile(filepath.Join(ecosystemPath, "go.work"), []byte(goWorkContent), 0644)
+		service.WriteFile(filepath.Join(ecosystemPath, ".gitignore"), []byte(gitignoreContent), 0644)
+
+		readmeContent := fmt.Sprintf(`# %s
+
+A Grove ecosystem for managing related projects.
+
+## Getting Started
+
+Add projects to this directory and they will be automatically discovered by Grove tools.
+`, ecosystemName)
+		service.WriteFile(filepath.Join(ecosystemPath, "README.md"), []byte(readmeContent), 0644)
+
+		service.RunGitInit(ecosystemPath)
 
 		root, _ := yamlHandler.LoadGlobalConfig()
 		setup.SetValue(root, map[string]interface{}{
@@ -1107,10 +1194,25 @@ use (
 	if selectedOnly["tmux"] {
 		pretty.InfoPretty("Setting up tmux bindings...")
 		popupsContent := `# Grove tmux popup bindings
-bind-key c display-popup -E -w "90%" -h "85%" -d "#{pane_current_path}" "claude"
-bind-key f display-popup -E -w "90%" -h "85%" -d "#{pane_current_path}" "grove flow"
-bind-key n display-popup -E -w "90%" -h "85%" -d "#{pane_current_path}" "grove nb"
-bind-key x display-popup -E -w "90%" -h "85%" -d "#{pane_current_path}" "cx"
+# Source this file from your tmux.conf: source-file ~/.config/tmux/popups.conf
+
+# --- Popup Settings ---
+set -g popup-border-lines none
+
+# --- Grove Flow Plan Status ---
+bind-key -n C-p run-shell "PATH=$PATH:$HOME/.grove/bin flow tmux status"
+
+# --- Gmux Session Switcher ---
+bind-key -n C-f display-popup -w 100% -h 98% -x C -y C -E "HOME=$HOME PATH=$PATH:$HOME/.grove/bin gmux sz"
+
+# --- Context (cx) View ---
+bind-key -n M-v display-popup -w 100% -h 98% -x C -y C -E "PATH=$PATH:$HOME/.grove/bin cx view"
+
+# --- NB (Notes) TUI ---
+bind-key -n C-n run-shell "PATH=$PATH:$HOME/.grove/bin nb tmux tui"
+
+# --- Core Editor ---
+bind-key -n C-e run-shell "PATH=$PATH:$HOME/.grove/bin core tmux editor"
 `
 		service.WriteFile("~/.config/tmux/popups.conf", []byte(popupsContent), 0644)
 

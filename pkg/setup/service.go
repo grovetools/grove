@@ -3,7 +3,9 @@ package setup
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/mattsolo1/grove-core/logging"
 	"github.com/sirupsen/logrus"
@@ -72,7 +74,7 @@ func (s *Service) WriteFile(path string, content []byte, perm os.FileMode) error
 	// Expand home directory if needed
 	expandedPath := expandPath(path)
 
-	description := fmt.Sprintf("Write %s", path)
+	description := fmt.Sprintf("Write %s", AbbreviatePath(expandedPath))
 	if s.dryRun {
 		s.logger.Infof("[dry-run] Would write to %s", path)
 		s.logAction(ActionWriteFile, description, expandedPath, true, nil)
@@ -101,7 +103,7 @@ func (s *Service) WriteFile(path string, content []byte, perm os.FileMode) error
 func (s *Service) AppendToFile(path string, content string) error {
 	expandedPath := expandPath(path)
 
-	description := fmt.Sprintf("Append to %s", path)
+	description := fmt.Sprintf("Append to %s", AbbreviatePath(expandedPath))
 	if s.dryRun {
 		s.logger.Infof("[dry-run] Would append to %s", path)
 		s.logAction(ActionAppendFile, description, expandedPath, true, nil)
@@ -137,7 +139,7 @@ func (s *Service) AppendToFile(path string, content string) error {
 func (s *Service) MkdirAll(path string, perm os.FileMode) error {
 	expandedPath := expandPath(path)
 
-	description := fmt.Sprintf("Create directory %s", path)
+	description := fmt.Sprintf("Create directory %s", AbbreviatePath(expandedPath))
 	if s.dryRun {
 		s.logger.Infof("[dry-run] Would create directory %s", path)
 		s.logAction(ActionCreateDir, description, expandedPath, true, nil)
@@ -150,6 +152,37 @@ func (s *Service) MkdirAll(path string, perm os.FileMode) error {
 	}
 
 	s.logger.Infof("Created directory %s", path)
+	s.logAction(ActionCreateDir, description, expandedPath, true, nil)
+	return nil
+}
+
+// RunGitInit initializes a git repository in the given directory
+func (s *Service) RunGitInit(path string) error {
+	expandedPath := expandPath(path)
+	description := fmt.Sprintf("Initialize git in %s", AbbreviatePath(expandedPath))
+
+	if s.dryRun {
+		s.logger.Infof("[dry-run] Would run git init in %s", path)
+		s.logAction(ActionCreateDir, description, expandedPath, true, nil)
+		return nil
+	}
+
+	// Check if .git already exists
+	gitDir := filepath.Join(expandedPath, ".git")
+	if _, err := os.Stat(gitDir); err == nil {
+		s.logger.Infof("Git already initialized in %s", path)
+		return nil
+	}
+
+	// Run git init
+	cmd := exec.Command("git", "init")
+	cmd.Dir = expandedPath
+	if err := cmd.Run(); err != nil {
+		s.logAction(ActionCreateDir, description, expandedPath, false, err)
+		return fmt.Errorf("failed to initialize git in %s: %w", path, err)
+	}
+
+	s.logger.Infof("Initialized git in %s", path)
 	s.logAction(ActionCreateDir, description, expandedPath, true, nil)
 	return nil
 }
@@ -201,6 +234,18 @@ func expandPath(path string) string {
 			return path
 		}
 		return filepath.Join(homeDir, path[1:])
+	}
+	return path
+}
+
+// AbbreviatePath replaces the home directory with ~ for display
+func AbbreviatePath(path string) string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	if strings.HasPrefix(path, homeDir) {
+		return "~" + path[len(homeDir):]
 	}
 	return path
 }

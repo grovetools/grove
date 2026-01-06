@@ -83,10 +83,12 @@ func (h *YAMLHandler) SaveYAML(path string, root *yaml.Node) error {
 		return fmt.Errorf("failed to marshal YAML: %w", err)
 	}
 
+	displayPath := AbbreviatePath(expandedPath)
+
 	// Use the service to write the file (respects dry-run)
 	if h.service.IsDryRun() {
-		h.service.logger.Infof("[dry-run] Would write YAML to %s", path)
-		h.service.logAction(ActionUpdateYAML, fmt.Sprintf("Update %s", path), expandedPath, true, nil)
+		h.service.logger.Infof("[dry-run] Would write YAML to %s", displayPath)
+		h.service.logAction(ActionUpdateYAML, fmt.Sprintf("Update %s", displayPath), expandedPath, true, nil)
 		return nil
 	}
 
@@ -97,12 +99,12 @@ func (h *YAMLHandler) SaveYAML(path string, root *yaml.Node) error {
 	}
 
 	if err := os.WriteFile(expandedPath, data, 0644); err != nil {
-		h.service.logAction(ActionUpdateYAML, fmt.Sprintf("Update %s", path), expandedPath, false, err)
+		h.service.logAction(ActionUpdateYAML, fmt.Sprintf("Update %s", displayPath), expandedPath, false, err)
 		return fmt.Errorf("failed to write YAML file %s: %w", path, err)
 	}
 
-	h.service.logger.Infof("Updated %s", path)
-	h.service.logAction(ActionUpdateYAML, fmt.Sprintf("Update %s", path), expandedPath, true, nil)
+	h.service.logger.Infof("Updated %s", displayPath)
+	h.service.logAction(ActionUpdateYAML, fmt.Sprintf("Update %s", displayPath), expandedPath, true, nil)
 	return nil
 }
 
