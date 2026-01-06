@@ -46,6 +46,7 @@ Delegation Behavior:
 	rootCmd.AddCommand(newDocsCmd())
 	rootCmd.AddCommand(newRunCmd())
 	rootCmd.AddCommand(newSchemaCmd())
+	rootCmd.AddCommand(newSetupCmd())
 	rootCmd.AddCommand(newStarshipCmd())
 	rootCmd.AddCommand(internal.NewInternalCmd())
 
