@@ -250,7 +250,7 @@ func newSetupModel(service *setup.Service, selectedOnly map[string]bool) *setupM
 
 	// Set default paths
 	homeDir, _ := os.UserHomeDir()
-	defaultEcosystemPath := filepath.Join(homeDir, "Code", "grove-ecosystem")
+	defaultEcosystemPath := filepath.Join(homeDir, "Code", "grove-projects")
 	defaultNotebookPath := filepath.Join(homeDir, "notebooks")
 
 	return &setupModel{
@@ -261,7 +261,7 @@ func newSetupModel(service *setup.Service, selectedOnly map[string]bool) *setupM
 		textInput:     ti,
 		currentInput:  inputPath,
 		ecosystemPath: defaultEcosystemPath,
-		ecosystemName: "grove-ecosystem",
+		ecosystemName: "grove-projects",
 		notebookPath:  defaultNotebookPath,
 		geminiMethod:  geminiMethodCommand,
 		geminiValue:   "op read 'op://Private/Gemini API Key/credential' --no-newline",
@@ -1061,8 +1061,8 @@ func runSetupDefaults(service *setup.Service, selectedOnly map[string]bool, logg
 
 	if runAll || selectedOnly["ecosystem"] {
 		pretty.InfoPretty("Setting up ecosystem directory...")
-		ecosystemPath := filepath.Join(homeDir, "Code", "grove-ecosystem")
-		ecosystemName := "grove-ecosystem"
+		ecosystemPath := filepath.Join(homeDir, "Code", "grove-projects")
+		ecosystemName := "grove-projects"
 
 		service.MkdirAll(ecosystemPath, 0755)
 

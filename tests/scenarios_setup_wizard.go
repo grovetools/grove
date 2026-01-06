@@ -53,7 +53,7 @@ func SetupWizardCLIDefaultsScenario() *harness.Scenario {
 			}),
 			harness.NewStep("Verify files and directories created", func(ctx *harness.Context) error {
 				return ctx.Verify(func(v *verify.Collector) {
-					ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-ecosystem")
+					ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-projects")
 					notebookPath := filepath.Join(ctx.HomeDir(), "notebooks")
 					configPath := filepath.Join(ctx.ConfigDir(), "grove", "grove.yml")
 
@@ -63,7 +63,7 @@ func SetupWizardCLIDefaultsScenario() *harness.Scenario {
 				})
 			}),
 			harness.NewStep("Verify ecosystem files", func(ctx *harness.Context) error {
-				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-ecosystem")
+				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-projects")
 				return ctx.Verify(func(v *verify.Collector) {
 					v.Equal("grove.yml exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "grove.yml")))
 					v.Equal("go.work exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "go.work")))
@@ -90,7 +90,7 @@ func SetupWizardCLIDryRunScenario() *harness.Scenario {
 				return nil
 			}),
 			harness.NewStep("Verify no files created in dry-run mode", func(ctx *harness.Context) error {
-				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-ecosystem")
+				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-projects")
 				notebookPath := filepath.Join(ctx.HomeDir(), "notebooks")
 
 				return ctx.Verify(func(v *verify.Collector) {
@@ -119,7 +119,7 @@ func SetupWizardCLIOnlyScenario() *harness.Scenario {
 				return nil
 			}),
 			harness.NewStep("Verify only notebook was created", func(ctx *harness.Context) error {
-				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-ecosystem")
+				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-projects")
 				notebookPath := filepath.Join(ctx.HomeDir(), "notebooks")
 
 				return ctx.Verify(func(v *verify.Collector) {
@@ -148,7 +148,7 @@ func SetupWizardEcosystemFilesScenario() *harness.Scenario {
 				return nil
 			}),
 			harness.NewStep("Verify ecosystem files created", func(ctx *harness.Context) error {
-				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-ecosystem")
+				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-projects")
 
 				return ctx.Verify(func(v *verify.Collector) {
 					v.Equal("grove.yml exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "grove.yml")))
@@ -156,11 +156,11 @@ func SetupWizardEcosystemFilesScenario() *harness.Scenario {
 				})
 			}),
 			harness.NewStep("Verify grove.yml content", func(ctx *harness.Context) error {
-				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-ecosystem")
+				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-projects")
 				groveYMLPath := filepath.Join(ecosystemPath, "grove.yml")
 
 				return ctx.Verify(func(v *verify.Collector) {
-					v.Equal("grove.yml contains name", nil, fs.AssertContains(groveYMLPath, "name: grove-ecosystem"))
+					v.Equal("grove.yml contains name", nil, fs.AssertContains(groveYMLPath, "name: grove-projects"))
 					v.Equal("grove.yml contains workspaces", nil, fs.AssertContains(groveYMLPath, "workspaces:"))
 				})
 			}),
@@ -555,7 +555,7 @@ func SetupWizardTUIFullWorkflowScenario() *harness.Scenario {
 			}),
 			harness.NewStep("Verify files were created", func(ctx *harness.Context) error {
 				return ctx.Verify(func(v *verify.Collector) {
-					ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-ecosystem")
+					ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-projects")
 					notebookPath := filepath.Join(ctx.HomeDir(), "notebooks")
 					configPath := filepath.Join(ctx.ConfigDir(), "grove", "grove.yml")
 
@@ -683,7 +683,7 @@ func SetupWizardTUIQuitScenario() *harness.Scenario {
 				return nil
 			}),
 			harness.NewStep("Verify no files created", func(ctx *harness.Context) error {
-				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-ecosystem")
+				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-projects")
 				return ctx.Check("no ecosystem created", fs.AssertNotExists(ecosystemPath))
 			}),
 		},
