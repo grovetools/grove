@@ -46,8 +46,8 @@ func AllScenarios() []*harness.Scenario {
 		SetupWizardTmuxIdempotentScenario(),
 		// Setup Wizard scenarios - TUI tests (local only)
 		SetupWizardTUIComponentSelectionScenario(),
-		// SetupWizardTUINavigationScenario(),    // TODO: Fix timing/back button issues
-		// SetupWizardTUIFullWorkflowScenario(),  // TODO: Fix summary screen detection
+		SetupWizardTUINavigationScenario(),
+		SetupWizardTUIFullWorkflowScenario(),
 		SetupWizardTUIDeselectAllScenario(),
 		SetupWizardTUIQuitScenario(),
 	}

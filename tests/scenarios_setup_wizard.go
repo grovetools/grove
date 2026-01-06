@@ -66,7 +66,7 @@ func SetupWizardCLIDefaultsScenario() *harness.Scenario {
 				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-projects")
 				return ctx.Verify(func(v *verify.Collector) {
 					v.Equal("grove.yml exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "grove.yml")))
-					v.Equal("go.work exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "go.work")))
+					v.Equal("README.md exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "README.md")))
 				})
 			}),
 		},
@@ -152,7 +152,7 @@ func SetupWizardEcosystemFilesScenario() *harness.Scenario {
 
 				return ctx.Verify(func(v *verify.Collector) {
 					v.Equal("grove.yml exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "grove.yml")))
-					v.Equal("go.work exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "go.work")))
+					v.Equal("README.md exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "README.md")))
 				})
 			}),
 			harness.NewStep("Verify grove.yml content", func(ctx *harness.Context) error {
@@ -428,6 +428,17 @@ func SetupWizardTUINavigationScenario() *harness.Scenario {
 					return err
 				}
 
+				// Should be at First Project step now
+				if err := session.WaitForText("first project", 5*time.Second); err != nil {
+					content, _ := session.Capture(tui.WithCleanedOutput())
+					return fmt.Errorf("first project step not reached: %w\nContent:\n%s", err, content)
+				}
+
+				// Skip first project (leave blank) -> Enter
+				if err := session.Type("Enter"); err != nil {
+					return err
+				}
+
 				// Should be at Notebook step now
 				if err := session.WaitForText("Enter the path for your notebook directory", 5*time.Second); err != nil {
 					content, _ := session.Capture(tui.WithCleanedOutput())
@@ -438,15 +449,15 @@ func SetupWizardTUINavigationScenario() *harness.Scenario {
 			harness.NewStep("Navigate backward", func(ctx *harness.Context) error {
 				session := ctx.Get("tui_session").(*tui.Session)
 
-				// Press 'b' to go back
-				if err := session.Type("b"); err != nil {
+				// Press Escape to go back
+				if err := session.SendKeys("Escape"); err != nil {
 					return err
 				}
 
-				// Should be back at Ecosystem name input
-				if err := session.WaitForText("What should this ecosystem be called", 5*time.Second); err != nil {
+				// Should be back at First Project step
+				if err := session.WaitForText("first project", 5*time.Second); err != nil {
 					content, _ := session.Capture(tui.WithCleanedOutput())
-					return fmt.Errorf("ecosystem name step not reached: %w\nContent:\n%s", err, content)
+					return fmt.Errorf("first project step not reached: %w\nContent:\n%s", err, content)
 				}
 				return nil
 			}),
@@ -514,6 +525,14 @@ func SetupWizardTUIFullWorkflowScenario() *harness.Scenario {
 
 				// Accept default ecosystem name
 				if err := session.WaitForText("What should this ecosystem be called", 5*time.Second); err != nil {
+					return err
+				}
+				if err := session.Type("Enter"); err != nil {
+					return err
+				}
+
+				// Skip first project (leave blank)
+				if err := session.WaitForText("first project", 5*time.Second); err != nil {
 					return err
 				}
 				if err := session.Type("Enter"); err != nil {
