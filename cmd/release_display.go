@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -64,76 +63,67 @@ var (
 
 // Phase display helpers
 func displayPhase(title string) {
-	ctx := context.Background()
 	ulog.Info("Release phase").
 		Field("title", title).
 		Pretty(fmt.Sprintf("%s %s", theme.IconSparkle, title)).
-		Log(ctx)
+		Emit()
 }
 
 func displaySection(title string) {
-	ctx := context.Background()
 	ulog.Info("Release section").
 		Field("title", title).
 		Pretty(title).
-		Log(ctx)
+		Emit()
 }
 
 func displaySuccess(message string) {
-	ctx := context.Background()
 	ulog.Success("Release operation successful").
 		Field("message", message).
 		Pretty(theme.IconSuccess + " " + message).
-		Log(ctx)
+		Emit()
 }
 
 func displayWarning(message string) {
-	ctx := context.Background()
 	ulog.Warn("Release warning").
 		Field("message", message).
 		Pretty(theme.IconWarning + " " + message).
-		Log(ctx)
+		Emit()
 }
 
 func displayError(message string) {
-	ctx := context.Background()
 	ulog.Error("Release error").
 		Field("message", message).
 		Pretty(theme.IconError + " " + message).
-		Log(ctx)
+		Emit()
 }
 
 func displayInfo(message string) {
-	ctx := context.Background()
 	ulog.Info("Release information").
 		Field("message", message).
 		Pretty(message).
-		Log(ctx)
+		Emit()
 }
 
 // Progress display helpers
 func displayProgress(message string) {
-	ctx := context.Background()
 	ulog.Progress("Release in progress").
 		Field("message", message).
 		Pretty(fmt.Sprintf("%s %s", theme.IconWorktree, message)).
-		Log(ctx)
+		Emit()
 }
 
 func displayComplete(message string) {
-	ctx := context.Background()
 	ulog.Success("Release operation completed").
 		Field("message", message).
 		Pretty(theme.IconSuccess + " " + message).
-		Log(ctx)
+		Emit()
 }
 
 func displayFailed(message string) {
-	ctx := context.Background()
 	ulog.Error("Release operation failed").
 		Field("message", message).
 		Pretty(theme.IconError + " " + message).
-		Log(ctx)
+		Emit()
 }
 
 // Create a styled pre-flight checks table
@@ -208,12 +198,11 @@ func displayPreflightTable(headers []string, rows [][]string) {
 		Headers(headers...).
 		Rows(styledRows...)
 
-	ctx := context.Background()
 	ulog.Info("Release preflight table").
 		Field("row_count", len(styledRows)).
 		Field("headers", headers).
 		Pretty(t.String()).
-		Log(ctx)
+		Emit()
 }
 
 // Create a progress box for release operations
@@ -225,12 +214,11 @@ func displayReleaseProgress(title string, items []string) {
 	content = append(content, items...)
 
 	box := phaseBoxStyle.Render(strings.Join(content, "\n"))
-	ctx := context.Background()
 	ulog.Info("Release progress").
 		Field("title", title).
 		Field("item_count", len(items)).
 		Pretty(box).
-		Log(ctx)
+		Emit()
 }
 
 // Display final success message
@@ -250,13 +238,12 @@ func displayFinalSuccess(version string, repoCount int) {
 	}
 
 	box := successBoxStyle.Render(strings.Join(content, "\n"))
-	ctx := context.Background()
-	ulog.Info("Release completed").Pretty("\n").PrettyOnly().Log(ctx)
+	ulog.Info("Release completed").Pretty("\n").PrettyOnly().Emit()
 	ulog.Success("Release successfully created").
 		Field("version", version).
 		Field("repo_count", repoCount).
 		Pretty(box).
-		Log(ctx)
+		Emit()
 }
 
 // Display release summary with better formatting
@@ -275,13 +262,12 @@ func displayReleaseSummary(releaseLevels [][]string, versions map[string]string,
 
 		if len(reposInLevel) > 0 {
 			levelCount++
-			ctx := context.Background()
-			ulog.Info("Release level separator").Pretty("\n").PrettyOnly().Log(ctx)
+			ulog.Info("Release level separator").Pretty("\n").PrettyOnly().Emit()
 			ulog.Info("Release level").
 				Field("level", levelCount).
 				Field("repo_count", len(reposInLevel)).
 				Pretty(fmt.Sprintf("Level %d (can release in parallel):", levelCount)).
-				Log(ctx)
+				Emit()
 
 			for _, repo := range reposInLevel {
 				current := currentVersions[repo]
@@ -303,7 +289,7 @@ func displayReleaseSummary(releaseLevels [][]string, versions map[string]string,
 					Field("proposed_version", proposed).
 					Field("increment", increment).
 					Pretty(prettyMsg).
-					Log(ctx)
+					Emit()
 			}
 		}
 	}

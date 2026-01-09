@@ -108,12 +108,11 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(workspaces) == 0 {
-		ctx := context.Background()
 		buildUlog.Info("No projects to build").
 			Field("filter", buildFilter).
 			Field("exclude", buildExclude).
 			Pretty("No projects to build after filtering.").
-			Log(ctx)
+			Emit()
 		return nil
 	}
 
@@ -148,23 +147,22 @@ func runBuild(cmd *cobra.Command, args []string) error {
 			return enc.Encode(result)
 		}
 
-		ctx := context.Background()
 		buildUlog.Info("Dry run - projects to build").
 			Field("total", len(jobs)).
 			Pretty("Projects that would be built:").
-			Log(ctx)
+			Emit()
 		for i, job := range jobs {
 			buildUlog.Info("Build job").
 				Field("index", i+1).
 				Field("name", job.Name).
 				Field("path", job.Path).
 				Pretty(fmt.Sprintf("  %d. %s (%s)", i+1, job.Name, job.Path)).
-				Log(ctx)
+				Emit()
 		}
 		buildUlog.Info("Dry run summary").
 			Field("total", len(jobs)).
 			Pretty(fmt.Sprintf("\nTotal: %d projects", len(jobs))).
-			Log(ctx)
+			Emit()
 		return nil
 	}
 
@@ -257,13 +255,12 @@ func runVerboseBuild(jobs []build.BuildJob) error {
 		completed := successCount + failCount + 1
 		progress := fmt.Sprintf("[%d/%d]", completed, totalJobs)
 
-		ctx := context.Background()
 		buildUlog.Progress("Building project").
 			Field("name", result.Job.Name).
 			Field("completed", completed).
 			Field("total", totalJobs).
 			Pretty(fmt.Sprintf("\n%s Building %s...", progress, result.Job.Name)).
-			Log(ctx)
+			Emit()
 		pretty.Divider()
 
 		if len(result.Output) > 0 {
@@ -382,16 +379,15 @@ func runTuiBuild(jobs []build.BuildJob) error {
 
 			// Print summary with visual distinction using equals dividers
 			pretty.Blank()
-			ctx := context.Background()
 			buildUlog.Info("Build summary separator").
 				Pretty(strings.Repeat("=", 60)).
 				PrettyOnly().
-				Log(ctx)
+				Emit()
 			pretty.ErrorPretty(fmt.Sprintf("Build failed: %d/%d projects failed", fm.failCount, len(fm.projects)), nil)
 			buildUlog.Info("Build summary separator").
 				Pretty(strings.Repeat("=", 60)).
 				PrettyOnly().
-				Log(ctx)
+				Emit()
 
 			// For single project builds, skip showing output again (already shown in streaming logs)
 			if len(fm.projects) > 1 {

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -123,13 +122,12 @@ func runAliasSet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to update symlink: %w", err)
 	}
 
-	ctx := context.Background()
 	aliasUlog.Success("Alias set successfully").
 		Field("repository", repoName).
 		Field("old_alias", oldAlias).
 		Field("new_alias", newAlias).
 		Pretty(fmt.Sprintf("%s Alias for '%s' set to '%s'. You can now use '%s' to run the tool.", theme.IconSuccess, repoName, newAlias, newAlias)).
-		Log(ctx)
+		Emit()
 	return nil
 }
 
@@ -144,12 +142,11 @@ func runAliasUnset(cmd *cobra.Command, args []string) error {
 	config, _ := sdk.LoadAliases(groveHome)
 
 	if config.Aliases == nil || config.Aliases[repoName] == "" {
-		ctx := context.Background()
 		aliasUlog.Info("No custom alias to remove").
 			Field("repository", repoName).
 			Field("default_alias", info.Alias).
 			Pretty(fmt.Sprintf("No custom alias set for '%s'. It is already using the default.", repoName)).
-			Log(ctx)
+			Emit()
 		return nil
 	}
 
@@ -170,12 +167,11 @@ func runAliasUnset(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to update symlink: %w", err)
 	}
 
-	ctx := context.Background()
 	aliasUlog.Success("Custom alias removed").
 		Field("repository", repoName).
 		Field("old_alias", oldAlias).
 		Field("default_alias", info.Alias).
 		Pretty(fmt.Sprintf("%s Custom alias for '%s' removed. It now uses the default alias '%s'.", theme.IconSuccess, repoName, info.Alias)).
-		Log(ctx)
+		Emit()
 	return nil
 }

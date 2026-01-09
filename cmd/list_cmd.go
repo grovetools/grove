@@ -224,12 +224,11 @@ func runList(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to marshal JSON: %w", err)
 		}
-		ctx := context.Background()
 		listUlog.Info("Tool list").
 			Field("tool_count", len(toolInfos)).
 			Field("format", "json").
 			Pretty(string(jsonData)).
-			Log(ctx)
+			Emit()
 		return nil
 	}
 
@@ -305,12 +304,11 @@ func runList(cmd *cobra.Command, args []string) error {
 		Headers(headers...).
 		Rows(rows...)
 
-	ctx := context.Background()
 	listUlog.Info("Tool list").
 		Field("tool_count", len(toolInfos)).
 		Field("format", "table").
 		Pretty(t.String()).
-		Log(ctx)
+		Emit()
 
 	return nil
 }
