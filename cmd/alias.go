@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,10 +9,14 @@ import (
 	"text/tabwriter"
 
 	"github.com/mattsolo1/grove-core/cli"
+	grovelogging "github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-meta/pkg/reconciler"
 	"github.com/mattsolo1/grove-meta/pkg/sdk"
 	"github.com/spf13/cobra"
 )
+
+var aliasUlog = grovelogging.NewUnifiedLogger("grove-meta.alias")
 
 func init() {
 	rootCmd.AddCommand(newAliasCmd())
@@ -118,7 +123,13 @@ func runAliasSet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to update symlink: %w", err)
 	}
 
-	fmt.Printf("✅ Alias for '%s' set to '%s'. You can now use '%s' to run the tool.\n", repoName, newAlias, newAlias)
+	ctx := context.Background()
+	aliasUlog.Success("Alias set successfully").
+		Field("repository", repoName).
+		Field("old_alias", oldAlias).
+		Field("new_alias", newAlias).
+		Pretty(fmt.Sprintf("%s Alias for '%s' set to '%s'. You can now use '%s' to run the tool.", theme.IconSuccess, repoName, newAlias, newAlias)).
+		Log(ctx)
 	return nil
 }
 
@@ -133,7 +144,12 @@ func runAliasUnset(cmd *cobra.Command, args []string) error {
 	config, _ := sdk.LoadAliases(groveHome)
 
 	if config.Aliases == nil || config.Aliases[repoName] == "" {
-		fmt.Printf("No custom alias set for '%s'. It is already using the default.\n", repoName)
+		ctx := context.Background()
+		aliasUlog.Info("No custom alias to remove").
+			Field("repository", repoName).
+			Field("default_alias", info.Alias).
+			Pretty(fmt.Sprintf("No custom alias set for '%s'. It is already using the default.", repoName)).
+			Log(ctx)
 		return nil
 	}
 
@@ -154,6 +170,12 @@ func runAliasUnset(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to update symlink: %w", err)
 	}
 
-	fmt.Printf("✅ Custom alias for '%s' removed. It now uses the default alias '%s'.\n", repoName, info.Alias)
+	ctx := context.Background()
+	aliasUlog.Success("Custom alias removed").
+		Field("repository", repoName).
+		Field("old_alias", oldAlias).
+		Field("default_alias", info.Alias).
+		Pretty(fmt.Sprintf("%s Custom alias for '%s' removed. It now uses the default alias '%s'.", theme.IconSuccess, repoName, info.Alias)).
+		Log(ctx)
 	return nil
 }

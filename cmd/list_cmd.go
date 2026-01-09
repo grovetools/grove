@@ -17,6 +17,7 @@ import (
 	tablecomponent "github.com/mattsolo1/grove-core/tui/components/table"
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/logging"
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-meta/pkg/discovery"
@@ -25,6 +26,8 @@ import (
 	meta_workspace "github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
+
+var listUlog = grovelogging.NewUnifiedLogger("grove-meta.list")
 
 
 func init() {
@@ -221,7 +224,12 @@ func runList(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to marshal JSON: %w", err)
 		}
-		fmt.Println(string(jsonData))
+		ctx := context.Background()
+		listUlog.Info("Tool list").
+			Field("tool_count", len(toolInfos)).
+			Field("format", "json").
+			Pretty(string(jsonData)).
+			Log(ctx)
 		return nil
 	}
 
@@ -297,7 +305,12 @@ func runList(cmd *cobra.Command, args []string) error {
 		Headers(headers...).
 		Rows(rows...)
 
-	fmt.Println(t)
+	ctx := context.Background()
+	listUlog.Info("Tool list").
+		Field("tool_count", len(toolInfos)).
+		Field("format", "table").
+		Pretty(t.String()).
+		Log(ctx)
 
 	return nil
 }

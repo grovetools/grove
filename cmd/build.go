@@ -20,11 +20,14 @@ import (
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/logging"
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-meta/pkg/build"
 	"github.com/mattsolo1/grove-meta/pkg/discovery"
 	"github.com/spf13/cobra"
 )
+
+var buildUlog = grovelogging.NewUnifiedLogger("grove-meta.build")
 
 var (
 	buildVerbose     bool
@@ -105,7 +108,12 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(workspaces) == 0 {
-		fmt.Println("No projects to build after filtering.")
+		ctx := context.Background()
+		buildUlog.Info("No projects to build").
+			Field("filter", buildFilter).
+			Field("exclude", buildExclude).
+			Pretty("No projects to build after filtering.").
+			Log(ctx)
 		return nil
 	}
 
@@ -140,11 +148,23 @@ func runBuild(cmd *cobra.Command, args []string) error {
 			return enc.Encode(result)
 		}
 
-		fmt.Println("Projects that would be built:")
+		ctx := context.Background()
+		buildUlog.Info("Dry run - projects to build").
+			Field("total", len(jobs)).
+			Pretty("Projects that would be built:").
+			Log(ctx)
 		for i, job := range jobs {
-			fmt.Printf("  %d. %s (%s)\n", i+1, job.Name, job.Path)
+			buildUlog.Info("Build job").
+				Field("index", i+1).
+				Field("name", job.Name).
+				Field("path", job.Path).
+				Pretty(fmt.Sprintf("  %d. %s (%s)", i+1, job.Name, job.Path)).
+				Log(ctx)
 		}
-		fmt.Printf("\nTotal: %d projects\n", len(jobs))
+		buildUlog.Info("Dry run summary").
+			Field("total", len(jobs)).
+			Pretty(fmt.Sprintf("\nTotal: %d projects", len(jobs))).
+			Log(ctx)
 		return nil
 	}
 
@@ -237,7 +257,13 @@ func runVerboseBuild(jobs []build.BuildJob) error {
 		completed := successCount + failCount + 1
 		progress := fmt.Sprintf("[%d/%d]", completed, totalJobs)
 
-		fmt.Printf("\n%s Building %s...\n", progress, result.Job.Name)
+		ctx := context.Background()
+		buildUlog.Progress("Building project").
+			Field("name", result.Job.Name).
+			Field("completed", completed).
+			Field("total", totalJobs).
+			Pretty(fmt.Sprintf("\n%s Building %s...", progress, result.Job.Name)).
+			Log(ctx)
 		pretty.Divider()
 
 		if len(result.Output) > 0 {
@@ -356,9 +382,16 @@ func runTuiBuild(jobs []build.BuildJob) error {
 
 			// Print summary with visual distinction using equals dividers
 			pretty.Blank()
-			fmt.Println(strings.Repeat("=", 60))
+			ctx := context.Background()
+			buildUlog.Info("Build summary separator").
+				Pretty(strings.Repeat("=", 60)).
+				PrettyOnly().
+				Log(ctx)
 			pretty.ErrorPretty(fmt.Sprintf("Build failed: %d/%d projects failed", fm.failCount, len(fm.projects)), nil)
-			fmt.Println(strings.Repeat("=", 60))
+			buildUlog.Info("Build summary separator").
+				Pretty(strings.Repeat("=", 60)).
+				PrettyOnly().
+				Log(ctx)
 
 			// For single project builds, skip showing output again (already shown in streaming logs)
 			if len(fm.projects) > 1 {
