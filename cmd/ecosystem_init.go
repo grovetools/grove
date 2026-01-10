@@ -5,7 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 
+	"github.com/mattn/go-isatty"
+	"github.com/mattsolo1/grove-core/config"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/spf13/cobra"
 )
 
@@ -152,10 +156,87 @@ clean:
 		gitCommit.Run()
 	}
 
-	fmt.Println("\n✅ Ecosystem created!")
+	fmt.Printf("\n%s Ecosystem created!\n", theme.IconSuccess)
+
+	// Check discoverability and prompt to add to groves if needed
+	if err := checkAndPromptDiscoverability(targetDir); err != nil {
+		// Don't fail the command if discoverability check fails, just warn
+		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+	}
+
 	if len(args) > 0 {
 		fmt.Printf("\ncd %s\n", ecosystemName)
 	}
+
+	return nil
+}
+
+// checkAndPromptDiscoverability checks if the ecosystem will be discoverable
+// and prompts the user to add it to the global config if not.
+func checkAndPromptDiscoverability(ecosystemPath string) error {
+	// Get absolute path of the ecosystem
+	absPath, err := filepath.Abs(ecosystemPath)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path: %w", err)
+	}
+
+	// Load the current global config
+	cfg, err := config.LoadDefault()
+	if err != nil {
+		// If config loading fails, we can't check discoverability
+		// This is not necessarily an error - might be first-time setup
+		cfg = &config.Config{
+			Groves: make(map[string]config.GroveSourceConfig),
+		}
+	}
+	// Check if the ecosystem is already discoverable
+	if discoverable, groveName := isEcosystemDiscoverable(absPath, cfg); discoverable {
+		fmt.Printf("\nThis ecosystem is discoverable via grove '%s'\n", groveName)
+		return nil
+	}
+
+	// Check if we're in a TTY (interactive mode)
+	if !isatty.IsTerminal(os.Stdin.Fd()) && !isatty.IsCygwinTerminal(os.Stdin.Fd()) {
+		fmt.Printf("\n%s This ecosystem is not in a configured grove and won't be\n", theme.IconWarning)
+		fmt.Printf("   discovered by grove tools.\n")
+		fmt.Printf("   Run in an interactive terminal to add it, or manually update\n")
+		fmt.Printf("   ~/.config/grove/grove.override.yml\n")
+		return nil
+	}
+
+	// Derive grove name from the ecosystem path itself
+	groveName, err := deriveGroveName(absPath, cfg.Groves)
+	if err != nil {
+		fmt.Printf("\n%s This ecosystem is not in a configured grove and won't be\n", theme.IconWarning)
+		fmt.Printf("   discovered by grove tools.\n")
+		fmt.Printf("   Error: %v\n", err)
+		fmt.Printf("   Manually update ~/.config/grove/grove.override.yml\n")
+		return nil
+	}
+
+	// Get available notebooks
+	notebooks := getNotebookKeys(cfg)
+	sort.Strings(notebooks)
+
+	// Run the TUI prompt
+	result, err := runInitPrompt(absPath, groveName, notebooks)
+	if err != nil {
+		return fmt.Errorf("failed to run prompt: %w", err)
+	}
+
+	if !result.Confirmed {
+		fmt.Println("\nSkipped adding grove to config.")
+		return nil
+	}
+
+	// Update the config file where groves are defined - add the ecosystem itself as a grove
+	configPath, err := updateGlobalConfig(groveName, absPath, result.SelectedNotebook)
+	if err != nil {
+		return fmt.Errorf("failed to update config: %w", err)
+	}
+
+	fmt.Printf("\n%s Added grove '%s' (%s)\n", theme.IconSuccess, groveName, absPath)
+	fmt.Printf("  Updated %s\n", configPath)
 
 	return nil
 }

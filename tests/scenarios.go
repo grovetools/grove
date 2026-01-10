@@ -56,6 +56,14 @@ func AllScenarios() []*harness.Scenario {
 		SetupWizardTUIFullWorkflowScenario(),
 		SetupWizardTUIDeselectAllScenario(),
 		SetupWizardTUIQuitScenario(),
+
+		// Ecosystem Init discovery scenarios
+		EcosystemInitAlreadyDiscoverableScenario(),
+		EcosystemInitNotDiscoverableScenario(),
+		EcosystemInitDeclineAddScenario(),
+		EcosystemInitNonInteractiveScenario(),
+		EcosystemInitPreservesConfigScenario(),
+		EcosystemInitEditsCorrectFileScenario(),
 	}
 }
 
