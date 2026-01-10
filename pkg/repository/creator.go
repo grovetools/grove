@@ -484,11 +484,19 @@ func (c *Creator) showLocalSummary(opts CreateOptions, targetPath string) {
 func (c *Creator) dryRunLocal(opts CreateOptions) error {
 	c.logger.Info("DRY RUN MODE - No changes will be made")
 
-	c.logger.Infof("\nWould create repository structure in: ./%s", opts.Name)
-	c.logger.Infof("Binary alias: %s", opts.Alias)
+	c.logger.Infof("\nWould create repository in: ./%s", opts.Name)
 	c.logger.Infof("Description: %s", opts.Description)
 
-	c.logger.Info("\nCommands that would be executed:")
+	if opts.TemplatePath == "" {
+		c.logger.Info("\nFiles that would be created (minimal repo):")
+		c.logger.Info("  README.md")
+		c.logger.Info("  grove.yml")
+	} else {
+		c.logger.Infof("\nTemplate: %s", opts.TemplatePath)
+		c.logger.Info("Files would be created from template")
+	}
+
+	c.logger.Info("\nGit commands:")
 	c.logger.Info("  git init")
 	c.logger.Info("  git add .")
 	c.logger.Info("  git commit -m 'feat: initial repository setup'")
@@ -497,7 +505,6 @@ func (c *Creator) dryRunLocal(opts CreateOptions) error {
 	if opts.Ecosystem {
 		c.logger.Info("\nEcosystem integration:")
 		c.logger.Infof("  git submodule add ./%s %s", opts.Name, opts.Name)
-		c.logger.Infof("  Update go.work: Add use (./%s)", opts.Name)
 	}
 
 	return nil
@@ -683,6 +690,11 @@ func (c *Creator) validate(opts CreateOptions) error {
 func (c *Creator) generateSkeleton(opts CreateOptions, targetPath string) error {
 	c.logger.Info("Generating repository skeleton...")
 
+	// If no template specified, create a minimal repository
+	if opts.TemplatePath == "" {
+		return c.generateMinimalSkeleton(opts, targetPath)
+	}
+
 	// Determine module path based on mode
 	var modulePath string
 	if opts.Ecosystem {
@@ -710,8 +722,57 @@ func (c *Creator) generateSkeleton(opts CreateOptions, targetPath string) error 
 		IsPublic:         opts.Public,
 	}
 
-	// Always use external template (TemplatePath defaults to "go" which resolves to the Go template)
+	// Use external template
 	return c.generateFromExternalTemplate(opts, data, targetPath)
+}
+
+// generateMinimalSkeleton creates a minimal repository with just README.md and grove.yml
+func (c *Creator) generateMinimalSkeleton(opts CreateOptions, targetPath string) error {
+	c.logger.Info("Creating minimal repository...")
+
+	// Create directory
+	if err := os.MkdirAll(targetPath, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// Create README.md
+	readmeContent := fmt.Sprintf("# %s\n\n%s\n", opts.Name, opts.Description)
+	if err := os.WriteFile(filepath.Join(targetPath, "README.md"), []byte(readmeContent), 0644); err != nil {
+		return fmt.Errorf("failed to create README.md: %w", err)
+	}
+
+	// Create grove.yml
+	groveYmlContent := fmt.Sprintf(`name: %s
+description: %s
+`, opts.Name, opts.Description)
+	if err := os.WriteFile(filepath.Join(targetPath, "grove.yml"), []byte(groveYmlContent), 0644); err != nil {
+		return fmt.Errorf("failed to create grove.yml: %w", err)
+	}
+
+	// Initialize git repository
+	c.logger.Info("Initializing git repository...")
+	gitInit := exec.Command("git", "init")
+	gitInit.Dir = targetPath
+	if err := gitInit.Run(); err != nil {
+		return fmt.Errorf("failed to initialize git: %w", err)
+	}
+
+	// Add all files
+	gitAdd := exec.Command("git", "add", ".")
+	gitAdd.Dir = targetPath
+	if err := gitAdd.Run(); err != nil {
+		return fmt.Errorf("failed to add files: %w", err)
+	}
+
+	// Create initial commit
+	gitCommit := exec.Command("git", "commit", "-m", "feat: initial repository setup")
+	gitCommit.Dir = targetPath
+	if err := gitCommit.Run(); err != nil {
+		return fmt.Errorf("failed to create initial commit: %w", err)
+	}
+
+	c.logger.Info("✅ Minimal repository created")
+	return nil
 }
 
 func (c *Creator) generateFromExternalTemplate(opts CreateOptions, data templates.TemplateData, targetPath string) error {
