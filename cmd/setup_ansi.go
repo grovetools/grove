@@ -11,132 +11,154 @@ import (
 // ANSI art generation helpers for the setup wizard
 // These provide visual previews of what the configured tools will look like
 
-// renderGmuxView generates a styled representation of gmux sz output
-// showing an ecosystem with several projects, some with git modifications
-func renderGmuxView(projectName string, isNew bool, width int) string {
+// renderGmuxView generates a styled representation of gmux table view
+// showing an ecosystem with projects in table format like the real gmux TUI
+func renderGmuxView(ecosystemName string, projectName string, isNew bool, width int) string {
 	var content strings.Builder
 
 	// Styles
 	headerStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("39")).
 		Bold(true)
-	dirtyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("214"))
 	branchStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("141"))
+	successStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("46"))
+	warningStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("214"))
 	newStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("46")).
 		Bold(true)
 	mutedStyle := theme.DefaultTheme.Muted
+	borderStyle := mutedStyle
 
-	// Simulated gmux output header
-	content.WriteString(headerStyle.Render("grove-projects"))
-	content.WriteString(mutedStyle.Render(" (ecosystem)"))
-	content.WriteString("\n")
-	content.WriteString(strings.Repeat("─", min(width-8, 60)))
-	content.WriteString("\n")
+	// Use ecosystem name or default
+	ecoName := ecosystemName
+	if ecoName == "" {
+		ecoName = "my-projects"
+	}
+
+	// Filter prompt
+	content.WriteString(mutedStyle.Render("[Focus: "))
+	content.WriteString(headerStyle.Render(ecoName))
+	content.WriteString(mutedStyle.Render("] > Press / to filter..."))
+	content.WriteString("\n\n")
+
+	// Table header
+	content.WriteString(borderStyle.Render("  ╭───┬────┬───────────────┬──────────────┬───────┬───────────╮\n"))
+	content.WriteString(borderStyle.Render("  │"))
+	content.WriteString(mutedStyle.Render(" K "))
+	content.WriteString(borderStyle.Render("│"))
+	content.WriteString(mutedStyle.Render(" CX "))
+	content.WriteString(borderStyle.Render("│"))
+	content.WriteString(mutedStyle.Render(" WORKSPACE     "))
+	content.WriteString(borderStyle.Render("│"))
+	content.WriteString(mutedStyle.Render("  BRANCH      "))
+	content.WriteString(borderStyle.Render("│"))
+	content.WriteString(mutedStyle.Render(" 󰊢 GIT "))
+	content.WriteString(borderStyle.Render("│"))
+	content.WriteString(mutedStyle.Render(" 󰊢 CHANGES "))
+	content.WriteString(borderStyle.Render("│\n"))
+	content.WriteString(borderStyle.Render("  ├───┼────┼───────────────┼──────────────┼───────┼───────────┤\n"))
+
+	// Ecosystem row
+	content.WriteString(borderStyle.Render("󰜴 │   │    │"))
+	content.WriteString(headerStyle.Render(fmt.Sprintf("  %-12s", ecoName)))
+	content.WriteString(borderStyle.Render("│"))
+	content.WriteString(mutedStyle.Render(" -            "))
+	content.WriteString(borderStyle.Render("│"))
+	content.WriteString(mutedStyle.Render(" -     "))
+	content.WriteString(borderStyle.Render("│"))
+	content.WriteString(mutedStyle.Render(" -         "))
+	content.WriteString(borderStyle.Render("│\n"))
 
 	// Project entries
 	projects := []struct {
-		name   string
-		branch string
-		dirty  bool
+		name    string
+		branch  string
+		git     string
+		changes string
+		isLast  bool
 	}{
-		{"grove-core", "main", false},
-		{"grove-flow", "feature/jobs", true},
-		{"grove-nb", "main", false},
-		{"api-server", "fix/auth-bug", true},
+		{"grove-core", "main", "↑1", "-", false},
+		{"grove-flow", "feat/jobs", "✗", "N:1", false},
+		{"api-server", "main", "✓", "M:1 +2 -1", false},
 	}
 
 	for _, p := range projects {
-		prefix := "  "
-		suffix := ""
-
-		if p.dirty {
-			suffix = dirtyStyle.Render(" *")
+		treeChar := "├─"
+		if p.isLast && projectName == "" {
+			treeChar = "└─"
 		}
 
-		branchInfo := branchStyle.Render(fmt.Sprintf("[%s]", p.branch))
+		content.WriteString(borderStyle.Render("  │   │    │ "))
+		content.WriteString(mutedStyle.Render(treeChar + " "))
+		content.WriteString(fmt.Sprintf("%-10s", p.name))
+		content.WriteString(borderStyle.Render("│"))
+		content.WriteString(branchStyle.Render(fmt.Sprintf("  %-12s", p.branch)))
+		content.WriteString(borderStyle.Render("│"))
 
-		content.WriteString(fmt.Sprintf("%s%s %s%s\n", prefix, p.name, branchInfo, suffix))
+		// Git status with color
+		gitStatus := p.git
+		if gitStatus == "✓" {
+			gitStatus = successStyle.Render(" ✓    ")
+		} else if gitStatus == "✗" {
+			gitStatus = warningStyle.Render(" ✗    ")
+		} else {
+			gitStatus = warningStyle.Render(fmt.Sprintf(" %-5s", p.git))
+		}
+		content.WriteString(gitStatus)
+		content.WriteString(borderStyle.Render("│"))
+		content.WriteString(mutedStyle.Render(fmt.Sprintf(" %-9s", p.changes)))
+		content.WriteString(borderStyle.Render("│\n"))
 	}
 
 	// Add the new project if specified
 	if projectName != "" {
-		prefix := "  "
-		marker := ""
-		if isNew {
-			marker = newStyle.Render(" (new)")
-		}
-		content.WriteString(fmt.Sprintf("%s%s%s\n", prefix, newStyle.Render(projectName), marker))
+		content.WriteString(borderStyle.Render("  │   │    │ "))
+		content.WriteString(mutedStyle.Render("└─ "))
+		content.WriteString(newStyle.Render(fmt.Sprintf("%-10s", projectName)))
+		content.WriteString(borderStyle.Render("│"))
+		content.WriteString(branchStyle.Render("  main        "))
+		content.WriteString(borderStyle.Render("│"))
+		content.WriteString(newStyle.Render(" (new)"))
+		content.WriteString(borderStyle.Render("│"))
+		content.WriteString(mutedStyle.Render(" -         "))
+		content.WriteString(borderStyle.Render("│\n"))
 	}
 
-	// Box it
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Padding(0, 1).
-		Width(min(width-12, 50))
+	content.WriteString(borderStyle.Render("  ╰───┴────┴───────────────┴──────────────┴───────┴───────────╯\n"))
 
-	return boxStyle.Render(content.String())
+	// Legend
+	content.WriteString(mutedStyle.Render("Icons:  current •  active •  ecosystem •  repo"))
+
+	return content.String()
 }
 
-// renderNbView generates a styled representation of the nb tui interface
-func renderNbView(width int) string {
-	var content strings.Builder
-
-	// Styles
-	headerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("39")).
-		Bold(true)
-	selectedStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("236")).
-		Foreground(lipgloss.Color("255"))
-	tagStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("141"))
-	dateStyle := theme.DefaultTheme.Muted
-
-	content.WriteString(headerStyle.Render("Notes"))
-	content.WriteString(dateStyle.Render(" - default workspace"))
-	content.WriteString("\n")
-	content.WriteString(strings.Repeat("─", min(width-8, 50)))
-	content.WriteString("\n")
-
-	// Sample notes
-	notes := []struct {
-		title    string
-		tags     []string
-		date     string
-		selected bool
-	}{
-		{"Project kickoff meeting", []string{"meeting"}, "2h ago", true},
-		{"API design notes", []string{"design", "api"}, "1d ago", false},
-		{"Bug investigation: auth flow", []string{"bug"}, "2d ago", false},
-		{"Weekly standup notes", []string{"meeting"}, "3d ago", false},
+// renderNbView returns a captured nb tui tree view with ANSI styling
+// The workspace name is substituted into the template
+func renderNbView(workspaceName string, width int) string {
+	wsName := workspaceName
+	if wsName == "" {
+		wsName = "my-project"
 	}
 
-	for _, n := range notes {
-		line := fmt.Sprintf("  %s", n.title)
-		for _, tag := range n.tags {
-			line += " " + tagStyle.Render("#"+tag)
-		}
-		line += " " + dateStyle.Render(n.date)
+	// Captured from real nb tui output - using \x1b for escape character
+	template := "  \x1b[1mnb > %s\x1b[0m\n" +
+		"\n" +
+		"   \x1b[93m▶ \x1b[39m󰇧 \x1b[3;4mglobal\x1b[0m\n" +
+		"      \x1b[3m%s\x1b[0m\n" +
+		"     \x1b[2m│ \x1b[0m\x1b[93m󰚇\x1b[39m inbox\x1b[2m (2)\x1b[0m\n" +
+		"     \x1b[2m│ \x1b[0m\x1b[31m\x1b[39m issues\x1b[2m (3)\x1b[0m\n" +
+		"     \x1b[2m│ \x1b[0m\x1b[34m󰠡\x1b[39m \x1b[3mplans\x1b[0m\x1b[2m (2)\x1b[0m\n" +
+		"     \x1b[2m│ └ \x1b[0m\x1b[34m󰦖 \x1b[3m\x1b[39minitial-setup\x1b[0m\x1b[2m [\x1b[3mnote:\x1b[0m ← setup]\x1b[2m (3)\x1b[0m\n" +
+		"     \x1b[2m│ \x1b[0m\x1b[34m󰔟\x1b[39m \x1b[3min_progress\x1b[0m\x1b[2m (1)\x1b[0m\n" +
+		"     \x1b[2m│ └ \x1b[0m\x1b[34m󰡯\x1b[39m 20260106-kickoff.md\x1b[2m [\x1b[3mplan:\x1b[0m → setup]\n" +
+		"     \x1b[2m└ \x1b[0m\x1b[32m󰄳\x1b[39m completed\x1b[2m (2)\x1b[0m\n" +
+		"\n" +
+		"  \x1b[2m6 notes shown | Press \x1b[0m\x1b[1m\x1b[93m?\x1b[0m\x1b[2m for help\x1b[0m"
 
-		if n.selected {
-			content.WriteString(selectedStyle.Render(line))
-		} else {
-			content.WriteString(line)
-		}
-		content.WriteString("\n")
-	}
-
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Padding(0, 1).
-		Width(min(width-12, 55))
-
-	return boxStyle.Render(content.String())
+	return fmt.Sprintf(template, wsName, wsName)
 }
 
 // renderNoteCreationExample shows a sample nb new command and resulting file structure

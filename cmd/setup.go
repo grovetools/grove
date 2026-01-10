@@ -879,7 +879,7 @@ across several possibly related git repositories.`
 	// Show gmux preview
 	content.WriteString(theme.DefaultTheme.Muted.Render("Preview: Your ecosystem in gmux"))
 	content.WriteString("\n")
-	content.WriteString(renderGmuxView("", false, m.width))
+	content.WriteString(renderGmuxView(m.ecosystemName, "", false, m.width))
 
 	return padStyle.Render(content.String())
 }
@@ -923,7 +923,7 @@ Leave blank and press Enter to skip this step.`
 	if projectName != "" {
 		content.WriteString(theme.DefaultTheme.Muted.Render("Preview: Your new project in the ecosystem"))
 		content.WriteString("\n")
-		content.WriteString(renderGmuxView(projectName, true, m.width))
+		content.WriteString(renderGmuxView(m.ecosystemName, projectName, true, m.width))
 	}
 
 	return padStyle.Render(content.String())
@@ -962,7 +962,7 @@ Each workspace gets its own section, keeping project context organized.`
 	// Show nb preview and note creation example
 	content.WriteString(theme.DefaultTheme.Muted.Render("Preview: The nb notes interface"))
 	content.WriteString("\n")
-	content.WriteString(renderNbView(m.width))
+	content.WriteString(renderNbView(m.ecosystemName, m.width))
 	content.WriteString("\n\n")
 	content.WriteString(renderNoteCreationExample(m.textInput.Value(), m.width))
 
