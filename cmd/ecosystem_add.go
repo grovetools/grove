@@ -46,9 +46,9 @@ Examples:
 func runEcosystemAdd(cmd *cobra.Command, args []string) error {
 	repo := args[0]
 
-	// Check we're in an ecosystem root
-	if _, err := os.Stat("grove.yml"); os.IsNotExist(err) {
-		return fmt.Errorf("not in a Grove ecosystem (grove.yml not found)")
+	// Check we're in an ecosystem root (grove.yml with workspaces key)
+	if err := validateEcosystemRoot(); err != nil {
+		return err
 	}
 
 	// Determine the Git URL and target path

@@ -29,8 +29,8 @@ Examples:
 
 func runEcosystemList(cmd *cobra.Command, args []string) error {
 	// Check we're in an ecosystem root
-	if _, err := os.Stat("grove.yml"); os.IsNotExist(err) {
-		return fmt.Errorf("not in a Grove ecosystem (grove.yml not found)")
+	if err := validateEcosystemRoot(); err != nil {
+		return err
 	}
 
 	// Get submodules
