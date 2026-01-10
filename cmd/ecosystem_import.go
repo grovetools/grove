@@ -11,14 +11,14 @@ import (
 )
 
 var (
-	ecosystemAddPath string
+	ecosystemImportPath string
 )
 
-func newEcosystemAddCmd() *cobra.Command {
+func newEcosystemImportCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "add <repo>",
-		Short: "Add an existing repository to the ecosystem",
-		Long: `Add an existing repository to the ecosystem as a git submodule.
+		Use:   "import <repo>",
+		Short: "Import an existing repository into the ecosystem",
+		Long: `Import an existing repository into the ecosystem as a git submodule.
 
 The repo can be:
 - A local path (../my-repo or /path/to/repo)
@@ -26,24 +26,24 @@ The repo can be:
 - A full Git URL (https://github.com/user/repo.git)
 
 Examples:
-  # Add from local path
-  grove ecosystem add ../my-existing-tool
+  # Import from local path
+  grove ecosystem import ../my-existing-tool
 
-  # Add from GitHub
-  grove ecosystem add mattsolo1/grove-context
+  # Import from GitHub
+  grove ecosystem import mattsolo1/grove-context
 
-  # Add with custom directory name
-  grove ecosystem add mattsolo1/grove-context --path vendor/context`,
+  # Import with custom directory name
+  grove ecosystem import mattsolo1/grove-context --path vendor/context`,
 		Args: cobra.ExactArgs(1),
-		RunE: runEcosystemAdd,
+		RunE: runEcosystemImport,
 	}
 
-	cmd.Flags().StringVar(&ecosystemAddPath, "path", "", "Custom path for the submodule")
+	cmd.Flags().StringVar(&ecosystemImportPath, "path", "", "Custom path for the submodule")
 
 	return cmd
 }
 
-func runEcosystemAdd(cmd *cobra.Command, args []string) error {
+func runEcosystemImport(cmd *cobra.Command, args []string) error {
 	repo := args[0]
 
 	// Check we're in an ecosystem root (grove.yml with workspaces key)
@@ -62,16 +62,16 @@ func runEcosystemAdd(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to resolve path: %w", err)
 		}
 		gitURL = absPath
-		if ecosystemAddPath != "" {
-			targetPath = ecosystemAddPath
+		if ecosystemImportPath != "" {
+			targetPath = ecosystemImportPath
 		} else {
 			targetPath = filepath.Base(absPath)
 		}
 	} else if isGitHubShorthand(repo) {
 		// GitHub shorthand: user/repo
 		gitURL = fmt.Sprintf("https://github.com/%s.git", repo)
-		if ecosystemAddPath != "" {
-			targetPath = ecosystemAddPath
+		if ecosystemImportPath != "" {
+			targetPath = ecosystemImportPath
 		} else {
 			// Extract repo name from user/repo
 			parts := strings.Split(repo, "/")
@@ -80,8 +80,8 @@ func runEcosystemAdd(cmd *cobra.Command, args []string) error {
 	} else {
 		// Assume it's a full Git URL
 		gitURL = repo
-		if ecosystemAddPath != "" {
-			targetPath = ecosystemAddPath
+		if ecosystemImportPath != "" {
+			targetPath = ecosystemImportPath
 		} else {
 			// Extract repo name from URL
 			targetPath = extractRepoName(repo)
@@ -116,7 +116,7 @@ func runEcosystemAdd(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Printf("\n✅ Added %s to ecosystem\n", targetPath)
+	fmt.Printf("\nImported %s into ecosystem\n", targetPath)
 	return nil
 }
 

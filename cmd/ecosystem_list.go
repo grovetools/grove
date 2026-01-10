@@ -42,7 +42,7 @@ func runEcosystemList(cmd *cobra.Command, args []string) error {
 	if len(submodules) == 0 && len(localRepos) == 0 {
 		fmt.Println("No repositories in ecosystem")
 		fmt.Println("\nAdd a repository with:")
-		fmt.Println("  grove ecosystem add <repo>")
+		fmt.Println("  grove ecosystem import <repo>")
 		fmt.Println("  grove repo add <name> --ecosystem")
 		return nil
 	}
