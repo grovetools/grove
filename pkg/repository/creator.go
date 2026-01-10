@@ -252,13 +252,7 @@ func (c *Creator) CreateLocal(opts CreateOptions) (string, error) {
 		return "", fmt.Errorf("local verification failed: %w", err)
 	}
 
-	// Phase 3: Create initial release (local tag only)
-	if err := c.createLocalTag(opts, targetPath); err != nil {
-		c.rollback(state, opts, targetPath)
-		return "", fmt.Errorf("failed to create local tag: %w", err)
-	}
-
-	// Phase 4: Add to ecosystem (only if requested)
+	// Phase 3: Add to ecosystem (only if requested)
 	if opts.Ecosystem {
 		if err := c.addToEcosystemLocal(opts); err != nil {
 			c.rollback(state, opts, targetPath)
@@ -452,31 +446,15 @@ func (c *Creator) addToEcosystemLocal(opts CreateOptions) error {
 // showLocalSummary displays summary after local-only creation
 func (c *Creator) showLocalSummary(opts CreateOptions, targetPath string) {
 	fmt.Println("\n✅ Local repository created successfully!")
-	fmt.Println("\nSUMMARY")
-	fmt.Println("-------")
-	fmt.Printf("- Local repository created at: %s\n", targetPath)
-	fmt.Printf("- Binary alias: %s\n", opts.Alias)
-	fmt.Println("- Initial release tag v0.0.1 created locally")
+	fmt.Printf("\nRepository: %s\n", targetPath)
 
 	if opts.Ecosystem {
-		fmt.Println("- Added to grove-ecosystem as local submodule")
-		fmt.Println("- go.work has been updated")
-	}
-
-	if opts.Ecosystem {
-		fmt.Println("\nNEXT STEPS")
-		fmt.Println("----------")
-		fmt.Println("1. Stage and commit the ecosystem changes:")
-		fmt.Println("   > git add go.work .gitmodules " + opts.Name)
-		fmt.Printf("   > git commit -m \"feat: add %s to the ecosystem\"\n", opts.Name)
-		fmt.Println("")
-		fmt.Println("2. Start developing:")
-		fmt.Printf("   > cd %s\n", opts.Name)
-		fmt.Printf("   > grove install %s\n", opts.Alias)
+		fmt.Println("\nNext steps:")
+		fmt.Println("  git add go.work .gitmodules " + opts.Name)
+		fmt.Printf("  git commit -m \"feat: add %s\"\n", opts.Name)
+		fmt.Printf("  cd %s\n", opts.Name)
 	} else {
-		fmt.Println("\nTo start developing:")
-		fmt.Printf("  > cd %s\n", opts.Name)
-		fmt.Printf("  > grove install %s\n", opts.Alias)
+		fmt.Printf("\ncd %s\n", opts.Name)
 	}
 }
 
@@ -500,7 +478,6 @@ func (c *Creator) dryRunLocal(opts CreateOptions) error {
 	c.logger.Info("  git init")
 	c.logger.Info("  git add .")
 	c.logger.Info("  git commit -m 'feat: initial repository setup'")
-	c.logger.Info("  git tag v0.0.1 -m 'Initial release'")
 
 	if opts.Ecosystem {
 		c.logger.Info("\nEcosystem integration:")
