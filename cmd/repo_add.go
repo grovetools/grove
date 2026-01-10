@@ -33,10 +33,8 @@ func newRepoAddCmd() *cobra.Command {
 		Short: "Create a new local Grove repository",
 		Long: `Create a new local Grove repository with standard structure.
 
-This command creates a repository locally without GitHub integration.
-To add GitHub integration later, use 'grove repo github-init'.
-
-The binary alias defaults to the repository name if not specified.
+This command creates a repository locally. The binary alias defaults to the
+repository name if not specified.
 
 Examples:
   # Create a local standalone repository

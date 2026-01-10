@@ -463,29 +463,20 @@ func (c *Creator) showLocalSummary(opts CreateOptions, targetPath string) {
 		fmt.Println("- go.work has been updated")
 	}
 
-	fmt.Println("\nNEXT STEPS")
-	fmt.Println("----------")
-
 	if opts.Ecosystem {
+		fmt.Println("\nNEXT STEPS")
+		fmt.Println("----------")
 		fmt.Println("1. Stage and commit the ecosystem changes:")
 		fmt.Println("   > git add go.work .gitmodules " + opts.Name)
 		fmt.Printf("   > git commit -m \"feat: add %s to the ecosystem\"\n", opts.Name)
 		fmt.Println("")
-		fmt.Printf("2. Start developing your new tool:\n")
+		fmt.Println("2. Start developing:")
 		fmt.Printf("   > cd %s\n", opts.Name)
 		fmt.Printf("   > grove install %s\n", opts.Alias)
-		fmt.Println("")
-		fmt.Println("3. To publish to GitHub later:")
-		fmt.Printf("   > cd %s\n", opts.Name)
-		fmt.Println("   > grove repo github-init")
 	} else {
-		fmt.Printf("1. Start developing your new tool:\n")
-		fmt.Printf("   > cd %s\n", opts.Name)
-		fmt.Printf("   > grove install %s\n", opts.Alias)
-		fmt.Println("")
-		fmt.Println("2. To publish to GitHub later:")
-		fmt.Printf("   > cd %s\n", opts.Name)
-		fmt.Println("   > grove repo github-init")
+		fmt.Println("\nTo start developing:")
+		fmt.Printf("  > cd %s\n", opts.Name)
+		fmt.Printf("  > grove install %s\n", opts.Alias)
 	}
 }
 
@@ -508,9 +499,6 @@ func (c *Creator) dryRunLocal(opts CreateOptions) error {
 		c.logger.Infof("  git submodule add ./%s %s", opts.Name, opts.Name)
 		c.logger.Infof("  Update go.work: Add use (./%s)", opts.Name)
 	}
-
-	c.logger.Info("\nTo publish to GitHub later, run:")
-	c.logger.Infof("  cd %s && grove repo github-init", opts.Name)
 
 	return nil
 }
