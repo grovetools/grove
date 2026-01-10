@@ -28,8 +28,9 @@ func init() {
 
 func newAddRepoCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "add-repo <repo-name>",
-		Short: "Create a new Grove repository with standard structure",
+		Use:        "add-repo <repo-name>",
+		Short:      "Create a new Grove repository with standard structure",
+		Deprecated: "use 'grove repo add' instead. This command will be removed in a future version.",
 		Long: `Create a new Grove repository with standard structure.
 
 By default, this creates a local-only repository in the current directory.

@@ -20,15 +20,22 @@ type Creator struct {
 	gh     *gh.Client
 }
 
+// CreateOptions contains options for creating a new repository (local creation)
 type CreateOptions struct {
 	Name         string
 	Alias        string
 	Description  string
-	SkipGitHub   bool
+	SkipGitHub   bool // Deprecated: use CreateLocal for local-only, then InitializeGitHub separately
 	DryRun       bool
 	TemplatePath string
 	Ecosystem    bool
 	Public       bool
+}
+
+// GitHubInitOptions contains options for initializing GitHub integration
+type GitHubInitOptions struct {
+	Visibility string // "public" or "private" (default: "private")
+	DryRun     bool
 }
 
 type creationState struct {
@@ -171,6 +178,462 @@ func (c *Creator) Create(opts CreateOptions) error {
 
 	// Phase 6: Final summary
 	return c.showSummary(opts, targetPath)
+}
+
+// CreateLocal creates a new local repository without any GitHub integration.
+// This is the first step in the incremental workflow: create locally, then optionally
+// call InitializeGitHub to add GitHub integration later.
+func (c *Creator) CreateLocal(opts CreateOptions) (string, error) {
+	// Force SkipGitHub for local-only creation
+	opts.SkipGitHub = true
+
+	// Phase 1: Validation (local-only)
+	if err := c.validateLocal(opts); err != nil {
+		c.logger.Errorf("Validation failed: %v", err)
+		return "", err
+	}
+
+	// Handle dry-run mode
+	if opts.DryRun {
+		return "", c.dryRunLocal(opts)
+	}
+
+	// Determine target path based on mode
+	var targetPath string
+	if opts.Ecosystem {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("failed to get current directory: %w", err)
+		}
+		targetPath = filepath.Join(cwd, opts.Name)
+	} else {
+		targetPath = filepath.Join(".", opts.Name)
+	}
+
+	// Check if directory already exists
+	if _, err := os.Stat(targetPath); err == nil {
+		return "", fmt.Errorf("directory %s already exists", targetPath)
+	}
+
+	// Track state for rollback
+	state := &creationState{}
+
+	// Phase 2: Generate local skeleton
+	if err := c.generateSkeleton(opts, targetPath); err != nil {
+		state.localRepoCreated = true
+		c.rollback(state, opts, targetPath)
+		return "", fmt.Errorf("failed to generate skeleton: %w", err)
+	}
+	state.localRepoCreated = true
+
+	// Phase 2.5: Detect project type early
+	projectType := c.detectProjectType(targetPath)
+
+	// Phase 2.6: Add to go.work temporarily for Go projects only (in ecosystem mode)
+	if projectType == "go" && opts.Ecosystem {
+		rootDir, err := workspace.FindEcosystemRoot("")
+		if err == nil {
+			goWorkPath := filepath.Join(rootDir, "go.work")
+			if content, err := os.ReadFile(goWorkPath); err == nil {
+				state.originalGoWorkContent = content
+			}
+		}
+
+		if err := c.updateGoWork(opts); err != nil {
+			c.rollback(state, opts, targetPath)
+			return "", fmt.Errorf("failed to update go.work: %w", err)
+		}
+	}
+
+	// Phase 2.7: Local verification
+	c.logger.Info("Running local verification...")
+	if err := c.verifyLocal(opts, targetPath); err != nil {
+		c.rollback(state, opts, targetPath)
+		return "", fmt.Errorf("local verification failed: %w", err)
+	}
+
+	// Phase 3: Create initial release (local tag only)
+	if err := c.createLocalTag(opts, targetPath); err != nil {
+		c.rollback(state, opts, targetPath)
+		return "", fmt.Errorf("failed to create local tag: %w", err)
+	}
+
+	// Phase 4: Add to ecosystem (only if requested)
+	if opts.Ecosystem {
+		if err := c.addToEcosystemLocal(opts); err != nil {
+			c.rollback(state, opts, targetPath)
+			return "", fmt.Errorf("failed to add repository to ecosystem: %w\n\nNote: The grove-ecosystem may have been partially modified.\nYou can clean up with: git reset --hard", err)
+		}
+	}
+
+	// Phase 5: Show local summary
+	c.showLocalSummary(opts, targetPath)
+
+	return targetPath, nil
+}
+
+// InitializeGitHub adds GitHub integration to an existing local Grove repository.
+// This should be called from within the repository directory (where grove.yml exists).
+func (c *Creator) InitializeGitHub(opts GitHubInitOptions) error {
+	// Set default visibility
+	if opts.Visibility == "" {
+		opts.Visibility = "private"
+	}
+
+	// Get current directory (must be the repo root)
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current directory: %w", err)
+	}
+
+	// Validate: must be a Grove repository
+	groveYmlPath := filepath.Join(cwd, "grove.yml")
+	if _, err := os.Stat(groveYmlPath); os.IsNotExist(err) {
+		return fmt.Errorf("not a Grove repository: grove.yml not found in current directory\n\nRun this command from within a Grove repository created with 'grove repo add'")
+	}
+
+	// Get repo name from directory name
+	repoName := filepath.Base(cwd)
+
+	// Validate: must not already have origin remote
+	checkOriginCmd := exec.Command("git", "remote", "get-url", "origin")
+	if err := checkOriginCmd.Run(); err == nil {
+		return fmt.Errorf("repository already has a remote 'origin' configured\n\nTo change the remote, use 'git remote remove origin' first")
+	}
+
+	// Validate GitHub prerequisites
+	if err := c.validateGitHubPrereqs(repoName, opts.Visibility == "public"); err != nil {
+		return err
+	}
+
+	// Handle dry-run mode
+	if opts.DryRun {
+		return c.dryRunGitHubInit(repoName, opts)
+	}
+
+	// Create GitHub repository
+	c.logger.Infof("Creating GitHub repository mattsolo1/%s...", repoName)
+	if err := c.createGitHubRepoFromCwd(repoName, opts.Visibility == "public"); err != nil {
+		return err
+	}
+
+	// Set up secrets (only for private repos)
+	if opts.Visibility != "public" {
+		if err := c.setupSecretsFromCwd(repoName); err != nil {
+			c.logger.Warnf("Failed to set up secrets: %v", err)
+			c.logger.Warn("You may need to manually set up GROVE_PAT secret")
+		}
+	}
+
+	// Push code and tags
+	c.logger.Info("Pushing code to GitHub...")
+	if err := c.pushToGitHubFromCwd(); err != nil {
+		return err
+	}
+
+	// Wait for CI if .github directory exists
+	githubDir := filepath.Join(cwd, ".github")
+	if _, err := os.Stat(githubDir); err == nil {
+		c.logger.Info("Waiting for CI to complete...")
+		if err := c.waitForCIFromCwd(repoName); err != nil {
+			c.logger.Warnf("Could not monitor CI build: %v", err)
+			c.logger.Infof("Check CI status at: https://github.com/mattsolo1/%s/actions", repoName)
+		}
+	}
+
+	// Show success summary
+	fmt.Println("\n✅ GitHub integration complete!")
+	fmt.Printf("Repository URL: https://github.com/mattsolo1/%s\n", repoName)
+
+	return nil
+}
+
+// validateLocal validates options for local-only repository creation
+func (c *Creator) validateLocal(opts CreateOptions) error {
+	c.logger.Info("Validating repository configuration...")
+
+	// Validate repository name
+	if !isValidRepoName(opts.Name) {
+		return fmt.Errorf("invalid repository name: must only contain lowercase letters, numbers, and hyphens")
+	}
+
+	// Validate alias
+	if opts.Alias == "" {
+		return fmt.Errorf("binary alias cannot be empty")
+	}
+
+	// Check if we're in grove-ecosystem root (only if ecosystem mode)
+	if opts.Ecosystem {
+		if _, err := os.Stat("grove.yml"); err != nil {
+			return fmt.Errorf("no grove.yml found in the current directory.\n\nTo create a new Grove ecosystem, run:\n  grove ws init\n\nOr to create a standalone repository without an ecosystem:\n  grove repo add %s --alias %s (without --ecosystem flag)", opts.Name, opts.Alias)
+		}
+		// Check for alias conflicts in existing ecosystem
+		if err := checkBinaryAliasConflict(opts.Alias); err != nil {
+			return err
+		}
+	}
+
+	// Check dependencies
+	if _, err := exec.LookPath("git"); err != nil {
+		return fmt.Errorf("git is not installed or not in PATH")
+	}
+
+	return nil
+}
+
+// validateGitHubPrereqs validates GitHub prerequisites for InitializeGitHub
+func (c *Creator) validateGitHubPrereqs(repoName string, isPublic bool) error {
+	// Check for gh CLI
+	if _, err := exec.LookPath("gh"); err != nil {
+		return fmt.Errorf("GitHub CLI (gh) is not installed or not in PATH")
+	}
+
+	// Check GitHub authentication
+	cmd := exec.Command("gh", "auth", "status")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("not authenticated with GitHub. Run 'gh auth login' first")
+	}
+
+	// Check if repo already exists on GitHub
+	checkCmd := exec.Command("gh", "repo", "view", fmt.Sprintf("mattsolo1/%s", repoName))
+	if err := checkCmd.Run(); err == nil {
+		return fmt.Errorf("repository mattsolo1/%s already exists on GitHub", repoName)
+	}
+
+	// Check for GROVE_PAT (only for private repos)
+	if !isPublic && os.Getenv("GROVE_PAT") == "" {
+		return fmt.Errorf("GROVE_PAT environment variable not set. This is required for setting up GitHub Actions secrets for private repositories.\n\nOptions:\n  1. Set GROVE_PAT and try again\n  2. Use --visibility=public for a public repository")
+	}
+
+	return nil
+}
+
+// createLocalTag creates the initial v0.0.1 tag locally (without pushing)
+func (c *Creator) createLocalTag(opts CreateOptions, targetPath string) error {
+	c.logger.Info("Creating initial release tag v0.0.1...")
+
+	tagCmd := exec.Command("git", "tag", "v0.0.1", "-m", "Initial release")
+	tagCmd.Dir = targetPath
+	if err := tagCmd.Run(); err != nil {
+		return fmt.Errorf("failed to create tag: %w", err)
+	}
+
+	c.logger.Info("✅ Initial release tag created")
+	return nil
+}
+
+// addToEcosystemLocal adds the repository to the ecosystem without GitHub submodule URL
+func (c *Creator) addToEcosystemLocal(opts CreateOptions) error {
+	c.logger.Info("Adding repository to grove-ecosystem...")
+
+	// Check if submodule already exists
+	checkCmd := exec.Command("git", "submodule", "status", opts.Name)
+	if err := checkCmd.Run(); err == nil {
+		c.logger.Warnf("Submodule %s already exists", opts.Name)
+		return nil
+	}
+
+	// Add as submodule using local path
+	submoduleUrl := "./" + opts.Name
+	submoduleCmd := exec.Command("git", "submodule", "add", submoduleUrl, opts.Name)
+
+	if output, err := submoduleCmd.CombinedOutput(); err != nil {
+		if strings.Contains(string(output), "already exists in the index") {
+			c.logger.Warn("Submodule already in index, continuing...")
+		} else {
+			return fmt.Errorf("failed to add submodule: %w\nOutput: %s", err, string(output))
+		}
+	}
+
+	c.logger.Info("✅ Repository added to ecosystem")
+	return nil
+}
+
+// showLocalSummary displays summary after local-only creation
+func (c *Creator) showLocalSummary(opts CreateOptions, targetPath string) {
+	fmt.Println("\n✅ Local repository created successfully!")
+	fmt.Println("\nSUMMARY")
+	fmt.Println("-------")
+	fmt.Printf("- Local repository created at: %s\n", targetPath)
+	fmt.Printf("- Binary alias: %s\n", opts.Alias)
+	fmt.Println("- Initial release tag v0.0.1 created locally")
+
+	if opts.Ecosystem {
+		fmt.Println("- Added to grove-ecosystem as local submodule")
+		fmt.Println("- go.work has been updated")
+	}
+
+	fmt.Println("\nNEXT STEPS")
+	fmt.Println("----------")
+
+	if opts.Ecosystem {
+		fmt.Println("1. Stage and commit the ecosystem changes:")
+		fmt.Println("   > git add go.work .gitmodules " + opts.Name)
+		fmt.Printf("   > git commit -m \"feat: add %s to the ecosystem\"\n", opts.Name)
+		fmt.Println("")
+		fmt.Printf("2. Start developing your new tool:\n")
+		fmt.Printf("   > cd %s\n", opts.Name)
+		fmt.Printf("   > grove install %s\n", opts.Alias)
+		fmt.Println("")
+		fmt.Println("3. To publish to GitHub later:")
+		fmt.Printf("   > cd %s\n", opts.Name)
+		fmt.Println("   > grove repo github-init")
+	} else {
+		fmt.Printf("1. Start developing your new tool:\n")
+		fmt.Printf("   > cd %s\n", opts.Name)
+		fmt.Printf("   > grove install %s\n", opts.Alias)
+		fmt.Println("")
+		fmt.Println("2. To publish to GitHub later:")
+		fmt.Printf("   > cd %s\n", opts.Name)
+		fmt.Println("   > grove repo github-init")
+	}
+}
+
+// dryRunLocal shows what would be created in local-only mode
+func (c *Creator) dryRunLocal(opts CreateOptions) error {
+	c.logger.Info("DRY RUN MODE - No changes will be made")
+
+	c.logger.Infof("\nWould create repository structure in: ./%s", opts.Name)
+	c.logger.Infof("Binary alias: %s", opts.Alias)
+	c.logger.Infof("Description: %s", opts.Description)
+
+	c.logger.Info("\nCommands that would be executed:")
+	c.logger.Info("  git init")
+	c.logger.Info("  git add .")
+	c.logger.Info("  git commit -m 'feat: initial repository setup'")
+	c.logger.Info("  git tag v0.0.1 -m 'Initial release'")
+
+	if opts.Ecosystem {
+		c.logger.Info("\nEcosystem integration:")
+		c.logger.Infof("  git submodule add ./%s %s", opts.Name, opts.Name)
+		c.logger.Infof("  Update go.work: Add use (./%s)", opts.Name)
+	}
+
+	c.logger.Info("\nTo publish to GitHub later, run:")
+	c.logger.Infof("  cd %s && grove repo github-init", opts.Name)
+
+	return nil
+}
+
+// dryRunGitHubInit shows what would be done for GitHub initialization
+func (c *Creator) dryRunGitHubInit(repoName string, opts GitHubInitOptions) error {
+	c.logger.Info("DRY RUN MODE - No changes will be made")
+
+	c.logger.Infof("\nWould initialize GitHub for repository: %s", repoName)
+	c.logger.Infof("Visibility: %s", opts.Visibility)
+
+	c.logger.Info("\nCommands that would be executed:")
+	if opts.Visibility == "public" {
+		c.logger.Infof("  gh repo create mattsolo1/%s --public --source=. --remote=origin", repoName)
+	} else {
+		c.logger.Infof("  gh repo create mattsolo1/%s --private --source=. --remote=origin", repoName)
+		c.logger.Info("  gh secret set GROVE_PAT --body <GROVE_PAT>")
+	}
+	c.logger.Info("  git push -u origin main")
+	c.logger.Info("  git push origin --tags")
+	c.logger.Info("  gh run watch (if .github workflows exist)")
+
+	return nil
+}
+
+// createGitHubRepoFromCwd creates GitHub repo when running from the repo directory
+func (c *Creator) createGitHubRepoFromCwd(repoName string, isPublic bool) error {
+	createArgs := []string{"repo", "create", fmt.Sprintf("mattsolo1/%s", repoName)}
+	if isPublic {
+		createArgs = append(createArgs, "--public")
+	} else {
+		createArgs = append(createArgs, "--private")
+	}
+	createArgs = append(createArgs, "--source=.", "--remote=origin")
+	createCmd := exec.Command("gh", createArgs...)
+
+	if output, err := createCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to create GitHub repository: %w\nOutput: %s", err, string(output))
+	}
+
+	// Ensure the remote URL is clean
+	setUrlCmd := exec.Command("git", "remote", "set-url", "origin",
+		fmt.Sprintf("https://github.com/mattsolo1/%s.git", repoName))
+	if err := setUrlCmd.Run(); err != nil {
+		c.logger.Warnf("Failed to set clean remote URL: %v", err)
+	}
+
+	c.logger.Info("✅ GitHub repository created")
+	return nil
+}
+
+// setupSecretsFromCwd sets up secrets when running from the repo directory
+func (c *Creator) setupSecretsFromCwd(repoName string) error {
+	c.logger.Info("Setting up repository secrets...")
+
+	grovePAT := os.Getenv("GROVE_PAT")
+	if grovePAT == "" {
+		return fmt.Errorf("GROVE_PAT not set")
+	}
+
+	secretCmd := exec.Command("gh", "secret", "set", "GROVE_PAT", "--body", grovePAT)
+	if err := secretCmd.Run(); err != nil {
+		return fmt.Errorf("failed to set GROVE_PAT secret: %w", err)
+	}
+
+	c.logger.Info("✅ Repository secrets configured")
+	return nil
+}
+
+// pushToGitHubFromCwd pushes code and tags when running from the repo directory
+func (c *Creator) pushToGitHubFromCwd() error {
+	// Push main branch
+	pushCmd := exec.Command("git", "push", "-u", "origin", "main")
+	if output, err := pushCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to push to GitHub: %w\nOutput: %s", err, string(output))
+	}
+
+	// Push tags
+	pushTagsCmd := exec.Command("git", "push", "origin", "--tags")
+	if output, err := pushTagsCmd.CombinedOutput(); err != nil {
+		c.logger.Warnf("Failed to push tags: %v\nOutput: %s", err, string(output))
+	}
+
+	c.logger.Info("✅ Code pushed to GitHub")
+	return nil
+}
+
+// waitForCIFromCwd waits for CI when running from the repo directory
+func (c *Creator) waitForCIFromCwd(repoName string) error {
+	// Wait a moment for the workflow to start
+	time.Sleep(2 * time.Second)
+
+	// Get the workflow run ID
+	cmd := exec.Command("gh", "run", "list",
+		"--repo", fmt.Sprintf("mattsolo1/%s", repoName),
+		"--workflow", "release.yml",
+		"--limit", "1",
+		"--json", "databaseId",
+		"--jq", ".[0].databaseId")
+
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get workflow run: %w", err)
+	}
+
+	runID := strings.TrimSpace(string(output))
+	if runID == "" {
+		c.logger.Warn("No release workflow found yet, it may still be starting...")
+		return nil
+	}
+
+	// Watch the workflow
+	watchCmd := exec.Command("gh", "run", "watch", runID,
+		"--repo", fmt.Sprintf("mattsolo1/%s", repoName))
+	watchCmd.Stdout = os.Stdout
+	watchCmd.Stderr = os.Stderr
+
+	if err := watchCmd.Run(); err != nil {
+		return fmt.Errorf("release build failed: %w", err)
+	}
+
+	c.logger.Info("✅ Release build completed successfully")
+	return nil
 }
 
 func (c *Creator) validate(opts CreateOptions) error {

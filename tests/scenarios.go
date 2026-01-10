@@ -13,9 +13,15 @@ import (
 func AllScenarios() []*harness.Scenario {
 	return []*harness.Scenario{
 		ConventionalCommitsScenario(),
+		// Legacy add-repo scenarios (deprecated, kept for backwards compat)
 		AddRepoDryRunScenario(),
 		// AddRepoWithGitHubScenario(), // Commented out - GitHub integration test
 		AddRepoSkipGitHubScenario(),
+		// New 'grove repo' command scenarios
+		RepoAddDryRunScenario(),
+		RepoAddLocalOnlyScenario(),
+		RepoGitHubInitDryRunScenario(),
+		RepoIncrementalWorkflowScenario(),
 		WorkspaceBootstrappingScenario(), // Add the new scenario here
 		PolyglotProjectTypesScenario(),
 		PolyglotDependencyGraphScenario(),
