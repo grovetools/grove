@@ -26,7 +26,6 @@ type CreateOptions struct {
 	Description  string
 	SkipGitHub   bool
 	DryRun       bool
-	StageChanges bool
 	TemplatePath string
 	Ecosystem    bool
 	Public       bool
@@ -168,19 +167,9 @@ func (c *Creator) Create(opts CreateOptions) error {
 			c.rollback(state, opts, targetPath)
 			return fmt.Errorf("failed to add repository to ecosystem: %w\n\nNote: The grove-ecosystem may have been partially modified.\nYou can clean up with: git reset --hard", err)
 		}
-
-		// Phase 6: Stage changes (only if requested)
-		if opts.StageChanges {
-			if err := c.stageEcosystemChanges(opts, targetPath); err != nil {
-				// At this point the repo has been created successfully, so we just warn about staging
-				c.logger.Warnf("Failed to stage ecosystem changes: %v", err)
-				c.logger.Infof("The grove-ecosystem has been modified but changes were not staged.")
-				c.logger.Infof("You can stage manually: git add Makefile go.work .gitmodules %s", opts.Name)
-			}
-		}
 	}
 
-	// Phase 7: Final summary
+	// Phase 6: Final summary
 	return c.showSummary(opts, targetPath)
 }
 
@@ -714,36 +703,6 @@ func isGoTemplate(templatePath string) bool {
 	return templatePath == "go" || strings.HasSuffix(templatePath, "grove-project-tmpl-go")
 }
 
-func (c *Creator) stageEcosystemChanges(opts CreateOptions, targetPath string) error {
-	c.logger.Info("Staging ecosystem changes...")
-
-	// Always stage Makefile
-	filesToStage := []string{
-		"Makefile",
-	}
-
-	// Only stage go.work if this is a Go project
-	projectType := c.detectProjectType(targetPath)
-	if projectType == "go" {
-		filesToStage = append(filesToStage, "go.work")
-	}
-
-	if !opts.SkipGitHub {
-		// Only stage submodule-related files if GitHub repo was created
-		filesToStage = append(filesToStage, ".gitmodules", opts.Name)
-	}
-
-	args := append([]string{"add"}, filesToStage...)
-	cmd := exec.Command("git", args...)
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to stage changes: %w", err)
-	}
-
-	c.logger.Info("✅ Changes staged successfully")
-	return nil
-}
-
 func (c *Creator) showSummary(opts CreateOptions, targetPath string) error {
 	fmt.Println("\n✅ All operations completed successfully!")
 	fmt.Println("\nSUMMARY")
@@ -764,26 +723,13 @@ func (c *Creator) showSummary(opts CreateOptions, targetPath string) error {
 	fmt.Println("----------")
 
 	if opts.Ecosystem {
-		if opts.StageChanges {
-			fmt.Println("1. Review the staged changes in the ecosystem repo:")
-			fmt.Println("   > git status")
-			fmt.Println("   (You should see a modified Makefile, go.work, .gitmodules, and a new submodule entry)")
-			fmt.Println("")
-			fmt.Printf("2. Commit the integration to the main branch:\n")
-			fmt.Printf("   > git commit -m \"feat: add %s to the ecosystem\"\n", opts.Name)
-			fmt.Println("")
-			fmt.Printf("3. Start developing your new tool:\n")
-			fmt.Printf("   > cd %s\n", opts.Name)
-			fmt.Printf("   > grove install %s\n", opts.Alias)
-		} else {
-			fmt.Println("1. Stage and commit the ecosystem changes:")
-			fmt.Println("   > git add Makefile go.work .gitmodules " + opts.Name)
-			fmt.Printf("   > git commit -m \"feat: add %s to the ecosystem\"\n", opts.Name)
-			fmt.Println("")
-			fmt.Printf("2. Start developing your new tool:\n")
-			fmt.Printf("   > cd %s\n", opts.Name)
-			fmt.Printf("   > grove install %s\n", opts.Alias)
-		}
+		fmt.Println("1. Stage and commit the ecosystem changes:")
+		fmt.Println("   > git add Makefile go.work .gitmodules " + opts.Name)
+		fmt.Printf("   > git commit -m \"feat: add %s to the ecosystem\"\n", opts.Name)
+		fmt.Println("")
+		fmt.Printf("2. Start developing your new tool:\n")
+		fmt.Printf("   > cd %s\n", opts.Name)
+		fmt.Printf("   > grove install %s\n", opts.Alias)
 	} else {
 		// Standalone mode
 		fmt.Printf("1. Start developing your new tool:\n")
@@ -870,10 +816,6 @@ func (c *Creator) dryRun(opts CreateOptions) error {
 		c.logger.Infof("  Update Makefile: Add %s to PACKAGES", opts.Name)
 		c.logger.Infof("  Update Makefile: Add %s to BINARIES", opts.Alias)
 		c.logger.Infof("  Update go.work: Add use (./%s)", opts.Name)
-
-		if opts.StageChanges {
-			c.logger.Infof("  git add Makefile go.work .gitmodules %s", opts.Name)
-		}
 	} else {
 		c.logger.Info("\nEcosystem integration: SKIPPED (use --ecosystem flag to enable)")
 	}

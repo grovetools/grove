@@ -5,8 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	
-	"github.com/mattsolo1/grove-tend/pkg/command"
+
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
 )
@@ -24,55 +23,41 @@ func AddRepoDryRunScenario() *harness.Scenario {
 				Func: func(ctx *harness.Context) error {
 					// Create a minimal mock ecosystem
 					ecosystemDir := ctx.NewDir("ecosystem")
-					
+
 					// Create minimal files
 					fs.WriteString(filepath.Join(ecosystemDir, "grove.yml"), "name: grove-ecosystem\nworkspaces:\n  - \"grove-*\"\n")
 					fs.WriteString(filepath.Join(ecosystemDir, "go.work"), "go 1.24.4\n")
-					fs.WriteString(filepath.Join(ecosystemDir, "Makefile"), 
+					fs.WriteString(filepath.Join(ecosystemDir, "Makefile"),
 						"PACKAGES = grove-core\n# GROVE-META:ADD-REPO:PACKAGES\n\nBINARIES = grove\n# GROVE-META:ADD-REPO:BINARIES\n")
-					
-					// Change to ecosystem directory
-					originalDir, _ := os.Getwd()
-					defer os.Chdir(originalDir)
-					os.Chdir(ecosystemDir)
-					
-					// Set required env
-					os.Setenv("GROVE_PAT", "test-pat")
-					
-					// Set up mocks directory
-					mockDir := ctx.NewDir("mocks")
-					
-					// Create gh mock
-					ghMockPath := filepath.Join(mockDir, "gh")
-					fs.WriteString(ghMockPath, ghMockScript)
-					os.Chmod(ghMockPath, 0755)
-					
-					// Set PATH to use our mocks
-					os.Setenv("PATH", mockDir+":"+os.Getenv("PATH"))
-					
-					// Get grove binary path
-					groveBinary := ctx.GroveBinary
-					
-					cmd := command.New(groveBinary, "add-repo", "grove-test-dryrun",
-						"--alias=gtdr",
-						"--dry-run")
-					
+
+					// Note: GROVE_PAT is not required for local-only mode (default)
+
+					// Test dry-run with default alias (should use repo name)
+					// Use ctx.Bin() to use the project's binary from ./bin
+					cmd := ctx.Bin("add-repo", "grove-test-dryrun", "--dry-run")
+					cmd.Dir(ecosystemDir)
+
 					result := cmd.Run()
 					if result.ExitCode != 0 {
 						return fmt.Errorf("dry-run failed with exit code %d: %s\nStdout: %s", result.ExitCode, result.Stderr, result.Stdout)
 					}
-					
+
 					// Verify output - check both stdout and stderr as grove uses logging
 					combinedOutput := result.Stdout + result.Stderr
 					if !strings.Contains(combinedOutput, "DRY RUN MODE") {
 						return fmt.Errorf("expected DRY RUN MODE in output, got:\nStdout: %s\nStderr: %s", result.Stdout, result.Stderr)
 					}
-					
+
+					// Verify alias defaults to repo name in dry-run output
+					if !strings.Contains(combinedOutput, "Binary alias: grove-test-dryrun") {
+						return fmt.Errorf("expected alias to default to repo name 'grove-test-dryrun', got:\nStdout: %s\nStderr: %s", result.Stdout, result.Stderr)
+					}
+
 					// Verify no files were created
 					if _, err := os.Stat(filepath.Join(ecosystemDir, "grove-test-dryrun")); err == nil {
 						return fmt.Errorf("directory created in dry-run mode")
 					}
-					
+
 					return nil
 				},
 			},
@@ -141,10 +126,11 @@ func AddRepoWithGitHubScenario() *harness.Scenario {
 					ghLogFile := filepath.Join(ecosystemDir, "gh-calls.log")
 					os.Setenv("GH_MOCK_LOG", ghLogFile)
 					
-					groveBinary := ctx.GroveBinary
-					cmd := command.New(groveBinary, "add-repo", "grove-test-github",
+					// Use ctx.Bin() to use the project's binary from ./bin
+					cmd := ctx.Bin("add-repo", "grove-test-github",
 						"--alias=gtg",
-						"--description=Test repository with GitHub")
+						"--description=Test repository with GitHub",
+						"--github")
 					
 					result := cmd.Run()
 					if result.ExitCode != 0 {
@@ -190,87 +176,100 @@ func AddRepoWithGitHubScenario() *harness.Scenario {
 	}
 }
 
-// AddRepoSkipGitHubScenario tests local-only repository creation  
-func AddRepoSkipGitHubScenario() *harness.Scenario {
+// AddRepoLocalOnlyScenario tests local-only repository creation (now the default)
+func AddRepoLocalOnlyScenario() *harness.Scenario {
 	return &harness.Scenario{
-		Name:        "add-repo-skip-github",
-		Description: "Tests creating repository locally without GitHub integration",
+		Name:        "add-repo-local-only",
+		Description: "Tests creating repository locally without GitHub integration (default behavior)",
 		Tags:        []string{"add-repo", "local"},
 		Steps: []harness.Step{
 			{
-				Name:        "Create repository with --skip-github",
+				Name:        "Create repository in local-only mode (default)",
 				Description: "Tests local repository creation only",
 				Func: func(ctx *harness.Context) error {
 					ecosystemDir := ctx.NewDir("ecosystem")
-					
+
 					// Minimal setup
 					fs.WriteString(filepath.Join(ecosystemDir, "grove.yml"), "name: grove-ecosystem\nworkspaces:\n  - \"grove-*\"\n")
 					fs.WriteString(filepath.Join(ecosystemDir, "go.work"), "go 1.24.4\n")
-					fs.WriteString(filepath.Join(ecosystemDir, "Makefile"), 
+					fs.WriteString(filepath.Join(ecosystemDir, "Makefile"),
 						"PACKAGES = grove-core\n# GROVE-META:ADD-REPO:PACKAGES\n\nBINARIES = grove\n# GROVE-META:ADD-REPO:BINARIES\n")
-					
+
 					// Initialize as a git repository
-					cmd := command.New("git", "init").Dir(ecosystemDir)
+					cmd := ctx.Command("git", "init")
+					cmd.Dir(ecosystemDir)
 					if result := cmd.Run(); result.Error != nil {
 						return fmt.Errorf("failed to init git: %w", result.Error)
 					}
-					
+
 					// Add and commit initial files
-					cmd = command.New("git", "add", ".").Dir(ecosystemDir)
+					cmd = ctx.Command("git", "add", ".")
+					cmd.Dir(ecosystemDir)
 					if result := cmd.Run(); result.Error != nil {
 						return fmt.Errorf("failed to add files: %w", result.Error)
 					}
-					
-					cmd = command.New("git", "config", "user.email", "test@example.com").Dir(ecosystemDir)
+
+					cmd = ctx.Command("git", "config", "user.email", "test@example.com")
+					cmd.Dir(ecosystemDir)
 					if result := cmd.Run(); result.Error != nil {
 						return fmt.Errorf("failed to configure git email: %w", result.Error)
 					}
-					
-					cmd = command.New("git", "config", "user.name", "Test User").Dir(ecosystemDir)
+
+					cmd = ctx.Command("git", "config", "user.name", "Test User")
+					cmd.Dir(ecosystemDir)
 					if result := cmd.Run(); result.Error != nil {
 						return fmt.Errorf("failed to configure git name: %w", result.Error)
 					}
-					
-					cmd = command.New("git", "commit", "-m", "Initial commit").Dir(ecosystemDir)
+
+					cmd = ctx.Command("git", "commit", "-m", "Initial commit")
+					cmd.Dir(ecosystemDir)
 					if result := cmd.Run(); result.Error != nil {
 						return fmt.Errorf("failed to commit: %w", result.Error)
 					}
-					
-					// Change to ecosystem directory
-					originalDir, _ := os.Getwd()
-					defer os.Chdir(originalDir)
-					os.Chdir(ecosystemDir)
-					
-					os.Setenv("GROVE_PAT", "test-pat")
-					
+
+					// Note: GROVE_PAT is not required for local-only mode (default)
+
 					// Add mock make to PATH for local verification
 					mockDir := ctx.NewDir("mocks")
-					
+
 					// Create a simple mock make that succeeds
 					mockMake := filepath.Join(mockDir, "make")
 					fs.WriteString(mockMake, "#!/bin/bash\necho 'make $1: SUCCESS'\nexit 0\n")
 					os.Chmod(mockMake, 0755)
-					
+
 					os.Setenv("PATH", mockDir+":"+os.Getenv("PATH"))
-					
-					groveBinary := ctx.GroveBinary
-					groveCmd := command.New(groveBinary, "add-repo", "grove-test-local",
-						"--alias=gtl",
-						"--ecosystem", 
-						"--skip-github")
-					
+
+					// Use ctx.Bin() to use the project's binary from ./bin
+					// No --github flag = local-only mode (default)
+					// Also testing default alias (should be repo name)
+					groveCmd := ctx.Bin("add-repo", "grove-test-local",
+						"--ecosystem")
+					groveCmd.Dir(ecosystemDir)
+
 					result := groveCmd.Run()
 					if result.ExitCode != 0 {
 						return fmt.Errorf("command failed: %s", result.Stderr)
 					}
-					
+
 					// Verify local files were created
 					if _, err := os.Stat(filepath.Join(ecosystemDir, "grove-test-local")); os.IsNotExist(err) {
 						return fmt.Errorf("directory not created")
 					}
-					
+
 					if _, err := os.Stat(filepath.Join(ecosystemDir, "grove-test-local", "go.mod")); os.IsNotExist(err) {
 						return fmt.Errorf("go.mod not created")
+					}
+
+					// Verify grove.yml has correct alias (should be repo name by default)
+					groveYmlPath := filepath.Join(ecosystemDir, "grove-test-local", "grove.yml")
+					groveYmlContent, err := os.ReadFile(groveYmlPath)
+					if err != nil {
+						return fmt.Errorf("failed to read grove.yml: %w", err)
+					}
+					// The alias should be the repo name when not specified
+					expectedAliasInYml := "name: grove-test-local"
+					if !strings.Contains(string(groveYmlContent), expectedAliasInYml) {
+						return fmt.Errorf("grove.yml does not contain expected alias. Expected '%s' in:\n%s", expectedAliasInYml, string(groveYmlContent))
 					}
 
 					// Verify ecosystem integration files
@@ -296,10 +295,16 @@ func AddRepoSkipGitHubScenario() *harness.Scenario {
 					if !strings.Contains(string(gitModulesContent), expectedSubmoduleEntry) || !strings.Contains(string(gitModulesContent), expectedSubmoduleURL) {
 						return fmt.Errorf(".gitmodules was not updated correctly. Expected submodule entry for 'grove-test-local' in:\n%s", string(gitModulesContent))
 					}
-					
+
 					return nil
 				},
 			},
 		},
 	}
+}
+
+// AddRepoSkipGitHubScenario is deprecated but kept for backwards compatibility
+// Use AddRepoLocalOnlyScenario instead
+func AddRepoSkipGitHubScenario() *harness.Scenario {
+	return AddRepoLocalOnlyScenario()
 }

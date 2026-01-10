@@ -15,12 +15,11 @@ import (
 var (
 	addRepoAlias        string
 	addRepoDescription  string
-	addRepoSkipGitHub   bool
+	addRepoPushToGitHub bool
 	addRepoDryRun       bool
-	addRepoStageChanges bool
 	addRepoTemplate     string
 	addRepoEcosystem    bool
-	addRepoPublic       bool
+	addRepoVisibility   string
 )
 
 func init() {
@@ -31,37 +30,48 @@ func newAddRepoCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add-repo <repo-name>",
 		Short: "Create a new Grove repository with standard structure",
-		Long: `Create a new Grove repository with idiomatic structure and optional GitHub integration.
+		Long: `Create a new Grove repository with standard structure.
 
-By default, this creates a standalone repository in the current directory. Use --ecosystem to add it
-to an existing Grove ecosystem (monorepo).
+By default, this creates a local-only repository in the current directory.
+Use --github to create a GitHub repository and push the code.
+Use --ecosystem to add it to an existing Grove ecosystem (monorepo).
+
+The binary alias defaults to the repository name if not specified.
 
 Examples:
-  # Create standalone repository:
-  grove add-repo analyzer --alias az --description "Code analysis tool"
-  
-  # Create and add to ecosystem:
-  grove add-repo fizzbuzz --alias fizz --description "Fizzbuzz implementation" --ecosystem
-  
+  # Create a local-only standalone repository:
+  grove add-repo my-tool --description "My new tool"
+
+  # Create and push to GitHub (private by default):
+  grove add-repo my-tool --description "My new tool" --github
+
+  # Create a public GitHub repository:
+  grove add-repo my-tool --github --repo-visibility=public
+
+  # Add to an existing ecosystem:
+  grove add-repo my-tool --description "My new tool" --ecosystem
+
+  # Specify a custom alias:
+  grove add-repo grove-analyzer --alias az --description "Code analysis tool"
+
   # Use different templates:
-  grove add-repo myrust --template maturin --alias mr
-  grove add-repo myapp --template react-ts --alias ma
-  
+  grove add-repo myrust --template maturin
+  grove add-repo myapp --template react-ts
+
   # Use GitHub repository as template:
-  grove add-repo mytool --template mattsolo1/grove-project-tmpl-rust --alias mt
+  grove add-repo mytool --template mattsolo1/grove-project-tmpl-rust
   grove add-repo mylib --template https://github.com/user/template-repo.git`,
 		Args: cobra.ExactArgs(1),
 		RunE: runAddRepo,
 	}
 
-	cmd.Flags().StringVarP(&addRepoAlias, "alias", "a", "", "Binary alias (e.g., 'ct' for grove-context)")
+	cmd.Flags().StringVarP(&addRepoAlias, "alias", "a", "", "Binary alias (defaults to repo name)")
 	cmd.Flags().StringVarP(&addRepoDescription, "description", "d", "", "Repository description")
-	cmd.Flags().BoolVar(&addRepoSkipGitHub, "skip-github", false, "Skip GitHub repository creation")
+	cmd.Flags().BoolVar(&addRepoPushToGitHub, "github", false, "Create GitHub repository and push code")
 	cmd.Flags().BoolVar(&addRepoDryRun, "dry-run", false, "Preview operations without executing")
-	cmd.Flags().BoolVar(&addRepoStageChanges, "stage-ecosystem", false, "Stage ecosystem changes in git")
 	cmd.Flags().StringVar(&addRepoTemplate, "template", "go", "Template to use (go, maturin, react-ts, path/URL, or GitHub repo like 'owner/repo')")
 	cmd.Flags().BoolVar(&addRepoEcosystem, "ecosystem", false, "Add repository to an existing Grove ecosystem as a submodule")
-	cmd.Flags().BoolVar(&addRepoPublic, "public", false, "Create a public repository and skip private configuration")
+	cmd.Flags().StringVar(&addRepoVisibility, "repo-visibility", "private", "GitHub repository visibility: public or private (only with --github)")
 
 	return cmd
 }
@@ -102,20 +112,20 @@ func runAddRepo(cmd *cobra.Command, args []string) error {
 
 	repoName := args[0]
 
-	// Derive alias if not provided
+	// Validate --repo-visibility value
+	if addRepoVisibility != "public" && addRepoVisibility != "private" {
+		return fmt.Errorf("--repo-visibility must be 'public' or 'private', got '%s'", addRepoVisibility)
+	}
+
+	// Warn if --repo-visibility is set but --github is not
+	visibilityFlagChanged := cmd.Flags().Changed("repo-visibility")
+	if visibilityFlagChanged && !addRepoPushToGitHub {
+		logger.Warn("--repo-visibility is ignored without --github")
+	}
+
+	// Derive alias if not provided - default to repo name
 	if addRepoAlias == "" {
-		// Extract alias from repo name (e.g., grove-context -> ct)
-		parts := strings.Split(repoName, "-")
-		if len(parts) >= 2 {
-			// Take first letter of each part after "grove"
-			var alias strings.Builder
-			for i := 1; i < len(parts); i++ {
-				if len(parts[i]) > 0 {
-					alias.WriteByte(parts[i][0])
-				}
-			}
-			addRepoAlias = alias.String()
-		}
+		addRepoAlias = repoName
 	}
 
 	// Set default description if not provided
@@ -132,12 +142,11 @@ func runAddRepo(cmd *cobra.Command, args []string) error {
 		Name:         repoName,
 		Alias:        addRepoAlias,
 		Description:  addRepoDescription,
-		SkipGitHub:   addRepoSkipGitHub,
+		SkipGitHub:   !addRepoPushToGitHub, // Invert: --github flag enables GitHub, default is local-only
 		DryRun:       addRepoDryRun,
-		StageChanges: addRepoStageChanges,
 		TemplatePath: resolvedTemplate,
 		Ecosystem:    addRepoEcosystem,
-		Public:       addRepoPublic,
+		Public:       addRepoVisibility == "public",
 	}
 
 	logger.Infof("Creating new Grove repository: %s (alias: %s)", repoName, addRepoAlias)
