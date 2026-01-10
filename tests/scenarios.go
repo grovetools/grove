@@ -56,6 +56,8 @@ func AllScenarios() []*harness.Scenario {
 		SetupWizardTUIFullWorkflowScenario(),
 		SetupWizardTUIDeselectAllScenario(),
 		SetupWizardTUIQuitScenario(),
+		// Setup Wizard scenarios - Integration tests (explicit only, uses real grove binaries)
+		SetupWizardRealBinariesScenario(),
 
 		// Ecosystem Init discovery scenarios
 		EcosystemInitAlreadyDiscoverableScenario(),

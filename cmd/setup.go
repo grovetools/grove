@@ -755,10 +755,15 @@ func (m *setupModel) View() string {
 
 	var content strings.Builder
 
+	// Main container with consistent left padding
+	leftPadding := 2
+
 	// Header
 	headerStyle := theme.DefaultTheme.Header.Copy().
 		Width(m.width).
-		Padding(1, 2)
+		PaddingLeft(leftPadding).
+		PaddingTop(1).
+		PaddingBottom(1)
 
 	switch m.step {
 	case stepSelectComponents:
@@ -805,7 +810,7 @@ func (m *setupModel) View() string {
 	// Status bar
 	statusStyle := theme.DefaultTheme.Muted.Copy().
 		Width(m.width).
-		Padding(0, 2)
+		PaddingLeft(leftPadding)
 
 	var statusText string
 	if m.service.IsDryRun() {
@@ -828,11 +833,14 @@ func (m *setupModel) View() string {
 }
 
 func (m *setupModel) viewComponentSelection() string {
-	return m.componentList.View()
+	// Add left padding to component list
+	padStyle := lipgloss.NewStyle().PaddingLeft(2)
+	return padStyle.Render(m.componentList.View())
 }
 
 func (m *setupModel) viewEcosystemStep() string {
 	var content strings.Builder
+	padStyle := lipgloss.NewStyle().PaddingLeft(2)
 
 	// Explanation box
 	explainStyle := lipgloss.NewStyle().
@@ -850,7 +858,7 @@ across several possibly related git repositories.`
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(theme.DefaultTheme.Muted.GetForeground()).
 		Padding(1, 2).
-		Width(m.width - 4)
+		Width(m.width - 8)
 
 	var boxContent strings.Builder
 	if m.currentInput == inputPath {
@@ -866,11 +874,19 @@ across several possibly related git repositories.`
 	}
 
 	content.WriteString(boxStyle.Render(boxContent.String()))
-	return content.String()
+	content.WriteString("\n\n")
+
+	// Show gmux preview
+	content.WriteString(theme.DefaultTheme.Muted.Render("Preview: Your ecosystem in gmux"))
+	content.WriteString("\n")
+	content.WriteString(renderGmuxView("", false, m.width))
+
+	return padStyle.Render(content.String())
 }
 
 func (m *setupModel) viewFirstProjectStep() string {
 	var content strings.Builder
+	padStyle := lipgloss.NewStyle().PaddingLeft(2)
 
 	// Explanation
 	explainStyle := lipgloss.NewStyle().
@@ -887,7 +903,7 @@ Leave blank and press Enter to skip this step.`
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(theme.DefaultTheme.Muted.GetForeground()).
 		Padding(1, 2).
-		Width(m.width - 4)
+		Width(m.width - 8)
 
 	var boxContent strings.Builder
 	boxContent.WriteString("What should your first project be called?\n\n")
@@ -900,64 +916,30 @@ Leave blank and press Enter to skip this step.`
 	boxContent.WriteString(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Will be created at: %s", projectPath)))
 
 	content.WriteString(boxStyle.Render(boxContent.String()))
-	return content.String()
+	content.WriteString("\n\n")
+
+	// Show gmux preview with the new project
+	projectName := m.textInput.Value()
+	if projectName != "" {
+		content.WriteString(theme.DefaultTheme.Muted.Render("Preview: Your new project in the ecosystem"))
+		content.WriteString("\n")
+		content.WriteString(renderGmuxView(projectName, true, m.width))
+	}
+
+	return padStyle.Render(content.String())
 }
 
 func (m *setupModel) viewNotebookStep() string {
 	var content strings.Builder
+	padStyle := lipgloss.NewStyle().PaddingLeft(2)
 
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(theme.DefaultTheme.Muted.GetForeground()).
-		Padding(1, 2).
-		Width(m.width - 4)
-
-	content.WriteString("Enter the path for your notebook directory:\n\n")
-	content.WriteString(m.textInput.View())
-	content.WriteString("\n\n")
-	content.WriteString(theme.DefaultTheme.Muted.Render("This directory will store your notes and plans."))
-
-	return boxStyle.Render(content.String())
-}
-
-func (m *setupModel) viewGeminiKeyStep() string {
-	var content strings.Builder
-
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(theme.DefaultTheme.Muted.GetForeground()).
-		Padding(1, 2).
-		Width(m.width - 4)
-
-	if m.currentInput == inputMethod {
-		content.WriteString("How would you like to provide your Gemini API key?\n\n")
-		content.WriteString(m.methodList.View())
-	} else {
-		if m.geminiMethod == geminiMethodCommand {
-			content.WriteString("Enter the command to retrieve your API key:\n\n")
-			content.WriteString(m.textInput.View())
-			content.WriteString("\n\n")
-			content.WriteString(theme.DefaultTheme.Muted.Render("Example: op read 'op://Private/Gemini API Key/credential' --no-newline"))
-		} else {
-			content.WriteString("Enter your Gemini API key:\n\n")
-			content.WriteString(m.textInput.View())
-			content.WriteString("\n\n")
-			content.WriteString(theme.DefaultTheme.Muted.Render("The key will be stored in your global grove config."))
-		}
-	}
-
-	return boxStyle.Render(content.String())
-}
-
-func (m *setupModel) viewTmuxBindingsStep() string {
-	var content strings.Builder
-
+	// Explanation
 	explainStyle := lipgloss.NewStyle().
 		Foreground(theme.DefaultTheme.Muted.GetForeground()).
 		MarginBottom(1)
 
-	explanation := `This will add Grove popup bindings to your tmux config directory.
-You can source or incorporate them into your config as you see fit.`
+	explanation := `Notebooks store your development notes, plans, and AI chat histories.
+Each workspace gets its own section, keeping project context organized.`
 
 	content.WriteString(explainStyle.Render(explanation))
 	content.WriteString("\n\n")
@@ -966,7 +948,93 @@ You can source or incorporate them into your config as you see fit.`
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(theme.DefaultTheme.Muted.GetForeground()).
 		Padding(1, 2).
-		Width(m.width - 4)
+		Width(m.width - 8)
+
+	var boxContent strings.Builder
+	boxContent.WriteString("Enter the path for your notebook directory:\n\n")
+	boxContent.WriteString(m.textInput.View())
+	boxContent.WriteString("\n\n")
+	boxContent.WriteString(theme.DefaultTheme.Muted.Render("This directory will store your notes and plans."))
+
+	content.WriteString(boxStyle.Render(boxContent.String()))
+	content.WriteString("\n\n")
+
+	// Show nb preview and note creation example
+	content.WriteString(theme.DefaultTheme.Muted.Render("Preview: The nb notes interface"))
+	content.WriteString("\n")
+	content.WriteString(renderNbView(m.width))
+	content.WriteString("\n\n")
+	content.WriteString(renderNoteCreationExample(m.textInput.Value(), m.width))
+
+	return padStyle.Render(content.String())
+}
+
+func (m *setupModel) viewGeminiKeyStep() string {
+	var content strings.Builder
+	padStyle := lipgloss.NewStyle().PaddingLeft(2)
+
+	// Explanation
+	explainStyle := lipgloss.NewStyle().
+		Foreground(theme.DefaultTheme.Muted.GetForeground()).
+		MarginBottom(1)
+
+	explanation := `A Gemini API key enables AI-powered features in Grove:
+  - grove flow: Run LLM jobs for code analysis and generation
+  - grove llm request: Direct LLM queries from the command line
+  - AI-assisted changelog generation during releases
+
+This step is optional. You can skip it and configure the key later.`
+
+	content.WriteString(explainStyle.Render(explanation))
+	content.WriteString("\n\n")
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.DefaultTheme.Muted.GetForeground()).
+		Padding(1, 2).
+		Width(m.width - 8)
+
+	var boxContent strings.Builder
+	if m.currentInput == inputMethod {
+		boxContent.WriteString("How would you like to provide your Gemini API key?\n\n")
+		boxContent.WriteString(m.methodList.View())
+	} else {
+		if m.geminiMethod == geminiMethodCommand {
+			boxContent.WriteString("Enter the command to retrieve your API key:\n\n")
+			boxContent.WriteString(m.textInput.View())
+			boxContent.WriteString("\n\n")
+			boxContent.WriteString(theme.DefaultTheme.Muted.Render("Example: op read 'op://Private/Gemini API Key/credential' --no-newline"))
+		} else {
+			boxContent.WriteString("Enter your Gemini API key:\n\n")
+			boxContent.WriteString(m.textInput.View())
+			boxContent.WriteString("\n\n")
+			boxContent.WriteString(theme.DefaultTheme.Muted.Render("The key will be stored in your global grove config."))
+		}
+	}
+
+	content.WriteString(boxStyle.Render(boxContent.String()))
+	return padStyle.Render(content.String())
+}
+
+func (m *setupModel) viewTmuxBindingsStep() string {
+	var content strings.Builder
+	padStyle := lipgloss.NewStyle().PaddingLeft(2)
+
+	explainStyle := lipgloss.NewStyle().
+		Foreground(theme.DefaultTheme.Muted.GetForeground()).
+		MarginBottom(1)
+
+	explanation := `This will add Grove popup bindings to your tmux config directory.
+These bindings give you quick keyboard access to Grove tools from any tmux session.`
+
+	content.WriteString(explainStyle.Render(explanation))
+	content.WriteString("\n\n")
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.DefaultTheme.Muted.GetForeground()).
+		Padding(1, 2).
+		Width(m.width - 8)
 
 	var boxContent strings.Builder
 	boxContent.WriteString("Files to be created:\n\n")
@@ -976,11 +1044,17 @@ You can source or incorporate them into your config as you see fit.`
 	boxContent.WriteString("Press Enter to continue or esc to go back.")
 
 	content.WriteString(boxStyle.Render(boxContent.String()))
-	return content.String()
+	content.WriteString("\n\n")
+
+	// Show the keybindings that will be added
+	content.WriteString(renderTmuxConfig(m.width))
+
+	return padStyle.Render(content.String())
 }
 
 func (m *setupModel) viewNeovimPluginStep() string {
 	var content strings.Builder
+	padStyle := lipgloss.NewStyle().PaddingLeft(2)
 
 	explainStyle := lipgloss.NewStyle().
 		Foreground(theme.DefaultTheme.Muted.GetForeground()).
@@ -996,7 +1070,7 @@ You can require or incorporate it into your plugin setup as you see fit.`
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(theme.DefaultTheme.Muted.GetForeground()).
 		Padding(1, 2).
-		Width(m.width - 4)
+		Width(m.width - 8)
 
 	var boxContent strings.Builder
 	boxContent.WriteString("File to be created:\n\n")
@@ -1005,17 +1079,18 @@ You can require or incorporate it into your plugin setup as you see fit.`
 	boxContent.WriteString("Press Enter to continue or esc to go back.")
 
 	content.WriteString(boxStyle.Render(boxContent.String()))
-	return content.String()
+	return padStyle.Render(content.String())
 }
 
 func (m *setupModel) viewSummary() string {
 	var content strings.Builder
+	padStyle := lipgloss.NewStyle().PaddingLeft(2)
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(theme.DefaultTheme.Success.GetForeground()).
 		Padding(1, 2).
-		Width(m.width - 4)
+		Width(m.width - 8)
 
 	if m.service.IsDryRun() {
 		content.WriteString(theme.DefaultTheme.Warning.Render("DRY RUN - No changes were made\n\n"))
@@ -1047,7 +1122,7 @@ func (m *setupModel) viewSummary() string {
 	content.WriteString(theme.DefaultTheme.Muted.Render("  2. Run 'grove list' to see available tools\n"))
 	content.WriteString(theme.DefaultTheme.Muted.Render("  3. Start building with 'grove build' in your ecosystem\n"))
 
-	return boxStyle.Render(content.String())
+	return padStyle.Render(boxStyle.Render(content.String()))
 }
 
 func newSetupCmd() *cobra.Command {

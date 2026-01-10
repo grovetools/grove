@@ -440,7 +440,7 @@ func SetupWizardTUINavigationScenario() *harness.Scenario {
 				}
 
 				// Should be at Notebook step now
-				if err := session.WaitForText("Enter the path for your notebook directory", 5*time.Second); err != nil {
+				if err := session.WaitForText("nb new", 5*time.Second); err != nil {
 					content, _ := session.Capture(tui.WithCleanedOutput())
 					return fmt.Errorf("notebook step not reached: %w\nContent:\n%s", err, content)
 				}
@@ -540,7 +540,7 @@ func SetupWizardTUIFullWorkflowScenario() *harness.Scenario {
 				}
 
 				// Accept default notebook path
-				if err := session.WaitForText("Enter the path for your notebook directory", 5*time.Second); err != nil {
+				if err := session.WaitForText("nb new", 5*time.Second); err != nil {
 					return err
 				}
 				if err := session.Type("Enter"); err != nil {
@@ -661,6 +661,137 @@ func SetupWizardTUIDeselectAllScenario() *harness.Scenario {
 		},
 		true,  // localOnly
 		false, // explicitOnly
+	)
+}
+
+// SetupWizardRealBinariesScenario tests that after wizard completes, real grove binaries work with the configuration.
+// This test uses real grove binaries from PATH and is marked explicitOnly.
+func SetupWizardRealBinariesScenario() *harness.Scenario {
+	return harness.NewScenarioWithOptions(
+		"setup-wizard-real-binaries",
+		"Verifies real grove binaries integrate with wizard-created configuration",
+		[]string{"setup", "tui", "integration", "real-binaries"},
+		[]harness.Step{
+			harness.NewStep("Launch TUI and complete wizard", func(ctx *harness.Context) error {
+				groveBinary, err := findGroveBinary()
+				if err != nil {
+					return fmt.Errorf("failed to find grove binary: %w", err)
+				}
+				session, err := ctx.StartTUI(groveBinary, []string{"setup"})
+				if err != nil {
+					return fmt.Errorf("failed to start TUI: %w", err)
+				}
+				ctx.Set("tui_session", session)
+				return session.WaitForText("Select Components to Configure", 10*time.Second)
+			}),
+			harness.NewStep("Select only notebook component", func(ctx *harness.Context) error {
+				session := ctx.Get("tui_session").(*tui.Session)
+
+				// Deselect ecosystem (first item, already focused)
+				if err := session.Type(" "); err != nil {
+					return err
+				}
+				// Move to notebook - it should already be selected
+				if err := session.Type("j"); err != nil {
+					return err
+				}
+				// Move to gemini and deselect
+				if err := session.Type("j"); err != nil {
+					return err
+				}
+				if err := session.Type(" "); err != nil {
+					return err
+				}
+
+				return nil
+			}),
+			harness.NewStep("Complete notebook setup with defaults", func(ctx *harness.Context) error {
+				session := ctx.Get("tui_session").(*tui.Session)
+
+				// Confirm component selection
+				if err := session.Type("Enter"); err != nil {
+					return err
+				}
+
+				// Should be at notebook step - accept default path
+				if err := session.WaitForText("nb new", 5*time.Second); err != nil {
+					content, _ := session.Capture(tui.WithCleanedOutput())
+					return fmt.Errorf("notebook step not reached: %w\nContent:\n%s", err, content)
+				}
+				if err := session.Type("Enter"); err != nil {
+					return err
+				}
+
+				// Wait for summary
+				_, err := session.WaitForAnyText([]string{
+					"Setup Complete",
+					"Setup completed",
+					"Actions performed",
+				}, 10*time.Second)
+				if err != nil {
+					content, _ := session.Capture(tui.WithCleanedOutput())
+					return fmt.Errorf("summary screen not reached: %w\nContent:\n%s", err, content)
+				}
+
+				// Exit wizard
+				if err := session.Type("Enter"); err != nil {
+					return err
+				}
+				time.Sleep(500 * time.Millisecond)
+				return nil
+			}),
+			harness.NewStep("Verify notebook directory and config created", func(ctx *harness.Context) error {
+				notebookPath := filepath.Join(ctx.HomeDir(), "notebooks")
+				configPath := filepath.Join(ctx.ConfigDir(), "grove", "grove.yml")
+
+				return ctx.Verify(func(v *verify.Collector) {
+					v.Equal("notebook directory created", nil, fs.AssertExists(notebookPath))
+					v.Equal("global config created", nil, fs.AssertExists(configPath))
+					v.Equal("config contains notebooks section", nil, fs.AssertContains(configPath, "notebooks:"))
+				})
+			}),
+			harness.NewStep("Run nb new to create a note", func(ctx *harness.Context) error {
+				// Use the real nb binary from PATH - use --no-edit to avoid opening an editor
+				cmd := ctx.Command("nb", "new", "--no-edit", "My first test note")
+				result := cmd.Run()
+				ctx.ShowCommandOutput("nb new --no-edit 'My first test note'", result.Stdout, result.Stderr)
+				if err := ctx.Check("nb new succeeds", result.AssertSuccess()); err != nil {
+					return fmt.Errorf("nb new failed: %w\nStdout: %s\nStderr: %s", err, result.Stdout, result.Stderr)
+				}
+				return nil
+			}),
+		harness.NewStep("Verify note was created", func(ctx *harness.Context) error {
+			// nb creates notes under .grove/notebooks/nb/workspaces/<workspace>/inbox/
+			notebookPath := filepath.Join(ctx.HomeDir(), ".grove", "notebooks", "nb")
+
+			// Recursively search for .md files
+			var foundNote bool
+			
+
+			err := filepath.Walk(notebookPath, func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					return nil // skip errors
+				}
+				if !info.IsDir() && strings.HasSuffix(info.Name(), ".md") {
+					foundNote = true
+					_ = path
+					return filepath.SkipAll
+				}
+				return nil
+			})
+			if err != nil {
+				return fmt.Errorf("failed to search for note: %w", err)
+			}
+
+			if !foundNote {
+				return fmt.Errorf("no .md note file found in %s", notebookPath)
+			}
+
+			return nil
+		}),
+		},
+		true, // localOnly - requires tmux
+		true, // explicitOnly - uses real nb binary
 	)
 }
 
