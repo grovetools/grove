@@ -1,6 +1,6 @@
 #!/bin/bash
 # Grove development environment setup
-# Run from grove-ecosystem/grove-meta after cloning with submodules
+# Run from grove-ecosystem or grove-meta after cloning with submodules
 set -e
 
 # Colors
@@ -12,8 +12,16 @@ NC='\033[0m'
 
 error() { echo -e "${RED}error:${NC} $1" >&2; exit 1; }
 
-# Verify we're in grove-meta
-[[ -f "Makefile" && -f "go.mod" ]] || error "run from grove-meta directory"
+# Find grove-meta directory
+if [[ -f "Makefile" && -f "go.mod" ]]; then
+    GROVE_META="."
+elif [[ -d "grove-meta" && -f "grove-meta/go.mod" ]]; then
+    GROVE_META="grove-meta"
+else
+    error "run from grove-ecosystem or grove-meta directory"
+fi
+
+cd "$GROVE_META"
 
 echo -e "${DIM}grove development setup${NC}"
 echo ""
