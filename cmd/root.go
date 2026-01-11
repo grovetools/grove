@@ -39,6 +39,7 @@ Delegation Behavior:
 
 	// Add subcommands
 	rootCmd.AddCommand(newActivateCmd())
+	rootCmd.AddCommand(newBootstrapCmd())
 	rootCmd.AddCommand(newBuildCmd())
 	rootCmd.AddCommand(newChangelogCmd())
 	rootCmd.AddCommand(newConfigCmd())
