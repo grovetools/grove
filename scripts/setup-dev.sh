@@ -12,37 +12,40 @@ NC='\033[0m'
 
 error() { echo -e "${RED}error:${NC} $1" >&2; exit 1; }
 
-# Find grove-meta directory
+# Find directories
 if [[ -f "Makefile" && -f "go.mod" ]]; then
-    GROVE_META="."
+    # In grove-meta
+    GROVE_META="$(pwd)"
+    ECOSYSTEM="$(dirname "$GROVE_META")"
 elif [[ -d "grove-meta" && -f "grove-meta/go.mod" ]]; then
-    GROVE_META="grove-meta"
+    # In ecosystem root
+    ECOSYSTEM="$(pwd)"
+    GROVE_META="$ECOSYSTEM/grove-meta"
 else
     error "run from grove-ecosystem or grove-meta directory"
 fi
-
-cd "$GROVE_META"
 
 echo -e "${DIM}grove development setup${NC}"
 echo ""
 
 # 1. Build grove-meta
 echo -ne "Building grove... "
-make build >/dev/null 2>&1 || error "make build failed"
+(cd "$GROVE_META" && make build >/dev/null 2>&1) || error "make build failed"
 echo "done"
 
 # 2. Bootstrap (config + symlink)
 echo -ne "Bootstrapping... "
-./bin/grove bootstrap >/dev/null 2>&1 || error "bootstrap failed"
+"$GROVE_META/bin/grove" bootstrap >/dev/null 2>&1 || error "bootstrap failed"
 echo "done"
 
-# 3. Build ecosystem
+# 3. Build ecosystem (from ecosystem root so all projects are built)
 echo "Building ecosystem..."
-./bin/grove build || error "ecosystem build failed"
+cd "$ECOSYSTEM"
+"$GROVE_META/bin/grove" build || error "ecosystem build failed"
 
-# 4. Link dev binaries
+# 4. Link dev binaries (from ecosystem root so all binaries are linked)
 echo -ne "Linking binaries... "
-./bin/grove dev cwd >/dev/null 2>&1 || error "dev cwd failed"
+"$GROVE_META/bin/grove" dev cwd >/dev/null 2>&1 || error "dev cwd failed"
 echo "done"
 
 # Summary
