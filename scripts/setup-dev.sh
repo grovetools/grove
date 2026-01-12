@@ -136,7 +136,7 @@ GROVE_IGNORE_PATTERNS=".grove/
 .cx.work
 .claude/"
 
-GLOBAL_GITIGNORE="$(git config --global core.excludesFile 2>/dev/null)"
+GLOBAL_GITIGNORE="$(git config --global core.excludesFile 2>/dev/null || true)"
 
 if [[ -n "$GLOBAL_GITIGNORE" && -f "$GLOBAL_GITIGNORE" ]] && [[ -t 0 ]]; then
     # Check if patterns already present
