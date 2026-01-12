@@ -116,8 +116,10 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Create build jobs
+	// Create build jobs and load configs for dependency resolution
 	var jobs []build.BuildJob
+	configMap := make(map[string]*config.Config)
+
 	for _, wsPath := range workspaces {
 		cfg, err := config.LoadFrom(wsPath)
 		var buildCmd []string
@@ -127,20 +129,44 @@ func runBuild(cmd *cobra.Command, args []string) error {
 			buildCmd = []string{"make", "build"}
 		}
 
+		name := filepath.Base(wsPath)
 		jobs = append(jobs, build.BuildJob{
-			Name:    filepath.Base(wsPath),
+			Name:    name,
 			Path:    wsPath,
 			Command: buildCmd,
 		})
+
+		if err == nil {
+			configMap[name] = cfg
+		}
 	}
+
+	// Sort into build waves based on build_after dependencies
+	waves := sortIntoBuildWaves(jobs, configMap)
+	hasWaves := len(waves) > 1
 
 	// Handle dry-run mode
 	if buildDryRun {
 		if opts.JSONOutput {
 			result := map[string]interface{}{
-				"mode": "dry-run",
-				"projects": jobs,
-				"total": len(jobs),
+				"mode":   "dry-run",
+				"waves":  len(waves),
+				"total":  len(jobs),
+			}
+			if hasWaves {
+				waveData := make([][]string, len(waves))
+				for i, wave := range waves {
+					for _, job := range wave {
+						waveData[i] = append(waveData[i], job.Name)
+					}
+				}
+				result["build_order"] = waveData
+			} else {
+				var names []string
+				for _, job := range jobs {
+					names = append(names, job.Name)
+				}
+				result["projects"] = names
 			}
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
@@ -149,75 +175,117 @@ func runBuild(cmd *cobra.Command, args []string) error {
 
 		buildUlog.Info("Dry run - projects to build").
 			Field("total", len(jobs)).
+			Field("waves", len(waves)).
 			Pretty("Projects that would be built:").
 			Emit()
-		for i, job := range jobs {
-			buildUlog.Info("Build job").
-				Field("index", i+1).
-				Field("name", job.Name).
-				Field("path", job.Path).
-				Pretty(fmt.Sprintf("  %d. %s (%s)", i+1, job.Name, job.Path)).
-				Emit()
+
+		if hasWaves {
+			for i, wave := range waves {
+				buildUlog.Info("Build wave").
+					Field("wave", i+1).
+					Field("count", len(wave)).
+					Pretty(fmt.Sprintf("\nWave %d:", i+1)).
+					Emit()
+				for _, job := range wave {
+					deps := ""
+					if cfg, ok := configMap[job.Name]; ok && len(cfg.BuildAfter) > 0 {
+						deps = fmt.Sprintf(" (after: %s)", strings.Join(cfg.BuildAfter, ", "))
+					}
+					buildUlog.Info("Build job").
+						Field("name", job.Name).
+						Field("path", job.Path).
+						Pretty(fmt.Sprintf("  - %s%s", job.Name, deps)).
+						Emit()
+				}
+			}
+		} else {
+			for i, job := range jobs {
+				buildUlog.Info("Build job").
+					Field("index", i+1).
+					Field("name", job.Name).
+					Field("path", job.Path).
+					Pretty(fmt.Sprintf("  %d. %s (%s)", i+1, job.Name, job.Path)).
+					Emit()
+			}
 		}
 		buildUlog.Info("Dry run summary").
 			Field("total", len(jobs)).
-			Pretty(fmt.Sprintf("\nTotal: %d projects", len(jobs))).
+			Field("waves", len(waves)).
+			Pretty(fmt.Sprintf("\nTotal: %d projects in %d wave(s)", len(jobs), len(waves))).
 			Emit()
 		return nil
 	}
 
 	if opts.JSONOutput {
-		return runJSONBuild(jobs)
+		return runJSONBuildWaves(waves)
 	}
 
-	if buildVerbose {
-		return runVerboseBuild(jobs)
+	if buildVerbose || hasWaves {
+		if hasWaves && !buildVerbose {
+			buildUlog.Info("Using verbose mode for wave-based build").
+				Pretty("Building in waves due to build_after dependencies...").
+				Emit()
+		}
+		return runVerboseBuildWaves(waves)
 	}
 
 	return runTuiBuild(jobs)
 }
 
-func runJSONBuild(jobs []build.BuildJob) error {
-	ctx := context.Background()
-	continueOnError := !buildFailFast
-	resultsChan := build.Run(ctx, jobs, buildJobs, continueOnError)
-
+func runJSONBuildWaves(waves [][]build.BuildJob) error {
 	type BuildResult struct {
 		Name     string `json:"name"`
 		Path     string `json:"path"`
+		Wave     int    `json:"wave"`
 		Success  bool   `json:"success"`
 		Duration string `json:"duration"`
 		Error    string `json:"error,omitempty"`
 		Output   string `json:"output,omitempty"`
 	}
 
-	results := make([]BuildResult, 0, len(jobs))
+	var results []BuildResult
 	var successCount, failCount int
 
-	for result := range resultsChan {
-		br := BuildResult{
-			Name:     result.Job.Name,
-			Path:     result.Job.Path,
-			Duration: result.Duration.Round(time.Millisecond).String(),
-		}
+	for waveIdx, waveJobs := range waves {
+		ctx := context.Background()
+		continueOnError := !buildFailFast
+		resultsChan := build.Run(ctx, waveJobs, buildJobs, continueOnError)
 
-		if result.Err != nil {
-			failCount++
-			br.Success = false
-			br.Error = result.Err.Error()
-			// Always include output for failed builds
-			br.Output = string(result.Output)
-		} else {
-			successCount++
-			br.Success = true
+		for result := range resultsChan {
+			br := BuildResult{
+				Name:     result.Job.Name,
+				Path:     result.Job.Path,
+				Wave:     waveIdx + 1,
+				Duration: result.Duration.Round(time.Millisecond).String(),
+			}
+
+			if result.Err != nil {
+				failCount++
+				br.Success = false
+				br.Error = result.Err.Error()
+				br.Output = string(result.Output)
+
+				if buildFailFast {
+					results = append(results, br)
+					return outputJSONResults(results, successCount, failCount, len(waves))
+				}
+			} else {
+				successCount++
+				br.Success = true
+			}
+			results = append(results, br)
 		}
-		results = append(results, br)
 	}
 
+	return outputJSONResults(results, successCount, failCount, len(waves))
+}
+
+func outputJSONResults[T any](results []T, successCount, failCount, totalWaves int) error {
 	output := map[string]interface{}{
-		"mode":      "build",
-		"jobs":      buildJobs,
-		"results":   results,
+		"mode":   "build",
+		"jobs":   buildJobs,
+		"waves":  totalWaves,
+		"results": results,
 		"summary": map[string]int{
 			"total":   len(results),
 			"success": successCount,
@@ -231,6 +299,71 @@ func runJSONBuild(jobs []build.BuildJob) error {
 		return err
 	}
 
+	if failCount > 0 {
+		return fmt.Errorf("%d builds failed", failCount)
+	}
+	return nil
+}
+
+func runVerboseBuildWaves(waves [][]build.BuildJob) error {
+	var successCount, failCount int
+	totalJobs := 0
+	for _, wave := range waves {
+		totalJobs += len(wave)
+	}
+
+	pretty := logging.NewPrettyLogger()
+	pretty.Progress(fmt.Sprintf("Building %d projects in %d wave(s) (using %d workers)", totalJobs, len(waves), buildJobs))
+	pretty.Blank()
+
+	completedJobs := 0
+	for waveIdx, waveJobs := range waves {
+		if len(waves) > 1 {
+			pretty.Progress(fmt.Sprintf("Wave %d/%d (%d projects)", waveIdx+1, len(waves), len(waveJobs)))
+		}
+
+		ctx := context.Background()
+		continueOnError := !buildFailFast
+		resultsChan := build.Run(ctx, waveJobs, buildJobs, continueOnError)
+
+		for result := range resultsChan {
+			completedJobs++
+			progress := fmt.Sprintf("[%d/%d]", completedJobs, totalJobs)
+
+			buildUlog.Progress("Building project").
+				Field("name", result.Job.Name).
+				Field("completed", completedJobs).
+				Field("total", totalJobs).
+				Pretty(fmt.Sprintf("\n%s Building %s...", progress, result.Job.Name)).
+				Emit()
+			pretty.Divider()
+
+			if len(result.Output) > 0 {
+				os.Stdout.Write(result.Output)
+			}
+
+			if result.Err != nil {
+				failCount++
+				pretty.Status("error", fmt.Sprintf("Failed (%v)", result.Duration.Round(time.Millisecond)))
+				if result.Err.Error() != "exit status 1" && result.Err.Error() != "exit status 2" {
+					pretty.ErrorPretty("Error", result.Err)
+				}
+				if buildFailFast {
+					pretty.Blank()
+					pretty.Divider()
+					pretty.InfoPretty(fmt.Sprintf("Build stopped (fail-fast). Success: %d, Failed: %d", successCount, failCount))
+					return fmt.Errorf("%d builds failed", failCount)
+				}
+			} else {
+				successCount++
+				pretty.Status("success", fmt.Sprintf("Success (%v)", result.Duration.Round(time.Millisecond)))
+			}
+		}
+	}
+
+	pretty.Blank()
+	pretty.Divider()
+	pretty.InfoPretty(fmt.Sprintf("Build finished. Success: %d, Failed: %d", successCount, failCount))
 	if failCount > 0 {
 		return fmt.Errorf("%d builds failed", failCount)
 	}
@@ -695,4 +828,78 @@ func (d projectDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		line = "  " + line
 	}
 	fmt.Fprint(w, line)
+}
+
+// sortIntoBuildWaves organizes build jobs into waves based on build_after dependencies.
+// Projects within a wave can be built in parallel; waves must be built sequentially.
+func sortIntoBuildWaves(jobs []build.BuildJob, configMap map[string]*config.Config) [][]build.BuildJob {
+	// Build dependency map: project name -> list of projects it depends on
+	deps := make(map[string][]string)
+	nameSet := make(map[string]bool)
+
+	for _, job := range jobs {
+		nameSet[job.Name] = true
+	}
+
+	for _, job := range jobs {
+		if cfg, ok := configMap[job.Name]; ok && len(cfg.BuildAfter) > 0 {
+			// Only include deps that are actually in our build set
+			var validDeps []string
+			for _, dep := range cfg.BuildAfter {
+				if nameSet[dep] {
+					validDeps = append(validDeps, dep)
+				}
+			}
+			deps[job.Name] = validDeps
+		}
+	}
+
+	// Track which projects are built
+	built := make(map[string]bool)
+	var waves [][]build.BuildJob
+
+	remaining := len(jobs)
+	for remaining > 0 {
+		var wave []build.BuildJob
+
+		for _, job := range jobs {
+			if built[job.Name] {
+				continue
+			}
+
+			// Check if all dependencies are built
+			canBuild := true
+			for _, dep := range deps[job.Name] {
+				if !built[dep] {
+					canBuild = false
+					break
+				}
+			}
+
+			if canBuild {
+				wave = append(wave, job)
+			}
+		}
+
+		if len(wave) == 0 && remaining > 0 {
+			// Circular dependency or missing dep - just build remaining
+			buildUlog.Warn("Possible circular dependency detected, building remaining projects").Emit()
+			for _, job := range jobs {
+				if !built[job.Name] {
+					wave = append(wave, job)
+				}
+			}
+		}
+
+		for _, job := range wave {
+			built[job.Name] = true
+			remaining--
+		}
+
+		if len(wave) > 0 {
+			waves = append(waves, wave)
+		}
+	}
+
+	return waves
 }
