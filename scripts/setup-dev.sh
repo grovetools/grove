@@ -29,8 +29,13 @@ echo -e "${DIM}grove development setup${NC}"
 echo ""
 
 # 1. Build grove-meta
-echo "Building grove..."
-(cd "$GROVE_META" && make build) || error "make build failed"
+echo -ne "Building grove... "
+if ! (cd "$GROVE_META" && make build >/dev/null 2>&1); then
+    echo "failed"
+    echo -e "${YELLOW}Retrying with verbose output:${NC}"
+    (cd "$GROVE_META" && make build) || error "make build failed"
+fi
+echo "done"
 
 # 2. Bootstrap (config + symlink)
 echo -ne "Bootstrapping... "
