@@ -1,55 +1,54 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/mattsolo1/grove-docgen/main/schema/docgen.config.schema.json
+enabled: true
 title: Grove
 description: Grove meta-CLI and package manager for the Grove ecosystem
 category: Developer Tools
-enabled: true
 settings:
-  output_dir: docs
-  rules_file: docs.rules
-  structured_output_file: pkg/docs/docs.json
-  system_prompt: default
-  model: gemini-2.5-pro
-  regeneration_mode: reference
-readme:
-  generate_toc: true
-  template: docs/README.md.tpl
-  output: README.md
-  source_section: overview
-  strip_lines: 2
+    model: gemini-2.5-pro
+    regeneration_mode: reference
+    rules_file: docs.rules
+    structured_output_file: pkg/docs/docs.json
+    system_prompt: default
+    output_dir: docs
 sections:
-  - name: introduction
-    order: 0
-    output: 00-introduction.md
-    prompt: prompts/00-introduction.md
-    title: Introduction
-    agg_strip_lines: 2
-  - name: overview
-    order: 1
-    output: 01-overview.md
-    prompt: prompts/01-overview.md
-    title: Overview
-  - name: installation
-    order: 2
-    output: 02-installation.md
-    prompt: prompts/02-installation.md
-    title: Installation
-  - name: binary-management
-    order: 3
-    output: 03-binary-management.md
-    prompt: prompts/03-binary-management.md
-    title: Binary Management
-  - name: ecosystems
-    order: 4
-    output: 04-ecosystems.md
-    prompt: prompts/04-ecosystems.md
-    title: Ecosystems
-  - name: configuration
-    order: 5
-    output: 05-configuration.md
-    prompt: prompts/05-configuration.md
-    title: Configuration
-  - name: command-reference
-    order: 6
-    output: 06-command-reference.md
-    prompt: prompts/06-command-reference.md
-    title: Command Reference
+    - name: introduction
+      title: Introduction
+      order: 0
+      prompt: 00-introduction.md
+      output: 00-introduction.md
+      agg_strip_lines: 2
+    - name: overview
+      title: Overview
+      order: 1
+      prompt: 01-overview.md
+      output: 01-overview.md
+    - name: installation
+      title: Installation
+      order: 2
+      prompt: 02-installation.md
+      output: 02-installation.md
+    - name: binary-management
+      title: Binary Management
+      order: 3
+      prompt: 03-binary-management.md
+      output: 03-binary-management.md
+    - name: ecosystems
+      title: Ecosystems
+      order: 4
+      prompt: 04-ecosystems.md
+      output: 04-ecosystems.md
+    - name: configuration
+      title: Configuration
+      order: 5
+      prompt: 05-configuration.md
+      output: 05-configuration.md
+    - name: command-reference
+      title: Command Reference
+      order: 6
+      prompt: 06-command-reference.md
+      output: 06-command-reference.md
+readme:
+    template: docs/README.md.tpl
+    output: README.md
+    source_section: overview
+    strip_lines: 2
+    generate_toc: true
