@@ -54,9 +54,59 @@ echo -e "${GREEN}Setup complete${NC}"
 
 if [[ ":$PATH:" != *":$GROVE_BIN:"* ]]; then
     echo ""
-    echo -e "${YELLOW}Add to PATH:${NC}"
-    echo '  export PATH="$HOME/.grove/bin:$PATH"   # bash/zsh'
-    echo '  fish_add_path ~/.grove/bin             # fish'
+    echo -e "${YELLOW}~/.grove/bin is not in your PATH${NC}"
+    echo ""
+
+    # Detect shell and config file
+    SHELL_NAME="$(basename "$SHELL")"
+    case "$SHELL_NAME" in
+        bash)
+            if [[ -f "$HOME/.bashrc" ]]; then
+                SHELL_RC="$HOME/.bashrc"
+            elif [[ -f "$HOME/.bash_profile" ]]; then
+                SHELL_RC="$HOME/.bash_profile"
+            else
+                SHELL_RC="$HOME/.bashrc"
+            fi
+            PATH_LINE='export PATH="$HOME/.grove/bin:$PATH"'
+            ;;
+        zsh)
+            SHELL_RC="$HOME/.zshrc"
+            PATH_LINE='export PATH="$HOME/.grove/bin:$PATH"'
+            ;;
+        fish)
+            SHELL_RC="$HOME/.config/fish/config.fish"
+            PATH_LINE='fish_add_path ~/.grove/bin'
+            ;;
+        *)
+            SHELL_RC=""
+            ;;
+    esac
+
+    if [[ -n "$SHELL_RC" ]]; then
+        echo -n "Add to $SHELL_RC? [Y/n] "
+        read -r response
+        if [[ -z "$response" || "$response" =~ ^[Yy] ]]; then
+            # Ensure parent directory exists for fish
+            mkdir -p "$(dirname "$SHELL_RC")"
+            echo "" >> "$SHELL_RC"
+            echo "# Grove" >> "$SHELL_RC"
+            echo "$PATH_LINE" >> "$SHELL_RC"
+            echo -e "Added to $SHELL_RC"
+            echo ""
+            echo "Restart your shell or run:"
+            echo "  source $SHELL_RC"
+        else
+            echo ""
+            echo "To add manually:"
+            echo '  export PATH="$HOME/.grove/bin:$PATH"   # bash/zsh'
+            echo '  fish_add_path ~/.grove/bin             # fish'
+        fi
+    else
+        echo "Add to PATH:"
+        echo '  export PATH="$HOME/.grove/bin:$PATH"   # bash/zsh'
+        echo '  fish_add_path ~/.grove/bin             # fish'
+    fi
 fi
 
 echo ""
