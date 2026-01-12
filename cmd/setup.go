@@ -40,6 +40,7 @@ const (
 	stepGeminiKey
 	stepTmuxBindings
 	stepNeovimPlugin
+	stepPlanPreservation
 	stepSummary
 )
 
@@ -172,6 +173,9 @@ type setupModel struct {
 	geminiValue    string
 	methodList     list.Model
 
+	// Hooks step state
+	planPreservationEnabled bool
+
 	// Service and config
 	service        *setup.Service
 	yamlHandler    *setup.YAMLHandler
@@ -208,6 +212,7 @@ func newSetupModel(service *setup.Service, selectedOnly map[string]bool) *setupM
 		{id: "gemini", title: "Gemini API Key", description: "Configure Gemini API access for LLM features", selected: true},
 		{id: "tmux", title: "tmux Popup Bindings", description: "Add tmux popup bindings for Grove tools", selected: false},
 		{id: "nvim", title: "Neovim Plugin", description: "Configure the grove-nvim Neovim plugin", selected: false},
+		{id: "hooks", title: "Hooks Configuration", description: "Configure plan preservation for Claude Code plans", selected: false},
 	}
 
 	// Apply --only filter if provided
@@ -302,6 +307,8 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateTmuxBindingsStep(msg)
 		case stepNeovimPlugin:
 			return m.updateNeovimPluginStep(msg)
+		case stepPlanPreservation:
+			return m.updatePlanPreservationStep(msg)
 		case stepSummary:
 			return m.updateSummaryStep(msg)
 		}
@@ -375,6 +382,8 @@ func (m *setupModel) buildOrderedSteps() {
 				m.orderedSteps = append(m.orderedSteps, stepTmuxBindings)
 			case "nvim":
 				m.orderedSteps = append(m.orderedSteps, stepNeovimPlugin)
+			case "hooks":
+				m.orderedSteps = append(m.orderedSteps, stepPlanPreservation)
 			}
 		}
 	}
@@ -554,6 +563,30 @@ func (m *setupModel) updateNeovimPluginStep(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 	return m, nil
 }
 
+func (m *setupModel) updatePlanPreservationStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keys.Base.Quit):
+		return m, tea.Quit
+	case key.Matches(msg, m.keys.Back):
+		m.prevStep()
+		return m, nil
+	case key.Matches(msg, m.keys.Select), key.Matches(msg, key.NewBinding(key.WithKeys("y", "n"))):
+		// Toggle or set based on key
+		if msg.String() == "y" {
+			m.planPreservationEnabled = true
+		} else if msg.String() == "n" {
+			m.planPreservationEnabled = false
+		} else {
+			m.planPreservationEnabled = !m.planPreservationEnabled
+		}
+		return m, nil
+	case key.Matches(msg, m.keys.Confirm):
+		m.nextStep()
+		return m, nil
+	}
+	return m, nil
+}
+
 func (m *setupModel) updateSummaryStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Base.Quit), key.Matches(msg, m.keys.Confirm):
@@ -581,6 +614,9 @@ func (m *setupModel) executeSetup() {
 	}
 	if m.selectedSteps["nvim"] {
 		m.setupNeovimPlugin()
+	}
+	if m.selectedSteps["hooks"] {
+		m.setupPlanPreservation()
 	}
 }
 
@@ -748,6 +784,28 @@ return {
 	m.service.WriteFile("~/.config/nvim/lua/plugins/grove.lua", []byte(nvimPluginContent), 0644)
 }
 
+func (m *setupModel) setupPlanPreservation() {
+	root, err := m.yamlHandler.LoadGlobalConfig()
+	if err != nil {
+		m.err = err
+		return
+	}
+
+	// Set hooks.plan_preservation.enabled
+	setup.SetValue(root, m.planPreservationEnabled, "hooks", "plan_preservation", "enabled")
+
+	// Also set reasonable defaults if enabling
+	if m.planPreservationEnabled {
+		setup.SetValue(root, "file", "hooks", "plan_preservation", "job_type")
+		setup.SetValue(root, "claude-plan", "hooks", "plan_preservation", "title_prefix")
+		setup.SetValue(root, true, "hooks", "plan_preservation", "kebab_case")
+	}
+
+	if err := m.yamlHandler.SaveGlobalConfig(root); err != nil {
+		m.err = err
+	}
+}
+
 func (m *setupModel) View() string {
 	if !m.ready {
 		return "Initializing..."
@@ -800,6 +858,11 @@ func (m *setupModel) View() string {
 		content.WriteString(headerStyle.Render("Neovim Plugin"))
 		content.WriteString("\n\n")
 		content.WriteString(m.viewNeovimPluginStep())
+
+	case stepPlanPreservation:
+		content.WriteString(headerStyle.Render("Plan Preservation"))
+		content.WriteString("\n\n")
+		content.WriteString(m.viewPlanPreservationStep())
 
 	case stepSummary:
 		content.WriteString(headerStyle.Render("Setup Complete"))
@@ -1077,6 +1140,53 @@ You can require or incorporate it into your plugin setup as you see fit.`
 	boxContent.WriteString(theme.DefaultTheme.Muted.Render("  ~/.config/nvim/lua/plugins/grove.lua\n"))
 	boxContent.WriteString("\n")
 	boxContent.WriteString("Press Enter to continue or esc to go back.")
+
+	content.WriteString(boxStyle.Render(boxContent.String()))
+	return padStyle.Render(content.String())
+}
+
+func (m *setupModel) viewPlanPreservationStep() string {
+	var content strings.Builder
+	padStyle := lipgloss.NewStyle().PaddingLeft(2)
+
+	explainStyle := lipgloss.NewStyle().
+		Foreground(theme.DefaultTheme.Muted.GetForeground()).
+		MarginBottom(1)
+
+	explanation := `Plan Preservation automatically saves Claude Code plans to your active grove-flow plan.
+
+When Claude exits plan mode, the plan content will be saved as a new job file
+in your current flow plan directory with a kebab-case title.`
+
+	content.WriteString(explainStyle.Render(explanation))
+	content.WriteString("\n\n")
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.DefaultTheme.Muted.GetForeground()).
+		Padding(1, 2).
+		Width(m.width - 8)
+
+	var boxContent strings.Builder
+	boxContent.WriteString("Enable plan preservation?\n\n")
+
+	// Show current selection
+	yesStyle := lipgloss.NewStyle()
+	noStyle := lipgloss.NewStyle()
+	if m.planPreservationEnabled {
+		yesStyle = yesStyle.Bold(true).Foreground(theme.DefaultTheme.Success.GetForeground())
+		noStyle = noStyle.Foreground(theme.DefaultTheme.Muted.GetForeground())
+	} else {
+		noStyle = noStyle.Bold(true).Foreground(theme.DefaultTheme.Success.GetForeground())
+		yesStyle = yesStyle.Foreground(theme.DefaultTheme.Muted.GetForeground())
+	}
+
+	boxContent.WriteString("  ")
+	boxContent.WriteString(yesStyle.Render("[Y] Yes"))
+	boxContent.WriteString("    ")
+	boxContent.WriteString(noStyle.Render("[N] No"))
+	boxContent.WriteString("\n\n")
+	boxContent.WriteString(theme.DefaultTheme.Muted.Render("Press y/n to select, Enter to confirm, esc to go back."))
 
 	content.WriteString(boxStyle.Render(boxContent.String()))
 	return padStyle.Render(content.String())
