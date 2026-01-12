@@ -31,27 +31,40 @@ fi
 echo -e "${DIM}grove development setup${NC}"
 echo ""
 
-# 1. Build grove-meta
-echo -ne "Building grove... "
+# 1. Build grove CLI
+START_TIME=$SECONDS
+echo -ne "Building grove CLI... "
 if ! (cd "$GROVE_META" && make build >/dev/null 2>&1); then
     echo "failed"
     echo -e "${YELLOW}Retrying with verbose output:${NC}"
     (cd "$GROVE_META" && make build) || error "make build failed"
 fi
+ELAPSED=$((SECONDS - START_TIME))
+echo "done (${ELAPSED}s)"
+
+# 2. Bootstrap
+echo -ne "Creating ~/.grove/bin... "
+mkdir -p "$HOME/.grove/bin"
 echo "done"
 
-# 2. Bootstrap (creates ~/.grove config and symlinks grove binary)
-echo -ne "Creating ~/.grove config... "
+echo -ne "Symlinking grove to ~/.grove/bin... "
+ln -sf "$GROVE_META/bin/grove" "$HOME/.grove/bin/grove"
+echo "done"
+
+echo -ne "Creating ~/.config/grove/grove.yml... "
 "$GROVE_META/bin/grove" bootstrap >/dev/null 2>&1 || error "bootstrap failed"
 echo "done"
 
 # 3. Build ecosystem (from ecosystem root so all projects are built)
+START_TIME=$SECONDS
 echo "Building ecosystem..."
 cd "$ECOSYSTEM"
 "$GROVE_META/bin/grove" build || error "ecosystem build failed"
+ELAPSED=$((SECONDS - START_TIME))
+echo "Ecosystem build complete (${ELAPSED}s)"
 
 # 4. Link dev binaries (from ecosystem root so all binaries are linked)
-echo -ne "Linking binaries... "
+echo -ne "Linking dev binaries to ~/.grove/bin... "
 "$GROVE_META/bin/grove" dev cwd >/dev/null 2>&1 || error "dev cwd failed"
 echo "done"
 
