@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -17,6 +18,13 @@ type BuildJob struct {
 	Name    string   // e.g., "grove-core"
 	Path    string   // Absolute path to the project directory
 	Command []string // The build command to execute, e.g., ["make", "build"]
+}
+
+// RunOptions contains optional configuration for build runs
+type RunOptions struct {
+	// ExtraPathDirs are prepended to PATH for all build commands
+	// This allows built tools to be available for subsequent builds
+	ExtraPathDirs []string
 }
 
 // BuildResult contains the outcome of a single build job.
@@ -37,9 +45,17 @@ type BuildEvent struct {
 
 // Run executes a list of build jobs concurrently and returns a channel of results.
 func Run(ctx context.Context, jobs []BuildJob, numWorkers int, continueOnError bool) <-chan BuildResult {
+	return RunWithOptions(ctx, jobs, numWorkers, continueOnError, nil)
+}
+
+// RunWithOptions executes build jobs with additional options like extra PATH directories.
+func RunWithOptions(ctx context.Context, jobs []BuildJob, numWorkers int, continueOnError bool, opts *RunOptions) <-chan BuildResult {
 	if numWorkers <= 0 {
 		numWorkers = runtime.NumCPU()
 	}
+
+	// Build environment with extra PATH if provided
+	env := buildEnv(opts)
 
 	jobsChan := make(chan BuildJob, len(jobs))
 	resultsChan := make(chan BuildResult, len(jobs))
@@ -73,8 +89,7 @@ func Run(ctx context.Context, jobs []BuildJob, numWorkers int, continueOnError b
 				}
 
 				cmd.Dir = job.Path
-				// Set environment to ensure consistent behavior
-				cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+				cmd.Env = env
 				output, err := cmd.CombinedOutput()
 				duration := time.Since(start)
 
@@ -108,11 +123,40 @@ func Run(ctx context.Context, jobs []BuildJob, numWorkers int, continueOnError b
 	return resultsChan
 }
 
+// buildEnv creates the environment for build commands, including extra PATH dirs
+func buildEnv(opts *RunOptions) []string {
+	env := os.Environ()
+	env = append(env, "TERM=xterm-256color")
+
+	if opts != nil && len(opts.ExtraPathDirs) > 0 {
+		// Find and modify PATH
+		pathPrefix := strings.Join(opts.ExtraPathDirs, string(os.PathListSeparator))
+		for i, e := range env {
+			if strings.HasPrefix(e, "PATH=") {
+				env[i] = "PATH=" + pathPrefix + string(os.PathListSeparator) + e[5:]
+				return env
+			}
+		}
+		// PATH not found, add it
+		env = append(env, "PATH="+pathPrefix)
+	}
+
+	return env
+}
+
 // RunWithEvents executes build jobs and returns a channel of events (start and finish)
 func RunWithEvents(ctx context.Context, jobs []BuildJob, numWorkers int, continueOnError bool) <-chan BuildEvent {
+	return RunWithEventsAndOptions(ctx, jobs, numWorkers, continueOnError, nil)
+}
+
+// RunWithEventsAndOptions executes build jobs with options and returns a channel of events
+func RunWithEventsAndOptions(ctx context.Context, jobs []BuildJob, numWorkers int, continueOnError bool, opts *RunOptions) <-chan BuildEvent {
 	if numWorkers <= 0 {
 		numWorkers = runtime.NumCPU()
 	}
+
+	// Build environment with extra PATH if provided
+	env := buildEnv(opts)
 
 	jobsChan := make(chan BuildJob, len(jobs))
 	eventsChan := make(chan BuildEvent, len(jobs)*2) // *2 for start and finish events
@@ -156,7 +200,7 @@ func RunWithEvents(ctx context.Context, jobs []BuildJob, numWorkers int, continu
 				}
 
 				cmd.Dir = job.Path
-				cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+				cmd.Env = env
 
 				// Get pipes for stdout and stderr
 				stdoutPipe, _ := cmd.StdoutPipe()

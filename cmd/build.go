@@ -145,6 +145,14 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	waves := sortIntoBuildWaves(jobs, configMap)
 	hasWaves := len(waves) > 1
 
+	// Collect all bin directories so built tools are available during build
+	var binDirs []string
+	for _, wsPath := range workspaces {
+		binDir := filepath.Join(wsPath, "bin")
+		binDirs = append(binDirs, binDir)
+	}
+	buildOpts := &build.RunOptions{ExtraPathDirs: binDirs}
+
 	// Handle dry-run mode
 	if buildDryRun {
 		if opts.JSONOutput {
@@ -217,7 +225,7 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	}
 
 	if opts.JSONOutput {
-		return runJSONBuildWaves(waves)
+		return runJSONBuildWaves(waves, buildOpts)
 	}
 
 	if buildVerbose || hasWaves {
@@ -226,13 +234,13 @@ func runBuild(cmd *cobra.Command, args []string) error {
 				Pretty("Building in waves due to build_after dependencies...").
 				Emit()
 		}
-		return runVerboseBuildWaves(waves)
+		return runVerboseBuildWaves(waves, buildOpts)
 	}
 
-	return runTuiBuild(jobs)
+	return runTuiBuildWithOpts(jobs, buildOpts)
 }
 
-func runJSONBuildWaves(waves [][]build.BuildJob) error {
+func runJSONBuildWaves(waves [][]build.BuildJob, opts *build.RunOptions) error {
 	type BuildResult struct {
 		Name     string `json:"name"`
 		Path     string `json:"path"`
@@ -249,7 +257,7 @@ func runJSONBuildWaves(waves [][]build.BuildJob) error {
 	for waveIdx, waveJobs := range waves {
 		ctx := context.Background()
 		continueOnError := !buildFailFast
-		resultsChan := build.Run(ctx, waveJobs, buildJobs, continueOnError)
+		resultsChan := build.RunWithOptions(ctx, waveJobs, buildJobs, continueOnError, opts)
 
 		for result := range resultsChan {
 			br := BuildResult{
@@ -305,7 +313,7 @@ func outputJSONResults[T any](results []T, successCount, failCount, totalWaves i
 	return nil
 }
 
-func runVerboseBuildWaves(waves [][]build.BuildJob) error {
+func runVerboseBuildWaves(waves [][]build.BuildJob, opts *build.RunOptions) error {
 	var successCount, failCount int
 	totalJobs := 0
 	for _, wave := range waves {
@@ -324,7 +332,7 @@ func runVerboseBuildWaves(waves [][]build.BuildJob) error {
 
 		ctx := context.Background()
 		continueOnError := !buildFailFast
-		resultsChan := build.Run(ctx, waveJobs, buildJobs, continueOnError)
+		resultsChan := build.RunWithOptions(ctx, waveJobs, buildJobs, continueOnError, opts)
 
 		for result := range resultsChan {
 			completedJobs++
@@ -439,6 +447,7 @@ func (p projectStatus) FilterValue() string { return p.name }
 type tuiModel struct {
 	projects      []projectStatus
 	jobs          []build.BuildJob
+	buildOpts     *build.RunOptions
 	list          list.Model
 	spinner       spinner.Model
 	logViewport   viewport.Model
@@ -463,6 +472,10 @@ type buildsStartedMsg struct {
 }
 
 func runTuiBuild(jobs []build.BuildJob) error {
+	return runTuiBuildWithOpts(jobs, nil)
+}
+
+func runTuiBuildWithOpts(jobs []build.BuildJob, opts *build.RunOptions) error {
 	var projects []projectStatus
 	for _, job := range jobs {
 		projects = append(projects, projectStatus{name: job.Name, status: "pending"})
@@ -490,6 +503,7 @@ func runTuiBuild(jobs []build.BuildJob) error {
 	m := tuiModel{
 		projects:    projects,
 		jobs:        jobs,
+		buildOpts:   opts,
 		list:        l,
 		spinner:     s,
 		logViewport: logViewport,
@@ -550,7 +564,7 @@ func (m tuiModel) startBuildsCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		continueOnError := !buildFailFast
-		eventsChan := build.RunWithEvents(ctx, m.jobs, buildJobs, continueOnError)
+		eventsChan := build.RunWithEventsAndOptions(ctx, m.jobs, buildJobs, continueOnError, m.buildOpts)
 
 		jobIndexMap := make(map[string]int)
 		for i, job := range m.jobs {

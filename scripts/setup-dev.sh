@@ -29,9 +29,8 @@ echo -e "${DIM}grove development setup${NC}"
 echo ""
 
 # 1. Build grove-meta
-echo -ne "Building grove... "
-(cd "$GROVE_META" && make build >/dev/null 2>&1) || error "make build failed"
-echo "done"
+echo "Building grove..."
+(cd "$GROVE_META" && make build) || error "make build failed"
 
 # 2. Bootstrap (config + symlink)
 echo -ne "Bootstrapping... "
