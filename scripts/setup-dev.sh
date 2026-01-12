@@ -109,5 +109,35 @@ if [[ ":$PATH:" != *":$GROVE_BIN:"* ]]; then
     fi
 fi
 
+# Global gitignore for grove patterns
+GROVE_IGNORE_PATTERNS=".grove/
+.grove.yml
+.cx.work
+.claude/"
+
+GLOBAL_GITIGNORE="$(git config --global core.excludesFile 2>/dev/null)"
+
+if [[ -n "$GLOBAL_GITIGNORE" && -f "$GLOBAL_GITIGNORE" ]]; then
+    # Check if patterns already present
+    if ! grep -q "^\.grove/$" "$GLOBAL_GITIGNORE" 2>/dev/null; then
+        echo ""
+        echo -e "${YELLOW}Add grove patterns to global gitignore?${NC}"
+        echo -e "${DIM}  .grove/  .grove.yml  .cx.work  .claude/${NC}"
+        echo -n "Add to $GLOBAL_GITIGNORE? [Y/n] "
+        read -r response
+        if [[ -z "$response" || "$response" =~ ^[Yy] ]]; then
+            echo "" >> "$GLOBAL_GITIGNORE"
+            echo "# Grove" >> "$GLOBAL_GITIGNORE"
+            echo "$GROVE_IGNORE_PATTERNS" >> "$GLOBAL_GITIGNORE"
+            echo "Added to $GLOBAL_GITIGNORE"
+        fi
+    fi
+else
+    echo ""
+    echo -e "${DIM}To globally ignore grove files, run:${NC}"
+    echo '  echo -e ".grove/\n.grove.yml\n.cx.work\n.claude/" >> ~/.config/git/ignore'
+    echo '  git config --global core.excludesFile ~/.config/git/ignore'
+fi
+
 echo ""
 echo "Run: grove list"
