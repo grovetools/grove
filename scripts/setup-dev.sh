@@ -138,9 +138,24 @@ GROVE_IGNORE_PATTERNS=".grove/
 
 GLOBAL_GITIGNORE="$(git config --global core.excludesFile 2>/dev/null || true)"
 
-if [[ -n "$GLOBAL_GITIGNORE" && -f "$GLOBAL_GITIGNORE" ]] && [[ -t 0 ]]; then
-    # Check if patterns already present
-    if ! grep -q "^\.grove/$" "$GLOBAL_GITIGNORE" 2>/dev/null; then
+if [[ -t 0 ]]; then
+    # Interactive mode - offer to configure gitignore
+    if [[ -z "$GLOBAL_GITIGNORE" ]]; then
+        # No global gitignore configured - offer to create one
+        echo ""
+        echo -e "${YELLOW}Add grove patterns to global gitignore?${NC}"
+        echo -e "${DIM}  .grove/  .grove.yml  .cx.work  .claude/${NC}"
+        echo -n "Create ~/.config/git/ignore? [Y/n] "
+        read -r response
+        if [[ -z "$response" || "$response" =~ ^[Yy] ]]; then
+            mkdir -p "$HOME/.config/git"
+            echo "# Grove" >> "$HOME/.config/git/ignore"
+            echo "$GROVE_IGNORE_PATTERNS" >> "$HOME/.config/git/ignore"
+            git config --global core.excludesFile "$HOME/.config/git/ignore"
+            echo "Created ~/.config/git/ignore"
+        fi
+    elif [[ -f "$GLOBAL_GITIGNORE" ]] && ! grep -q "^\.grove/$" "$GLOBAL_GITIGNORE" 2>/dev/null; then
+        # Global gitignore exists but doesn't have grove patterns
         echo ""
         echo -e "${YELLOW}Add grove patterns to global gitignore?${NC}"
         echo -e "${DIM}  .grove/  .grove.yml  .cx.work  .claude/${NC}"
@@ -153,11 +168,6 @@ if [[ -n "$GLOBAL_GITIGNORE" && -f "$GLOBAL_GITIGNORE" ]] && [[ -t 0 ]]; then
             echo "Added to $GLOBAL_GITIGNORE"
         fi
     fi
-else
-    echo ""
-    echo -e "${DIM}To globally ignore grove files, run:${NC}"
-    echo '  echo -e ".grove/\n.grove.yml\n.cx.work\n.claude/" >> ~/.config/git/ignore'
-    echo '  git config --global core.excludesFile ~/.config/git/ignore'
 fi
 
 echo ""
