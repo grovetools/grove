@@ -3,6 +3,9 @@
 # Run from grove-ecosystem or grove-meta after cloning with submodules
 set -e
 
+# Suppress make[1]: Entering/Leaving directory messages
+export MAKEFLAGS="${MAKEFLAGS:+$MAKEFLAGS }--no-print-directory"
+
 # Colors
 DIM='\033[2m'
 GREEN='\033[32m'
@@ -37,8 +40,8 @@ if ! (cd "$GROVE_META" && make build >/dev/null 2>&1); then
 fi
 echo "done"
 
-# 2. Bootstrap (config + symlink)
-echo -ne "Bootstrapping... "
+# 2. Bootstrap (creates ~/.grove config and symlinks grove binary)
+echo -ne "Creating ~/.grove config... "
 "$GROVE_META/bin/grove" bootstrap >/dev/null 2>&1 || error "bootstrap failed"
 echo "done"
 
@@ -88,7 +91,7 @@ if [[ ":$PATH:" != *":$GROVE_BIN:"* ]]; then
             ;;
     esac
 
-    if [[ -n "$SHELL_RC" ]]; then
+    if [[ -n "$SHELL_RC" ]] && [[ -t 0 ]]; then
         echo -n "Add to $SHELL_RC? [Y/n] "
         read -r response
         if [[ -z "$response" || "$response" =~ ^[Yy] ]]; then
@@ -122,7 +125,7 @@ GROVE_IGNORE_PATTERNS=".grove/
 
 GLOBAL_GITIGNORE="$(git config --global core.excludesFile 2>/dev/null)"
 
-if [[ -n "$GLOBAL_GITIGNORE" && -f "$GLOBAL_GITIGNORE" ]]; then
+if [[ -n "$GLOBAL_GITIGNORE" && -f "$GLOBAL_GITIGNORE" ]] && [[ -t 0 ]]; then
     # Check if patterns already present
     if ! grep -q "^\.grove/$" "$GLOBAL_GITIGNORE" 2>/dev/null; then
         echo ""
