@@ -443,16 +443,6 @@ func runReleaseApply(ctx context.Context) error {
 	//	return fmt.Errorf("failed to auto-commit ecosystem changes: %w", err)
 	// }
 
-	// Sync dependencies if requested
-	if releaseSyncDeps {
-		displaySection(theme.IconSync + " Syncing Dependencies")
-		displayInfo("Updating grove dependencies to latest versions...")
-		if err := runDepsSync(true, true); err != nil {
-			return fmt.Errorf("failed to sync dependencies: %w", err)
-		}
-		displaySuccess("Dependencies synced successfully")
-	}
-
 	// Run pre-flight checks (only for selected repos)
 	parentVersion := determineParentVersion(plan.RootDir, versions, hasChanges)
 	selectedWorkspaces := make([]string, 0, len(selectedRepos))

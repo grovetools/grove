@@ -44,7 +44,6 @@ var (
 	releaseInteractive    bool // New flag for interactive TUI mode
 	releaseSkipCI         bool // Skip CI waits after changelog updates
 	releaseResume         bool // Only process repos that haven't completed successfully
-	releaseSyncDeps       bool // Sync grove dependencies before releasing
 )
 
 func init() {
@@ -1032,8 +1031,8 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 					}
 				}
 
-				// Update dependencies if this is not the first level (skip in dry-run mode)
-				if levelIndex > 0 && !releaseDryRun {
+				// Update dependencies to latest versions (skip in dry-run mode)
+				if !releaseDryRun {
 					logger.WithFields(logrus.Fields{
 						"repo": repo,
 						"wsPath": wsPath,
