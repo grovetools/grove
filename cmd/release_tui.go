@@ -137,6 +137,34 @@ var releaseKeys = releaseKeyMap{
 	),
 }
 
+// ShortHelp returns key bindings for the short help view
+func (k releaseKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{
+		k.Toggle, k.Approve, k.Base.Quit,
+	}
+}
+
+// FullHelp returns all key bindings for the full help view
+func (k releaseKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		// Navigation
+		{k.Base.Up, k.Base.Down, k.Tab},
+		// Selection
+		{k.Toggle, k.SelectAll, k.DeselectAll},
+		// Version bumps
+		{k.SelectMajor, k.SelectMinor, k.SelectPatch, k.ApplySuggestion},
+		// Changelog
+		{k.ViewChangelog, k.EditChangelog, k.EditRepoChangelog},
+		{k.GenerateChangelog, k.GenerateAll, k.WriteChangelog},
+		// LLM rules
+		{k.EditRules, k.ResetRules},
+		// Settings
+		{k.ToggleDryRun, k.TogglePush, k.ToggleSyncDeps},
+		// Actions
+		{k.Approve, k.Back, k.Base.Quit, k.Base.Help},
+	}
+}
+
 // TUI views
 const (
 	viewTable     = "table"
