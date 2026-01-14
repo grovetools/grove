@@ -45,9 +45,19 @@ jobs:
       - name: Extract Release Notes from Changelog
         id: extract_release_notes
         run: |
-          # This awk script finds the section for the current tag and prints it,
-          # stopping at the next version tag or end of file.
+          # Validate that CHANGELOG.md exists
+          if [ ! -f CHANGELOG.md ]; then
+            echo "::error::CHANGELOG.md not found"
+            exit 1
+          fi
+          # Extract release notes for this version
           awk '/^## ${{ github.ref_name }}/{flag=1; next} /^## v/{flag=0} flag' CHANGELOG.md > release-notes.md
+          # Validate that we found content for this version
+          if [ ! -s release-notes.md ]; then
+            echo "::error::No changelog entry found for ${{ github.ref_name }}"
+            echo "::error::Ensure CHANGELOG.md contains a section starting with '## ${{ github.ref_name }}'"
+            exit 1
+          fi
           echo "Extracted notes:" ; cat release-notes.md
 
       - name: Create dist directory
