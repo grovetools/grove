@@ -1,11 +1,13 @@
 package project
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"golang.org/x/mod/modfile"
@@ -40,6 +42,10 @@ func (h *GoHandler) ParseDependencies(workspacePath string) ([]Dependency, error
 		return nil, fmt.Errorf("parsing go.mod: %w", err)
 	}
 
+	// Get production imports (excluding test files and test directories)
+	// This determines which dependencies affect release ordering
+	productionImports := h.getProductionImports(workspacePath)
+
 	var deps []Dependency
 	for _, req := range modFile.Require {
 		dep := Dependency{
@@ -48,15 +54,98 @@ func (h *GoHandler) ParseDependencies(workspacePath string) ([]Dependency, error
 			Type:    DependencyTypeLibrary,
 		}
 
-		// Check if this is a workspace dependency
+		// Check if this is a workspace dependency used in production code
+		// Test-only dependencies should not affect release ordering
 		if strings.HasPrefix(req.Mod.Path, "github.com/mattsolo1/") {
-			dep.Workspace = true
+			// Only mark as workspace dep if it's imported in production code
+			if productionImports[req.Mod.Path] {
+				dep.Workspace = true
+			}
 		}
 
 		deps = append(deps, dep)
 	}
 
 	return deps, nil
+}
+
+// getProductionImports scans Go source files (excluding tests) and returns
+// a set of imported grove-* module paths. This is used to determine which
+// dependencies are production vs test-only for release ordering.
+func (h *GoHandler) getProductionImports(workspacePath string) map[string]bool {
+	imports := make(map[string]bool)
+	importRegex := regexp.MustCompile(`"(github\.com/mattsolo1/[^"]+)"`)
+
+	filepath.Walk(workspacePath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Skip errors
+		}
+
+		// Skip directories
+		if info.IsDir() {
+			// Skip test directories entirely
+			if info.Name() == "tests" || info.Name() == "test" || info.Name() == "testdata" {
+				return filepath.SkipDir
+			}
+			// Skip vendor directory
+			if info.Name() == "vendor" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Only process .go files
+		if !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+
+		// Skip test files
+		if strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+
+		// Scan file for grove-* imports
+		file, err := os.Open(path)
+		if err != nil {
+			return nil
+		}
+		defer file.Close()
+
+		scanner := bufio.NewScanner(file)
+		inImportBlock := false
+		for scanner.Scan() {
+			line := scanner.Text()
+
+			// Track import blocks
+			if strings.Contains(line, "import (") {
+				inImportBlock = true
+				continue
+			}
+			if inImportBlock && strings.Contains(line, ")") {
+				inImportBlock = false
+				continue
+			}
+
+			// Check for grove imports
+			if strings.Contains(line, "github.com/mattsolo1/") {
+				matches := importRegex.FindAllStringSubmatch(line, -1)
+				for _, match := range matches {
+					if len(match) > 1 {
+						// Extract module path (first two parts after github.com/mattsolo1/)
+						parts := strings.Split(match[1], "/")
+						if len(parts) >= 3 {
+							modulePath := strings.Join(parts[:3], "/")
+							imports[modulePath] = true
+						}
+					}
+				}
+			}
+		}
+
+		return nil
+	})
+
+	return imports
 }
 
 func (h *GoHandler) UpdateDependency(workspacePath string, dep Dependency) error {

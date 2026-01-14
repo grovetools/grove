@@ -717,9 +717,10 @@ func calculateNextVersions(ctx context.Context, rootDir string, workspaces []str
 			currentVersion, err = semver.NewVersion(currentTag)
 			if err != nil {
 				// Skip repos with non-semver tags (like grove-ecosystem with calendar versioning)
-				// For RC releases, we'll just keep the existing tag
-				if isRC {
-					logger.WithFields(logrus.Fields{"repo": repoName, "tag": currentTag}).Warn("Skipping non-semver repo for RC release")
+				// The parent ecosystem uses date-based versioning (v2025.01.14 or v2025.01.14.1)
+				// which is handled separately by determineParentVersion
+				if repoName == "grove-ecosystem" || isRC {
+					logger.WithFields(logrus.Fields{"repo": repoName, "tag": currentTag}).Info("Skipping non-semver repo (calendar versioning)")
 					versions[repoName] = currentTag
 					commitsSinceTag[repoName] = 0
 					continue
