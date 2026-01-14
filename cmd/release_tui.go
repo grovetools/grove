@@ -1006,9 +1006,9 @@ func (m releaseTuiModel) viewTable() string {
 		}
 
 		// Selection checkbox
-		checkbox := "[" + theme.IconUnselect + "]"
+		checkbox := theme.IconUnselect
 		if repo.Selected {
-			checkbox = "[" + theme.IconSuccess + "]"
+			checkbox = theme.IconSuccess
 		}
 		// Only show checkbox for repos with changes
 		if repo.CurrentVersion == repo.NextVersion {
