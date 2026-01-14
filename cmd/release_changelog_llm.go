@@ -13,6 +13,7 @@ import (
 
 	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/util/delegation"
 )
 
 // Logger for changelog LLM operations
@@ -241,9 +242,9 @@ func autoPopulateRules(repoPath string) error {
 	}
 	
 	fmt.Printf("Auto-populating rules from files changed since %s...\n", lastTag)
-	
+
 	// Run 'grove cx from-git' for workspace-awareness
-	cmd := exec.Command("grove", "cx", "from-git", "--since", lastTag)
+	cmd := delegation.Command("cx", "from-git", "--since", lastTag)
 	cmd.Dir = repoPath
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -399,7 +400,7 @@ Generate the JSON object now:`, newVersion, currentDate, gitContext)
 		Field("repo_path", repoPath).
 		Field("prompt_file", tmpFile.Name()).
 		Field("output_file", outputPath).
-		Field("full_command", "grove "+strings.Join(args, " ")).
+		Field("full_command", "llm "+strings.Join(args[1:], " ")).
 		Field("args", args).
 		StructuredOnly().
 		Log(ctx)
@@ -419,7 +420,7 @@ Generate the JSON object now:`, newVersion, currentDate, gitContext)
 			Log(ctx)
 	}
 
-	gemapiCmd := exec.Command("grove", args...)
+	gemapiCmd := delegation.Command(args[0], args[1:]...)
 	gemapiCmd.Dir = repoPath // Set working directory to the repository being analyzed
 
 	// Redirect both stdout and stderr to log file to prevent TUI mangling

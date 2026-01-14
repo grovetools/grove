@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mattsolo1/grove-core/util/delegation"
 	"github.com/mattsolo1/grove-meta/pkg/devlinks"
 	"github.com/mattsolo1/grove-meta/pkg/workspace"
 )
@@ -730,7 +731,7 @@ func (m *Manager) InstallAllToolsFromSource() error {
 		}
 
 		// Run `grove dev cwd` in the build directory
-		devCmd := exec.Command("grove", "dev", "cwd")
+		devCmd := delegation.Command("dev", "cwd")
 		devCmd.Dir = buildDir
 		if output, err := devCmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("failed to run 'grove dev cwd' for %s: %w\nOutput: %s", toolName, err, string(output))

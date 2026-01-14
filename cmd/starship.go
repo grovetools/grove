@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/mattsolo1/grove-core/starship"
+	"github.com/mattsolo1/grove-core/util/delegation"
 	"github.com/spf13/cobra"
 )
 
@@ -34,7 +35,7 @@ func runAggregatedStarshipStatus(cmd *cobra.Command, args []string) error {
 		}
 
 		// Call tool's starship status via 'grove' for workspace-awareness
-		out, err := exec.Command("grove", tool, "starship", "status").Output()
+		out, err := delegation.Command(tool, "starship", "status").Output()
 		if err != nil {
 			continue
 		}

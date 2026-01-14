@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-core/util/delegation"
 	"github.com/mattsolo1/grove-meta/pkg/gh"
 	"github.com/mattsolo1/grove-meta/pkg/templates"
 	"github.com/sirupsen/logrus"
@@ -834,7 +835,7 @@ func (c *Creator) generateFromExternalTemplate(opts CreateOptions, data template
 
 	// Install git hooks
 	c.logger.Info("Installing git hooks...")
-	hooksCmd := exec.Command("grove", "git-hooks", "install")
+	hooksCmd := delegation.Command("git-hooks", "install")
 	hooksCmd.Dir = targetPath
 	if output, err := hooksCmd.CombinedOutput(); err != nil {
 		// Don't fail if hooks can't be installed, just warn
