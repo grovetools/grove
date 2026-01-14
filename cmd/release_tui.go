@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattsolo1/grove-core/logging"
 	tablecomponent "github.com/mattsolo1/grove-core/tui/components/table"
 	"github.com/mattsolo1/grove-core/tui/components/help"
 	"github.com/mattsolo1/grove-core/tui/keymap"
@@ -21,6 +22,9 @@ import (
 	"github.com/mattsolo1/grove-meta/pkg/release"
 	"github.com/spf13/cobra"
 )
+
+// TUI logger for debugging
+var tuiLog = logging.NewUnifiedLogger("grove-meta.release-tui")
 
 
 // Key bindings for the release TUI
@@ -725,11 +729,37 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.GenerateChangelog):
+		ctx := context.Background()
+		tuiLog.Debug("GenerateChangelog key pressed").
+			Field("plan_type", m.plan.Type).
+			Field("selected_index", m.selectedIndex).
+			Field("repo_count", len(m.repoNames)).
+			Field("generating", m.generating).
+			StructuredOnly(). // Don't output to TUI
+			Log(ctx)
+
 		if m.plan.Type == "full" && m.selectedIndex < len(m.repoNames) && !m.generating {
 			repoName := m.repoNames[m.selectedIndex]
+			tuiLog.Debug("Checking repo for changelog generation").
+				Field("repo_name", repoName).
+				StructuredOnly().
+				Log(ctx)
+
 			if repo, ok := m.plan.Repos[repoName]; ok {
+				tuiLog.Debug("Repo found in plan").
+					Field("repo_name", repoName).
+					Field("current_version", repo.CurrentVersion).
+					Field("next_version", repo.NextVersion).
+					Field("has_changes", repo.CurrentVersion != repo.NextVersion).
+					StructuredOnly().
+					Log(ctx)
+
 				// Only generate for repos with changes
 				if repo.CurrentVersion != repo.NextVersion {
+					tuiLog.Info("Starting changelog generation").
+						Field("repo_name", repoName).
+						StructuredOnly().
+						Log(ctx)
 					m.generating = true
 					m.genProgress = fmt.Sprintf("Generating changelog for %s", repoName)
 					// Start spinner animation
@@ -737,8 +767,25 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						generateChangelogCmd(m.plan.RootDir, repoName, repo),
 						tickSpinner(),
 					)
+				} else {
+					tuiLog.Debug("Skipping - no changes detected").
+						Field("repo_name", repoName).
+						StructuredOnly().
+						Log(ctx)
 				}
+			} else {
+				tuiLog.Warn("Repo not found in plan").
+					Field("repo_name", repoName).
+					StructuredOnly().
+					Log(ctx)
 			}
+		} else {
+			tuiLog.Debug("Conditions not met for changelog generation").
+				Field("is_full_plan", m.plan.Type == "full").
+				Field("valid_index", m.selectedIndex < len(m.repoNames)).
+				Field("not_generating", !m.generating).
+				StructuredOnly().
+				Log(ctx)
 		}
 		return m, nil
 
@@ -1297,7 +1344,13 @@ func (m releaseTuiModel) viewSettings() string {
 
 // Helper function to calculate next version
 func calculateNextVersion(current, bump string) string {
-	parts := strings.Split(current, ".")
+	// Strip prerelease suffix (e.g., v0.4.1-nightly.abc123 -> v0.4.1)
+	baseVersion := current
+	if idx := strings.Index(current, "-"); idx != -1 {
+		baseVersion = current[:idx]
+	}
+
+	parts := strings.Split(baseVersion, ".")
 	if len(parts) != 3 {
 		return current // Return as-is if not semantic version
 	}
