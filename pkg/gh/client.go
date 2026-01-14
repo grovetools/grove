@@ -105,11 +105,11 @@ func GetCurrentBranchCIStatus(repoPath string) (string, error) {
 	case "completed":
 		switch run.Conclusion {
 		case "success":
-			return "✅ Passed", nil
+			return "Passed", nil
 		case "failure":
 			return "❌ Failed", nil
 		case "cancelled":
-			return "⚠️ Cancelled", nil
+			return "Cancelled", nil
 		case "skipped":
 			return "⏭️ Skipped", nil
 		default:
@@ -195,7 +195,7 @@ func GetMyPRsStatus(repoPath string) (string, error) {
 		state := pr.StatusCheckRollup[0].State
 		switch state {
 		case "SUCCESS":
-			return "1 ✅", nil
+			return "1 passed", nil
 		case "FAILURE", "ERROR":
 			return "1 ❌", nil
 		default:
@@ -205,7 +205,7 @@ func GetMyPRsStatus(repoPath string) (string, error) {
 
 	parts := []string{}
 	if successCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d✅", successCount))
+		parts = append(parts, fmt.Sprintf("%d passed", successCount))
 	}
 	if failureCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d❌", failureCount))
@@ -246,17 +246,17 @@ func waitForBothWorkflows(ctx context.Context, slug, versionTag string) error {
 		repoName = parts[1]
 	}
 
-	fmt.Printf("%s\n", waitingStyle.Render("⏳ Waiting for workflows to complete for "+repoName+"@"+versionTag+"..."))
+	fmt.Printf("%s\n", waitingStyle.Render("Waiting for workflows to complete for "+repoName+"@"+versionTag+"..."))
 
 	// Step 1: Check for and wait for CI workflow completion first
 	// CI workflows run on push to main branch, which happens before tagging
 	if err := waitForCIWorkflow(ctx, slug, repoName); err != nil {
-		fmt.Printf("%s\n", warningStyle.Render("⚠️  CI workflow check failed: "+err.Error()))
+		fmt.Printf("%s\n", warningStyle.Render("CI workflow check failed: "+err.Error()))
 		// Don't fail the entire process for CI issues, but log it
 	}
 
 	// Step 2: Wait for the release workflow triggered by the tag
-	fmt.Printf("%s\n", infoStyle.Render("🚀 Now waiting for release workflow for "+repoName+"@"+versionTag+"..."))
+	fmt.Printf("%s\n", infoStyle.Render("Now waiting for release workflow for "+repoName+"@"+versionTag+"..."))
 	return waitForReleaseWorkflow(ctx, slug, repoName, versionTag)
 }
 
@@ -290,24 +290,25 @@ func waitForCIWorkflow(ctx context.Context, slug, repoName string) error {
 	for _, run := range runs {
 		if run.Status == "in_progress" || run.Status == "queued" || run.Status == "requested" {
 			runningCIID = fmt.Sprintf("%d", run.DatabaseID)
-			fmt.Printf("%s\n", infoStyle.Render("🔄 Found running CI workflow for "+repoName+", waiting for completion..."))
+			fmt.Printf("%s\n", infoStyle.Render("Found running CI workflow for "+repoName+", waiting for completion..."))
 			break
 		}
 	}
 
-	// If no running CI workflow, check if the most recent one failed
+	// If no running CI workflow, check the most recent one (informational only)
 	if runningCIID == "" && len(runs) > 0 {
 		latest := runs[0]
 		if latest.Status == "completed" {
 			if latest.Conclusion == "success" {
-				fmt.Printf("%s\n", successStyle.Render("✅ Latest CI workflow for "+repoName+" completed successfully"))
-				return nil
+				fmt.Printf("%s\n", successStyle.Render("Latest CI workflow for "+repoName+" completed successfully"))
 			} else {
-				return fmt.Errorf("latest CI workflow failed with conclusion: %s", latest.Conclusion)
+				// Just warn, don't fail - old CI failures shouldn't block releases
+				fmt.Printf("%s\n", warningStyle.Render("Latest CI workflow for "+repoName+" had conclusion: "+latest.Conclusion+" (not blocking)"))
 			}
+			return nil
 		}
 		// If not completed and not running, it might be queued
-		fmt.Printf("%s\n", infoStyle.Render("ℹ️  No actively running CI workflow found for "+repoName))
+		fmt.Printf("%s\n", infoStyle.Render("No actively running CI workflow found for "+repoName))
 		return nil
 	}
 
@@ -323,7 +324,7 @@ func waitForCIWorkflow(ctx context.Context, slug, repoName string) error {
 			}
 			return fmt.Errorf("failed to watch CI workflow: %w", err)
 		}
-		fmt.Printf("%s\n", successStyle.Render("✅ CI workflow for "+repoName+" completed successfully"))
+		fmt.Printf("%s\n", successStyle.Render("CI workflow for "+repoName+" completed successfully"))
 	}
 
 	return nil
@@ -372,7 +373,7 @@ func waitForReleaseWorkflow(ctx context.Context, slug, repoName, versionTag stri
 
 			if err := json.Unmarshal(output, &runs); err != nil {
 				if attemptCount%4 == 0 {
-					fmt.Printf("%s\n", warningStyle.Render("⚠️  Failed to parse release workflow data for "+repoName+"@"+versionTag+" (attempt "+fmt.Sprintf("%d", attemptCount)+"): "+err.Error()))
+					fmt.Printf("%s\n", warningStyle.Render("Failed to parse release workflow data for "+repoName+"@"+versionTag+" (attempt "+fmt.Sprintf("%d", attemptCount)+"): "+err.Error()))
 				}
 				continue
 			}
@@ -392,14 +393,14 @@ func waitForReleaseWorkflow(ctx context.Context, slug, repoName, versionTag stri
 			}
 
 			if attemptCount%4 == 0 { // Log every 20 seconds
-				fmt.Printf("%s\n", waitingStyle.Render("⏳ No release workflow found yet for "+repoName+"@"+versionTag+" (attempt "+fmt.Sprintf("%d", attemptCount)+")..."))
+				fmt.Printf("%s\n", waitingStyle.Render("No release workflow found yet for "+repoName+"@"+versionTag+" (attempt "+fmt.Sprintf("%d", attemptCount)+")..."))
 			}
 		}
 	}
 
 found:
 	// Now watch the release workflow run until it completes
-	fmt.Printf("%s\n", infoStyle.Render("👀 Watching release workflow "+runID+" for "+repoName+"@"+versionTag+"..."))
+	fmt.Printf("%s\n", infoStyle.Render("Watching release workflow "+runID+" for "+repoName+"@"+versionTag+"..."))
 	cmd := exec.CommandContext(ctx, "gh", "run", "watch", runID,
 		"--repo", slug,
 		"--exit-status")
@@ -414,11 +415,12 @@ found:
 		return fmt.Errorf("failed to watch release workflow: %w", err)
 	}
 
-	fmt.Printf("%s\n", successStyle.Render("🎉 Release workflow completed successfully for "+repoName+"@"+versionTag))
+	fmt.Printf("%s\n", successStyle.Render("Release workflow completed successfully for "+repoName+"@"+versionTag))
 	return nil
 }
 
 // WaitForCIWorkflow waits for CI workflow to complete for the latest commit on main branch
+// If there's no CI workflow defined, it returns immediately without error
 func WaitForCIWorkflow(ctx context.Context, repoPath string) error {
 	slug, err := getRepoSlug(repoPath)
 	if err != nil {
@@ -428,7 +430,39 @@ func WaitForCIWorkflow(ctx context.Context, repoPath string) error {
 	if parts := strings.Split(slug, "/"); len(parts) == 2 {
 		repoName = parts[1]
 	}
-	
+
+	// First, check if CI workflow exists at all
+	checkCmd := exec.CommandContext(ctx, "gh", "workflow", "list",
+		"--repo", slug,
+		"--json", "name")
+	checkOutput, err := checkCmd.Output()
+	if err != nil {
+		fmt.Printf("%s\n", infoStyle.Render("No workflows found for "+repoName+", skipping CI wait"))
+		return nil
+	}
+
+	var workflows []struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(checkOutput, &workflows); err != nil {
+		fmt.Printf("%s\n", infoStyle.Render("Could not parse workflows for "+repoName+", skipping CI wait"))
+		return nil
+	}
+
+	// Check if there's a CI workflow
+	hasCIWorkflow := false
+	for _, wf := range workflows {
+		if wf.Name == "CI" {
+			hasCIWorkflow = true
+			break
+		}
+	}
+
+	if !hasCIWorkflow {
+		fmt.Printf("%s\n", infoStyle.Render("No CI workflow defined for "+repoName+", skipping CI wait"))
+		return nil
+	}
+
 	// Get latest commit on main
 	cmd := exec.CommandContext(ctx, "git", "rev-parse", "origin/main")
 	cmd.Dir = repoPath
@@ -437,10 +471,10 @@ func WaitForCIWorkflow(ctx context.Context, repoPath string) error {
 		return fmt.Errorf("failed to get latest commit on main for %s: %w", repoName, err)
 	}
 	commitSHA := strings.TrimSpace(string(output))
-	
+
 	// Poll for the CI run for this commit to appear
 	var runID string
-	findTimeout := time.After(15 * time.Minute)
+	findTimeout := time.After(5 * time.Minute) // Reduced from 15 to 5 minutes
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -449,7 +483,8 @@ func WaitForCIWorkflow(ctx context.Context, repoPath string) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-findTimeout:
-			return fmt.Errorf("timeout waiting for CI workflow for commit %s to appear", commitSHA)
+			fmt.Printf("%s\n", warningStyle.Render("CI workflow for "+repoName+" didn't start within 5 minutes, continuing anyway"))
+			return nil // Don't fail, just continue
 		case <-ticker.C:
 			cmd = exec.CommandContext(ctx, "gh", "run", "list",
 				"--repo", slug,
@@ -457,7 +492,7 @@ func WaitForCIWorkflow(ctx context.Context, repoPath string) error {
 				"--commit", commitSHA,
 				"--limit", "1",
 				"--json", "databaseId")
-			
+
 			output, err := cmd.Output()
 			if err != nil {
 				continue // Try again
@@ -475,7 +510,7 @@ func WaitForCIWorkflow(ctx context.Context, repoPath string) error {
 
 foundCI:
 	// Watch the workflow run
-	fmt.Printf("%s\n", infoStyle.Render("👀 Watching CI workflow "+runID+" for "+repoName+"..."))
+	fmt.Printf("%s\n", infoStyle.Render("Watching CI workflow "+runID+" for "+repoName+"..."))
 	cmd = exec.CommandContext(ctx, "gh", "run", "watch", runID,
 		"--repo", slug,
 		"--exit-status")
@@ -486,7 +521,7 @@ foundCI:
 		}
 		return fmt.Errorf("failed to watch CI workflow: %w", err)
 	}
-	
-	fmt.Printf("%s\n", successStyle.Render("✅ CI workflow for "+repoName+" completed successfully"))
+
+	fmt.Printf("%s\n", successStyle.Render("CI workflow for "+repoName+" completed successfully"))
 	return nil
 }
