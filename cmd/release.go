@@ -44,6 +44,7 @@ var (
 	releaseInteractive    bool // New flag for interactive TUI mode
 	releaseSkipCI         bool // Skip CI waits after changelog updates
 	releaseResume         bool // Only process repos that haven't completed successfully
+	releaseSyncDeps       bool // Sync grove dependencies before releasing
 )
 
 func init() {
