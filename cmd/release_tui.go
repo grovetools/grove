@@ -318,7 +318,7 @@ func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Single generation mode
 			m.generating = false
 			if msg.err != nil {
-				m.genProgress = fmt.Sprintf("❌ Failed to generate changelog for %s: %v", msg.repoName, msg.err)
+				m.genProgress = fmt.Sprintf("%s Failed to generate changelog for %s: %v", theme.IconError, msg.repoName, msg.err)
 			} else {
 				m.genProgress = fmt.Sprintf("%s Changelog generated for %s", theme.IconSuccess, msg.repoName)
 			}
@@ -450,6 +450,10 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						m.genProgress = fmt.Sprintf("%s Failed to update changelog version: %v", theme.IconWarning, err)
 					}
 				}
+				// Also update the repo's CHANGELOG.md if it has the old version
+				if err := updateRepoChangelogVersion(m.plan.RootDir, repoName, oldVersion, repo.NextVersion); err != nil {
+					m.genProgress = fmt.Sprintf("%s Failed to update repo changelog: %v", theme.IconWarning, err)
+				}
 			}
 		}
 		return m, nil
@@ -467,6 +471,10 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						m.genProgress = fmt.Sprintf("%s Failed to update changelog version: %v", theme.IconWarning, err)
 					}
 				}
+				// Also update the repo's CHANGELOG.md if it has the old version
+				if err := updateRepoChangelogVersion(m.plan.RootDir, repoName, oldVersion, repo.NextVersion); err != nil {
+					m.genProgress = fmt.Sprintf("%s Failed to update repo changelog: %v", theme.IconWarning, err)
+				}
 			}
 		}
 		return m, nil
@@ -483,6 +491,10 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					if err := updateStagedChangelogVersion(repo.ChangelogPath, oldVersion, repo.NextVersion); err != nil {
 						m.genProgress = fmt.Sprintf("%s Failed to update changelog version: %v", theme.IconWarning, err)
 					}
+				}
+				// Also update the repo's CHANGELOG.md if it has the old version
+				if err := updateRepoChangelogVersion(m.plan.RootDir, repoName, oldVersion, repo.NextVersion); err != nil {
+					m.genProgress = fmt.Sprintf("%s Failed to update repo changelog: %v", theme.IconWarning, err)
 				}
 			}
 		}
@@ -507,7 +519,14 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 							})
 						}
 					}
-					m.genProgress = fmt.Sprintf("%s Applied %s version bump to %s", theme.IconSuccess, 
+					// Also update the repo's CHANGELOG.md if it has the old version
+					if err := updateRepoChangelogVersion(m.plan.RootDir, repoName, oldVersion, repo.NextVersion); err != nil {
+						m.genProgress = fmt.Sprintf("%s Failed to update repo changelog: %v", theme.IconWarning, err)
+						return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+							return clearProgressMsg{}
+						})
+					}
+					m.genProgress = fmt.Sprintf("%s Applied %s version bump to %s", theme.IconSuccess,
 						strings.ToUpper(repo.SuggestedBump), repoName)
 					// Save the updated plan
 					release.SavePlan(m.plan)
@@ -564,7 +583,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				// Create with a basic template
 				template := fmt.Sprintf("# Changelog\n\nAll notable changes to %s will be documented in this file.\n\nThe format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),\nand this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).\n\n", repoName)
 				if err := os.WriteFile(changelogPath, []byte(template), 0644); err != nil {
-					m.genProgress = fmt.Sprintf("❌ Failed to create CHANGELOG.md: %v", err)
+					m.genProgress = fmt.Sprintf("%s Failed to create CHANGELOG.md: %v", theme.IconError, err)
 					return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 						return clearProgressMsg{}
 					})
@@ -608,7 +627,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					// Read the staged changelog
 					stagedContent, err := os.ReadFile(repo.ChangelogPath)
 					if err != nil {
-						m.genProgress = fmt.Sprintf("❌ Failed to read staged changelog: %v", err)
+						m.genProgress = fmt.Sprintf("%s Failed to read staged changelog: %v", theme.IconError, err)
 						return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 							return clearProgressMsg{}
 						})
@@ -635,7 +654,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					
 					// Write the file
 					if err := os.WriteFile(changelogPath, newContent, 0644); err != nil {
-						m.genProgress = fmt.Sprintf("❌ Failed to write changelog: %v", err)
+						m.genProgress = fmt.Sprintf("%s Failed to write changelog: %v", theme.IconError, err)
 					} else {
 						// Calculate and store hash of the written content
 						hash := sha256.Sum256(newContent)
@@ -1072,6 +1091,9 @@ func (m releaseTuiModel) viewTable() string {
 		} else if repo.ChangelogState == "dirty" {
 			// Changelog was written and modified by user
 			changelogStatus = theme.DefaultTheme.Info.Copy().Bold(true).Render(theme.IconNote + " Modified")
+		} else if repoChangelogVersion := getRepoChangelogVersion(m.plan.RootDir, repoName); repoChangelogVersion != "" {
+			// Repo's CHANGELOG.md is dirty and has a version entry
+			changelogStatus = theme.DefaultTheme.Success.Render(fmt.Sprintf("%s In Repo (%s)", theme.IconSuccess, repoChangelogVersion))
 		} else if repo.ChangelogPath != "" {
 			if _, err := os.Stat(repo.ChangelogPath); err == nil {
 				// Check if the changelog is stale (different commit)
@@ -1169,7 +1191,7 @@ func (m releaseTuiModel) viewTable() string {
 	// Show release order information
 	releaseInfo := ""
 	if len(m.plan.ReleaseLevels) > 0 {
-		releaseInfo = "\n📋 Release Order (by dependency level)\n\n"
+		releaseInfo = fmt.Sprintf("\n%s Release Order (by dependency level)\n\n", theme.IconPlan)
 		for i, level := range m.plan.ReleaseLevels {
 			if len(level) > 0 {
 				releaseInfo += fmt.Sprintf("Level %d", i+1)
@@ -1225,7 +1247,7 @@ func (m releaseTuiModel) viewTable() string {
 				fmt.Sprintf("%s → %s", repo.CurrentVersion, repo.NextVersion),
 			)
 			
-			reasoning = fmt.Sprintf("\n\n💡 Suggested: %s version bump (%s)\n   %s", 
+			reasoning = fmt.Sprintf("\n\n%s Suggested: %s version bump (%s)\n   %s", theme.IconLightbulb, 
 				bumpType, versionChange, repo.SuggestionReasoning)
 		}
 	}
@@ -1560,25 +1582,123 @@ func updateStagedChangelogVersion(changelogPath, oldVersion, newVersion string) 
 	if changelogPath == "" || oldVersion == "" || newVersion == "" || oldVersion == newVersion {
 		return nil // Nothing to update
 	}
-	
+
 	// Read the staged changelog
 	content, err := os.ReadFile(changelogPath)
 	if err != nil {
 		return fmt.Errorf("failed to read staged changelog: %w", err)
 	}
-	
+
 	// Replace the old version with the new version in the header
 	// Look for "## oldVersion (date)" pattern
 	oldHeader := fmt.Sprintf("## %s (", oldVersion)
 	newHeader := fmt.Sprintf("## %s (", newVersion)
-	
+
 	updatedContent := strings.Replace(string(content), oldHeader, newHeader, 1)
-	
+
 	// Write back the updated content
 	if err := os.WriteFile(changelogPath, []byte(updatedContent), 0644); err != nil {
 		return fmt.Errorf("failed to write updated changelog: %w", err)
 	}
-	
+
+	return nil
+}
+
+// getRepoChangelogVersion checks if the repo's CHANGELOG.md has uncommitted changes (is dirty in git)
+// and returns the version found in the first entry. Returns empty string if not dirty or no version found.
+func getRepoChangelogVersion(rootDir, repoName string) string {
+	repoPath := filepath.Join(rootDir, repoName)
+
+	// Check if CHANGELOG.md is modified in git (staged or unstaged)
+	cmd := exec.Command("git", "status", "--porcelain", "CHANGELOG.md")
+	cmd.Dir = repoPath
+	output, err := cmd.Output()
+	if err != nil || len(strings.TrimSpace(string(output))) == 0 {
+		return "" // Not dirty
+	}
+
+	// Read the changelog to find the first version header
+	changelogPath := filepath.Join(repoPath, "CHANGELOG.md")
+	content, err := os.ReadFile(changelogPath)
+	if err != nil {
+		return ""
+	}
+
+	// Find the first version header pattern "## vX.Y.Z" or "## [vX.Y.Z]"
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "## v") {
+			// Extract version - stop at space or parenthesis
+			version := strings.TrimPrefix(line, "## ")
+			if idx := strings.IndexAny(version, " ("); idx != -1 {
+				version = version[:idx]
+			}
+			return version
+		}
+		if strings.HasPrefix(line, "## [v") {
+			// Handle [vX.Y.Z] format
+			version := strings.TrimPrefix(line, "## [")
+			if idx := strings.Index(version, "]"); idx != -1 {
+				version = version[:idx]
+			}
+			return version
+		}
+	}
+
+	return ""
+}
+
+// updateRepoChangelogVersion updates the version in the repo's CHANGELOG.md file
+// This is called when the user bumps the version after having written the changelog to the repo
+// It finds the first version header and replaces it with the new version
+func updateRepoChangelogVersion(rootDir, repoName, oldVersion, newVersion string) error {
+	if newVersion == "" {
+		return nil // Nothing to update
+	}
+
+	changelogPath := filepath.Join(rootDir, repoName, "CHANGELOG.md")
+
+	// Check if the file exists
+	content, err := os.ReadFile(changelogPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // No repo changelog to update
+		}
+		return fmt.Errorf("failed to read repo changelog: %w", err)
+	}
+
+	// Find the current version in the repo changelog (first ## vX.Y.Z header)
+	currentRepoVersion := ""
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## v") {
+			// Extract version up to space or paren
+			ver := strings.TrimPrefix(trimmed, "## ")
+			if idx := strings.IndexAny(ver, " ("); idx != -1 {
+				ver = ver[:idx]
+			}
+			currentRepoVersion = ver
+			break
+		}
+	}
+
+	if currentRepoVersion == "" || currentRepoVersion == newVersion {
+		return nil // No version found or already correct
+	}
+
+	// Replace the current version with the new version in the header
+	// Match pattern "## vX.Y.Z (" to be precise
+	oldHeader := fmt.Sprintf("## %s (", currentRepoVersion)
+	newHeader := fmt.Sprintf("## %s (", newVersion)
+	updatedContent := strings.Replace(string(content), oldHeader, newHeader, 1)
+
+	// Write back the updated content
+	if err := os.WriteFile(changelogPath, []byte(updatedContent), 0644); err != nil {
+		return fmt.Errorf("failed to write updated repo changelog: %w", err)
+	}
+
 	return nil
 }
 
