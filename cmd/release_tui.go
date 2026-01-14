@@ -529,18 +529,18 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Edit the staged changelog for the selected repository
 		if m.plan.Type == "full" && m.selectedIndex < len(m.repoNames) {
 			repoName := m.repoNames[m.selectedIndex]
+			repoPath := filepath.Join(m.plan.RootDir, repoName)
 			if repo, ok := m.plan.Repos[repoName]; ok {
 				if repo.ChangelogPath != "" {
-					// Open staged changelog in editor
-					return m, editFileCmd(repo.ChangelogPath)
+					// Open staged changelog in editor with repo as working directory
+					return m, editFileCmd(repo.ChangelogPath, repoPath)
 				} else {
 					// No staged changelog, try to edit the repo's CHANGELOG.md
-					repoPath := filepath.Join(m.plan.RootDir, repoName)
 					changelogPath := filepath.Join(repoPath, "CHANGELOG.md")
-					
+
 					// Check if CHANGELOG.md exists
 					if _, err := os.Stat(changelogPath); err == nil {
-						return m, editFileCmd(changelogPath)
+						return m, editFileCmd(changelogPath, repoPath)
 					} else {
 						m.genProgress = fmt.Sprintf("%s No changelog found. Generate one first with 'g'", theme.IconWarning)
 						return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
@@ -558,7 +558,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			repoName := m.repoNames[m.selectedIndex]
 			repoPath := filepath.Join(m.plan.RootDir, repoName)
 			changelogPath := filepath.Join(repoPath, "CHANGELOG.md")
-			
+
 			// Check if CHANGELOG.md exists, create if not
 			if _, err := os.Stat(changelogPath); os.IsNotExist(err) {
 				// Create with a basic template
@@ -570,9 +570,9 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					})
 				}
 			}
-			
-			// Open in editor
-			return m, editFileCmd(changelogPath)
+
+			// Open in editor with repo as working directory
+			return m, editFileCmd(changelogPath, repoPath)
 		}
 		return m, nil
 
@@ -647,7 +647,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						
 						// Open in editor for further editing
 						return m, tea.Batch(
-							editFileCmd(changelogPath),
+							editFileCmd(changelogPath, repoPath),
 							tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 								return clearProgressMsg{}
 							}),
@@ -708,7 +708,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			repoName := m.repoNames[m.selectedIndex]
 			repoPath := filepath.Join(m.plan.RootDir, repoName)
 			rulesPath := filepath.Join(repoPath, ".grove", "rules")
-			
+
 			// Create rules file if it doesn't exist
 			if _, err := os.Stat(rulesPath); os.IsNotExist(err) {
 				groveDir := filepath.Join(repoPath, ".grove")
@@ -722,9 +722,9 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 `
 				os.WriteFile(rulesPath, []byte(content), 0644)
 			}
-			
-			// Open in editor
-			return m, editRulesCmd(rulesPath)
+
+			// Open in editor with repo as working directory
+			return m, editRulesCmd(rulesPath, repoPath)
 		}
 		return m, nil
 
@@ -1400,8 +1400,10 @@ func tickSpinner() tea.Cmd {
 
 
 // Command to edit rules file in external editor
-func editRulesCmd(rulesPath string) tea.Cmd {
-	return tea.ExecProcess(exec.Command(getEditor(), rulesPath), func(err error) tea.Msg {
+func editRulesCmd(rulesPath, repoPath string) tea.Cmd {
+	cmd := exec.Command(getEditor(), rulesPath)
+	cmd.Dir = repoPath // Set working directory to repo for proper context
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		if err != nil {
 			return fmt.Errorf("failed to edit rules file: %w", err)
 		}
@@ -1410,8 +1412,12 @@ func editRulesCmd(rulesPath string) tea.Cmd {
 }
 
 // Command to edit a file in external editor
-func editFileCmd(filePath string) tea.Cmd {
-	return tea.ExecProcess(exec.Command(getEditor(), filePath), func(err error) tea.Msg {
+func editFileCmd(filePath, workDir string) tea.Cmd {
+	cmd := exec.Command(getEditor(), filePath)
+	if workDir != "" {
+		cmd.Dir = workDir // Set working directory for proper context
+	}
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		if err != nil {
 			return fmt.Errorf("failed to edit file: %w", err)
 		}
