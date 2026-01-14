@@ -11,10 +11,11 @@ import (
 
 	"github.com/mattsolo1/grove-core/git"
 	grovelogging "github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-meta/pkg/depsgraph"
 	"github.com/mattsolo1/grove-meta/pkg/discovery"
 	"github.com/mattsolo1/grove-meta/pkg/release"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
 )
 
 // runReleasePlan generates a release plan without executing it
@@ -432,7 +433,7 @@ func runReleaseApply(ctx context.Context) error {
 	
 	// Display selected repos summary
 	if len(selectedRepos) > 0 {
-		displayInfo(fmt.Sprintf("📦 Releasing %d selected repositories: %s", len(selectedRepos), strings.Join(selectedRepos, ", ")))
+		displayInfo(fmt.Sprintf("%s Releasing %d selected repositories: %s", theme.IconArchive, len(selectedRepos), strings.Join(selectedRepos, ", ")))
 	} else {
 		return fmt.Errorf("no repositories selected for release")
 	}
@@ -442,9 +443,13 @@ func runReleaseApply(ctx context.Context) error {
 	//	return fmt.Errorf("failed to auto-commit ecosystem changes: %w", err)
 	// }
 
-	// Run pre-flight checks
+	// Run pre-flight checks (only for selected repos)
 	parentVersion := determineParentVersion(plan.RootDir, versions, hasChanges)
-	if err := runPreflightChecks(ctx, plan.RootDir, parentVersion, workspaces, logger); err != nil {
+	selectedWorkspaces := make([]string, 0, len(selectedRepos))
+	for _, repo := range selectedRepos {
+		selectedWorkspaces = append(selectedWorkspaces, filepath.Join(plan.RootDir, repo))
+	}
+	if err := runPreflightChecks(ctx, plan.RootDir, parentVersion, selectedWorkspaces, logger); err != nil {
 		return err
 	}
 
@@ -463,7 +468,7 @@ func runReleaseApply(ctx context.Context) error {
 	}
 
 	// Final phase: commit and tag ecosystem
-	displaySection("🏁 Finalizing Ecosystem Release")
+	displaySection(theme.IconStatusCompleted + " Finalizing Ecosystem Release")
 
 	if !releaseSkipParent {
 		// Stage only the submodules that were released
@@ -500,37 +505,16 @@ func runReleaseApply(ctx context.Context) error {
 		}
 	}
 
-	// Handle parent repository updates unless skipped
-	var finalParentVersion string
-	// DISABLED: Skip parent repository operations to avoid submodule conflicts
-	if false && !releaseSkipParent {
-		// Recalculate parent version to handle same-day releases
-		finalParentVersion = determineParentVersion(plan.RootDir, versions, hasChanges)
+	// Parent repository (grove-ecosystem) updates are currently disabled
+	// Submodule releases are independent - the parent repo is updated manually
+	displayInfo("Parent repo (grove-ecosystem) not auto-updated - commit submodule changes manually if needed")
+	displaySuccess(fmt.Sprintf("Released %d module(s) successfully", releasedCount))
 
-		// Tag the main repository
-		if err := executeGitCommand(ctx, plan.RootDir, []string{"tag", "-a", finalParentVersion, "-m", fmt.Sprintf("Release %s", finalParentVersion)}, "Tag main repository", logger); err != nil {
-			return err
+	// Clear the plan after successful completion (but not in dry-run mode)
+	if !releaseDryRun {
+		if err := release.ClearPlan(); err != nil {
+			logger.WithError(err).Warn("Failed to clear release plan")
 		}
-
-		// Push the main repository changes
-		if err := executeGitCommand(ctx, plan.RootDir, []string{"push", "origin", "main"}, "Push main branch", logger); err != nil {
-			return err
-		}
-
-		// Push the main repository tag
-		if err := executeGitCommand(ctx, plan.RootDir, []string{"push", "origin", finalParentVersion}, "Push release tag", logger); err != nil {
-			return err
-		}
-
-		displayFinalSuccess(finalParentVersion, releasedCount)
-	} else {
-		displayInfo("Skipping parent repository updates (--skip-parent flag)")
-		displaySuccess(fmt.Sprintf("Released %d module(s) successfully", releasedCount))
-	}
-
-	// Clear the plan after successful completion
-	if err := release.ClearPlan(); err != nil {
-		logger.WithError(err).Warn("Failed to clear release plan")
 	}
 
 	return nil

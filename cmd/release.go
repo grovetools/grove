@@ -245,7 +245,7 @@ func autoCommitEcosystemChanges(ctx context.Context, rootDir string, hasChanges 
 }
 
 func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces []string, logger *logrus.Logger) error {
-	displaySection("🔍 Pre-flight Checks")
+	displaySection(theme.IconFilter + " Pre-flight Checks")
 
 	// Check main repository status
 	mainStatus, err := git.GetStatus(rootDir)
@@ -274,12 +274,6 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces
 
 	// Check each workspace
 	for _, wsPath := range workspaces {
-		// Get relative path from root
-		relPath, err := filepath.Rel(rootDir, wsPath)
-		if err != nil {
-			relPath = wsPath
-		}
-
 		repoName := filepath.Base(wsPath)
 
 		// Skip if not in the filter list (when filter is specified)
@@ -287,7 +281,8 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces
 			continue
 		}
 
-		wsStatus := workspaceStatus{Path: relPath}
+		// Use just the repo name for display
+		wsStatus := workspaceStatus{Path: repoName}
 
 		// Get workspace git status
 		status, err := git.GetStatus(wsPath)
@@ -525,15 +520,20 @@ func tagSubmodules(ctx context.Context, rootDir string, versions map[string]stri
 }
 
 func executeGitCommand(ctx context.Context, dir string, args []string, description string, logger *logrus.Logger) error {
+	cmd := fmt.Sprintf("git %s", strings.Join(args, " "))
 	if releaseDryRun {
-		logger.WithFields(logrus.Fields{
-			"command": fmt.Sprintf("git %s", strings.Join(args, " ")),
-			"dir":     dir,
-		}).Info("[DRY RUN] Would execute")
+		ulog.Info("[DRY RUN] Would execute").
+			Field("command", cmd).
+			Field("dir", dir).
+			Pretty(fmt.Sprintf("%s [DRY RUN] %s", theme.IconInfo, cmd)).
+			Log(ctx)
 		return nil
 	}
 
-	logger.WithField("command", fmt.Sprintf("git %s", strings.Join(args, " "))).Info(description)
+	ulog.Info(description).
+		Field("command", cmd).
+		Pretty(fmt.Sprintf("%s %s", theme.IconRunning, cmd)).
+		Log(ctx)
 
 	// Retry logic for git lock errors
 	maxRetries := 3
@@ -882,25 +882,35 @@ func getVersionIncrement(current, proposed string) string {
 }
 
 func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]string, versions map[string]string, currentVersions map[string]string, hasChanges map[string]bool, graph *depsgraph.Graph, logger *logrus.Logger, useLLMChangelog bool, plan *release.ReleasePlan) error {
-	displaySection("🎯 Release Orchestration")
+	displaySection(theme.IconBullet + " Release Orchestration")
 
 	// Process each level of dependencies
 	for levelIndex, level := range releaseLevels {
-		logger.WithField("level", levelIndex).Info("Processing release level")
+		ulog.Info("Processing release level").
+			Field("level", levelIndex).
+			Pretty(fmt.Sprintf("%s Processing release level %d", theme.IconArrow, levelIndex)).
+			Log(ctx)
 
 		// Collect repositories that need releasing at this level
 		var reposToRelease []string
 		for _, repoName := range level {
 			// Skip if no changes
 			if changes, ok := hasChanges[repoName]; !ok || !changes {
-				logger.WithField("repo", repoName).Info("Skipping (no changes)")
+				ulog.Debug("Skipping repo").
+					Field("repo", repoName).
+					Field("reason", "no changes").
+					Pretty(fmt.Sprintf("  %s Skipping %s (no changes)", theme.IconPending, repoName)).
+					Log(ctx)
 				continue
 			}
 
 			// Skip if no version
 			version, ok := versions[repoName]
 			if !ok {
-				logger.WithField("repo", repoName).Warn("No version found, skipping")
+				ulog.Warn("No version found").
+					Field("repo", repoName).
+					Pretty(fmt.Sprintf("  %s No version found for %s, skipping", theme.IconWarning, repoName)).
+					Log(ctx)
 				continue
 			}
 
@@ -922,7 +932,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 			}
 			
 			if isRepoFullyReleased(ctx, wsPath, repoPlan) {
-				displayInfo(fmt.Sprintf("✅ %s already fully released (%s), skipping", repoName, version))
+				displayInfo(fmt.Sprintf("%s %s already fully released (%s), skipping", theme.IconSuccess, repoName, version))
 				continue
 			}
 			
@@ -939,23 +949,26 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 		}
 
 		if len(reposToRelease) == 0 {
-			logger.WithField("level", levelIndex).Info("No repositories to release at this level")
+			ulog.Debug("No repositories to release at this level").
+				Field("level", levelIndex).
+				Log(ctx)
 			continue
 		}
 
 		// Process all repositories at this level in parallel
 		if len(reposToRelease) > 1 {
-			logger.WithFields(logrus.Fields{
-				"level": levelIndex,
-				"count": len(reposToRelease),
-				"repos": strings.Join(reposToRelease, ", "),
-			}).Info("Releasing repositories in parallel")
-			displayInfo(fmt.Sprintf("🚀 Releasing %d repositories in parallel: %s", len(reposToRelease), strings.Join(reposToRelease, ", ")))
+			ulog.Info("Releasing repositories in parallel").
+				Field("level", levelIndex).
+				Field("count", len(reposToRelease)).
+				Field("repos", strings.Join(reposToRelease, ", ")).
+				Pretty(fmt.Sprintf("%s Releasing %d repositories in parallel: %s", theme.IconRunning, len(reposToRelease), strings.Join(reposToRelease, ", "))).
+				Log(ctx)
 		} else {
-			logger.WithFields(logrus.Fields{
-				"level": levelIndex,
-				"repo":  reposToRelease[0],
-			}).Info("Releasing repository")
+			ulog.Info("Releasing repository").
+				Field("level", levelIndex).
+				Field("repo", reposToRelease[0]).
+				Pretty(fmt.Sprintf("%s Releasing %s", theme.IconArrow, reposToRelease[0])).
+				Log(ctx)
 		}
 
 		// Use goroutines to release repositories in parallel
@@ -976,10 +989,11 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 
 				wsPath := node.Dir
 
-				logger.WithFields(logrus.Fields{
-					"repo":    repo,
-					"version": version,
-				}).Info("Releasing module")
+				ulog.Info("Releasing module").
+					Field("repo", repo).
+					Field("version", version).
+					Pretty(fmt.Sprintf("  %s %s %s", theme.IconRepo, repo, theme.DefaultTheme.Success.Render(version))).
+					Log(ctx)
 
 				// For RC releases, checkout/create rc-nightly branch (always reset to main)
 				if !releaseDryRun && plan.Type == "rc" {
@@ -1318,8 +1332,11 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 							return
 						}
 
-						logger.Infof("✅ CI release for %s@%s successful.", repo, version)
-						displayInfo(fmt.Sprintf("✅ CI release for %s@%s successful.", repo, version))
+						ulog.Success("CI release successful").
+							Field("repo", repo).
+							Field("version", version).
+							Pretty(fmt.Sprintf("  %s CI release for %s@%s successful", theme.IconSuccess, repo, version)).
+							Log(ctx)
 					} else {
 						// No .github directory, skip CI workflow monitoring
 						logger.Infof("No .github directory found for %s, skipping CI workflow monitoring", repo)
@@ -2155,15 +2172,15 @@ func checkForOutdatedDependencies(ctx context.Context, rootDir string, workspace
 
 	// Display info about dependency updates that will occur
 	if len(outdatedDeps) > 0 {
-		displayInfo("📦 This release will update dependencies:")
+		displayInfo(theme.IconArchive + " This release will update dependencies:")
 		for wsName, deps := range outdatedDeps {
-			fmt.Printf("  📦 %s:\n", wsName)
+			fmt.Printf("  %s %s:\n", theme.IconRepo, wsName)
 			for dep, versions := range deps {
 				depName := filepath.Base(dep) // Extract just the repo name
-				fmt.Printf("    • %s: %s\n", depName, versions)
+				fmt.Printf("    %s %s: %s\n", theme.IconBullet, depName, versions)
 			}
 		}
-		fmt.Printf("\n💡 Consider running `grove deps sync --commit --push` before releasing\n\n")
+		fmt.Printf("\n%s Consider running `grove deps sync --commit --push` before releasing\n\n", theme.IconLightbulb)
 	}
 
 	return nil
