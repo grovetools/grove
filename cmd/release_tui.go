@@ -941,10 +941,11 @@ func (m releaseTuiModel) viewTable() string {
 		BorderStyle(theme.DefaultTheme.Muted)
 	
 	// Conditionally add headers based on plan type
+	// First column is arrow indicator, second is checkbox
 	if m.plan.Type == "full" {
-		t.Headers("", "Repository", "Branch", "Git Status", "Changes/Release", "Proposed", "Status", "Changelog")
+		t.Headers(" ", " ", "Repository", "Branch", "Git Status", "Changes/Release", "Proposed", "Status", "Changelog")
 	} else {
-		t.Headers("", "Repository", "Branch", "Git Status", "Changes/Release", "Proposed", "Status")
+		t.Headers(" ", " ", "Repository", "Branch", "Git Status", "Changes/Release", "Proposed", "Status")
 	}
 
 	// Count selected repositories with changes
@@ -960,7 +961,8 @@ func (m releaseTuiModel) viewTable() string {
 		var row []string
 		if m.plan.Type == "full" {
 			row = []string{
-				"",  // No selection checkbox for parent
+				" ",  // Arrow indicator (none for parent)
+				" ",  // No selection checkbox for parent
 				"grove-ecosystem",
 				"-",  // Branch
 				"-",  // Git Status
@@ -971,7 +973,8 @@ func (m releaseTuiModel) viewTable() string {
 			}
 		} else {
 			row = []string{
-				"",  // No selection checkbox for parent
+				" ",  // Arrow indicator (none for parent)
+				" ",  // No selection checkbox for parent
 				"grove-ecosystem",
 				"-",  // Branch
 				"-",  // Git Status
@@ -980,14 +983,14 @@ func (m releaseTuiModel) viewTable() string {
 				"-",
 			}
 		}
-		
+
 		t.Row(row...)
-		
+
 		// Add separator row
 		if m.plan.Type == "full" {
-			t.Row("", "───────────────", "──────", "──────────", "───────────────", "──────────", "─────────", "──────────")
+			t.Row(" ", " ", "───────────────", "──────", "──────────", "───────────────", "──────────", "─────────", "──────────")
 		} else {
-			t.Row("", "───────────────", "──────", "──────────", "───────────────", "──────────", "─────────")
+			t.Row(" ", " ", "───────────────", "──────", "──────────", "───────────────", "──────────", "─────────")
 		}
 	}
 
@@ -1079,9 +1082,16 @@ func (m releaseTuiModel) viewTable() string {
 			changesReleaseStr = fmt.Sprintf("%s (%s%d)", repo.CurrentVersion, theme.IconArrowUp, repo.CommitsSinceLastTag)
 		}
 
+		// Arrow indicator for selected row
+		arrow := " "
+		if i == m.selectedIndex && repo.CurrentVersion != repo.NextVersion {
+			arrow = theme.IconArrowRightBold
+		}
+
 		var row []string
 		if m.plan.Type == "full" {
 			row = []string{
+				arrow,
 				checkbox,
 				repoName,
 				repo.Branch,
@@ -1093,6 +1103,7 @@ func (m releaseTuiModel) viewTable() string {
 			}
 		} else {
 			row = []string{
+				arrow,
 				checkbox,
 				repoName,
 				repo.Branch,
@@ -1100,13 +1111,6 @@ func (m releaseTuiModel) viewTable() string {
 				changesReleaseStr,
 				repo.NextVersion,
 				statusStr,
-			}
-		}
-
-		// Highlight selected row (but not for repos without changes)
-		if i == m.selectedIndex && repo.CurrentVersion != repo.NextVersion {
-			for j, cell := range row {
-				row[j] = theme.DefaultTheme.Selected.Render(cell)
 			}
 		}
 
@@ -1201,12 +1205,18 @@ func (m releaseTuiModel) viewTable() string {
 
 	// Combine all content that should be scrollable
 	fullContent := fmt.Sprintf("%s%s%s%s", tableStr, releaseInfo, reasoning, progress)
-	
+
 	// Update viewport with the content
 	m.viewport.SetContent(fullContent)
-	
-	// Return header, viewport, and footer
-	return fmt.Sprintf("%s\n\n%s\n\n%s", header, m.viewport.View(), footer)
+
+	// Create content with margin
+	content := fmt.Sprintf("%s\n\n%s\n\n%s", header, m.viewport.View(), footer)
+
+	// Apply margin around the entire TUI
+	marginStyle := lipgloss.NewStyle().
+		Padding(1, 2) // 1 line top/bottom, 2 chars left/right
+
+	return marginStyle.Render(content)
 }
 
 func (m releaseTuiModel) viewChangelog() string {
