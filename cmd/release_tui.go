@@ -244,6 +244,8 @@ func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Adjust viewport size - leave room for header and footer
 		m.viewport.Width = msg.Width - 4
 		m.viewport.Height = msg.Height - 8 // More room for header/footer
+		// Update help component size for proper rendering
+		m.help.SetSize(msg.Width, msg.Height)
 		return m, vpCmd
 
 	case tea.KeyMsg:
@@ -343,7 +345,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.help.ShowAll {
 		switch msg.String() {
 		case "?", "q", "esc", "ctrl+c":
-			m.help.ShowAll = false
+			m.help.Toggle()
 			return m, nil
 		default:
 			// Ignore ALL other keys when help is shown, including 'A'
@@ -800,7 +802,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.Base.Help):
-		m.help.ShowAll = !m.help.ShowAll
+		m.help.Toggle()
 		return m, nil
 
 	}
