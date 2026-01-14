@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,7 +12,11 @@ import (
 	"time"
 
 	"github.com/mattsolo1/grove-core/config"
+	"github.com/mattsolo1/grove-core/logging"
 )
+
+// Logger for changelog LLM operations
+var changelogLog = logging.NewUnifiedLogger("grove-meta.changelog-llm")
 
 // LLMChangelogResult holds the structured response from the LLM.
 type LLMChangelogResult struct {
@@ -54,11 +59,11 @@ func runLLMChangelog(repoPath, newVersion string) error {
 		return fmt.Errorf("failed to get git diff: %w\n%s", err, string(diffOutput))
 	}
 
-	// Combine context
-	context := fmt.Sprintf("GIT LOG:\n%s\n\nGIT DIFF STAT:\n%s", string(logOutput), string(diffOutput))
+	// Combine git context
+	gitContext := fmt.Sprintf("GIT LOG:\n%s\n\nGIT DIFF STAT:\n%s", string(logOutput), string(diffOutput))
 
 	// 3. Generate changelog with LLM.
-	result, err := generateChangelogWithLLM(context, newVersion, repoPath)
+	result, err := generateChangelogWithLLM(gitContext, newVersion, repoPath)
 	if err != nil {
 		return fmt.Errorf("failed to generate changelog with LLM: %w", err)
 	}
@@ -269,13 +274,13 @@ func openInEditor(filepath string) error {
 
 // generateChangelogWithLLM constructs a prompt and calls gemapi to generate the changelog.
 // It now returns the new LLMChangelogResult struct.
-func generateChangelogWithLLM(context, newVersion, repoPath string) (*LLMChangelogResult, error) {
-	return generateChangelogWithLLMInteractive(context, newVersion, repoPath, false)
+func generateChangelogWithLLM(gitContext, newVersion, repoPath string) (*LLMChangelogResult, error) {
+	return generateChangelogWithLLMInteractive(gitContext, newVersion, repoPath, false)
 }
 
 // generateChangelogWithLLMInteractive constructs a prompt and calls gemapi to generate the changelog.
 // skipPrompt controls whether to skip interactive prompts (useful for TUI mode).
-func generateChangelogWithLLMInteractive(context, newVersion, repoPath string, skipPrompt bool) (*LLMChangelogResult, error) {
+func generateChangelogWithLLMInteractive(gitContext, newVersion, repoPath string, skipPrompt bool) (*LLMChangelogResult, error) {
 	// Prompt for rules file editing
 	if err := promptForRulesEdit(repoPath, skipPrompt); err != nil {
 		fmt.Printf("Warning: Failed to handle rules file: %v\n", err)
@@ -290,7 +295,10 @@ func generateChangelogWithLLMInteractive(context, newVersion, repoPath string, s
 		var llmCfg LLMConfig
 		if err := coreCfg.UnmarshalExtension("llm", &llmCfg); err == nil && llmCfg.DefaultModel != "" {
 			model = llmCfg.DefaultModel
-			fmt.Printf("Using model from grove.yml: %s\n", model)
+			// Only print to stdout if not in TUI mode (skipPrompt = true means TUI mode)
+			if !skipPrompt {
+				fmt.Printf("Using model from grove.yml: %s\n", model)
+			}
 		}
 	}
 
@@ -332,7 +340,7 @@ Based on the provided git log and diff stat, analyze the changes and generate a 
 %s
 ---
 
-Generate the JSON object now:`, newVersion, currentDate, context)
+Generate the JSON object now:`, newVersion, currentDate, gitContext)
 
 	// Write prompt to a temporary file
 	tmpFile, err := os.CreateTemp("", "grove-changelog-prompt-*.md")
@@ -348,8 +356,9 @@ Generate the JSON object now:`, newVersion, currentDate, context)
 		return nil, fmt.Errorf("failed to close temporary prompt file: %w", err)
 	}
 
-	// Construct and execute the gemapi command
+	// Construct and execute the LLM command via grove llm (which delegates to gemapi)
 	args := []string{
+		"llm",
 		"request",
 		"--model", model,
 		"--file", tmpFile.Name(),
@@ -370,20 +379,64 @@ Generate the JSON object now:`, newVersion, currentDate, context)
 		fmt.Printf("Logging output to: %s\n", logPath)
 	}
 	
-	// Use 'grove gemapi' for workspace-awareness
-	gemapiCmd := exec.Command("grove", append([]string{"gemapi"}, args...)...)
+	// Use 'grove llm' for workspace-awareness (delegates to gemapi for Gemini models)
+	ctx := context.Background()
+	changelogLog.Debug("Calling grove llm").
+		Field("model", model).
+		Field("repo_path", repoPath).
+		Field("prompt_file", tmpFile.Name()).
+		Field("full_command", "grove "+strings.Join(args, " ")).
+		Field("args", args).
+		StructuredOnly().
+		Log(ctx)
+
+	// Verify temp file exists and has content
+	if info, err := os.Stat(tmpFile.Name()); err != nil {
+		changelogLog.Error("Temp file does not exist").
+			Err(err).
+			Field("path", tmpFile.Name()).
+			StructuredOnly().
+			Log(ctx)
+	} else {
+		changelogLog.Debug("Temp file verified").
+			Field("path", tmpFile.Name()).
+			Field("size", info.Size()).
+			StructuredOnly().
+			Log(ctx)
+	}
+
+	gemapiCmd := exec.Command("grove", args...)
 	gemapiCmd.Dir = repoPath // Set working directory to the repository being analyzed
 
 	// Redirect stderr to log file to prevent TUI mangling
 	gemapiCmd.Stderr = logFile
 
 	output, err := gemapiCmd.Output()
+
+	changelogLog.Debug("gemapi command completed").
+		Field("output_len", len(output)).
+		Field("has_error", err != nil).
+		StructuredOnly().
+		Log(ctx)
+
 	if err != nil {
 		// Read log file content for error details
 		logContent, _ := os.ReadFile(logPath)
+		changelogLog.Error("gemapi request failed").
+			Err(err).
+			Field("log_path", logPath).
+			Field("log_content", string(logContent)).
+			Field("output", string(output)).
+			StructuredOnly().
+			Log(ctx)
 		return nil, fmt.Errorf("failed to execute 'gemapi request': %w\nLog: %s\nOutput: %s", err, logPath, string(logContent))
 	}
-	
+
+	changelogLog.Debug("Raw gemapi output").
+		Field("output", string(output)).
+		StructuredOnly().
+		Log(ctx)
+
 	// Clean the output to ensure it's valid JSON
 	// LLMs sometimes wrap JSON in ```json ... ``` blocks
 	jsonString := strings.TrimSpace(string(output))
@@ -393,16 +446,71 @@ Generate the JSON object now:`, newVersion, currentDate, context)
 		jsonString = strings.TrimSpace(jsonString)
 	}
 
+	previewLen := len(jsonString)
+	if previewLen > 200 {
+		previewLen = 200
+	}
+	changelogLog.Debug("Cleaned JSON string").
+		Field("json_len", len(jsonString)).
+		Field("json_preview", jsonString[:previewLen]).
+		StructuredOnly().
+		Log(ctx)
+
 	// Unmarshal the JSON response
 	var result LLMChangelogResult
 	if err := json.Unmarshal([]byte(jsonString), &result); err != nil {
+		changelogLog.Error("Failed to unmarshal JSON").
+			Err(err).
+			Field("json_string", jsonString).
+			StructuredOnly().
+			Log(ctx)
 		return nil, fmt.Errorf("failed to unmarshal LLM response into JSON: %w\nResponse:\n%s", err, string(output))
 	}
+
+	changelogLog.Info("Successfully parsed LLM response").
+		Field("suggestion", result.Suggestion).
+		Field("justification_len", len(result.Justification)).
+		Field("changelog_len", len(result.Changelog)).
+		StructuredOnly().
+		Log(ctx)
 
 	// Ensure the changelog ends with a newline
 	if result.Changelog != "" && !strings.HasSuffix(result.Changelog, "\n") {
 		result.Changelog = result.Changelog + "\n"
 	}
 
+	// Fix the version header - LLMs often ignore explicit version instructions
+	// and hallucinate versions from the git context. Enforce the correct header.
+	result.Changelog = fixChangelogHeader(result.Changelog, newVersion, currentDate)
+
 	return &result, nil
+}
+
+// fixChangelogHeader ensures the changelog has the correct version and date in the header.
+// LLMs frequently ignore explicit instructions and hallucinate version numbers from
+// git history, so we deterministically fix the header after generation.
+func fixChangelogHeader(changelog, version, date string) string {
+	if changelog == "" {
+		return changelog
+	}
+
+	lines := strings.SplitN(changelog, "\n", 2)
+	if len(lines) == 0 {
+		return changelog
+	}
+
+	// Check if first line is a version header (## v...)
+	firstLine := strings.TrimSpace(lines[0])
+	if !strings.HasPrefix(firstLine, "## ") {
+		// No header found, prepend the correct one
+		correctHeader := fmt.Sprintf("## %s (%s)\n\n", version, date)
+		return correctHeader + changelog
+	}
+
+	// Replace the existing header with the correct one
+	correctHeader := fmt.Sprintf("## %s (%s)", version, date)
+	if len(lines) == 2 {
+		return correctHeader + "\n" + lines[1]
+	}
+	return correctHeader + "\n"
 }
