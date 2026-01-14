@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-meta/pkg/release"
 	"github.com/spf13/cobra"
 )
@@ -60,7 +61,7 @@ and documentation updates.`,
 			}
 			
 			// Display summary
-			fmt.Println("\n✅ Release plan generated successfully!")
+			fmt.Println("\n" + theme.IconSuccess + " Release plan generated successfully!")
 			fmt.Printf("   Plan saved to: ~/.grove/release_plan.json\n")
 			
 			// Count repos with changes
@@ -199,7 +200,7 @@ Use this to abort a release in progress and start fresh.`,
 				return fmt.Errorf("failed to clear plan: %w", err)
 			}
 			
-			fmt.Println("✅ Release plan cleared successfully")
+			fmt.Println(theme.IconSuccess + " Release plan cleared successfully")
 			return nil
 		},
 	}
@@ -322,9 +323,9 @@ Examples:
 				}
 				
 				// Report results
-				fmt.Printf("\n✅ Successfully processed %d repositories\n", successCount)
+				fmt.Printf("\n%s Successfully processed %d repositories\n", theme.IconSuccess, successCount)
 				if failCount > 0 {
-					fmt.Printf("❌ Failed on %d repositories:\n", failCount)
+					fmt.Printf("%s Failed on %d repositories:\n", theme.IconError, failCount)
 					for _, err := range errors {
 						fmt.Printf("  - %s\n", err)
 					}
@@ -376,7 +377,7 @@ Examples:
 				return fmt.Errorf("failed to delete tag: %w\n%s", err, string(output))
 			}
 			
-			fmt.Printf("✅ Successfully removed local tag %s\n", tagName)
+			fmt.Printf("%s Successfully removed local tag %s\n", theme.IconSuccess, tagName)
 			
 			// Remove from remote if requested
 			if remote {
@@ -385,7 +386,7 @@ Examples:
 				if err != nil {
 					return fmt.Errorf("failed to delete remote tag: %w\n%s", err, string(output))
 				}
-				fmt.Printf("✅ Successfully removed remote tag %s\n", tagName)
+				fmt.Printf("%s Successfully removed remote tag %s\n", theme.IconSuccess, tagName)
 			}
 			
 			return nil
@@ -464,7 +465,7 @@ Examples:
 			}
 			
 			// Warn about destructive operation
-			fmt.Printf("⚠️  This will rollback %d commit(s) using %s reset\n", commits, mode)
+			fmt.Printf("%s This will rollback %d commit(s) using %s reset\n", theme.IconWarning, commits, mode)
 			if mode == "hard" {
 				fmt.Println("   WARNING: Hard reset will LOSE all uncommitted changes!")
 			}
@@ -531,7 +532,7 @@ Examples:
 				if output, err := tagCmd.CombinedOutput(); err != nil {
 					// Don't fail if tag already exists, just warn
 					if !strings.Contains(string(output), "already exists") {
-						fmt.Printf("  ⚠️  Could not create backup tag: %s\n", strings.TrimSpace(string(output)))
+						fmt.Printf("  %s Could not create backup tag: %s\n", theme.IconWarning, strings.TrimSpace(string(output)))
 					}
 				} else {
 					fmt.Printf("  ✓ Created backup tag: %s\n", backupRepoTag)
@@ -542,7 +543,7 @@ Examples:
 					statusCmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
 					statusCmd.Dir = repoPath
 					if output, _ := statusCmd.Output(); len(output) > 0 {
-						fmt.Printf("  ⚠️  Warning: %s has uncommitted changes that will be lost!\n", repoName)
+						fmt.Printf("  %s Warning: %s has uncommitted changes that will be lost!\n", theme.IconWarning, repoName)
 					}
 				}
 				
@@ -583,7 +584,7 @@ Examples:
 					
 					if needsForce && !forcePush {
 						errors = append(errors, fmt.Sprintf("%s: needs force push but --force not provided", repoName))
-						fmt.Printf("  ⚠️  Skipping push: force push required but --force not provided\n")
+						fmt.Printf("  %s Skipping push: force push required but --force not provided\n", theme.IconWarning)
 						failCount++
 						continue
 					}
@@ -619,23 +620,23 @@ Examples:
 			// Save rollback state for potential recovery
 			if len(rollbackState) > 0 {
 				if err := saveRollbackState(rollbackState); err != nil {
-					fmt.Printf("\n⚠️  Could not save rollback state: %v\n", err)
+					fmt.Printf("\n%s Could not save rollback state: %v\n", theme.IconWarning, err)
 				} else {
-					fmt.Printf("\n📝 Rollback state saved to ~/.grove/release_rollback.json\n")
+					fmt.Printf("\n%s Rollback state saved to ~/.grove/release_rollback.json\n", theme.IconNote)
 				}
 			}
 			
 			// Report results
-			fmt.Printf("\n✅ Successfully rolled back %d repositories\n", successCount)
+			fmt.Printf("\n%s Successfully rolled back %d repositories\n", theme.IconSuccess, successCount)
 			if failCount > 0 {
-				fmt.Printf("❌ Failed on %d repositories:\n", failCount)
+				fmt.Printf("%s Failed on %d repositories:\n", theme.IconError, failCount)
 				for _, err := range errors {
 					fmt.Printf("  - %s\n", err)
 				}
 				return fmt.Errorf("some rollback operations failed")
 			}
 			
-			fmt.Printf("\n💡 To recover, use the backup tags created with prefix: %s\n", backupTag)
+			fmt.Printf("\n%s To recover, use the backup tags created with prefix: %s\n", theme.IconLightbulb, backupTag)
 			
 			return nil
 		},
