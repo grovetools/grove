@@ -43,17 +43,3 @@ func registerDeprecatedCommands(rootCmd *cobra.Command) {
 		},
 	})
 }
-
-// registerDeprecatedWorkspaceSubcommands adds deprecation shims to the workspace command
-func registerDeprecatedWorkspaceSubcommands(wsCmd *cobra.Command) {
-	// Deprecated: workspace secrets moved to dev secrets
-	wsCmd.AddCommand(&cobra.Command{
-		Use:    "secrets",
-		Short:  "DEPRECATED: Use 'grove dev secrets' instead",
-		Hidden: true,
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Fprintln(os.Stderr, "Warning: 'grove workspace secrets' is deprecated and will be removed in a future version.")
-			fmt.Fprintln(os.Stderr, "Please use 'grove dev secrets' instead.")
-		},
-	})
-}
