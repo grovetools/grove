@@ -38,13 +38,10 @@ Delegation Behavior:
     grove dev delegate global`
 
 	// Add subcommands
-	rootCmd.AddCommand(newActivateCmd())
 	rootCmd.AddCommand(newBootstrapCmd())
 	rootCmd.AddCommand(newBuildCmd())
 	rootCmd.AddCommand(newChangelogCmd())
-	rootCmd.AddCommand(newConfigCmd())
 	rootCmd.AddCommand(newDepsCmd())
-	rootCmd.AddCommand(newDocsCmd())
 	rootCmd.AddCommand(newRunCmd())
 	rootCmd.AddCommand(newSchemaCmd())
 	rootCmd.AddCommand(newSetupCmd())

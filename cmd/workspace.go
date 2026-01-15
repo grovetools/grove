@@ -16,21 +16,10 @@ func newWorkspaceCmd() *cobra.Command {
 		Long:    "Execute operations and view aggregated information across all discovered workspaces",
 	}
 
-	// Subcommands will be added here
-	cmd.AddCommand(NewWorkspaceCreateCmd()) // Add this
-	cmd.AddCommand(NewWorkspaceOpenCmd())   // Add this
-	cmd.AddCommand(NewWorkspaceRemoveCmd()) // Add this
-	cmd.AddCommand(NewWorkspaceInitCmd())
-	cmd.AddCommand(newWorkspaceListCmd())
-	cmd.AddCommand(newWorkspaceStatusCmd())
+	// Subcommands
 	cmd.AddCommand(NewWorkspaceWorktreesCmd())
-	cmd.AddCommand(NewWorkspaceIssuesCmd())
-	cmd.AddCommand(NewWorkspaceCurrentCmd())
-	cmd.AddCommand(NewWorkspacePlansCmd())
-	cmd.AddCommand(NewWorkspaceChatsCmd())
 	cmd.AddCommand(newWorkspaceGitHooksCmd())
 	cmd.AddCommand(NewWorkspaceSecretsCmd())
-	cmd.AddCommand(NewWorkspaceManageCmd())
 
 	return cmd
 }

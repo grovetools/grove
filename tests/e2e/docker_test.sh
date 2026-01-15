@@ -312,60 +312,6 @@ test_tool_management() {
   info "Tool management test passed!"
 }
 
-test_workspace_operations() {
-  info "TEST: Workspace Operations"
-  
-  # Configure git for commits (sometimes required)
-  git config --global user.email "test@example.com" || true
-  git config --global user.name "Test User" || true
-  
-  # Create a temporary ecosystem
-  ECO_DIR="/tmp/my-ecosystem"
-  mkdir -p "$ECO_DIR"
-  cd "$ECO_DIR"
-  
-  # Initialize workspace
-  step "Initializing new grove workspace..."
-  if ! grove ws init; then
-    error "'grove ws init' failed"
-    exit 1
-  fi
-  
-  # Verify workspace files
-  step "Verifying workspace initialization..."
-  if [ ! -f "grove.yml" ]; then
-    error "grove.yml not created"
-    exit 1
-  fi
-  
-  if [ ! -f "go.work" ]; then
-    error "go.work not created"
-    exit 1
-  fi
-  
-  if [ ! -f "Makefile" ]; then
-    error "Makefile not created"
-    exit 1
-  fi
-  
-  if [ ! -f ".gitignore" ]; then
-    error ".gitignore not created"
-    exit 1
-  fi
-  
-  # Verify git repo was initialized
-  if [ ! -d ".git" ]; then
-    error "Git repository not initialized"
-    exit 1
-  fi
-  
-  # Test grove list command
-  step "Testing 'grove list' command..."
-  grove list || true
-  
-  info "Workspace operations test passed!"
-}
-
 test_install_improvements() {
   info "TEST: Install Command Improvements"
   
@@ -739,7 +685,6 @@ main() {
   fi
   test_installation
   test_tool_management
-  test_workspace_operations
   test_install_improvements
   test_dependency_resolution
   test_alias_management

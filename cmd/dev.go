@@ -20,14 +20,10 @@ These commands are distinct from 'grove version' which manages official releases
 	cmd.AddCommand(newDevUseCmd())
 	cmd.AddCommand(newDevListCmd())
 	cmd.AddCommand(newDevCurrentCmd())
-	cmd.AddCommand(newDevUnlinkCmd())
 	cmd.AddCommand(newDevPruneCmd())
 	cmd.AddCommand(newDevListBinsCmd())
 	cmd.AddCommand(newDevCwdCmd())
-	cmd.AddCommand(newDevResetCmd())
-	cmd.AddCommand(newDevTuiCmd())
 	cmd.AddCommand(newDevWorkspaceCmd())
-	cmd.AddCommand(newDevDelegateCmd())
 	cmd.AddCommand(newDevPointCmd())
 
 	return cmd
