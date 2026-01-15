@@ -68,6 +68,10 @@ func printAvailableTools(t *theme.Theme) {
 	var tools []toolRow
 	maxBinaryLen := len("BINARY")
 	for repo, info := range sdk.GetToolRegistry() {
+		// Skip grove itself - it's self-referential
+		if info.Alias == "grove" {
+			continue
+		}
 		desc := info.Description
 		if desc == "" {
 			desc = "-"
@@ -107,6 +111,17 @@ func printAvailableTools(t *theme.Theme) {
 			pad(row.description, 32),
 			t.Muted.Render(row.repo))
 	}
+
+	// Examples
+	cyan := t.Bold.Copy().Foreground(t.Colors.Cyan)
+	fmt.Println("\n " + t.Muted.Render("Command examples:"))
+	fmt.Printf("   %s %s  %s\n", cyan.Render("grove"), blue.Render(pad("install cx", 16)), t.Muted.Render("# Install a tool"))
+	fmt.Printf("   %s %s  %s\n", cyan.Render("grove"), blue.Render(pad("setup", 16)), t.Muted.Render("# Run setup wizard"))
+	fmt.Println("\n " + t.Muted.Render("Tool examples:"))
+	fmt.Printf("   %s %s  %s\n", cyan.Render("grove"), blue.Render(pad("cx stats", 16)), t.Muted.Render("# Show context statistics"))
+	fmt.Printf("   %s %s  %s\n", cyan.Render("grove"), blue.Render(pad("nb tui", 16)), t.Muted.Render("# Open notebook TUI"))
+	fmt.Printf("   %s %s  %s\n", cyan.Render("grove"), blue.Render(pad("flow status", 16)), t.Muted.Render("# Show flow plan status"))
+	fmt.Printf("   %s %s  %s\n", cyan.Render("grove"), blue.Render(pad("gmux sessionize", 16)), t.Muted.Render("# Create tmux session"))
 }
 
 // Execute runs the root command
