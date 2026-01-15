@@ -219,16 +219,12 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	if opts.JSONOutput {
-		// Output as JSON
+		// Output as JSON to stdout (not via logger)
 		jsonData, err := json.MarshalIndent(toolInfos, "", "  ")
 		if err != nil {
 			return fmt.Errorf("failed to marshal JSON: %w", err)
 		}
-		listUlog.Info("Tool list").
-			Field("tool_count", len(toolInfos)).
-			Field("format", "json").
-			Pretty(string(jsonData)).
-			Emit()
+		fmt.Println(string(jsonData))
 		return nil
 	}
 
