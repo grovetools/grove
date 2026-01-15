@@ -66,20 +66,32 @@ Run 'grove <tool>' to delegate to installed tools, or use subcommands below.`
 	})
 }
 
-// printAvailableTools prints the available ecosystem tools
+// printAvailableTools prints the available ecosystem tools in table format
 func printAvailableTools() {
-	// Get all tools and their aliases
-	var tools []struct{ alias, repo string }
+	// Get all tools and their info
+	type toolRow struct {
+		binary, description, repo string
+	}
+	var tools []toolRow
 	for repo, info := range sdk.GetToolRegistry() {
-		tools = append(tools, struct{ alias, repo string }{info.Alias, repo})
+		desc := info.Description
+		if desc == "" {
+			desc = "-"
+		}
+		// Truncate long descriptions
+		if len(desc) > 30 {
+			desc = desc[:27] + "..."
+		}
+		tools = append(tools, toolRow{info.Alias, desc, repo})
 	}
 	sort.Slice(tools, func(i, j int) bool {
-		return tools[i].alias < tools[j].alias
+		return tools[i].binary < tools[j].binary
 	})
 
 	fmt.Println("\nAvailable Tools (run 'grove <tool>'):")
+	fmt.Printf("  %-12s %-32s %s\n", "BINARY", "DESCRIPTION", "REPO")
 	for _, t := range tools {
-		fmt.Printf("  %-16s %s\n", t.alias, t.repo)
+		fmt.Printf("  %-12s %-32s %s\n", t.binary, t.description, t.repo)
 	}
 }
 

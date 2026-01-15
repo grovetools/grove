@@ -31,6 +31,7 @@ const (
 // ToolInfo contains information about a tool
 type ToolInfo struct {
 	Alias        string   // Default alias and binary name
+	Description  string   // Short description of the tool
 	Dependencies []string // List of canonical RepoNames this tool depends on
 }
 

@@ -16,9 +16,10 @@ import (
 
 // GroveConfig represents the relevant parts of grove.yml
 type GroveConfig struct {
-	Name       string   `yaml:"name"`
-	BuildAfter []string `yaml:"build_after"`
-	Binary     struct {
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description"`
+	BuildAfter  []string `yaml:"build_after"`
+	Binary      struct {
 		Name string `yaml:"name"`
 		Path string `yaml:"path"`
 	} `yaml:"binary"`
@@ -28,6 +29,7 @@ type GroveConfig struct {
 type ToolEntry struct {
 	RepoName     string
 	Alias        string
+	Description  string
 	Dependencies []string
 }
 
@@ -91,6 +93,7 @@ func main() {
 		tools = append(tools, ToolEntry{
 			RepoName:     config.Name,
 			Alias:        config.Binary.Name,
+			Description:  config.Description,
 			Dependencies: config.BuildAfter,
 		})
 	}
@@ -108,14 +111,15 @@ func main() {
 
 	for _, tool := range tools {
 		if len(tool.Dependencies) == 0 {
-			buf.WriteString(fmt.Sprintf("\t%q: {Alias: %q},\n", tool.RepoName, tool.Alias))
+			buf.WriteString(fmt.Sprintf("\t%q: {Alias: %q, Description: %q},\n",
+				tool.RepoName, tool.Alias, tool.Description))
 		} else {
 			deps := make([]string, len(tool.Dependencies))
 			for i, d := range tool.Dependencies {
 				deps[i] = fmt.Sprintf("%q", d)
 			}
-			buf.WriteString(fmt.Sprintf("\t%q: {Alias: %q, Dependencies: []string{%s}},\n",
-				tool.RepoName, tool.Alias, strings.Join(deps, ", ")))
+			buf.WriteString(fmt.Sprintf("\t%q: {Alias: %q, Description: %q, Dependencies: []string{%s}},\n",
+				tool.RepoName, tool.Alias, tool.Description, strings.Join(deps, ", ")))
 		}
 	}
 
