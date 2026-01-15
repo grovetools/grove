@@ -19,7 +19,9 @@ func newWorkspaceCmd() *cobra.Command {
 	// Subcommands
 	cmd.AddCommand(NewWorkspaceWorktreesCmd())
 	cmd.AddCommand(newWorkspaceGitHooksCmd())
-	cmd.AddCommand(NewWorkspaceSecretsCmd())
+
+	// Register deprecated subcommand shims for backwards compatibility
+	registerDeprecatedWorkspaceSubcommands(cmd)
 
 	return cmd
 }

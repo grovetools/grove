@@ -15,6 +15,7 @@ var bootstrapDryRun bool
 
 func newBootstrapCmd() *cobra.Command {
 	cmd := cli.NewStandardCommand("bootstrap", "Bootstrap Grove from source")
+	cmd.Hidden = true // Internal command used during initial setup
 	cmd.Long = `Bootstrap Grove for development from source.
 
 This command is used after cloning the grove-ecosystem repository to set up

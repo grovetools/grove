@@ -40,13 +40,14 @@ Delegation Behavior:
 	// Add subcommands
 	rootCmd.AddCommand(newBootstrapCmd())
 	rootCmd.AddCommand(newBuildCmd())
-	rootCmd.AddCommand(newChangelogCmd())
 	rootCmd.AddCommand(newDepsCmd())
 	rootCmd.AddCommand(newRunCmd())
 	rootCmd.AddCommand(newSchemaCmd())
 	rootCmd.AddCommand(newSetupCmd())
-	rootCmd.AddCommand(newStarshipCmd())
 	rootCmd.AddCommand(internal.NewInternalCmd())
+
+	// Register deprecated command shims for backwards compatibility
+	registerDeprecatedCommands(rootCmd)
 
 	// Set up the root command's RunE to handle tool delegation
 	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {

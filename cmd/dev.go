@@ -25,6 +25,7 @@ These commands are distinct from 'grove version' which manages official releases
 	cmd.AddCommand(newDevCwdCmd())
 	cmd.AddCommand(newDevWorkspaceCmd())
 	cmd.AddCommand(newDevPointCmd())
+	cmd.AddCommand(newDevSecretsCmd())
 
 	return cmd
 }

@@ -1266,6 +1266,10 @@ Examples:
 	cmd.Flags().BoolVar(&setupDefaults, "defaults", false, "Use default values without interactive prompts")
 	cmd.Flags().BoolVar(&setupDryRun, "dry-run", false, "Preview changes without making them")
 
+	// Add subcommands
+	cmd.AddCommand(newStarshipCmd())
+	cmd.AddCommand(newGitHooksCmd())
+
 	return cmd
 }
 

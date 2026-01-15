@@ -146,6 +146,7 @@ Examples:
 	cmd.AddCommand(newReleaseClearPlanCmd())
 	cmd.AddCommand(newReleaseUndoTagCmd())
 	cmd.AddCommand(newReleaseRollbackCmd())
+	cmd.AddCommand(newChangelogCmd())
 
 	return cmd
 }

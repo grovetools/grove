@@ -17,8 +17,9 @@ var (
 
 func newChangelogCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "changelog <repo-path>",
-		Short: "Generate a changelog for a repository",
+		Use:    "changelog <repo-path>",
+		Short:  "Generate a changelog for a repository",
+		Hidden: true, // Internal command used by release workflow
 		Long: `Generates a changelog entry for a repository and prepends it to CHANGELOG.md.
 
 By default, it generates the changelog from conventional commits.

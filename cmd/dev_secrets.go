@@ -14,29 +14,28 @@ import (
 	"github.com/spf13/cobra"
 )
 
-
-func NewWorkspaceSecretsCmd() *cobra.Command {
+func newDevSecretsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "secrets",
 		Short: "Manage GitHub repository secrets across all workspaces",
 		Long:  "Set, update, or delete GitHub repository secrets for all discovered workspaces using the GitHub CLI",
 	}
 
-	cmd.AddCommand(newWorkspaceSecretsSetCmd())
-	cmd.AddCommand(newWorkspaceSecretsDeleteCmd())
-	cmd.AddCommand(newWorkspaceSecretsListCmd())
+	cmd.AddCommand(newDevSecretsSetCmd())
+	cmd.AddCommand(newDevSecretsDeleteCmd())
+	cmd.AddCommand(newDevSecretsListCmd())
 
 	return cmd
 }
 
-func newWorkspaceSecretsSetCmd() *cobra.Command {
+func newDevSecretsSetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set SECRET_NAME [SECRET_VALUE]",
 		Short: "Set a secret across all workspace repositories",
 		Long: `Set a GitHub repository secret across all discovered workspace repositories.
 If SECRET_VALUE is not provided, the secret will be read from stdin.`,
 		Args: cobra.RangeArgs(1, 2),
-		RunE: runWorkspaceSecretsSet,
+		RunE: runDevSecretsSet,
 	}
 
 	cmd.Flags().StringP("file", "f", "", "Read secret value from file")
@@ -46,13 +45,13 @@ If SECRET_VALUE is not provided, the secret will be read from stdin.`,
 	return cmd
 }
 
-func newWorkspaceSecretsDeleteCmd() *cobra.Command {
+func newDevSecretsDeleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete SECRET_NAME",
 		Short: "Delete a secret from all workspace repositories",
 		Long:  "Delete a GitHub repository secret from all discovered workspace repositories",
 		Args:  cobra.ExactArgs(1),
-		RunE:  runWorkspaceSecretsDelete,
+		RunE:  runDevSecretsDelete,
 	}
 
 	cmd.Flags().StringArrayP("include", "i", []string{}, "Only include workspaces matching pattern (can be specified multiple times)")
@@ -61,20 +60,20 @@ func newWorkspaceSecretsDeleteCmd() *cobra.Command {
 	return cmd
 }
 
-func newWorkspaceSecretsListCmd() *cobra.Command {
+func newDevSecretsListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List secrets for all workspace repositories",
 		Long:  "List GitHub repository secrets for all discovered workspace repositories",
 		Args:  cobra.NoArgs,
-		RunE:  runWorkspaceSecretsList,
+		RunE:  runDevSecretsList,
 	}
 
 	return cmd
 }
 
-func runWorkspaceSecretsSet(cmd *cobra.Command, args []string) error {
-	logger := logging.NewLogger("ws-secrets")
+func runDevSecretsSet(cmd *cobra.Command, args []string) error {
+	logger := logging.NewLogger("dev-secrets")
 	pretty := logging.NewPrettyLogger()
 	secretName := args[0]
 
@@ -118,7 +117,7 @@ func runWorkspaceSecretsSet(cmd *cobra.Command, args []string) error {
 	}
 
 	// Filter workspaces
-	filteredWorkspaces := filterWorkspaces(workspaces, rootDir, includePatterns, excludePatterns)
+	filteredWorkspaces := filterDevWorkspaces(workspaces, rootDir, includePatterns, excludePatterns)
 
 	if len(filteredWorkspaces) == 0 {
 		return fmt.Errorf("no workspaces matched the filters")
@@ -223,8 +222,8 @@ func runWorkspaceSecretsSet(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runWorkspaceSecretsDelete(cmd *cobra.Command, args []string) error {
-	logger := logging.NewLogger("ws-secrets")
+func runDevSecretsDelete(cmd *cobra.Command, args []string) error {
+	logger := logging.NewLogger("dev-secrets")
 	pretty := logging.NewPrettyLogger()
 	secretName := args[0]
 
@@ -249,7 +248,7 @@ func runWorkspaceSecretsDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	// Filter workspaces
-	filteredWorkspaces := filterWorkspaces(workspaces, rootDir, includePatterns, excludePatterns)
+	filteredWorkspaces := filterDevWorkspaces(workspaces, rootDir, includePatterns, excludePatterns)
 
 	if len(filteredWorkspaces) == 0 {
 		return fmt.Errorf("no workspaces matched the filters")
@@ -354,8 +353,8 @@ func runWorkspaceSecretsDelete(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runWorkspaceSecretsList(cmd *cobra.Command, args []string) error {
-	logger := logging.NewLogger("ws-secrets")
+func runDevSecretsList(cmd *cobra.Command, args []string) error {
+	logger := logging.NewLogger("dev-secrets")
 	pretty := logging.NewPrettyLogger()
 
 	// Discover projects
@@ -426,8 +425,8 @@ func runWorkspaceSecretsList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// filterWorkspaces filters workspaces based on include/exclude patterns
-func filterWorkspaces(workspaces []string, rootDir string, includePatterns, excludePatterns []string) []string {
+// filterDevWorkspaces filters workspaces based on include/exclude patterns
+func filterDevWorkspaces(workspaces []string, rootDir string, includePatterns, excludePatterns []string) []string {
 	var filtered []string
 
 	for _, ws := range workspaces {

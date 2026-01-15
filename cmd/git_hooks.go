@@ -8,10 +8,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func init() {
-	rootCmd.AddCommand(newGitHooksCmd())
-}
-
 func newGitHooksCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "git-hooks",
