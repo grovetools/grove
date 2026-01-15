@@ -42,6 +42,12 @@ func AllScenarios() []*harness.Scenario {
 		EcosystemInitNonInteractiveScenario(),
 		EcosystemInitPreservesConfigScenario(),
 		EcosystemInitEditsCorrectFileScenario(),
+
+		// Dev Commands scenarios
+		DevCwdWorkflow(),
+		DevLinkAndUseWorkflow(),
+		DevPointWorkflow(),
+		DevListWorkflow(),
 	}
 }
 
