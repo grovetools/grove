@@ -162,7 +162,7 @@ func activateDevLink(binaryName, alias string) error {
 
 	// Check if binDir is in PATH
 	if !isDirInPath(binDir) {
-		fmt.Printf("\n⚠️  Warning: '%s' is not in your PATH.\n", binDir)
+		fmt.Printf("\nWARNING: '%s' is not in your PATH.\n", binDir)
 		fmt.Println("   Please add it to your shell configuration file (e.g., .zshrc, .bash_profile):")
 		fmt.Printf("   export PATH=\"%s:$PATH\"\n", binDir)
 	}

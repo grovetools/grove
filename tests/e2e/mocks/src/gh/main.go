@@ -29,7 +29,7 @@ func main() {
 				fmt.Fprintln(os.Stderr, "mock gh: CI workflow failed")
 				os.Exit(1)
 			}
-			fmt.Println("✓ Workflow run completed successfully")
+			fmt.Println("* Workflow run completed successfully")
 		}
 	case "release":
 		if subcommand == "create" {

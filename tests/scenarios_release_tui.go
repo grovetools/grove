@@ -261,7 +261,7 @@ func ReleaseTUISelectionScenario() *harness.Scenario {
 				}
 
 				// repo-a should be shown and selected (it has changes)
-				if !strings.Contains(content, "[✓]") && !strings.Contains(content, "repo-a") {
+				if !strings.Contains(content, "[*]") && !strings.Contains(content, "repo-a") {
 					return fmt.Errorf("repo-a not found or not selected in TUI output.\n%s", content)
 				}
 				
@@ -346,7 +346,7 @@ func ReleaseTUISelectionScenario() *harness.Scenario {
 				}
 				
 				// Check if repo-a was deselected
-				if strings.Contains(beforeSelectAll, "[✓]") && strings.Contains(beforeSelectAll, "repo-a") {
+				if strings.Contains(beforeSelectAll, "[*]") && strings.Contains(beforeSelectAll, "repo-a") {
 					// Still selected after Ctrl+d, this might indicate the shortcut isn't working
 					fmt.Printf("Note: Ctrl+d might not be implemented (repo-a still selected after Ctrl+d)\n")
 				}

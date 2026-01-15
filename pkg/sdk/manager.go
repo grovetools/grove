@@ -737,7 +737,7 @@ func (m *Manager) InstallAllToolsFromSource() error {
 			return fmt.Errorf("failed to run 'grove dev cwd' for %s: %w\nOutput: %s", toolName, err, string(output))
 		}
 
-		fmt.Printf("    ✓ %s installed as %s\n", toolName, versionTag)
+		fmt.Printf("    * %s installed as %s\n", toolName, versionTag)
 	}
 
 	return nil

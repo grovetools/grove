@@ -335,7 +335,7 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces
 	hasIssues := false // Don't consider grove-ecosystem issues since ecosystem operations are disabled
 	for _, ws := range workspaceStatuses {
 		issues := []string{}
-		statusStr := "✓ Clean"
+		statusStr := "* Clean"
 		branch := ws.Branch
 
 		if ws.Error != nil {
@@ -361,7 +361,7 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces
 				// If the only change is CHANGELOG.md, don't treat it as a blocker
 				if allChanges != "" && allChanges != "CHANGELOG.md" {
 					issues = append(issues, "uncommitted changes")
-					statusStr = "✗ Dirty"
+					statusStr = "x Dirty"
 				} else if allChanges == "CHANGELOG.md" {
 					// Show it's changelog only - use circle and orange color
 					statusStr = "◯ Changelog"
@@ -940,9 +940,9 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 			// If --resume flag is used, provide detailed status
 			if releaseResume && repoPlan != nil {
 				if repoPlan.LastFailedOperation != "" {
-					displayInfo(fmt.Sprintf("🔄 %s needs retry (failed at: %s)", repoName, repoPlan.LastFailedOperation))
+					displayInfo(fmt.Sprintf(" %s needs retry (failed at: %s)", repoName, repoPlan.LastFailedOperation))
 				} else if repoPlan.ChangelogPushed || repoPlan.CIPassed {
-					displayInfo(fmt.Sprintf("🔄 %s partially complete, continuing", repoName))
+					displayInfo(fmt.Sprintf(" %s partially complete, continuing", repoName))
 				}
 			}
 
@@ -1712,7 +1712,7 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 }
 
 func displayAndConfirmVersionsWithOrder(rootDir string, versions map[string]string, currentVersions map[string]string, hasChanges map[string]bool, releaseLevels [][]string, graph *depsgraph.Graph, parentVersion string, autoDependencies map[string]bool, logger *logrus.Logger) bool {
-	displaySection("📊 Proposed Versions")
+	displaySection(" Proposed Versions")
 
 	// Create separate lists for repos with and without changes
 	var reposWithChanges []string
@@ -1888,7 +1888,7 @@ func displayAndConfirmVersionsWithOrder(rootDir string, versions map[string]stri
 }
 
 func displayAndConfirmVersions(versions map[string]string, currentVersions map[string]string, hasChanges map[string]bool, logger *logrus.Logger) bool {
-	displaySection("📊 Proposed Versions")
+	displaySection(" Proposed Versions")
 
 	// Create separate lists for repos with and without changes
 	var reposWithChanges []string

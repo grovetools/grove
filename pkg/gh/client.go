@@ -107,16 +107,16 @@ func GetCurrentBranchCIStatus(repoPath string) (string, error) {
 		case "success":
 			return "Passed", nil
 		case "failure":
-			return "❌ Failed", nil
+			return "x Failed", nil
 		case "cancelled":
 			return "Cancelled", nil
 		case "skipped":
-			return "⏭️ Skipped", nil
+			return "Skipped", nil
 		default:
 			return "? Unknown", nil
 		}
 	case "in_progress", "queued", "requested", "waiting", "pending":
-		return "⌛ Pending", nil
+		return "Pending", nil
 	default:
 		return "? Unknown", nil
 	}
@@ -187,19 +187,19 @@ func GetMyPRsStatus(repoPath string) (string, error) {
 	if total == 1 {
 		pr := prs[0]
 		if pr.IsDraft {
-			return "1 ⌛ (Draft)", nil
+			return "1 (Draft)", nil
 		}
 		if len(pr.StatusCheckRollup) == 0 {
-			return "1 ⌛", nil
+			return "1 pending", nil
 		}
 		state := pr.StatusCheckRollup[0].State
 		switch state {
 		case "SUCCESS":
 			return "1 passed", nil
 		case "FAILURE", "ERROR":
-			return "1 ❌", nil
+			return "1 x", nil
 		default:
-			return "1 ⌛", nil
+			return "1 pending", nil
 		}
 	}
 
@@ -208,13 +208,13 @@ func GetMyPRsStatus(repoPath string) (string, error) {
 		parts = append(parts, fmt.Sprintf("%d passed", successCount))
 	}
 	if failureCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d❌", failureCount))
+		parts = append(parts, fmt.Sprintf("%dx", failureCount))
 	}
 	if pendingCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d⌛", pendingCount))
+		parts = append(parts, fmt.Sprintf("%d pending", pendingCount))
 	}
 	if draftCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d📝", draftCount))
+		parts = append(parts, fmt.Sprintf("%d draft", draftCount))
 	}
 
 	return fmt.Sprintf("%d (%s)", total, strings.Join(parts, ", ")), nil
@@ -359,7 +359,7 @@ func waitForReleaseWorkflow(ctx context.Context, slug, repoName, versionTag stri
 			output, err := cmd.Output()
 			if err != nil {
 				if attemptCount%4 == 0 { // Log every 20 seconds
-					fmt.Printf("%s\n", waitingStyle.Render("🔍 Still searching for release workflow for "+repoName+"@"+versionTag+" (attempt "+fmt.Sprintf("%d", attemptCount)+")..."))
+					fmt.Printf("%s\n", waitingStyle.Render("Still searching for release workflow for "+repoName+"@"+versionTag+" (attempt "+fmt.Sprintf("%d", attemptCount)+")..."))
 				}
 				continue
 			}
@@ -383,7 +383,7 @@ func waitForReleaseWorkflow(ctx context.Context, slug, repoName, versionTag stri
 				if (run.HeadBranch == versionTag || run.HeadBranch == "refs/tags/"+versionTag) &&
 					(run.WorkflowName == "Release" || run.WorkflowName == "release") {
 					runID = fmt.Sprintf("%d", run.DatabaseID)
-					fmt.Printf("%s\n", successStyle.Render("🎯 Found release workflow run "+runID+" for "+repoName+"@"+versionTag))
+					fmt.Printf("%s\n", successStyle.Render("Found release workflow run "+runID+" for "+repoName+"@"+versionTag))
 					goto found // Use goto to break out of both loops
 				}
 			}

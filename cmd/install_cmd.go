@@ -217,7 +217,7 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 				latestVersion, err := manager.GetLatestVersionTag(toolName)
 				if err != nil {
 					fmt.Printf("%s %s: %s\n",
-						theme.DefaultTheme.Error.Render("✗"),
+						theme.DefaultTheme.Error.Render("x"),
 						theme.DefaultTheme.Bold.Render(toolName),
 						theme.DefaultTheme.Error.Render(fmt.Sprintf("Failed to get latest version: %v", err)))
 					continue

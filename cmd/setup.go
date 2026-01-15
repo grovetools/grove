@@ -1213,11 +1213,11 @@ func (m *setupModel) viewSummary() string {
 	checkStyle := theme.DefaultTheme.Success
 	for _, action := range m.service.Actions() {
 		if action.Success {
-			content.WriteString(checkStyle.Render("  ✓ "))
+			content.WriteString(checkStyle.Render("  * "))
 			content.WriteString(action.Description)
 			content.WriteString("\n")
 		} else {
-			content.WriteString(theme.DefaultTheme.Error.Render("  ✗ "))
+			content.WriteString(theme.DefaultTheme.Error.Render("  x "))
 			content.WriteString(action.Description)
 			if action.Error != nil {
 				content.WriteString(fmt.Sprintf(" (%s)", action.Error.Error()))
@@ -1431,9 +1431,9 @@ bind-key -n C-e run-shell "PATH=$PATH:$HOME/.grove/bin core tmux editor"
 	pretty.Success("Setup complete!")
 	for _, action := range service.Actions() {
 		if action.Success {
-			pretty.InfoPretty(fmt.Sprintf("  ✓ %s", action.Description))
+			pretty.InfoPretty(fmt.Sprintf("  * %s", action.Description))
 		} else {
-			pretty.InfoPretty(fmt.Sprintf("  ✗ %s: %v", action.Description, action.Error))
+			pretty.InfoPretty(fmt.Sprintf("  x %s: %v", action.Description, action.Error))
 		}
 	}
 

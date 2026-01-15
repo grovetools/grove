@@ -150,7 +150,7 @@ to the 'main' version or the active release version.`
 					fmt.Printf("Warning: failed to reconcile %s: %v\n", binaryName, err)
 				}
 			}
-			fmt.Println("✓ Symlinks updated.")
+			fmt.Println("* Symlinks updated.")
 		}
 
 		if removedCount == 0 {

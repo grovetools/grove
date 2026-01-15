@@ -198,14 +198,14 @@ func runDevSecretsSet(cmd *cobra.Command, args []string) error {
 
 	for res := range resultChan {
 		if res.success {
-			fmt.Printf("%s %s\n", theme.DefaultTheme.Success.Render("✓"), res.workspace)
+			fmt.Printf("%s %s\n", theme.DefaultTheme.Success.Render("*"), res.workspace)
 			successCount++
 		} else {
 			errMsg := "unknown error"
 			if res.err != nil {
 				errMsg = res.err.Error()
 			}
-			fmt.Printf("%s %s: %s\n", theme.DefaultTheme.Error.Render("✗"), res.workspace, errMsg)
+			fmt.Printf("%s %s: %s\n", theme.DefaultTheme.Error.Render("x"), res.workspace, errMsg)
 			failCount++
 		}
 	}
@@ -329,14 +329,14 @@ func runDevSecretsDelete(cmd *cobra.Command, args []string) error {
 
 	for res := range resultChan {
 		if res.success {
-			fmt.Printf("%s %s\n", theme.DefaultTheme.Success.Render("✓"), res.workspace)
+			fmt.Printf("%s %s\n", theme.DefaultTheme.Success.Render("*"), res.workspace)
 			successCount++
 		} else {
 			errMsg := "unknown error"
 			if res.err != nil {
 				errMsg = res.err.Error()
 			}
-			fmt.Printf("%s %s: %s\n", theme.DefaultTheme.Error.Render("✗"), res.workspace, errMsg)
+			fmt.Printf("%s %s: %s\n", theme.DefaultTheme.Error.Render("x"), res.workspace, errMsg)
 			failCount++
 		}
 	}
@@ -385,7 +385,7 @@ func runDevSecretsList(cmd *cobra.Command, args []string) error {
 		cmd.Dir = ws
 		output, err := cmd.Output()
 		if err != nil {
-			fmt.Printf("\n%s %s: failed to get repository URL\n", theme.DefaultTheme.Error.Render("✗"), wsName)
+			fmt.Printf("\n%s %s: failed to get repository URL\n", theme.DefaultTheme.Error.Render("x"), wsName)
 			continue
 		}
 
@@ -407,7 +407,7 @@ func runDevSecretsList(cmd *cobra.Command, args []string) error {
 		}
 
 		if owner == "" || repo == "" {
-			fmt.Printf("\n%s %s: could not parse repository URL\n", theme.DefaultTheme.Error.Render("✗"), wsName)
+			fmt.Printf("\n%s %s: could not parse repository URL\n", theme.DefaultTheme.Error.Render("x"), wsName)
 			continue
 		}
 
@@ -418,7 +418,7 @@ func runDevSecretsList(cmd *cobra.Command, args []string) error {
 		cmd.Stderr = os.Stderr
 		err = cmd.Run()
 		if err != nil {
-			fmt.Printf("  %s Failed to list secrets: %v\n", theme.DefaultTheme.Error.Render("✗"), err)
+			fmt.Printf("  %s Failed to list secrets: %v\n", theme.DefaultTheme.Error.Render("x"), err)
 		}
 	}
 

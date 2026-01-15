@@ -63,7 +63,7 @@ exec "%s" "$@"
 				// If it fails, we should see "Failed" in the UI, if it succeeds we see the version or Ready
 				time.Sleep(3 * time.Second) // Give it time to process
 				
-				result, err := session.WaitForAnyText([]string{"✓ Ready", "## v0.1.1", "Failed", "✓ Written", "minor"}, 15*time.Second)
+				result, err := session.WaitForAnyText([]string{"* Ready", "## v0.1.1", "Failed", "* Written", "minor"}, 15*time.Second)
 				if err != nil {
 					// Capture current screen for debugging
 					content, _ := session.Capture()
@@ -161,7 +161,7 @@ exec "%s" "$@"
 					return err
 				}
 				// Wait for changelog to be generated - look for completion indicators
-				if _, err := session.WaitForAnyText([]string{"✓ Ready", "✓ Generated", "## v0.1.1", "### Features"}, 20*time.Second); err != nil {
+				if _, err := session.WaitForAnyText([]string{"* Ready", "* Generated", "## v0.1.1", "### Features"}, 20*time.Second); err != nil {
 					content, _ := session.Capture()
 					return fmt.Errorf("failed waiting for generation to complete, screen: %s, error: %w", content, err)
 				}
@@ -199,7 +199,7 @@ exec "%s" "$@"
 				
 				// Look for any indication that the file was modified
 				// The exact text might vary - could be "Modified", "Dirty", or show a different status
-				result, err := session.WaitForAnyText([]string{"Modified", "Dirty", "✗", "Changed"}, 5*time.Second)
+				result, err := session.WaitForAnyText([]string{"Modified", "Dirty", "x", "Changed"}, 5*time.Second)
 				if err != nil {
 					// Capture the screen to see what's actually displayed
 					content, _ := session.Capture()

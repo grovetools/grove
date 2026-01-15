@@ -21,12 +21,12 @@ case "$1" in
         case "$2" in
             "create")
                 # Simulate successful repo creation
-                echo "✓ Created repository $3"
+                echo "* Created repository $3"
                 exit 0
                 ;;
             "delete")
                 # Simulate successful repo deletion
-                echo "✓ Deleted repository $3"
+                echo "* Deleted repository $3"
                 exit 0
                 ;;
             "view")
@@ -46,7 +46,7 @@ case "$1" in
         if [[ "$2" == "set" && "$3" == "GROVE_PAT" ]]; then
             # Read from stdin but don't actually do anything
             cat > /dev/null
-            echo "✓ Set secret GROVE_PAT"
+            echo "* Set secret GROVE_PAT"
             exit 0
         fi
         ;;
@@ -60,7 +60,7 @@ case "$1" in
                 ;;
             "watch")
                 # Simulate successful CI run
-                echo "✓ Workflow run completed successfully"
+                echo "* Workflow run completed successfully"
                 exit 0
                 ;;
         esac
@@ -255,7 +255,7 @@ if [[ "$1" == "run" ]]; then
             echo "Error: release workflow failed" >&2
             exit 1
         else
-            echo "✓ Workflow run completed successfully"
+            echo "* Workflow run completed successfully"
             exit 0
         fi
     fi

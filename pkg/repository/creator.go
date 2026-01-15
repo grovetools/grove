@@ -337,7 +337,7 @@ func (c *Creator) InitializeGitHub(opts GitHubInitOptions) error {
 	}
 
 	// Show success summary
-	fmt.Println("\n✅ GitHub integration complete!")
+	fmt.Println("\n GitHub integration complete!")
 	fmt.Printf("Repository URL: https://github.com/mattsolo1/%s\n", repoName)
 
 	return nil
@@ -413,7 +413,7 @@ func (c *Creator) createLocalTag(opts CreateOptions, targetPath string) error {
 		return fmt.Errorf("failed to create tag: %w", err)
 	}
 
-	c.logger.Info("✅ Initial release tag created")
+	c.logger.Info(" Initial release tag created")
 	return nil
 }
 
@@ -440,13 +440,13 @@ func (c *Creator) addToEcosystemLocal(opts CreateOptions) error {
 		}
 	}
 
-	c.logger.Info("✅ Repository added to ecosystem")
+	c.logger.Info(" Repository added to ecosystem")
 	return nil
 }
 
 // showLocalSummary displays summary after local-only creation
 func (c *Creator) showLocalSummary(opts CreateOptions, targetPath string) {
-	fmt.Println("\n✅ Local repository created successfully!")
+	fmt.Println("\n Local repository created successfully!")
 	fmt.Printf("\nRepository: %s\n", targetPath)
 
 	if opts.Ecosystem {
@@ -531,7 +531,7 @@ func (c *Creator) createGitHubRepoFromCwd(repoName string, isPublic bool) error 
 		c.logger.Warnf("Failed to set clean remote URL: %v", err)
 	}
 
-	c.logger.Info("✅ GitHub repository created")
+	c.logger.Info(" GitHub repository created")
 	return nil
 }
 
@@ -549,7 +549,7 @@ func (c *Creator) setupSecretsFromCwd(repoName string) error {
 		return fmt.Errorf("failed to set GROVE_PAT secret: %w", err)
 	}
 
-	c.logger.Info("✅ Repository secrets configured")
+	c.logger.Info(" Repository secrets configured")
 	return nil
 }
 
@@ -567,7 +567,7 @@ func (c *Creator) pushToGitHubFromCwd() error {
 		c.logger.Warnf("Failed to push tags: %v\nOutput: %s", err, string(output))
 	}
 
-	c.logger.Info("✅ Code pushed to GitHub")
+	c.logger.Info(" Code pushed to GitHub")
 	return nil
 }
 
@@ -605,7 +605,7 @@ func (c *Creator) waitForCIFromCwd(repoName string) error {
 		return fmt.Errorf("release build failed: %w", err)
 	}
 
-	c.logger.Info("✅ Release build completed successfully")
+	c.logger.Info(" Release build completed successfully")
 	return nil
 }
 
@@ -749,7 +749,7 @@ description: %s
 		return fmt.Errorf("failed to create initial commit: %w", err)
 	}
 
-	c.logger.Info("✅ Minimal repository created")
+	c.logger.Info(" Minimal repository created")
 	return nil
 }
 
@@ -971,7 +971,7 @@ func (c *Creator) verifyLocal(opts CreateOptions, targetPath string) error {
 		c.logger.Warn("No Makefile found, skipping build verification")
 	}
 
-	c.logger.Info("✅ Local verification passed")
+	c.logger.Info(" Local verification passed")
 	return nil
 }
 
@@ -1023,7 +1023,7 @@ func (c *Creator) createGitHubRepo(opts CreateOptions, targetPath string) error 
 		c.logger.Warnf("Failed to set clean remote URL: %v", err)
 	}
 
-	c.logger.Info("✅ GitHub repository created")
+	c.logger.Info(" GitHub repository created")
 	return nil
 }
 
@@ -1035,7 +1035,7 @@ func (c *Creator) pushToGitHub(opts CreateOptions, targetPath string) error {
 		return fmt.Errorf("failed to push to GitHub: %w\nOutput: %s", err, string(output))
 	}
 
-	c.logger.Info("✅ Code pushed to GitHub")
+	c.logger.Info(" Code pushed to GitHub")
 	return nil
 }
 
@@ -1057,7 +1057,7 @@ func (c *Creator) setupSecrets(opts CreateOptions, targetPath string) error {
 		return fmt.Errorf("failed to set GROVE_PAT secret: %w", err)
 	}
 
-	c.logger.Info("✅ Repository secrets configured")
+	c.logger.Info(" Repository secrets configured")
 	return nil
 }
 
@@ -1080,7 +1080,7 @@ func (c *Creator) createInitialRelease(opts CreateOptions, targetPath string) er
 		}
 	}
 
-	c.logger.Info("✅ Initial release created")
+	c.logger.Info(" Initial release created")
 	return nil
 }
 
@@ -1119,7 +1119,7 @@ func (c *Creator) waitForCI(opts CreateOptions) error {
 		return fmt.Errorf("release build failed: %w", err)
 	}
 
-	c.logger.Info("✅ Release build completed successfully")
+	c.logger.Info(" Release build completed successfully")
 	return nil
 }
 
@@ -1169,7 +1169,7 @@ func (c *Creator) addToEcosystem(opts CreateOptions) error {
 
 	// go.work was already updated earlier for local verification, so skip here
 
-	c.logger.Info("✅ Repository added to ecosystem")
+	c.logger.Info(" Repository added to ecosystem")
 	return nil
 }
 
@@ -1194,7 +1194,7 @@ func isGoTemplate(templatePath string) bool {
 }
 
 func (c *Creator) showSummary(opts CreateOptions, targetPath string) error {
-	fmt.Println("\n✅ All operations completed successfully!")
+	fmt.Println("\n All operations completed successfully!")
 	fmt.Println("\nSUMMARY")
 	fmt.Println("-------")
 	fmt.Printf("- Local repository created at: %s\n", targetPath)

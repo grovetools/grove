@@ -74,7 +74,7 @@ func installGitHooksSingle() error {
 		return fmt.Errorf("failed to install git hooks: %w", err)
 	}
 
-	fmt.Printf("✅ Conventional commit hook installed successfully in %s\n", gitRoot)
+	fmt.Printf(" Conventional commit hook installed successfully in %s\n", gitRoot)
 	return nil
 }
 
@@ -88,7 +88,7 @@ func uninstallGitHooksSingle() error {
 		return fmt.Errorf("failed to uninstall git hooks: %w", err)
 	}
 
-	fmt.Printf("✅ Conventional commit hook uninstalled successfully from %s\n", gitRoot)
+	fmt.Printf(" Conventional commit hook uninstalled successfully from %s\n", gitRoot)
 	return nil
 }
 

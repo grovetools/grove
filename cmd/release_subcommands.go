@@ -299,7 +299,7 @@ Examples:
 						}
 						// Tag doesn't exist locally, that's ok
 					} else {
-						fmt.Printf("  ✓ Removed local tag %s from %s\n", version, repoName)
+						fmt.Printf("  * Removed local tag %s from %s\n", version, repoName)
 					}
 					
 					// Delete remote tag if requested
@@ -315,7 +315,7 @@ Examples:
 							}
 							// Tag doesn't exist remotely, that's ok
 						} else {
-							fmt.Printf("  ✓ Removed remote tag %s from %s\n", version, repoName)
+							fmt.Printf("  * Removed remote tag %s from %s\n", version, repoName)
 						}
 					}
 					
@@ -535,7 +535,7 @@ Examples:
 						fmt.Printf("  %s Could not create backup tag: %s\n", theme.IconWarning, strings.TrimSpace(string(output)))
 					}
 				} else {
-					fmt.Printf("  ✓ Created backup tag: %s\n", backupRepoTag)
+					fmt.Printf("  * Created backup tag: %s\n", backupRepoTag)
 				}
 				
 				// Check for uncommitted changes if using hard reset
@@ -565,7 +565,7 @@ Examples:
 					rollbackState[repoName] = strings.TrimSpace(string(headOutput))
 				}
 				
-				fmt.Printf("  ✓ Rolled back %d commit(s) (%s mode)\n", commits, mode)
+				fmt.Printf("  * Rolled back %d commit(s) (%s mode)\n", commits, mode)
 				
 				// Push if requested
 				if push {
@@ -608,9 +608,9 @@ Examples:
 					}
 					
 					if needsForce && forcePush {
-						fmt.Printf("  ✓ Force pushed to origin\n")
+						fmt.Printf("  * Force pushed to origin\n")
 					} else {
-						fmt.Printf("  ✓ Pushed to origin\n")
+						fmt.Printf("  * Pushed to origin\n")
 					}
 				}
 				
