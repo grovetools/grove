@@ -11,12 +11,14 @@ import (
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-meta/cmd/internal"
 	"github.com/mattsolo1/grove-meta/pkg/delegation"
 	"github.com/mattsolo1/grove-meta/pkg/overrides"
 	"github.com/mattsolo1/grove-meta/pkg/sdk"
 	meta_workspace "github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 var rootCmd = cli.NewStandardCommand("grove", "Grove workspace orchestrator and tool manager")
@@ -55,24 +57,91 @@ Run 'grove <tool>' to delegate to installed tools, or use subcommands below.`
 	rootCmd.FParseErrWhitelist.UnknownFlags = true
 	rootCmd.Args = cobra.ArbitraryArgs // Allow any arguments to be passed
 
-	// Custom help function to add available tools section
-	defaultHelp := rootCmd.HelpFunc()
-	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		defaultHelp(cmd, args)
-		// Only show tools section for root command
-		if cmd == rootCmd {
-			printAvailableTools()
+	// Custom help function with consistent styling
+	rootCmd.SetHelpFunc(styledHelpFunc)
+}
+
+// styledHelpFunc provides consistently styled help output
+func styledHelpFunc(cmd *cobra.Command, args []string) {
+	t := theme.DefaultTheme
+	blue := t.Bold.Copy().Foreground(t.Colors.Blue)
+
+	// Print description
+	if cmd.Long != "" {
+		fmt.Println(cmd.Long)
+	} else if cmd.Short != "" {
+		fmt.Println(cmd.Short)
+	}
+
+	// Print usage with inline flags
+	if cmd.Runnable() || cmd.HasSubCommands() {
+		fmt.Println("\n " + t.Bold.Render("USAGE"))
+		if cmd.Runnable() {
+			fmt.Printf(" %s\n", cmd.UseLine())
 		}
-	})
+		if cmd.HasSubCommands() {
+			fmt.Printf(" %s [command]\n", cmd.CommandPath())
+		}
+
+		// Collect flags inline
+		var flags []string
+		cmd.LocalFlags().VisitAll(func(f *pflag.Flag) {
+			if f.Hidden {
+				return
+			}
+			if f.Shorthand != "" {
+				flags = append(flags, fmt.Sprintf("-%s/--%s", f.Shorthand, f.Name))
+			} else {
+				flags = append(flags, fmt.Sprintf("--%s", f.Name))
+			}
+		})
+		if len(flags) > 0 {
+			fmt.Printf("\n " + t.Muted.Render("Flags: "+strings.Join(flags, ", ")))
+			fmt.Println()
+		}
+	}
+
+	// Print available commands
+	if cmd.HasAvailableSubCommands() {
+		// Find max command name length
+		maxLen := 0
+		for _, subcmd := range cmd.Commands() {
+			if subcmd.IsAvailableCommand() && len(subcmd.Name()) > maxLen {
+				maxLen = len(subcmd.Name())
+			}
+		}
+
+		fmt.Println("\n " + t.Bold.Render("COMMANDS"))
+		for _, subcmd := range cmd.Commands() {
+			if subcmd.IsAvailableCommand() {
+				name := subcmd.Name()
+				padding := strings.Repeat(" ", maxLen-len(name))
+				fmt.Printf(" %s%s  %s\n", blue.Render(name), padding, subcmd.Short)
+			}
+		}
+	}
+
+	// Print available tools for root command
+	if cmd == rootCmd {
+		printAvailableTools()
+	}
+
+	// Print help hint
+	if cmd.HasSubCommands() {
+		fmt.Printf("\n Use \"%s [command] --help\" for more information about a command.\n", cmd.CommandPath())
+	}
 }
 
 // printAvailableTools prints the available ecosystem tools in table format
 func printAvailableTools() {
+	t := theme.DefaultTheme
+
 	// Get all tools and their info
 	type toolRow struct {
 		binary, description, repo string
 	}
 	var tools []toolRow
+	maxBinaryLen := len("BINARY")
 	for repo, info := range sdk.GetToolRegistry() {
 		desc := info.Description
 		if desc == "" {
@@ -83,15 +152,35 @@ func printAvailableTools() {
 			desc = desc[:27] + "..."
 		}
 		tools = append(tools, toolRow{info.Alias, desc, repo})
+		if len(info.Alias) > maxBinaryLen {
+			maxBinaryLen = len(info.Alias)
+		}
 	}
 	sort.Slice(tools, func(i, j int) bool {
 		return tools[i].binary < tools[j].binary
 	})
 
-	fmt.Println("\nAvailable Tools (run 'grove <tool>'):")
-	fmt.Printf("  %-12s %-32s %s\n", "BINARY", "DESCRIPTION", "REPO")
-	for _, t := range tools {
-		fmt.Printf("  %-12s %-32s %s\n", t.binary, t.description, t.repo)
+	// Helper to pad string to width
+	pad := func(s string, width int) string {
+		if len(s) >= width {
+			return s
+		}
+		return s + strings.Repeat(" ", width-len(s))
+	}
+
+	// Use a blue style for tool names
+	blue := t.Bold.Copy().Foreground(t.Colors.Blue)
+
+	fmt.Println("\n " + t.Bold.Render("AVAILABLE TOOLS"))
+	fmt.Printf(" %s  %s  %s\n",
+		t.Muted.Render(pad("BINARY", maxBinaryLen)),
+		t.Muted.Render(pad("DESCRIPTION", 32)),
+		t.Muted.Render("REPO"))
+	for _, row := range tools {
+		fmt.Printf(" %s  %s  %s\n",
+			blue.Render(pad(row.binary, maxBinaryLen)),
+			pad(row.description, 32),
+			t.Muted.Render(row.repo))
 	}
 }
 
