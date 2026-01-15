@@ -23,19 +23,7 @@ func init() {
 	// Set long description
 	rootCmd.Long = `Grove workspace orchestrator and tool manager.
 
-Grove acts as a command delegator. When you run 'grove <tool>', it finds and
-executes the specified tool.
-
-Delegation Behavior:
-  By default, grove uses a 'global-first' strategy, always using the globally
-  configured binaries (as shown in 'grove list' or 'grove dev current').
-
-  To switch to 'workspace-aware' delegation, run:
-    grove dev delegate workspace
-
-  This will make grove prioritize binaries from your current workspace, which is
-  useful for local development. To switch back to global-first, run:
-    grove dev delegate global`
+Run 'grove <tool>' to delegate to installed tools, or use subcommands below.`
 
 	// Add subcommands
 	rootCmd.AddCommand(newBootstrapCmd())
