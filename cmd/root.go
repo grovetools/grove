@@ -41,7 +41,6 @@ Delegation Behavior:
 	rootCmd.AddCommand(newBootstrapCmd())
 	rootCmd.AddCommand(newBuildCmd())
 	rootCmd.AddCommand(newDepsCmd())
-	rootCmd.AddCommand(newRunCmd())
 	rootCmd.AddCommand(newSchemaCmd())
 	rootCmd.AddCommand(newSetupCmd())
 	rootCmd.AddCommand(internal.NewInternalCmd())
