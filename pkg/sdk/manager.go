@@ -105,6 +105,11 @@ func GetAllTools() []string {
 	return tools
 }
 
+// GetToolRegistry returns the tool registry map
+func GetToolRegistry() map[string]ToolInfo {
+	return toolRegistry
+}
+
 // Manager handles SDK installation and version management
 type Manager struct {
 	homeDir string

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/mattsolo1/grove-core/cli"
@@ -13,6 +14,7 @@ import (
 	"github.com/mattsolo1/grove-meta/cmd/internal"
 	"github.com/mattsolo1/grove-meta/pkg/delegation"
 	"github.com/mattsolo1/grove-meta/pkg/overrides"
+	"github.com/mattsolo1/grove-meta/pkg/sdk"
 	meta_workspace "github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
 )
@@ -51,7 +53,34 @@ Run 'grove <tool>' to delegate to installed tools, or use subcommands below.`
 
 	// Allow arbitrary args for tool delegation
 	rootCmd.FParseErrWhitelist.UnknownFlags = true
-	rootCmd.Args = cobra.ArbitraryArgs  // Allow any arguments to be passed
+	rootCmd.Args = cobra.ArbitraryArgs // Allow any arguments to be passed
+
+	// Custom help function to add available tools section
+	defaultHelp := rootCmd.HelpFunc()
+	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		defaultHelp(cmd, args)
+		// Only show tools section for root command
+		if cmd == rootCmd {
+			printAvailableTools()
+		}
+	})
+}
+
+// printAvailableTools prints the available ecosystem tools
+func printAvailableTools() {
+	// Get all tools and their aliases
+	var tools []struct{ alias, repo string }
+	for repo, info := range sdk.GetToolRegistry() {
+		tools = append(tools, struct{ alias, repo string }{info.Alias, repo})
+	}
+	sort.Slice(tools, func(i, j int) bool {
+		return tools[i].alias < tools[j].alias
+	})
+
+	fmt.Println("\nAvailable Tools (run 'grove <tool>'):")
+	for _, t := range tools {
+		fmt.Printf("  %-16s %s\n", t.alias, t.repo)
+	}
 }
 
 // Execute runs the root command
