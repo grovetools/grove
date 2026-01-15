@@ -18,16 +18,13 @@ import (
 	"github.com/mattsolo1/grove-meta/pkg/sdk"
 	meta_workspace "github.com/mattsolo1/grove-meta/pkg/workspace"
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 )
 
 var rootCmd = cli.NewStandardCommand("grove", "Grove workspace orchestrator and tool manager")
 
 func init() {
-	// Set long description
-	rootCmd.Long = `Grove workspace orchestrator and tool manager.
-
-Run 'grove <tool>' to delegate to installed tools, or use subcommands below.`
+	// Set long description (don't repeat Short - grove-core help shows both)
+	rootCmd.Long = `Run 'grove <tool>' to delegate to installed tools, or use subcommands below.`
 
 	// Add subcommands
 	rootCmd.AddCommand(newBootstrapCmd())
@@ -57,84 +54,12 @@ Run 'grove <tool>' to delegate to installed tools, or use subcommands below.`
 	rootCmd.FParseErrWhitelist.UnknownFlags = true
 	rootCmd.Args = cobra.ArbitraryArgs // Allow any arguments to be passed
 
-	// Custom help function with consistent styling
-	rootCmd.SetHelpFunc(styledHelpFunc)
-}
-
-// styledHelpFunc provides consistently styled help output
-func styledHelpFunc(cmd *cobra.Command, args []string) {
-	t := theme.DefaultTheme
-	blue := t.Bold.Copy().Foreground(t.Colors.Blue)
-
-	// Print description
-	if cmd.Long != "" {
-		fmt.Println(cmd.Long)
-	} else if cmd.Short != "" {
-		fmt.Println(cmd.Short)
-	}
-
-	// Print usage with inline flags
-	if cmd.Runnable() || cmd.HasSubCommands() {
-		fmt.Println("\n " + t.Bold.Render("USAGE"))
-		if cmd.Runnable() {
-			fmt.Printf(" %s\n", cmd.UseLine())
-		}
-		if cmd.HasSubCommands() {
-			fmt.Printf(" %s [command]\n", cmd.CommandPath())
-		}
-
-		// Collect flags inline
-		var flags []string
-		cmd.LocalFlags().VisitAll(func(f *pflag.Flag) {
-			if f.Hidden {
-				return
-			}
-			if f.Shorthand != "" {
-				flags = append(flags, fmt.Sprintf("-%s/--%s", f.Shorthand, f.Name))
-			} else {
-				flags = append(flags, fmt.Sprintf("--%s", f.Name))
-			}
-		})
-		if len(flags) > 0 {
-			fmt.Printf("\n " + t.Muted.Render("Flags: "+strings.Join(flags, ", ")))
-			fmt.Println()
-		}
-	}
-
-	// Print available commands
-	if cmd.HasAvailableSubCommands() {
-		// Find max command name length
-		maxLen := 0
-		for _, subcmd := range cmd.Commands() {
-			if subcmd.IsAvailableCommand() && len(subcmd.Name()) > maxLen {
-				maxLen = len(subcmd.Name())
-			}
-		}
-
-		fmt.Println("\n " + t.Bold.Render("COMMANDS"))
-		for _, subcmd := range cmd.Commands() {
-			if subcmd.IsAvailableCommand() {
-				name := subcmd.Name()
-				padding := strings.Repeat(" ", maxLen-len(name))
-				fmt.Printf(" %s%s  %s\n", blue.Render(name), padding, subcmd.Short)
-			}
-		}
-	}
-
-	// Print available tools for root command
-	if cmd == rootCmd {
-		printAvailableTools()
-	}
-
-	// Print help hint
-	if cmd.HasSubCommands() {
-		fmt.Printf("\n Use \"%s [command] --help\" for more information about a command.\n", cmd.CommandPath())
-	}
+	// Use core styled help with custom "AVAILABLE TOOLS" section
+	cli.SetStyledHelpWithExtras(rootCmd, printAvailableTools)
 }
 
 // printAvailableTools prints the available ecosystem tools in table format
-func printAvailableTools() {
-	t := theme.DefaultTheme
+func printAvailableTools(t *theme.Theme) {
 
 	// Get all tools and their info
 	type toolRow struct {
@@ -186,22 +111,20 @@ func printAvailableTools() {
 
 // Execute runs the root command
 func Execute() error {
-	// Check if the first argument might be a tool to delegate to
+	// Check if the first argument is a known tool - delegate BEFORE cobra parses flags
 	if len(os.Args) > 1 {
 		potentialTool := os.Args[1]
-		
-		// Check if this is NOT a known subcommand
-		if _, _, err := rootCmd.Find(os.Args[1:]); err != nil {
-			// This might be a tool delegation request
-			// Try to delegate to the tool
-			if err := delegateToTool(potentialTool, os.Args[2:]); err != nil {
-				// If delegation fails, show the original cobra error
-				return rootCmd.Execute()
+
+		// Skip if it looks like a flag (let cobra handle it)
+		if !strings.HasPrefix(potentialTool, "-") {
+			// Check if it's a registered tool in our ecosystem
+			if _, _, _, found := sdk.FindTool(potentialTool); found {
+				// Delegate immediately with all remaining args (including -h, --help, etc.)
+				return delegateToTool(potentialTool, os.Args[2:])
 			}
-			return nil
 		}
 	}
-	
+
 	return rootCmd.Execute()
 }
 
