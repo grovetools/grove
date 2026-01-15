@@ -356,35 +356,49 @@ Generate the JSON object now:`, newVersion, currentDate, gitContext)
 		return nil, fmt.Errorf("failed to close temporary prompt file: %w", err)
 	}
 
+	// Create a temp file for the LLM response output
+	outputFile, err := os.CreateTemp("", "grove-changelog-response-*.json")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create output file: %w", err)
+	}
+	outputPath := outputFile.Name()
+	outputFile.Close()
+	defer os.Remove(outputPath)
+
 	// Construct and execute the LLM command via grove llm (which delegates to gemapi)
+	// Use --output flag to get clean response without console decoration
+	// Use --max-output-tokens to ensure the full changelog can be generated
 	args := []string{
 		"llm",
 		"request",
 		"--model", model,
 		"--file", tmpFile.Name(),
+		"--output", outputPath,
+		"--max-output-tokens", "8192",
 		"--yes",
 	}
-	
-	// Create a log file for gemapi output
+
+	// Create a log file for gemapi console output
 	logFile, err := os.CreateTemp("", "grove-gemapi-*.log")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create log file: %w", err)
 	}
 	logPath := logFile.Name()
 	defer logFile.Close()
-	
+
 	// Only show this message if not in skip prompt mode (i.e., not in TUI)
 	if !skipPrompt {
 		fmt.Printf("Calling gemapi with model %s for version suggestion...\n", model)
 		fmt.Printf("Logging output to: %s\n", logPath)
 	}
-	
+
 	// Use 'grove llm' for workspace-awareness (delegates to gemapi for Gemini models)
 	ctx := context.Background()
 	changelogLog.Debug("Calling grove llm").
 		Field("model", model).
 		Field("repo_path", repoPath).
 		Field("prompt_file", tmpFile.Name()).
+		Field("output_file", outputPath).
 		Field("full_command", "grove "+strings.Join(args, " ")).
 		Field("args", args).
 		StructuredOnly().
@@ -408,13 +422,13 @@ Generate the JSON object now:`, newVersion, currentDate, gitContext)
 	gemapiCmd := exec.Command("grove", args...)
 	gemapiCmd.Dir = repoPath // Set working directory to the repository being analyzed
 
-	// Redirect stderr to log file to prevent TUI mangling
+	// Redirect both stdout and stderr to log file to prevent TUI mangling
+	gemapiCmd.Stdout = logFile
 	gemapiCmd.Stderr = logFile
 
-	output, err := gemapiCmd.Output()
+	err = gemapiCmd.Run()
 
 	changelogLog.Debug("gemapi command completed").
-		Field("output_len", len(output)).
 		Field("has_error", err != nil).
 		StructuredOnly().
 		Log(ctx)
@@ -426,11 +440,21 @@ Generate the JSON object now:`, newVersion, currentDate, gitContext)
 			Err(err).
 			Field("log_path", logPath).
 			Field("log_content", string(logContent)).
-			Field("output", string(output)).
 			StructuredOnly().
 			Log(ctx)
 		return nil, fmt.Errorf("failed to execute 'gemapi request': %w\nLog: %s\nOutput: %s", err, logPath, string(logContent))
 	}
+
+	// Read the LLM response from the output file
+	output, err := os.ReadFile(outputPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read LLM response from output file: %w", err)
+	}
+
+	changelogLog.Debug("Read LLM response from file").
+		Field("output_len", len(output)).
+		StructuredOnly().
+		Log(ctx)
 
 	changelogLog.Debug("Raw gemapi output").
 		Field("output", string(output)).
@@ -439,12 +463,8 @@ Generate the JSON object now:`, newVersion, currentDate, gitContext)
 
 	// Clean the output to ensure it's valid JSON
 	// LLMs sometimes wrap JSON in ```json ... ``` blocks
-	jsonString := strings.TrimSpace(string(output))
-	if strings.HasPrefix(jsonString, "```json") {
-		jsonString = strings.TrimPrefix(jsonString, "```json")
-		jsonString = strings.TrimSuffix(jsonString, "```")
-		jsonString = strings.TrimSpace(jsonString)
-	}
+	// The output may also contain console styling from gemapi, so we need to extract the JSON
+	jsonString := extractJSONFromOutput(string(output))
 
 	previewLen := len(jsonString)
 	if previewLen > 200 {
@@ -513,4 +533,146 @@ func fixChangelogHeader(changelog, version, date string) string {
 		return correctHeader + "\n" + lines[1]
 	}
 	return correctHeader + "\n"
+}
+
+// extractJSONFromOutput extracts a JSON object from LLM output that may contain
+// console styling, markdown code blocks, or other surrounding content.
+// Handles nested code blocks within the JSON content.
+func extractJSONFromOutput(output string) string {
+	output = strings.TrimSpace(output)
+
+	// Try to find JSON within ```json ... ``` code blocks first
+	// The JSON content may contain nested ``` blocks (e.g., in changelog markdown),
+	// so we need to find the closing ``` that's at the start of a line after the JSON object closes.
+	if idx := strings.Index(output, "```json"); idx != -1 {
+		start := idx + len("```json")
+		rest := output[start:]
+
+		// Look for the closing ``` by finding where the JSON object ends (})
+		// and then finding the next ``` after that
+		jsonStart := strings.Index(rest, "{")
+		if jsonStart != -1 {
+			// Find the end of the JSON object by tracking brace depth
+			depth := 0
+			inString := false
+			escape := false
+			jsonEnd := -1
+
+			for i := jsonStart; i < len(rest); i++ {
+				c := rest[i]
+				if escape {
+					escape = false
+					continue
+				}
+				if c == '\\' && inString {
+					escape = true
+					continue
+				}
+				if c == '"' {
+					inString = !inString
+					continue
+				}
+				if inString {
+					continue
+				}
+				if c == '{' {
+					depth++
+				} else if c == '}' {
+					depth--
+					if depth == 0 {
+						jsonEnd = i + 1
+						break
+					}
+				}
+			}
+
+			if jsonEnd != -1 {
+				return strings.TrimSpace(rest[jsonStart:jsonEnd])
+			}
+		}
+	}
+
+	// Try to find JSON within ``` ... ``` code blocks (without language specifier)
+	if idx := strings.Index(output, "```\n{"); idx != -1 {
+		start := idx + len("```\n")
+		rest := output[start:]
+
+		// Same logic: track brace depth to find the JSON object end
+		depth := 0
+		inString := false
+		escape := false
+		jsonEnd := -1
+
+		for i := 0; i < len(rest); i++ {
+			c := rest[i]
+			if escape {
+				escape = false
+				continue
+			}
+			if c == '\\' && inString {
+				escape = true
+				continue
+			}
+			if c == '"' {
+				inString = !inString
+				continue
+			}
+			if inString {
+				continue
+			}
+			if c == '{' {
+				depth++
+			} else if c == '}' {
+				depth--
+				if depth == 0 {
+					jsonEnd = i + 1
+					break
+				}
+			}
+		}
+
+		if jsonEnd != -1 {
+			return strings.TrimSpace(rest[:jsonEnd])
+		}
+	}
+
+	// Try to find raw JSON object by looking for { and tracking brace depth
+	startIdx := strings.Index(output, "{")
+	if startIdx == -1 {
+		return output // No JSON object found, return as-is
+	}
+
+	// Track brace depth to find the matching closing }
+	depth := 0
+	inString := false
+	escape := false
+
+	for i := startIdx; i < len(output); i++ {
+		c := output[i]
+		if escape {
+			escape = false
+			continue
+		}
+		if c == '\\' && inString {
+			escape = true
+			continue
+		}
+		if c == '"' {
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		if c == '{' {
+			depth++
+		} else if c == '}' {
+			depth--
+			if depth == 0 {
+				return strings.TrimSpace(output[startIdx : i+1])
+			}
+		}
+	}
+
+	return output // No matching } found
 }

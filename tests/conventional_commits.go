@@ -65,7 +65,7 @@ func ConventionalCommitsScenario() *harness.Scenario {
 				Func: func(ctx *harness.Context) error {
 					repoDir := ctx.Get("repo_dir").(string)
 					
-					cmd := command.New(ctx.GroveBinary, "git-hooks", "install").Dir(repoDir)
+					cmd := command.New(ctx.GroveBinary, "setup", "git-hooks", "install").Dir(repoDir)
 					result := cmd.Run()
 					
 					if result.Error != nil {
@@ -77,7 +77,7 @@ func ConventionalCommitsScenario() *harness.Scenario {
 						return fmt.Errorf("commit-msg hook was not created at %s", hookPath)
 					}
 					
-					ctx.ShowCommandOutput("grove git-hooks install", result.Stdout, result.Stderr)
+					ctx.ShowCommandOutput("grove setup git-hooks install", result.Stdout, result.Stderr)
 					ctx.Set("hook_path", hookPath)
 					return nil
 				},
@@ -211,7 +211,7 @@ func ConventionalCommitsScenario() *harness.Scenario {
 				Func: func(ctx *harness.Context) error {
 					repoDir := ctx.Get("repo_dir").(string)
 					
-					cmd := command.New(ctx.GroveBinary, "changelog", ".", "--version", "v0.2.0").Dir(repoDir)
+					cmd := command.New(ctx.GroveBinary, "release", "changelog", ".", "--version", "v0.2.0").Dir(repoDir)
 					result := cmd.Run()
 					
 					if result.Error != nil {
@@ -296,7 +296,7 @@ func ConventionalCommitsScenario() *harness.Scenario {
 					}
 					
 					// Generate changelog for v0.3.0
-					cmd := command.New(ctx.GroveBinary, "changelog", ".", "--version", "v0.3.0").Dir(repoDir)
+					cmd := command.New(ctx.GroveBinary, "release", "changelog", ".", "--version", "v0.3.0").Dir(repoDir)
 					result := cmd.Run()
 					
 					if result.Error != nil {
@@ -334,7 +334,7 @@ func ConventionalCommitsScenario() *harness.Scenario {
 					repoDir := ctx.Get("repo_dir").(string)
 					hookPath := ctx.Get("hook_path").(string)
 					
-					cmd := command.New(ctx.GroveBinary, "git-hooks", "uninstall").Dir(repoDir)
+					cmd := command.New(ctx.GroveBinary, "setup", "git-hooks", "uninstall").Dir(repoDir)
 					result := cmd.Run()
 					
 					if result.Error != nil {
@@ -346,7 +346,7 @@ func ConventionalCommitsScenario() *harness.Scenario {
 						return fmt.Errorf("commit-msg hook still exists after uninstall")
 					}
 					
-					ctx.ShowCommandOutput("grove git-hooks uninstall", result.Stdout, result.Stderr)
+					ctx.ShowCommandOutput("grove setup git-hooks uninstall", result.Stdout, result.Stderr)
 					return nil
 				},
 			},
