@@ -1,5 +1,5 @@
 enabled: true
-title: Grove
+title: grove
 description: Grove meta-CLI and package manager for the Grove ecosystem
 category: Developer Tools
 settings:
