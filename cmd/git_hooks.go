@@ -3,11 +3,11 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/mattsolo1/grove-core/git"
-	"github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-meta/pkg/discovery"
-	"github.com/mattsolo1/grove-meta/pkg/githooks"
+	"github.com/grovetools/core/git"
+	"github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/grove/pkg/discovery"
+	"github.com/grovetools/grove/pkg/githooks"
 	"github.com/spf13/cobra"
 )
 

@@ -14,12 +14,12 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattsolo1/grove-core/logging"
-	tablecomponent "github.com/mattsolo1/grove-core/tui/components/table"
-	"github.com/mattsolo1/grove-core/tui/components/help"
-	"github.com/mattsolo1/grove-core/tui/keymap"
-	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-meta/pkg/release"
+	"github.com/grovetools/core/logging"
+	tablecomponent "github.com/grovetools/core/tui/components/table"
+	"github.com/grovetools/core/tui/components/help"
+	"github.com/grovetools/core/tui/keymap"
+	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/grove/pkg/release"
 	"github.com/spf13/cobra"
 )
 

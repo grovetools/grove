@@ -11,7 +11,7 @@ import (
 // Node represents a module in the dependency graph
 type Node struct {
 	Name    string   // Module name (e.g., "grove-core")
-	Path    string   // Full module path (e.g., "github.com/mattsolo1/grove-core")
+	Path    string   // Full module path (e.g., "github.com/grovetools/core")
 	Dir     string   // Directory path
 	Deps    []string // Direct dependencies (module paths)
 	Version string   // Current version (if known)

@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/fs"
-	"github.com/mattsolo1/grove-tend/pkg/harness"
-	"github.com/mattsolo1/grove-tend/pkg/verify"
-	"github.com/mattsolo1/grove-meta/pkg/devlinks"
+	"github.com/grovetools/tend/pkg/fs"
+	"github.com/grovetools/tend/pkg/harness"
+	"github.com/grovetools/tend/pkg/verify"
+	"github.com/grovetools/grove/pkg/devlinks"
 )
 
 // setupMockEcosystem creates a sandboxed environment with two "worktrees",

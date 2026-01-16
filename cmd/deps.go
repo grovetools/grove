@@ -9,10 +9,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/git"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-meta/pkg/depsgraph"
-	"github.com/mattsolo1/grove-meta/pkg/discovery"
+	"github.com/grovetools/core/git"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/grove/pkg/depsgraph"
+	"github.com/grovetools/grove/pkg/discovery"
 	"github.com/spf13/cobra"
 )
 
@@ -43,9 +43,9 @@ them to the specified version. If no version is specified or @latest is used,
 it will fetch the latest available version.
 
 Examples:
-  grove deps bump github.com/mattsolo1/grove-core@v0.2.0
-  grove deps bump github.com/mattsolo1/grove-core@latest
-  grove deps bump github.com/mattsolo1/grove-core`,
+  grove deps bump github.com/grovetools/core@v0.2.0
+  grove deps bump github.com/grovetools/core@latest
+  grove deps bump github.com/grovetools/core`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// If push is set, commit must also be set

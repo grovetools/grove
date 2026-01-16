@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/conventional"
+	"github.com/grovetools/core/conventional"
 	"github.com/spf13/cobra"
 )
 

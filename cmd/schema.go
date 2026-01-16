@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/cli"
-	"github.com/mattsolo1/grove-meta/pkg/discovery"
+	"github.com/grovetools/core/cli"
+	"github.com/grovetools/grove/pkg/discovery"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )

@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/cli"
-	"github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-meta/pkg/discovery"
-	"github.com/mattsolo1/grove-meta/pkg/runner"
+	"github.com/grovetools/core/cli"
+	"github.com/grovetools/core/logging"
+	"github.com/grovetools/grove/pkg/discovery"
+	"github.com/grovetools/grove/pkg/runner"
 	"github.com/spf13/cobra"
 )
 

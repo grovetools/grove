@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"github.com/mattsolo1/grove-core/cli"
+	"github.com/grovetools/core/cli"
 	"github.com/spf13/cobra"
 )
 

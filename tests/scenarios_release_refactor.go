@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mattsolo1/grove-tend/pkg/harness"
+	"github.com/grovetools/tend/pkg/harness"
 )
 
 // setupMockEcosystemStep is a reusable step to create a consistent test ecosystem.

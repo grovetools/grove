@@ -12,9 +12,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/util/delegation"
-	"github.com/mattsolo1/grove-meta/pkg/devlinks"
-	"github.com/mattsolo1/grove-meta/pkg/workspace"
+	"github.com/grovetools/core/util/delegation"
+	"github.com/grovetools/grove/pkg/devlinks"
+	"github.com/grovetools/grove/pkg/workspace"
 )
 
 const (

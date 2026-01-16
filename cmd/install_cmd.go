@@ -7,11 +7,11 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-meta/pkg/devlinks"
-	"github.com/mattsolo1/grove-meta/pkg/reconciler"
-	"github.com/mattsolo1/grove-meta/pkg/sdk"
+	"github.com/grovetools/core/logging"
+	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/grove/pkg/devlinks"
+	"github.com/grovetools/grove/pkg/reconciler"
+	"github.com/grovetools/grove/pkg/sdk"
 	"github.com/spf13/cobra"
 )
 

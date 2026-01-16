@@ -9,12 +9,12 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/mattsolo1/grove-core/cli"
-	"github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/version"
-	"github.com/mattsolo1/grove-meta/pkg/devlinks"
-	"github.com/mattsolo1/grove-meta/pkg/reconciler"
-	"github.com/mattsolo1/grove-meta/pkg/sdk"
+	"github.com/grovetools/core/cli"
+	"github.com/grovetools/core/logging"
+	"github.com/grovetools/core/version"
+	"github.com/grovetools/grove/pkg/devlinks"
+	"github.com/grovetools/grove/pkg/reconciler"
+	"github.com/grovetools/grove/pkg/sdk"
 	"github.com/spf13/cobra"
 )
 

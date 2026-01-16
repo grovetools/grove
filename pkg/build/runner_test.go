@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mattsolo1/grove-meta/pkg/build"
+	"github.com/grovetools/grove/pkg/build"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

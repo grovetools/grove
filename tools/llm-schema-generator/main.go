@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/invopop/jsonschema"
-	"github.com/mattsolo1/grove-meta/pkg/llmconfig"
+	"github.com/grovetools/grove/pkg/llmconfig"
 )
 
 func main() {

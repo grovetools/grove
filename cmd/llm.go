@@ -6,8 +6,8 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/cli"
-	"github.com/mattsolo1/grove-core/config"
+	"github.com/grovetools/core/cli"
+	"github.com/grovetools/core/config"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"

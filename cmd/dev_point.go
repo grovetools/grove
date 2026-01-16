@@ -5,10 +5,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mattsolo1/grove-core/cli"
-	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-meta/pkg/overrides"
-	meta_workspace "github.com/mattsolo1/grove-meta/pkg/workspace"
+	"github.com/grovetools/core/cli"
+	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/grove/pkg/overrides"
+	meta_workspace "github.com/grovetools/grove/pkg/workspace"
 	"github.com/spf13/cobra"
 )
 

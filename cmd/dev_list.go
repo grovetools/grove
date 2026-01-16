@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/mattsolo1/grove-core/cli"
-	"github.com/mattsolo1/grove-meta/pkg/devlinks"
+	"github.com/grovetools/core/cli"
+	"github.com/grovetools/grove/pkg/devlinks"
 	"github.com/spf13/cobra"
 )
 

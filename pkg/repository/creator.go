@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-core/util/delegation"
-	"github.com/mattsolo1/grove-meta/pkg/gh"
-	"github.com/mattsolo1/grove-meta/pkg/templates"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/util/delegation"
+	"github.com/grovetools/grove/pkg/gh"
+	"github.com/grovetools/grove/pkg/templates"
 	"github.com/sirupsen/logrus"
 )
 
@@ -677,7 +677,7 @@ func (c *Creator) generateSkeleton(opts CreateOptions, targetPath string) error 
 	var modulePath string
 	if opts.Ecosystem {
 		// In ecosystem mode, it's part of grove-meta
-		modulePath = fmt.Sprintf("github.com/mattsolo1/grove-meta/%s", opts.Name)
+		modulePath = fmt.Sprintf("github.com/grovetools/grove/%s", opts.Name)
 	} else {
 		// In standalone mode, it's its own module
 		modulePath = fmt.Sprintf("github.com/mattsolo1/%s", opts.Name)

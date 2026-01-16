@@ -9,13 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-core/git"
-	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-meta/pkg/depsgraph"
-	"github.com/mattsolo1/grove-meta/pkg/discovery"
-	"github.com/mattsolo1/grove-meta/pkg/release"
+	"github.com/grovetools/core/git"
+	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/grove/pkg/depsgraph"
+	"github.com/grovetools/grove/pkg/discovery"
+	"github.com/grovetools/grove/pkg/release"
 )
 
 // runReleasePlan generates a release plan without executing it

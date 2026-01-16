@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-core/config"
-	"github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/util/delegation"
+	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/logging"
+	"github.com/grovetools/core/util/delegation"
 )
 
 // Logger for changelog LLM operations

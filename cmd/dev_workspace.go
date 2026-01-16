@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/cli"
-	meta_workspace "github.com/mattsolo1/grove-meta/pkg/workspace"
+	"github.com/grovetools/core/cli"
+	meta_workspace "github.com/grovetools/grove/pkg/workspace"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )

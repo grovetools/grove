@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-meta/pkg/devlinks"
-	"github.com/mattsolo1/grove-meta/pkg/sdk"
+	"github.com/grovetools/core/logging"
+	"github.com/grovetools/grove/pkg/devlinks"
+	"github.com/grovetools/grove/pkg/sdk"
 	"github.com/sirupsen/logrus"
 )
 

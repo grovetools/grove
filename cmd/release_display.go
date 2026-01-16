@@ -5,9 +5,9 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	tablecomponent "github.com/mattsolo1/grove-core/tui/components/table"
-	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/tui/theme"
+	tablecomponent "github.com/grovetools/core/tui/components/table"
+	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/tui/theme"
 )
 
 // Define reusable styles for the release command

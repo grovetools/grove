@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-meta/pkg/release"
+	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/grove/pkg/release"
 	"github.com/spf13/cobra"
 )
 

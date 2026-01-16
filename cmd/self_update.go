@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mattsolo1/grove-core/cli"
-	"github.com/mattsolo1/grove-core/logging"
+	"github.com/grovetools/core/cli"
+	"github.com/grovetools/core/logging"
 	"github.com/spf13/cobra"
 )
 

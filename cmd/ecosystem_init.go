@@ -8,8 +8,8 @@ import (
 	"sort"
 
 	"github.com/mattn/go-isatty"
-	"github.com/mattsolo1/grove-core/config"
-	"github.com/mattsolo1/grove-core/tui/theme"
+	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/tui/theme"
 	"github.com/spf13/cobra"
 )
 

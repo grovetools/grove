@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/config"
-	"github.com/mattsolo1/grove-meta/pkg/project"
+	"github.com/grovetools/core/config"
+	"github.com/grovetools/grove/pkg/project"
 	"github.com/sirupsen/logrus"
 )
 
