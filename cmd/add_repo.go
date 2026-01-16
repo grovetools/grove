@@ -60,7 +60,7 @@ Examples:
   grove add-repo myapp --template react-ts
 
   # Use GitHub repository as template:
-  grove add-repo mytool --template mattsolo1/grove-project-tmpl-rust
+  grove add-repo mytool --template grovetools/grove-project-tmpl-rust
   grove add-repo mylib --template https://github.com/user/template-repo.git`,
 		Args: cobra.ExactArgs(1),
 		RunE: runAddRepo,
@@ -78,9 +78,9 @@ Examples:
 }
 
 var templateAliases = map[string]string{
-	"go":       "mattsolo1/grove-project-tmpl-go",       // Go template
-	"maturin":  "mattsolo1/grove-project-tmpl-maturin",  // Python/Rust template
-	"react-ts": "mattsolo1/grove-project-tmpl-react-ts", // React TypeScript template
+	"go":       "grovetools/grove-project-tmpl-go",       // Go template
+	"maturin":  "grovetools/grove-project-tmpl-maturin",  // Python/Rust template
+	"react-ts": "grovetools/grove-project-tmpl-react-ts", // React TypeScript template
 }
 
 func resolveTemplate(spec string, ecosystem bool) string {
@@ -92,7 +92,7 @@ func resolveTemplate(spec string, ecosystem bool) string {
 			rootDir, err := workspace.FindEcosystemRoot("")
 			if err == nil {
 				// We're in an ecosystem - check for local template
-				localTemplateName := strings.TrimPrefix(alias, "mattsolo1/")
+				localTemplateName := strings.TrimPrefix(alias, "grovetools/")
 				localPath := filepath.Join(rootDir, localTemplateName)
 				if _, err := os.Stat(localPath); err == nil {
 					// Local template exists, use it

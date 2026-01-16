@@ -96,7 +96,7 @@ func checkModuleAvailable(ctx context.Context, modulePath, version string) error
 
 	// Set up environment for private modules
 	cmd.Env = append(os.Environ(),
-		"GOPRIVATE=github.com/mattsolo1/*",
+		"GOPRIVATE=github.com/grovetools/*",
 		"GOPROXY=direct",
 	)
 

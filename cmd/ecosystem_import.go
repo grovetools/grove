@@ -30,10 +30,10 @@ Examples:
   grove ecosystem import ../my-existing-tool
 
   # Import from GitHub
-  grove ecosystem import mattsolo1/grove-context
+  grove ecosystem import grovetools/grove-context
 
   # Import with custom directory name
-  grove ecosystem import mattsolo1/grove-context --path vendor/context`,
+  grove ecosystem import grovetools/grove-context --path vendor/context`,
 		Args: cobra.ExactArgs(1),
 		RunE: runEcosystemImport,
 	}

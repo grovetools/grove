@@ -1586,7 +1586,7 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 	// Check each dependency
 	for _, req := range modFile.Require {
 		// Only update Grove ecosystem dependencies
-		if !strings.HasPrefix(req.Mod.Path, "github.com/mattsolo1/") {
+		if !strings.HasPrefix(req.Mod.Path, "github.com/grovetools/") {
 			continue
 		}
 
@@ -1649,7 +1649,7 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 		cmd := exec.CommandContext(ctx, "go", "get", fmt.Sprintf("%s@%s", req.Mod.Path, targetVersion))
 		cmd.Dir = modulePath
 		cmd.Env = append(os.Environ(),
-			"GOPRIVATE=github.com/mattsolo1/*",
+			"GOPRIVATE=github.com/grovetools/*",
 			"GOPROXY=direct",
 		)
 
@@ -1671,7 +1671,7 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 		cmd := exec.CommandContext(ctx, "go", "mod", "tidy")
 		cmd.Dir = modulePath
 		cmd.Env = append(os.Environ(),
-			"GOPRIVATE=github.com/mattsolo1/*",
+			"GOPRIVATE=github.com/grovetools/*",
 			"GOPROXY=direct",
 		)
 
@@ -2144,11 +2144,11 @@ func checkForOutdatedDependencies(ctx context.Context, rootDir string, workspace
 			}
 
 			if inRequire || strings.HasPrefix(line, "require ") {
-				if strings.Contains(line, "github.com/mattsolo1/") {
+				if strings.Contains(line, "github.com/grovetools/") {
 					parts := strings.Fields(line)
 					if len(parts) >= 2 {
 						dep := parts[0]
-						if strings.HasPrefix(dep, "github.com/mattsolo1/") {
+						if strings.HasPrefix(dep, "github.com/grovetools/") {
 							currentVersion := parts[1]
 
 							// Get latest version

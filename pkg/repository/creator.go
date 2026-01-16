@@ -160,12 +160,12 @@ func (c *Creator) Create(opts CreateOptions) error {
 			// .github directory exists, wait for CI
 			if err := c.waitForCI(opts); err != nil {
 				c.logger.Warnf("Could not monitor CI build: %v", err)
-				c.logger.Infof("Repository created successfully. Check CI status at: https://github.com/mattsolo1/%s/actions", opts.Name)
+				c.logger.Infof("Repository created successfully. Check CI status at: https://github.com/grovetools/%s/actions", opts.Name)
 			}
 		} else {
 			// No .github directory, skip CI monitoring
 			c.logger.Info("No .github directory found, skipping CI monitoring")
-			c.logger.Infof("Repository created successfully at: https://github.com/mattsolo1/%s", opts.Name)
+			c.logger.Infof("Repository created successfully at: https://github.com/grovetools/%s", opts.Name)
 		}
 	}
 
@@ -307,7 +307,7 @@ func (c *Creator) InitializeGitHub(opts GitHubInitOptions) error {
 	}
 
 	// Create GitHub repository
-	c.logger.Infof("Creating GitHub repository mattsolo1/%s...", repoName)
+	c.logger.Infof("Creating GitHub repository grovetools/%s...", repoName)
 	if err := c.createGitHubRepoFromCwd(repoName, opts.Visibility == "public"); err != nil {
 		return err
 	}
@@ -332,13 +332,13 @@ func (c *Creator) InitializeGitHub(opts GitHubInitOptions) error {
 		c.logger.Info("Waiting for CI to complete...")
 		if err := c.waitForCIFromCwd(repoName); err != nil {
 			c.logger.Warnf("Could not monitor CI build: %v", err)
-			c.logger.Infof("Check CI status at: https://github.com/mattsolo1/%s/actions", repoName)
+			c.logger.Infof("Check CI status at: https://github.com/grovetools/%s/actions", repoName)
 		}
 	}
 
 	// Show success summary
 	fmt.Println("\n GitHub integration complete!")
-	fmt.Printf("Repository URL: https://github.com/mattsolo1/%s\n", repoName)
+	fmt.Printf("Repository URL: https://github.com/grovetools/%s\n", repoName)
 
 	return nil
 }
@@ -390,9 +390,9 @@ func (c *Creator) validateGitHubPrereqs(repoName string, isPublic bool) error {
 	}
 
 	// Check if repo already exists on GitHub
-	checkCmd := exec.Command("gh", "repo", "view", fmt.Sprintf("mattsolo1/%s", repoName))
+	checkCmd := exec.Command("gh", "repo", "view", fmt.Sprintf("grovetools/%s", repoName))
 	if err := checkCmd.Run(); err == nil {
-		return fmt.Errorf("repository mattsolo1/%s already exists on GitHub", repoName)
+		return fmt.Errorf("repository grovetools/%s already exists on GitHub", repoName)
 	}
 
 	// Check for GROVE_PAT (only for private repos)
@@ -497,9 +497,9 @@ func (c *Creator) dryRunGitHubInit(repoName string, opts GitHubInitOptions) erro
 
 	c.logger.Info("\nCommands that would be executed:")
 	if opts.Visibility == "public" {
-		c.logger.Infof("  gh repo create mattsolo1/%s --public --source=. --remote=origin", repoName)
+		c.logger.Infof("  gh repo create grovetools/%s --public --source=. --remote=origin", repoName)
 	} else {
-		c.logger.Infof("  gh repo create mattsolo1/%s --private --source=. --remote=origin", repoName)
+		c.logger.Infof("  gh repo create grovetools/%s --private --source=. --remote=origin", repoName)
 		c.logger.Info("  gh secret set GROVE_PAT --body <GROVE_PAT>")
 	}
 	c.logger.Info("  git push -u origin main")
@@ -511,7 +511,7 @@ func (c *Creator) dryRunGitHubInit(repoName string, opts GitHubInitOptions) erro
 
 // createGitHubRepoFromCwd creates GitHub repo when running from the repo directory
 func (c *Creator) createGitHubRepoFromCwd(repoName string, isPublic bool) error {
-	createArgs := []string{"repo", "create", fmt.Sprintf("mattsolo1/%s", repoName)}
+	createArgs := []string{"repo", "create", fmt.Sprintf("grovetools/%s", repoName)}
 	if isPublic {
 		createArgs = append(createArgs, "--public")
 	} else {
@@ -526,7 +526,7 @@ func (c *Creator) createGitHubRepoFromCwd(repoName string, isPublic bool) error 
 
 	// Ensure the remote URL is clean
 	setUrlCmd := exec.Command("git", "remote", "set-url", "origin",
-		fmt.Sprintf("https://github.com/mattsolo1/%s.git", repoName))
+		fmt.Sprintf("https://github.com/grovetools/%s.git", repoName))
 	if err := setUrlCmd.Run(); err != nil {
 		c.logger.Warnf("Failed to set clean remote URL: %v", err)
 	}
@@ -578,7 +578,7 @@ func (c *Creator) waitForCIFromCwd(repoName string) error {
 
 	// Get the workflow run ID
 	cmd := exec.Command("gh", "run", "list",
-		"--repo", fmt.Sprintf("mattsolo1/%s", repoName),
+		"--repo", fmt.Sprintf("grovetools/%s", repoName),
 		"--workflow", "release.yml",
 		"--limit", "1",
 		"--json", "databaseId",
@@ -597,7 +597,7 @@ func (c *Creator) waitForCIFromCwd(repoName string) error {
 
 	// Watch the workflow
 	watchCmd := exec.Command("gh", "run", "watch", runID,
-		"--repo", fmt.Sprintf("mattsolo1/%s", repoName))
+		"--repo", fmt.Sprintf("grovetools/%s", repoName))
 	watchCmd.Stdout = os.Stdout
 	watchCmd.Stderr = os.Stderr
 
@@ -651,9 +651,9 @@ func (c *Creator) validate(opts CreateOptions) error {
 		}
 
 		// Check if repo already exists on GitHub
-		checkCmd := exec.Command("gh", "repo", "view", fmt.Sprintf("mattsolo1/%s", opts.Name))
+		checkCmd := exec.Command("gh", "repo", "view", fmt.Sprintf("grovetools/%s", opts.Name))
 		if err := checkCmd.Run(); err == nil {
-			return fmt.Errorf("repository mattsolo1/%s already exists on GitHub", opts.Name)
+			return fmt.Errorf("repository grovetools/%s already exists on GitHub", opts.Name)
 		}
 
 		// Check for GROVE_PAT early, but only for private repos
@@ -680,7 +680,7 @@ func (c *Creator) generateSkeleton(opts CreateOptions, targetPath string) error 
 		modulePath = fmt.Sprintf("github.com/grovetools/grove/%s", opts.Name)
 	} else {
 		// In standalone mode, it's its own module
-		modulePath = fmt.Sprintf("github.com/mattsolo1/%s", opts.Name)
+		modulePath = fmt.Sprintf("github.com/grovetools/%s", opts.Name)
 	}
 
 	// Sanitize alias for use as environment variable
@@ -875,7 +875,7 @@ func (c *Creator) verifyLocal(opts CreateOptions, targetPath string) error {
 	case "go":
 		// Prepare environment for Go commands
 		goEnv := append(os.Environ(),
-			"GOPRIVATE=github.com/mattsolo1/*",
+			"GOPRIVATE=github.com/grovetools/*",
 			"GOPROXY=direct",
 		)
 		if !opts.Ecosystem {
@@ -1000,7 +1000,7 @@ func (c *Creator) createGitHubRepo(opts CreateOptions, targetPath string) error 
 	c.logger.Info("Creating GitHub repository...")
 
 	// Create the repository without pushing
-	createArgs := []string{"repo", "create", fmt.Sprintf("mattsolo1/%s", opts.Name)}
+	createArgs := []string{"repo", "create", fmt.Sprintf("grovetools/%s", opts.Name)}
 	if opts.Public {
 		createArgs = append(createArgs, "--public")
 	} else {
@@ -1017,7 +1017,7 @@ func (c *Creator) createGitHubRepo(opts CreateOptions, targetPath string) error 
 	// Ensure the remote URL is clean (no embedded tokens)
 	c.logger.Info("Ensuring clean remote URL...")
 	setUrlCmd := exec.Command("git", "remote", "set-url", "origin",
-		fmt.Sprintf("https://github.com/mattsolo1/%s.git", opts.Name))
+		fmt.Sprintf("https://github.com/grovetools/%s.git", opts.Name))
 	setUrlCmd.Dir = targetPath
 	if err := setUrlCmd.Run(); err != nil {
 		c.logger.Warnf("Failed to set clean remote URL: %v", err)
@@ -1092,7 +1092,7 @@ func (c *Creator) waitForCI(opts CreateOptions) error {
 
 	// Get the workflow run ID
 	cmd := exec.Command("gh", "run", "list",
-		"--repo", fmt.Sprintf("mattsolo1/%s", opts.Name),
+		"--repo", fmt.Sprintf("grovetools/%s", opts.Name),
 		"--workflow", "release.yml",
 		"--limit", "1",
 		"--json", "databaseId",
@@ -1111,7 +1111,7 @@ func (c *Creator) waitForCI(opts CreateOptions) error {
 
 	// Watch the workflow
 	watchCmd := exec.Command("gh", "run", "watch", runID,
-		"--repo", fmt.Sprintf("mattsolo1/%s", opts.Name))
+		"--repo", fmt.Sprintf("grovetools/%s", opts.Name))
 	watchCmd.Stdout = os.Stdout
 	watchCmd.Stderr = os.Stderr
 
@@ -1135,7 +1135,7 @@ func (c *Creator) addToEcosystem(opts CreateOptions) error {
 		// Update the submodule URL in case it changed (only if GitHub is enabled)
 		if !opts.SkipGitHub {
 			updateUrlCmd := exec.Command("git", "submodule", "set-url", opts.Name,
-				fmt.Sprintf("git@github.com:mattsolo1/%s.git", opts.Name))
+				fmt.Sprintf("git@github.com:grovetools/%s.git", opts.Name))
 			if err := updateUrlCmd.Run(); err != nil {
 				c.logger.Warnf("Failed to update submodule URL: %v", err)
 			}
@@ -1147,7 +1147,7 @@ func (c *Creator) addToEcosystem(opts CreateOptions) error {
 		if opts.SkipGitHub {
 			submoduleUrl = "./" + opts.Name
 		} else {
-			submoduleUrl = fmt.Sprintf("git@github.com:mattsolo1/%s.git", opts.Name)
+			submoduleUrl = fmt.Sprintf("git@github.com:grovetools/%s.git", opts.Name)
 		}
 		
 		submoduleCmd := exec.Command("git", "submodule", "add", submoduleUrl, opts.Name)
@@ -1200,7 +1200,7 @@ func (c *Creator) showSummary(opts CreateOptions, targetPath string) error {
 	fmt.Printf("- Local repository created at: %s\n", targetPath)
 
 	if !opts.SkipGitHub {
-		fmt.Printf("- GitHub repository created:  https://github.com/mattsolo1/%s\n", opts.Name)
+		fmt.Printf("- GitHub repository created:  https://github.com/grovetools/%s\n", opts.Name)
 		fmt.Println("- Initial release v0.0.1 pushed and CI is running.")
 	}
 
@@ -1235,8 +1235,8 @@ func (c *Creator) rollback(state *creationState, opts CreateOptions, targetPath 
 
 	if state.githubRepoCreated && !opts.SkipGitHub {
 		c.logger.Warnf("GitHub repository was created but setup failed.")
-		c.logger.Warnf("Please delete it manually: https://github.com/mattsolo1/%s", opts.Name)
-		c.logger.Warnf("Run: gh repo delete mattsolo1/%s", opts.Name)
+		c.logger.Warnf("Please delete it manually: https://github.com/grovetools/%s", opts.Name)
+		c.logger.Warnf("Run: gh repo delete grovetools/%s", opts.Name)
 	}
 
 	if state.localRepoCreated {
@@ -1291,8 +1291,8 @@ func (c *Creator) dryRun(opts CreateOptions) error {
 	c.logger.Info("  git commit -m 'feat: initial repository setup'")
 
 	if !opts.SkipGitHub {
-		c.logger.Infof("  gh repo create mattsolo1/%s --private", opts.Name)
-		c.logger.Infof("  git remote add origin git@github.com:mattsolo1/%s.git", opts.Name)
+		c.logger.Infof("  gh repo create grovetools/%s --private", opts.Name)
+		c.logger.Infof("  git remote add origin git@github.com:grovetools/%s.git", opts.Name)
 		c.logger.Info("  git push -u origin main")
 		c.logger.Info("  gh secret set GROVE_PAT --body <GROVE_PAT>")
 		c.logger.Info("  git tag v0.0.1")
@@ -1302,7 +1302,7 @@ func (c *Creator) dryRun(opts CreateOptions) error {
 
 	if opts.Ecosystem {
 		c.logger.Info("\nEcosystem integration:")
-		c.logger.Infof("  git submodule add git@github.com:mattsolo1/%s.git", opts.Name)
+		c.logger.Infof("  git submodule add git@github.com:grovetools/%s.git", opts.Name)
 		c.logger.Infof("  Update Makefile: Add %s to PACKAGES", opts.Name)
 		c.logger.Infof("  Update Makefile: Add %s to BINARIES", opts.Alias)
 		c.logger.Infof("  Update go.work: Add use (./%s)", opts.Name)
@@ -1315,7 +1315,7 @@ func (c *Creator) dryRun(opts CreateOptions) error {
 
 func (c *Creator) getLatestVersion(repo string) string {
 	cmd := exec.Command("gh", "api",
-		fmt.Sprintf("repos/mattsolo1/%s/releases/latest", repo),
+		fmt.Sprintf("repos/grovetools/%s/releases/latest", repo),
 		"--jq", ".tag_name")
 	output, err := cmd.Output()
 	if err != nil {

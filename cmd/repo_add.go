@@ -22,9 +22,9 @@ var (
 
 // repoAddTemplateAliases maps template shortcuts to GitHub repository URLs
 var repoAddTemplateAliases = map[string]string{
-	"go":       "mattsolo1/grove-project-tmpl-go",
-	"maturin":  "mattsolo1/grove-project-tmpl-maturin",
-	"react-ts": "mattsolo1/grove-project-tmpl-react-ts",
+	"go":       "grovetools/grove-project-tmpl-go",
+	"maturin":  "grovetools/grove-project-tmpl-maturin",
+	"react-ts": "grovetools/grove-project-tmpl-react-ts",
 }
 
 func newRepoAddCmd() *cobra.Command {
@@ -79,7 +79,7 @@ func resolveRepoAddTemplate(spec string, ecosystem bool) string {
 		if ecosystem {
 			rootDir, err := workspace.FindEcosystemRoot("")
 			if err == nil {
-				localTemplateName := strings.TrimPrefix(alias, "mattsolo1/")
+				localTemplateName := strings.TrimPrefix(alias, "grovetools/")
 				localPath := filepath.Join(rootDir, localTemplateName)
 				if _, err := os.Stat(localPath); err == nil {
 					return localPath

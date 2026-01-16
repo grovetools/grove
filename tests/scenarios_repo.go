@@ -26,7 +26,7 @@ func RepoGitHubInitDryRunScenario() *harness.Scenario {
 
 					// Create minimal grove.yml to make it a Grove repo
 					fs.WriteString(filepath.Join(repoDir, "grove.yml"), "name: grove-test-repo\nbinary:\n  alias: gtr\n")
-					fs.WriteString(filepath.Join(repoDir, "go.mod"), "module github.com/mattsolo1/grove-test-repo\n\ngo 1.24.4\n")
+					fs.WriteString(filepath.Join(repoDir, "go.mod"), "module github.com/grovetools/grove-test-repo\n\ngo 1.24.4\n")
 
 					// Initialize git
 					cmd := ctx.Command("git", "init")

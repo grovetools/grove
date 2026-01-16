@@ -19,7 +19,7 @@ type TemplateData struct {
 	GoVersion        string
 	CoreVersion      string
 	TendVersion      string
-	ModulePath       string // Full module path (e.g., github.com/mattsolo1/repo-name)
+	ModulePath       string // Full module path (e.g., github.com/grovetools/repo-name)
 	IsPublic         bool
 }
 

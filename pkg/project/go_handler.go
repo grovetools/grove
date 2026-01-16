@@ -56,7 +56,7 @@ func (h *GoHandler) ParseDependencies(workspacePath string) ([]Dependency, error
 
 		// Check if this is a workspace dependency used in production code
 		// Test-only dependencies should not affect release ordering
-		if strings.HasPrefix(req.Mod.Path, "github.com/mattsolo1/") {
+		if strings.HasPrefix(req.Mod.Path, "github.com/grovetools/") {
 			// Only mark as workspace dep if it's imported in production code
 			if productionImports[req.Mod.Path] {
 				dep.Workspace = true
@@ -74,7 +74,7 @@ func (h *GoHandler) ParseDependencies(workspacePath string) ([]Dependency, error
 // dependencies are production vs test-only for release ordering.
 func (h *GoHandler) getProductionImports(workspacePath string) map[string]bool {
 	imports := make(map[string]bool)
-	importRegex := regexp.MustCompile(`"(github\.com/mattsolo1/[^"]+)"`)
+	importRegex := regexp.MustCompile(`"(github\.com/grovetools/[^"]+)"`)
 
 	filepath.Walk(workspacePath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -127,11 +127,11 @@ func (h *GoHandler) getProductionImports(workspacePath string) map[string]bool {
 			}
 
 			// Check for grove imports
-			if strings.Contains(line, "github.com/mattsolo1/") {
+			if strings.Contains(line, "github.com/grovetools/") {
 				matches := importRegex.FindAllStringSubmatch(line, -1)
 				for _, match := range matches {
 					if len(match) > 1 {
-						// Extract module path (first two parts after github.com/mattsolo1/)
+						// Extract module path (first two parts after github.com/grovetools/)
 						parts := strings.Split(match[1], "/")
 						if len(parts) >= 3 {
 							modulePath := strings.Join(parts[:3], "/")
@@ -161,7 +161,7 @@ func (h *GoHandler) UpdateDependency(workspacePath string, dep Dependency) error
 	cmd := exec.CommandContext(ctx, "go", "get", fmt.Sprintf("%s@%s", dep.Name, dep.Version))
 	cmd.Dir = workspacePath
 	cmd.Env = append(os.Environ(),
-		"GOPRIVATE=github.com/mattsolo1/*",
+		"GOPRIVATE=github.com/grovetools/*",
 		"GOPROXY=direct",
 	)
 
@@ -174,7 +174,7 @@ func (h *GoHandler) UpdateDependency(workspacePath string, dep Dependency) error
 	tidyCmd := exec.CommandContext(ctx, "go", "mod", "tidy")
 	tidyCmd.Dir = workspacePath
 	tidyCmd.Env = append(os.Environ(),
-		"GOPRIVATE=github.com/mattsolo1/*",
+		"GOPRIVATE=github.com/grovetools/*",
 		"GOPROXY=direct",
 	)
 

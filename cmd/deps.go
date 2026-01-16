@@ -71,7 +71,7 @@ func newDepsSyncCmd() *cobra.Command {
 		Short: "Update all Grove dependencies to their latest versions",
 		Long: `Synchronize all Grove dependencies across all submodules.
 
-This command automatically discovers all Grove dependencies (github.com/mattsolo1/*)
+This command automatically discovers all Grove dependencies (github.com/grovetools/*)
 in each submodule and updates them to their latest versions. This is useful for
 keeping the entire ecosystem in sync after multiple tools have been released.
 
@@ -228,7 +228,7 @@ func getLatestModuleVersion(modulePath string) (string, error) {
 
 	// Set up environment for private modules
 	cmd.Env = append(os.Environ(),
-		"GOPRIVATE=github.com/mattsolo1/*",
+		"GOPRIVATE=github.com/grovetools/*",
 		"GOPROXY=direct",
 	)
 
@@ -258,7 +258,7 @@ func getLatestPrereleaseModuleVersion(modulePath string) (string, error) {
 
 	// Set up environment for private modules
 	cmd.Env = append(os.Environ(),
-		"GOPRIVATE=github.com/mattsolo1/*",
+		"GOPRIVATE=github.com/grovetools/*",
 		"GOPROXY=direct",
 	)
 
@@ -299,7 +299,7 @@ func runGoGet(workspacePath, modulePath, version string) error {
 
 	// Set up environment for private modules
 	cmd.Env = append(os.Environ(),
-		"GOPRIVATE=github.com/mattsolo1/*",
+		"GOPRIVATE=github.com/grovetools/*",
 		"GOPROXY=direct",
 	)
 
@@ -316,7 +316,7 @@ func runGoModTidy(workspacePath string) error {
 
 	// Set up environment for private modules
 	cmd.Env = append(os.Environ(),
-		"GOPRIVATE=github.com/mattsolo1/*",
+		"GOPRIVATE=github.com/grovetools/*",
 		"GOPROXY=direct",
 	)
 
@@ -417,9 +417,9 @@ func runDepsSync(commit, push bool) error {
 
 		// Check if this is a Grove module itself
 		var isGroveModule string
-		if match := strings.Contains(string(goModContent), "module github.com/mattsolo1/"); match {
+		if match := strings.Contains(string(goModContent), "module github.com/grovetools/"); match {
 			for _, line := range strings.Split(string(goModContent), "\n") {
-				if strings.HasPrefix(strings.TrimSpace(line), "module github.com/mattsolo1/") {
+				if strings.HasPrefix(strings.TrimSpace(line), "module github.com/grovetools/") {
 					isGroveModule = strings.Fields(line)[1]
 					break
 				}
@@ -444,11 +444,11 @@ func runDepsSync(commit, push bool) error {
 
 			if inRequire || strings.HasPrefix(line, "require ") {
 				// Extract Grove dependencies
-				if strings.Contains(line, "github.com/mattsolo1/") {
+				if strings.Contains(line, "github.com/grovetools/") {
 					parts := strings.Fields(line)
 					if len(parts) >= 1 {
 						dep := parts[0]
-						if strings.HasPrefix(dep, "github.com/mattsolo1/") && dep != isGroveModule {
+						if strings.HasPrefix(dep, "github.com/grovetools/") && dep != isGroveModule {
 							wsDeps = append(wsDeps, dep)
 							uniqueDeps[dep] = true
 						}

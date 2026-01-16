@@ -25,7 +25,7 @@ const (
 	ActiveVersionFile = "active_version"
 
 	// GitHub API constants
-	GitHubOwner = "mattsolo1"
+	GitHubOwner = "grovetools"
 	GitHubAPI   = "https://api.github.com"
 )
 
@@ -675,7 +675,7 @@ func (m *Manager) InstallAllToolsFromSource() error {
 		buildCmd := exec.Command("make", "build")
 		buildCmd.Dir = buildDir
 		buildCmd.Env = append(os.Environ(),
-			"GOPRIVATE=github.com/mattsolo1/*",
+			"GOPRIVATE=github.com/grovetools/*",
 			fmt.Sprintf("GOWORK=%s", goWorkPath))
 
 		if output, err := buildCmd.CombinedOutput(); err != nil {
@@ -828,7 +828,7 @@ func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
 	buildCmd := exec.Command("make", "build")
 	buildCmd.Dir = buildDir
 	buildCmd.Env = append(os.Environ(),
-		"GOPRIVATE=github.com/mattsolo1/*",
+		"GOPRIVATE=github.com/grovetools/*",
 		fmt.Sprintf("GOWORK=%s", goWorkPath))
 	if output, err := buildCmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("build failed: %w\nOutput: %s", err, string(output))
