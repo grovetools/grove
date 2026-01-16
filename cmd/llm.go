@@ -103,13 +103,13 @@ func runLlmRequest(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unrecognized model provider for '%s'. Model must start with 'gpt-', 'o1-', 'o3-', or 'gemini-'", model)
 	}
 
-	// Log delegation decision
+	// Log delegation decision (debug-level to avoid polluting stdout when piping)
 	log := cli.GetLogger(cmd)
 	log.WithFields(logrus.Fields{
 		"request_id":   requestID,
 		"model":        model,
 		"delegated_to": targetBinary,
-	}).Info("Delegating LLM request to provider")
+	}).Debug("Delegating LLM request to provider")
 
 	// 3. Construct arguments for delegation
 	var delegateArgs []string
