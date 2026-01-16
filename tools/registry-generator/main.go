@@ -18,6 +18,7 @@ import (
 type GroveConfig struct {
 	Name        string   `yaml:"name"`
 	Description string   `yaml:"description"`
+	Managed     bool     `yaml:"managed"`
 	BuildAfter  []string `yaml:"build_after"`
 	Binary      struct {
 		Name string `yaml:"name"`
@@ -60,9 +61,6 @@ func main() {
 			continue
 		}
 		name := entry.Name()
-		if !strings.HasPrefix(name, "grove-") {
-			continue
-		}
 
 		projectPath := filepath.Join(ecosystemRoot, name)
 		groveYmlPath := filepath.Join(projectPath, "grove.yml")
@@ -82,6 +80,11 @@ func main() {
 		var config GroveConfig
 		if err := yaml.Unmarshal(data, &config); err != nil {
 			log.Printf("Warning: failed to parse %s: %v", groveYmlPath, err)
+			continue
+		}
+
+		// Skip if not a managed ecosystem tool
+		if !config.Managed {
 			continue
 		}
 

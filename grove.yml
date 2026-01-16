@@ -1,5 +1,6 @@
-name: grove-meta
+name: grove
 description: Grove package manager and command delegator
+managed: true
 binary:
   name: grove
   path: ./bin/grove
