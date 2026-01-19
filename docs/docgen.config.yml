@@ -5,7 +5,7 @@ category: Developer Tools
 settings:
     model: gemini-2.5-pro
     regeneration_mode: reference
-    rules_file: docs.rules
+    rules_file: .cx/docs.rules
     structured_output_file: pkg/docs/docs.json
     system_prompt: default
     output_dir: docs
