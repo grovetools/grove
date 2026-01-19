@@ -10,12 +10,6 @@ settings:
     system_prompt: default
     output_dir: docs
 sections:
-    - name: introduction
-      title: Introduction
-      order: 0
-      prompt: 00-introduction.md
-      output: 00-introduction.md
-      agg_strip_lines: 2
     - name: overview
       title: Overview
       order: 1
