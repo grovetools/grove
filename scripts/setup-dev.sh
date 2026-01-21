@@ -17,15 +17,15 @@ error() { echo -e "${RED}error:${NC} $1" >&2; exit 1; }
 
 # Find directories
 if [[ -f "Makefile" && -f "go.mod" ]]; then
-    # In grove-meta
-    GROVE_META="$(pwd)"
-    ECOSYSTEM="$(dirname "$GROVE_META")"
-elif [[ -d "grove-meta" && -f "grove-meta/go.mod" ]]; then
+    # In grove directory
+    GROVE_DIR="$(pwd)"
+    ECOSYSTEM="$(dirname "$GROVE_DIR")"
+elif [[ -d "grove" && -f "grove/go.mod" ]]; then
     # In ecosystem root
     ECOSYSTEM="$(pwd)"
-    GROVE_META="$ECOSYSTEM/grove-meta"
+    GROVE_DIR="$ECOSYSTEM/grove"
 else
-    error "run from grove-ecosystem or grove-meta directory"
+    error "run from grovetools or grove directory"
 fi
 
 echo -e "${DIM}grove development setup${NC}"
@@ -34,10 +34,10 @@ echo ""
 # 1. Build grove CLI
 START_TIME=$SECONDS
 echo -ne "Building grove CLI... "
-if ! (cd "$GROVE_META" && make build >/dev/null 2>&1); then
+if ! (cd "$GROVE_DIR" && make build >/dev/null 2>&1); then
     echo "failed"
     echo -e "${YELLOW}Retrying with verbose output:${NC}"
-    (cd "$GROVE_META" && make build) || error "make build failed"
+    (cd "$GROVE_DIR" && make build) || error "make build failed"
 fi
 ELAPSED=$((SECONDS - START_TIME))
 echo "done (${ELAPSED}s)"
@@ -48,24 +48,24 @@ mkdir -p "$HOME/.grove/bin"
 echo "done"
 
 echo -ne "Symlinking grove to ~/.grove/bin... "
-ln -sf "$GROVE_META/bin/grove" "$HOME/.grove/bin/grove"
+ln -sf "$GROVE_DIR/bin/grove" "$HOME/.grove/bin/grove"
 echo "done"
 
 echo -ne "Creating ~/.config/grove/grove.yml... "
-"$GROVE_META/bin/grove" bootstrap >/dev/null 2>&1 || error "bootstrap failed"
+"$GROVE_DIR/bin/grove" bootstrap >/dev/null 2>&1 || error "bootstrap failed"
 echo "done"
 
 # 3. Build ecosystem (from ecosystem root so all projects are built)
 START_TIME=$SECONDS
 echo "Building ecosystem..."
 cd "$ECOSYSTEM"
-"$GROVE_META/bin/grove" build || error "ecosystem build failed"
+"$GROVE_DIR/bin/grove" build --verbose || error "ecosystem build failed"
 ELAPSED=$((SECONDS - START_TIME))
 echo "Ecosystem build complete (${ELAPSED}s)"
 
 # 4. Link dev binaries (from ecosystem root so all binaries are linked)
 echo -ne "Linking dev binaries to ~/.grove/bin... "
-"$GROVE_META/bin/grove" dev cwd >/dev/null 2>&1 || error "dev cwd failed"
+"$GROVE_DIR/bin/grove" dev cwd >/dev/null 2>&1 || error "dev cwd failed"
 echo "done"
 
 # Summary
