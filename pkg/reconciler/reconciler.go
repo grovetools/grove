@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/grove/pkg/devlinks"
 	"github.com/grovetools/grove/pkg/sdk"
 	"github.com/sirupsen/logrus"
@@ -38,7 +39,7 @@ func NewWithToolVersions(toolVersions *sdk.ToolVersions) (*Reconciler, error) {
 		}
 	}
 
-	groveHome := filepath.Join(os.Getenv("HOME"), ".grove")
+	groveHome := paths.DataDir()
 
 	return &Reconciler{
 		devConfig:    devConfig,
@@ -72,7 +73,7 @@ func (r *Reconciler) Reconcile(toolName string) error {
 		effectiveAlias = toolName
 	}
 
-	binDir := filepath.Join(r.groveHome, "bin")
+	binDir := paths.BinDir()
 	symlinkPath := filepath.Join(binDir, effectiveAlias)
 
 	// Check if a dev override is active - dev links are stored by tool alias

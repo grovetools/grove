@@ -10,6 +10,7 @@ import (
 
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/grove/cmd/internal"
@@ -167,11 +168,6 @@ func delegateToTool(toolName string, args []string) error {
 	logger := logging.NewLogger("grove-meta")
 	logger.WithField("tool", toolName).Debug("Delegating to tool")
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
-	}
-
 	var toolPath string
 	var cmdEnv []string // Environment for the command
 	delegationMode := delegation.GetMode()
@@ -253,7 +249,7 @@ func delegateToTool(toolName string, args []string) error {
 	// This block is executed if the opt-in is not active, or if a local binary
 	// was not found in the workspace.
 	if toolPath == "" {
-		toolPath = filepath.Join(homeDir, ".grove", "bin", toolName)
+		toolPath = filepath.Join(paths.BinDir(), toolName)
 		logger.WithField("path", toolPath).Debug("Using global binary")
 
 		// Check if the tool exists
