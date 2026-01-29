@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/grovetools/core/cli"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/grove/pkg/devlinks"
 	meta_workspace "github.com/grovetools/grove/pkg/workspace"
 	"github.com/spf13/cobra"
@@ -133,13 +134,8 @@ func activateDevLink(binaryName, alias string) error {
 		return fmt.Errorf("alias '%s' not found for binary '%s'", alias, binaryName)
 	}
 
-	// Get grove home directory
-	groveHome, err := devlinks.GetGroveHome()
-	if err != nil {
-		return err
-	}
-
-	binDir := filepath.Join(groveHome, "bin")
+	// Get grove bin directory using paths package
+	binDir := paths.BinDir()
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		return err
 	}

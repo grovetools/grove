@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
@@ -750,12 +751,18 @@ bind-key -n C-e run-shell "PATH=$PATH:$HOME/.grove/bin core tmux editor"
 }
 
 func (m *setupModel) setupNeovimPlugin() {
-	nvimPluginContent := `-- Grove Neovim plugin configuration
+	// Abbreviate path for user-friendly config
+	nvimPluginDir := filepath.Join(paths.DataDir(), "nvim-plugins", "grove-nvim")
+	displayPath := setup.AbbreviatePath(nvimPluginDir)
+	// Ensure forward slashes for Lua path compatibility
+	displayPath = strings.ReplaceAll(displayPath, "\\", "/")
+
+	nvimPluginContent := fmt.Sprintf(`-- Grove Neovim plugin configuration
 -- Add this to your lazy.nvim plugin specs
 
 return {
   {
-    dir = "~/.grove/nvim-plugins/grove-nvim",
+    dir = "%s",
     name = "grove-nvim",
     dependencies = {
       "nvim-lua/plenary.nvim",
@@ -780,7 +787,7 @@ return {
     end,
   },
 }
-`
+`, displayPath)
 	m.service.WriteFile("~/.config/nvim/lua/plugins/grove.lua", []byte(nvimPluginContent), 0644)
 }
 

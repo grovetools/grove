@@ -136,7 +136,7 @@ to the 'main' version or the active release version.`
 		if len(binariesToReconcile) > 0 {
 			fmt.Println("\nReconciling symlinks for affected binaries...")
 			// Load tool versions for reconciler
-			tv, err := sdk.LoadToolVersions(os.Getenv("HOME") + "/.grove")
+			tv, err := sdk.LoadToolVersions()
 			if err != nil {
 				tv = &sdk.ToolVersions{Versions: make(map[string]string)}
 			}

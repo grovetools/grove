@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/grovetools/core/pkg/paths"
 )
 
 // ReleasePlan represents the state of an entire release operation.
@@ -52,24 +54,26 @@ type RepoReleasePlan struct {
 	CommitsSinceLastTag int    `json:"commits_since_last_tag,omitempty"`
 }
 
+func getReleaseStateDir() string {
+	return filepath.Join(paths.StateDir(), "release")
+}
+
 func getPlanPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
+	releaseDir := getReleaseStateDir()
+	if err := os.MkdirAll(releaseDir, 0755); err != nil {
 		return "", err
 	}
-	groveDir := filepath.Join(home, ".grove")
-	if err := os.MkdirAll(groveDir, 0755); err != nil {
-		return "", err
-	}
-	return filepath.Join(groveDir, "release_plan.json"), nil
+	return filepath.Join(releaseDir, "release_plan.json"), nil
 }
 
 func getStagingDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
+	releaseDir := getReleaseStateDir()
+	stagingDir := filepath.Join(releaseDir, "staging")
+	// The staging dir itself may be removed, so ensure it exists when requested.
+	if err := os.MkdirAll(stagingDir, 0755); err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".grove", "release_staging"), nil
+	return stagingDir, nil
 }
 
 // LoadPlan reads and unmarshals the release plan from disk.
@@ -117,9 +121,9 @@ func ClearPlan() error {
 		os.Remove(planPath)
 	}
 
-	stagingDir, err := getStagingDir()
-	if err == nil {
-		os.RemoveAll(stagingDir)
-	}
+	// Staging dir is now a subdirectory of the release state dir
+	stagingDir := filepath.Join(getReleaseStateDir(), "staging")
+	os.RemoveAll(stagingDir)
+
 	return nil
 }

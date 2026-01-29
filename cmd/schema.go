@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/grovetools/core/cli"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/grove/pkg/discovery"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -149,15 +150,12 @@ func runSchemaGenerate(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("\n Unified local schema generated at: %s\n", outputPath)
 
-	// Also write to ~/.grove/grove.schema.json for global config file support
-	homeDir, err := os.UserHomeDir()
-	if err == nil {
-		globalGroveDir := filepath.Join(homeDir, ".grove")
-		if err := os.MkdirAll(globalGroveDir, 0755); err == nil {
-			globalSchemaPath := filepath.Join(globalGroveDir, "grove.schema.json")
-			if err := os.WriteFile(globalSchemaPath, outputBytes, 0644); err == nil {
-				fmt.Printf(" Global schema generated at: %s\n", globalSchemaPath)
-			}
+	// Also write to global data dir for global config file support
+	globalSchemaDir := filepath.Join(paths.DataDir(), "schemas")
+	if err := os.MkdirAll(globalSchemaDir, 0755); err == nil {
+		globalSchemaPath := filepath.Join(globalSchemaDir, "grove.schema.json")
+		if err := os.WriteFile(globalSchemaPath, outputBytes, 0644); err == nil {
+			fmt.Printf(" Global schema generated at: %s\n", globalSchemaPath)
 		}
 	}
 

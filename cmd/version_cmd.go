@@ -11,6 +11,7 @@ import (
 
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/version"
 	"github.com/grovetools/grove/pkg/devlinks"
 	"github.com/grovetools/grove/pkg/reconciler"
@@ -109,7 +110,7 @@ func runVersionList(cmd *cobra.Command, args []string) error {
 	}
 
 	// Load tool versions
-	tv, err := sdk.LoadToolVersions(os.Getenv("HOME") + "/.grove")
+	tv, err := sdk.LoadToolVersions()
 	if err != nil {
 		tv = &sdk.ToolVersions{
 			Versions: make(map[string]string),
@@ -131,7 +132,7 @@ func runVersionList(cmd *cobra.Command, args []string) error {
 	// Build a map of version -> tools
 	versionTools := make(map[string][]string)
 	for _, version := range versions {
-		versionDir := filepath.Join(os.Getenv("HOME"), ".grove", "versions", version, "bin")
+		versionDir := filepath.Join(paths.DataDir(), "versions", version, "bin")
 		entries, err := os.ReadDir(versionDir)
 		if err != nil {
 			continue
@@ -260,7 +261,7 @@ func runVersionUse(cmd *cobra.Command, args []string) error {
 	}
 
 	// Load tool versions and reconcile
-	tv, err := sdk.LoadToolVersions(os.Getenv("HOME") + "/.grove")
+	tv, err := sdk.LoadToolVersions()
 	if err != nil {
 		return fmt.Errorf("failed to load tool versions: %w", err)
 	}

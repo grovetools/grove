@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/grovetools/core/pkg/paths"
 )
 
 // Config is the top-level structure for the devlinks registry file
@@ -27,22 +29,9 @@ type LinkInfo struct {
 	RegisteredAt string `json:"registered_at"`
 }
 
-// GetGroveHome returns the path to the .grove directory in the user's home
-func GetGroveHome() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".grove"), nil
-}
-
 // LoadConfig loads the devlinks configuration from the registry file
 func LoadConfig() (*Config, error) {
-	groveHome, err := GetGroveHome()
-	if err != nil {
-		return nil, err
-	}
-	configPath := filepath.Join(groveHome, "devlinks.json")
+	configPath := filepath.Join(paths.StateDir(), "devlinks.json")
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		return &Config{Binaries: make(map[string]*BinaryLinks)}, nil
@@ -65,14 +54,11 @@ func LoadConfig() (*Config, error) {
 
 // SaveConfig saves the devlinks configuration to the registry file
 func SaveConfig(config *Config) error {
-	groveHome, err := GetGroveHome()
-	if err != nil {
+	stateDir := paths.StateDir()
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(groveHome, 0755); err != nil {
-		return err
-	}
-	configPath := filepath.Join(groveHome, "devlinks.json")
+	configPath := filepath.Join(stateDir, "devlinks.json")
 
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {

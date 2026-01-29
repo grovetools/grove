@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"sort"
 
 	"github.com/grovetools/core/cli"
@@ -29,7 +28,7 @@ This command shows the layered status where development links override released 
 
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		// Load tool versions for reconciler
-		tv, err := sdk.LoadToolVersions(os.Getenv("HOME") + "/.grove")
+		tv, err := sdk.LoadToolVersions()
 		if err != nil {
 			tv = &sdk.ToolVersions{
 				Versions: make(map[string]string),

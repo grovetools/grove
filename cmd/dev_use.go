@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/grovetools/core/cli"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/grove/pkg/devlinks"
 	"github.com/grovetools/grove/pkg/reconciler"
 	"github.com/grovetools/grove/pkg/sdk"
@@ -109,7 +110,7 @@ func switchToRelease(binaryName string) error {
 	}
 
 	// Load tool versions for reconciler
-	tv, err := sdk.LoadToolVersions(os.Getenv("HOME") + "/.grove")
+	tv, err := sdk.LoadToolVersions()
 	if err != nil {
 		return fmt.Errorf("failed to load tool versions: %w", err)
 	}
@@ -125,7 +126,7 @@ func switchToRelease(binaryName string) error {
 	}
 
 	// Check if the binary exists in the released version
-	releasedBinPath := filepath.Join(os.Getenv("HOME"), ".grove", "versions", activeVersion, "bin", binaryName)
+	releasedBinPath := filepath.Join(paths.DataDir(), "versions", activeVersion, "bin", binaryName)
 	if _, err := os.Stat(releasedBinPath); err != nil {
 		return fmt.Errorf("binary '%s' not found in released version '%s'", binaryName, activeVersion)
 	}

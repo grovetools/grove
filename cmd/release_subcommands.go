@@ -25,7 +25,7 @@ func newReleasePlanCmd() *cobra.Command {
 		Long: `Generate a release plan that analyzes all repositories for changes
 and suggests appropriate version bumps.
 
-The plan is saved to ~/.grove/release_plan.json and can be:
+The plan is saved to the Grove state directory and can be:
 - Reviewed and modified with 'grove release tui'
 - Applied with 'grove release apply'
 - Cleared with 'grove release clear-plan'
@@ -62,7 +62,6 @@ and documentation updates.`,
 			
 			// Display summary
 			fmt.Println("\n" + theme.IconSuccess + " Release plan generated successfully!")
-			fmt.Printf("   Plan saved to: ~/.grove/release_plan.json\n")
 			
 			// Count repos with changes
 			reposWithChanges := 0
@@ -103,7 +102,7 @@ func newReleaseApplyCmd() *cobra.Command {
 and reviewed with 'grove release tui'.
 
 This command will:
-1. Load the plan from ~/.grove/release_plan.json
+1. Load the plan from the Grove state directory
 2. Execute the release for all approved repositories
 3. Create tags and push changes if configured
 4. Clear the plan upon successful completion
@@ -155,9 +154,7 @@ func newReleaseClearPlanCmd() *cobra.Command {
 		Short: "Clear the current release plan",
 		Long: `Clear the current release plan and staging directory.
 
-This removes:
-- The release plan at ~/.grove/release_plan.json
-- The staging directory at ~/.grove/release_staging/
+This removes the release plan and staging directory from the Grove state directory.
 
 Use this to abort a release in progress and start fresh.`,
 		RunE: func(cmd *cobra.Command, args []string) error {

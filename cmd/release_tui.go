@@ -1752,7 +1752,7 @@ This command provides an interactive way to:
 - Preview and approve changelogs
 - Execute the release once all repositories are approved
 
-The release plan is persisted in ~/.grove/release_plan.json and can be
+The release plan is persisted in the Grove state directory and can be
 resumed if interrupted.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()

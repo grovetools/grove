@@ -14,11 +14,12 @@ import (
 	"sync"
 	"time"
 
-	tablecomponent "github.com/grovetools/core/tui/components/table"
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/logging"
 	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/workspace"
+	tablecomponent "github.com/grovetools/core/tui/components/table"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/grove/pkg/discovery"
 	"github.com/grovetools/grove/pkg/reconciler"
@@ -75,8 +76,8 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	// Load tool versions
-	groveHome := filepath.Join(os.Getenv("HOME"), ".grove")
-	toolVersions, err := sdk.LoadToolVersions(groveHome)
+	dataDir := paths.DataDir()
+	toolVersions, err := sdk.LoadToolVersions()
 	if err != nil {
 		logger.WithError(err).Warn("Failed to load tool versions")
 		toolVersions = &sdk.ToolVersions{
@@ -168,7 +169,7 @@ func runList(cmd *cobra.Command, args []string) error {
 		// Check for other installed versions - use effective alias from FindTool
 		_, _, effectiveAlias, _ := sdk.FindTool(repoName)
 		for _, installedVersion := range installedVersions {
-			versionBinPath := filepath.Join(groveHome, "versions", installedVersion, "bin", effectiveAlias)
+			versionBinPath := filepath.Join(dataDir, "versions", installedVersion, "bin", effectiveAlias)
 			if _, err := os.Stat(versionBinPath); err == nil {
 				// Only add to other versions if it's not the active version
 				if source != "release" || version != installedVersion {

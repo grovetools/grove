@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/grove/pkg/devlinks"
 	"github.com/grovetools/grove/pkg/workspace"
@@ -19,10 +20,8 @@ import (
 
 const (
 	// Directory structure constants
-	GroveDir          = ".grove"
-	VersionsDir       = "versions"
-	BinDir            = "bin"
-	ActiveVersionFile = "active_version"
+	VersionsDir = "versions"
+	BinDir      = "bin"
 
 	// GitHub API constants
 	GitHubOwner = "grovetools"
@@ -45,8 +44,8 @@ type AliasConfig struct {
 }
 
 // LoadAliases loads the user's custom alias configuration
-func LoadAliases(groveHome string) (*AliasConfig, error) {
-	aliasFile := filepath.Join(groveHome, "aliases.json")
+func LoadAliases() (*AliasConfig, error) {
+	aliasFile := filepath.Join(paths.StateDir(), "aliases.json")
 	conf := &AliasConfig{Aliases: make(map[string]string)}
 
 	if data, err := os.ReadFile(aliasFile); err == nil {
@@ -59,8 +58,12 @@ func LoadAliases(groveHome string) (*AliasConfig, error) {
 }
 
 // SaveAliases saves the user's custom alias configuration
-func SaveAliases(groveHome string, config *AliasConfig) error {
-	aliasFile := filepath.Join(groveHome, "aliases.json")
+func SaveAliases(config *AliasConfig) error {
+	stateDir := paths.StateDir()
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		return fmt.Errorf("failed to create state directory: %w", err)
+	}
+	aliasFile := filepath.Join(stateDir, "aliases.json")
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal aliases: %w", err)
@@ -71,8 +74,7 @@ func SaveAliases(groveHome string, config *AliasConfig) error {
 // FindTool resolves a user-provided identifier (repo name, alias) to its canonical info
 // It returns the canonical repoName, the ToolInfo, the effective alias, and a found boolean
 func FindTool(identifier string) (string, ToolInfo, string, bool) {
-	groveHome := filepath.Join(os.Getenv("HOME"), ".grove")
-	aliases, _ := LoadAliases(groveHome)
+	aliases, _ := LoadAliases()
 
 	// 1. Check if identifier is a custom alias
 	for repoName, customAlias := range aliases.Aliases {
@@ -114,29 +116,18 @@ func GetToolRegistry() map[string]ToolInfo {
 
 // Manager handles SDK installation and version management
 type Manager struct {
-	homeDir string
-	baseDir string
-	useGH   bool
+	useGH bool
 }
 
 // NewManager creates a new SDK manager instance
 func NewManager() (*Manager, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get home directory: %w", err)
-	}
-
-	baseDir := filepath.Join(homeDir, GroveDir)
-
 	// Run migration on initialization
-	if err := MigrateFromSingleVersion(baseDir); err != nil {
+	if err := MigrateFromSingleVersion(); err != nil {
 		// Ignore migration errors - it's a one-time operation
 	}
 
 	return &Manager{
-		homeDir: homeDir,
-		baseDir: baseDir,
-		useGH:   false,
+		useGH: false,
 	}, nil
 }
 
@@ -206,26 +197,14 @@ func (m *Manager) ResolveDependencies(initialToolSpecs []string) ([]string, erro
 
 // EnsureDirs creates the necessary directory structure
 func (m *Manager) EnsureDirs() error {
-	dirs := []string{
-		m.baseDir,
-		filepath.Join(m.baseDir, BinDir),
-		filepath.Join(m.baseDir, VersionsDir),
-	}
-
-	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory %s: %w", dir, err)
-		}
-	}
-
-	return nil
+	return paths.EnsureDirs()
 }
 
 // GetActiveVersion returns the currently active version (DEPRECATED)
 // This method is kept for backward compatibility but should not be used
 func (m *Manager) GetActiveVersion() (string, error) {
 	// Try to migrate from old format if needed
-	if err := MigrateFromSingleVersion(m.baseDir); err != nil {
+	if err := MigrateFromSingleVersion(); err != nil {
 		// Ignore migration errors
 	}
 
@@ -242,7 +221,7 @@ func (m *Manager) GetToolVersion(tool string) (string, error) {
 		repoName = tool
 	}
 
-	tv, err := LoadToolVersions(m.baseDir)
+	tv, err := LoadToolVersions()
 	if err != nil {
 		return "", fmt.Errorf("failed to load tool versions: %w", err)
 	}
@@ -270,14 +249,14 @@ func (m *Manager) SetToolVersion(tool, version string) error {
 		repoName = tool
 	}
 
-	tv, err := LoadToolVersions(m.baseDir)
+	tv, err := LoadToolVersions()
 	if err != nil {
 		return fmt.Errorf("failed to load tool versions: %w", err)
 	}
 
 	tv.SetToolVersion(repoName, version)
 
-	if err := tv.Save(m.baseDir); err != nil {
+	if err := tv.Save(); err != nil {
 		return fmt.Errorf("failed to save tool versions: %w", err)
 	}
 
@@ -497,7 +476,7 @@ func (m *Manager) getReleaseWithGH(repoName, version string) (*GitHubRelease, er
 
 // ListInstalledVersions returns all installed versions
 func (m *Manager) ListInstalledVersions() ([]string, error) {
-	versionsDir := filepath.Join(m.baseDir, VersionsDir)
+	versionsDir := filepath.Join(paths.DataDir(), VersionsDir)
 	entries, err := os.ReadDir(versionsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -554,7 +533,7 @@ func (m *Manager) InstallTool(toolName, versionTag string) error {
 	}
 
 	// Create version directory
-	versionBinDir := filepath.Join(m.baseDir, VersionsDir, versionTag, BinDir)
+	versionBinDir := filepath.Join(paths.DataDir(), VersionsDir, versionTag, BinDir)
 	if err := os.MkdirAll(versionBinDir, 0755); err != nil {
 		return fmt.Errorf("failed to create version directory: %w", err)
 	}
@@ -581,7 +560,7 @@ func (m *Manager) InstallAllToolsFromSource() error {
 	}
 
 	// Use a persistent workspace directory
-	workspaceDir := filepath.Join(m.baseDir, "source-workspace")
+	workspaceDir := filepath.Join(paths.DataDir(), "source-workspace")
 	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
 		return fmt.Errorf("failed to create workspace directory: %w", err)
 	}
@@ -699,7 +678,7 @@ func (m *Manager) InstallAllToolsFromSource() error {
 		binaryPath := binaries[0].Path
 
 		// Install binary
-		versionBinDir := filepath.Join(m.baseDir, VersionsDir, versionTag, BinDir)
+		versionBinDir := filepath.Join(paths.DataDir(), VersionsDir, versionTag, BinDir)
 		if err := os.MkdirAll(versionBinDir, 0755); err != nil {
 			return fmt.Errorf("failed to create version directory: %w", err)
 		}
@@ -756,8 +735,8 @@ func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
 		return "", fmt.Errorf("unknown tool: %s", toolName)
 	}
 
-	// Use a persistent workspace directory in ~/.grove/source-workspace
-	workspaceDir := filepath.Join(m.baseDir, "source-workspace")
+	// Use a persistent workspace directory
+	workspaceDir := filepath.Join(paths.DataDir(), "source-workspace")
 	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create workspace directory: %w", err)
 	}
@@ -854,7 +833,7 @@ func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
 	}
 
 	// Create version directory
-	versionBinDir := filepath.Join(m.baseDir, VersionsDir, versionTag, BinDir)
+	versionBinDir := filepath.Join(paths.DataDir(), VersionsDir, versionTag, BinDir)
 	if err := os.MkdirAll(versionBinDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create version directory: %w", err)
 	}
@@ -901,7 +880,7 @@ func (m *Manager) UseToolVersion(tool, versionTag string) error {
 	}
 
 	// Check if the tool at this version is installed
-	toolPath := filepath.Join(m.baseDir, VersionsDir, versionTag, BinDir, effectiveAlias)
+	toolPath := filepath.Join(paths.DataDir(), VersionsDir, versionTag, BinDir, effectiveAlias)
 	if _, err := os.Stat(toolPath); os.IsNotExist(err) {
 		return fmt.Errorf("tool %s version %s is not installed", repoName, versionTag)
 	}
@@ -932,7 +911,7 @@ func (m *Manager) UninstallVersion(versionTag string) error {
 		}
 
 		// Clear symlinks
-		binDir := filepath.Join(m.baseDir, BinDir)
+		binDir := paths.BinDir()
 		entries, _ := os.ReadDir(binDir)
 		for _, entry := range entries {
 			if !entry.IsDir() {
@@ -945,7 +924,7 @@ func (m *Manager) UninstallVersion(versionTag string) error {
 	}
 
 	// Remove version directory
-	versionDir := filepath.Join(m.baseDir, VersionsDir, versionTag)
+	versionDir := filepath.Join(paths.DataDir(), VersionsDir, versionTag)
 	return os.RemoveAll(versionDir)
 }
 

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/grovetools/core/cli"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/grove/pkg/setup"
 	"github.com/spf13/cobra"
@@ -21,9 +22,9 @@ func newBootstrapCmd() *cobra.Command {
 This command is used after cloning the grove-ecosystem repository to set up
 an environment for developing the grove tools from source. It:
 
-  1. Creates ~/.grove/bin directory
-  2. Symlinks the current grove binary to ~/.grove/bin/grove
-  3. Creates minimal ~/.config/grove/grove.yml with the ecosystem configured
+  1. Creates the Grove binary directory if it doesn't exist
+  2. Symlinks the current grove binary to that directory
+  3. Creates minimal global grove.yml with the ecosystem configured
   4. Prints PATH instructions
 
 After running bootstrap, you can:
@@ -35,7 +36,7 @@ Example:
   cd grove-ecosystem/grove-meta
   make build
   ./bin/grove bootstrap
-  # Add ~/.grove/bin to PATH, then:
+  # Add the printed path to your PATH, then:
   grove build
   grove dev cwd`
 
@@ -70,15 +71,10 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 	service := setup.NewService(bootstrapDryRun)
 	yamlHandler := setup.NewYAMLHandler(service)
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
-	}
-
-	groveBinDir := filepath.Join(homeDir, ".grove", "bin")
+	groveBinDir := paths.BinDir()
 	groveSymlink := filepath.Join(groveBinDir, "grove")
 
-	// 1. Create ~/.grove/bin
+	// 1. Create Grove binary directory
 	if err := service.MkdirAll(groveBinDir, 0755); err != nil {
 		return err
 	}
@@ -121,12 +117,12 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Path: %s\n", ecosystemDir)
 	fmt.Println()
 
-	// Check if PATH already includes ~/.grove/bin
+	// Check if PATH already includes the Grove bin directory
 	pathEnv := os.Getenv("PATH")
 	if !containsPath(pathEnv, groveBinDir) {
 		fmt.Println("Add to PATH:")
-		fmt.Printf("  export PATH=\"$HOME/.grove/bin:$PATH\"   # bash/zsh\n")
-		fmt.Printf("  fish_add_path ~/.grove/bin             # fish\n")
+		fmt.Printf("  export PATH=\"%s:$PATH\"   # bash/zsh\n", groveBinDir)
+		fmt.Printf("  fish_add_path %s             # fish\n", groveBinDir)
 		fmt.Println()
 	}
 

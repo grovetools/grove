@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/grovetools/core/pkg/paths"
 )
 
 // Mode represents the binary delegation strategy
@@ -24,11 +26,7 @@ type Config struct {
 
 // GetConfigPath returns the path to the delegation config file
 func GetConfigPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".grove", "delegation.json"), nil
+	return filepath.Join(paths.StateDir(), "delegation.json"), nil
 }
 
 // LoadConfig loads the delegation configuration
@@ -68,9 +66,8 @@ func SaveConfig(config *Config) error {
 		return err
 	}
 
-	// Ensure .grove directory exists
-	groveDir := filepath.Dir(configPath)
-	if err := os.MkdirAll(groveDir, 0755); err != nil {
+	// Ensure the state directory exists
+	if err := os.MkdirAll(paths.StateDir(), 0755); err != nil {
 		return err
 	}
 

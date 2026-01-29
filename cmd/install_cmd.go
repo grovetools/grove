@@ -3,11 +3,11 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/grove/pkg/devlinks"
 	"github.com/grovetools/grove/pkg/reconciler"
@@ -94,7 +94,7 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 
 		// Reconcile symlinks for all tools
 		fmt.Println(theme.DefaultTheme.Bold.Render("\nActivating tools..."))
-		tv, err := sdk.LoadToolVersions(os.Getenv("HOME") + "/.grove")
+		tv, err := sdk.LoadToolVersions()
 		if err != nil {
 			logger.WithError(err).Warn("Could not load tool versions for reconciliation")
 			tv = &sdk.ToolVersions{Versions: make(map[string]string)}
@@ -131,7 +131,7 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 	}
 
 	// Migration: ensure we're using the new per-tool version system
-	if err := sdk.MigrateFromSingleVersion(os.Getenv("HOME") + "/.grove"); err != nil {
+	if err := sdk.MigrateFromSingleVersion(); err != nil {
 		logger.Debugf("Migration check failed: %v", err)
 	}
 
@@ -160,7 +160,7 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 		var binaryExists bool
 		if currentVersion != "" {
 			// Load tool versions and create reconciler to find the binary path
-			tv, _ := sdk.LoadToolVersions(os.Getenv("HOME") + "/.grove")
+			tv, _ := sdk.LoadToolVersions()
 			if tv == nil {
 				tv = &sdk.ToolVersions{Versions: make(map[string]string)}
 			}
@@ -279,7 +279,7 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 			}
 
 			// Reconcile the symlink
-			tv, err := sdk.LoadToolVersions(os.Getenv("HOME") + "/.grove")
+			tv, err := sdk.LoadToolVersions()
 			if err != nil {
 				// Log the error but proceed with an empty config so we don't block the user
 				logger.WithError(err).Warn("Could not load tool versions for reconciliation")
@@ -323,9 +323,8 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 
 	// No longer need to set a single active version - each tool is activated individually
 
-	// Check if ~/.grove/bin is in PATH
-	homeDir, _ := os.UserHomeDir()
-	groveBin := filepath.Join(homeDir, ".grove", "bin")
+	// Check if grove bin directory is in PATH
+	groveBin := paths.BinDir()
 	path := os.Getenv("PATH")
 
 	if !strings.Contains(path, groveBin) {

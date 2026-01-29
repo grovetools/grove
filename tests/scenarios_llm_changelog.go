@@ -6,10 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/grovetools/tend/pkg/harness"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/tend/pkg/command"
 	"github.com/grovetools/tend/pkg/fs"
 	"github.com/grovetools/tend/pkg/git"
+	"github.com/grovetools/tend/pkg/harness"
 )
 
 // LLMChangelogScenario tests the LLM-powered changelog generation feature
@@ -500,11 +501,11 @@ flow:
 					}
 					
 					ctx.Set("test_repo", repoDir)
-					
+
 					// Check if release plan file would be created (without actually running TUI)
-					planPath := filepath.Join(os.Getenv("HOME"), ".grove", "release_plan.json")
+					planPath := filepath.Join(paths.StateDir(), "release", "release_plan.json")
 					ctx.Set("plan_path", planPath)
-					
+
 					return nil
 				},
 			},
@@ -524,7 +525,7 @@ flow:
 						"interactive Terminal User Interface",
 						"release planning",
 						"LLM-suggested version bumps",
-						"~/.grove/release_plan.json",
+						"Grove state directory",
 					}
 					
 					for _, expected := range expectedStrings {

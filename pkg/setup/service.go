@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/sirupsen/logrus"
 )
 
@@ -251,24 +252,10 @@ func AbbreviatePath(path string) string {
 }
 
 // GlobalConfigPath returns the path to the global grove configuration file.
-// It checks XDG_CONFIG_HOME first for compatibility with the test harness
-// and grove-core's config loading, then falls back to ~/.config.
 func GlobalConfigPath() string {
-	// Check XDG_CONFIG_HOME first (matches grove-core behavior)
-	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
-		return filepath.Join(xdgConfig, "grove", "grove.yml")
+	configDir := paths.ConfigDir()
+	if configDir == "" {
+		return ""
 	}
-
-	// Fall back to ~/.config
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".config", "grove", "grove.yml")
-	}
-	return filepath.Join(homeDir, ".config", "grove", "grove.yml")
-}
-
-// GroveHomeDir returns the path to the ~/.grove directory
-func GroveHomeDir() string {
-	homeDir, _ := os.UserHomeDir()
-	return filepath.Join(homeDir, ".grove")
+	return filepath.Join(configDir, "grove.yml")
 }
