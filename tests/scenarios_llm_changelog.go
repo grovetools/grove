@@ -19,7 +19,7 @@ func LLMChangelogScenario() *harness.Scenario {
 		Name:        "llm-changelog",
 		Description: "Tests LLM-powered changelog generation with the --llm-changelog flag",
 		Tags:        []string{"llm", "changelog", "release", "local-only"},
-		LocalOnly:   true, // This test requires gemapi to be available
+		LocalOnly:   true, // This test requires grove-gemini to be available
 		Steps: []harness.Step{
 			{
 				Name:        "Setup test repository",
@@ -252,19 +252,19 @@ func TestLoadConfig(t *testing.T) {
 				},
 			},
 			{
-				Name:        "Verify gemapi availability",
-				Description: "Checks if gemapi is available for LLM changelog generation",
+				Name:        "Verify grove-gemini availability",
+				Description: "Checks if grove-gemini is available for LLM changelog generation",
 				Func: func(ctx *harness.Context) error {
-					// Check if gemapi is available
-					cmd := command.New("which", "gemapi")
+					// Check if grove-gemini is available
+					cmd := command.New("which", "grove-gemini")
 					result := cmd.Run()
 					
 					if result.Error != nil {
-						// gemapi not found - this test requires it
-						return fmt.Errorf("gemapi is required for LLM changelog generation")
+						// grove-gemini not found - this test requires it
+						return fmt.Errorf("grove-gemini is required for LLM changelog generation")
 					}
 					
-					// gemapi found, continue with test
+					// grove-gemini found, continue with test
 					return nil
 				},
 			},
@@ -407,7 +407,7 @@ func ReleaseTUIScenario() *harness.Scenario {
 		Name:        "release-tui",
 		Description: "Tests the release TUI subcommand and plan management",
 		Tags:        []string{"release", "tui", "interactive", "local-only"},
-		LocalOnly:   true, // This test requires gemapi for LLM suggestions
+		LocalOnly:   true, // This test requires grove-gemini for LLM suggestions
 		Steps: []harness.Step{
 			{
 				Name:        "Verify TUI subcommand exists",

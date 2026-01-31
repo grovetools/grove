@@ -253,13 +253,13 @@ func setupTestRepoWithChangesStep(repoName string) harness.Step {
 			return err
 		}
 		
-		// Create mock gemapi
+		// Create mock grove-gemini
 		mockDir := ctx.NewDir("mocks")
-		gemapiMockPath := filepath.Join(mockDir, "gemapi")
-		if err := fs.WriteString(gemapiMockPath, gemapiMockScript); err != nil {
+		groveGeminiMockPath := filepath.Join(mockDir, "grove-gemini")
+		if err := fs.WriteString(groveGeminiMockPath, groveGeminiMockScript); err != nil {
 			return err
 		}
-		if err := os.Chmod(gemapiMockPath, 0755); err != nil {
+		if err := os.Chmod(groveGeminiMockPath, 0755); err != nil {
 			return err
 		}
 		// Store the mock directory path in context for later use

@@ -35,7 +35,7 @@ func newLlmRequestCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "request [prompt...]",
 		Short: "Make a request to an LLM provider",
-		Long: `Acts as a facade, delegating to the appropriate tool (gemapi, grove-openai) based on the model.
+		Long: `Acts as a facade, delegating to the appropriate tool (grove-gemini, grove-openai) based on the model.
 
 Model determination precedence:
 1. --model flag
@@ -44,7 +44,7 @@ Model determination precedence:
 		RunE: runLlmRequest,
 	}
 
-	// Superset of flags from gemapi and grove-openai
+	// Superset of flags from grove-gemini and grove-openai
 	cmd.Flags().StringP("model", "m", "", "LLM model to use (e.g., gpt-4o-mini, gemini-2.0-flash)")
 	cmd.Flags().StringP("prompt", "p", "", "Prompt text")
 	cmd.Flags().StringP("file", "f", "", "Read prompt from file")
@@ -95,7 +95,7 @@ func runLlmRequest(cmd *cobra.Command, args []string) error {
 	if strings.HasPrefix(model, "gpt-") || strings.HasPrefix(model, "o1-") || strings.HasPrefix(model, "o3-") {
 		targetBinary = "grove-openai"
 	} else if strings.HasPrefix(model, "gemini-") {
-		targetBinary = "gemapi"
+		targetBinary = "grove-gemini"
 	} else if strings.HasPrefix(model, "claude-") {
 		// For future Claude support
 		return fmt.Errorf("Claude models are not yet supported. Model must start with 'gpt-', 'o1-', 'o3-', or 'gemini-'")

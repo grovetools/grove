@@ -504,7 +504,7 @@ General-purpose helper commands.
 **Syntax**: `grove llm [subcommand]`
 
 **Description**:
-Provides a single, consistent entry point for all LLM interactions, intelligently delegating to the appropriate provider-specific tool (e.g., `gemapi`, `grove-openai`) based on the model name.
+Provides a single, consistent entry point for all LLM interactions, intelligently delegating to the appropriate provider-specific tool (e.g., `grove-gemini`, `grove-openai`) based on the model name.
 
 **Subcommands**:
 -   `request [prompt...]`: Makes a request to an LLM provider. This command accepts a superset of flags from the underlying tools. Use `grove llm request --help` for a full list of options.

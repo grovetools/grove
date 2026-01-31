@@ -11,4 +11,4 @@
     *   `deps`: Manages Go module dependencies (`bump`, `sync`, `tree`) across all projects in an ecosystem.
 *   **Stateful Release Workflow**: The `release` command suite (`plan`, `tui`, `apply`) provides a dependency-aware release process. It includes version calculation, optional LLM-based changelog generation, CI monitoring, and stateful execution with rollback capabilities.
 *   **Repository Management**: `repo add` and `ecosystem init` commands create new standalone repositories or monorepo ("ecosystem") structures from templates.
-*   **Unified LLM Interface**: `llm request` acts as a single entry point for LLM interactions, delegating prompts to the appropriate provider-specific tool (e.g., `gemapi`, `grove-openai`) based on the model name specified in flags or configuration.
+*   **Unified LLM Interface**: `llm request` acts as a single entry point for LLM interactions, delegating prompts to the appropriate provider-specific tool (e.g., `grove-gemini`, `grove-openai`) based on the model name specified in flags or configuration.

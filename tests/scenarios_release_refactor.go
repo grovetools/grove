@@ -154,7 +154,7 @@ func StreamlinedFullReleaseScenario() *harness.Scenario {
 			harness.SetupMocks(
 				harness.Mock{CommandName: "git"},
 				harness.Mock{CommandName: "gh"},
-				harness.Mock{CommandName: "gemapi"},
+				harness.Mock{CommandName: "grove-gemini"},
 				harness.Mock{CommandName: "go"},
 			),
 			setupMockEcosystemStep(),
@@ -316,7 +316,7 @@ func StreamlinedRCReleaseScenario() *harness.Scenario {
 			harness.SetupMocks(
 				harness.Mock{CommandName: "git"},
 				harness.Mock{CommandName: "gh"},
-				harness.Mock{CommandName: "gemapi"},
+				harness.Mock{CommandName: "grove-gemini"},
 				harness.Mock{CommandName: "go"},
 			),
 			setupMockEcosystemStep(),
@@ -439,7 +439,7 @@ func StreamlinedFailureScenario() *harness.Scenario {
 			harness.SetupMocks(
 				harness.Mock{CommandName: "git"},
 				harness.Mock{CommandName: "gh"},
-				harness.Mock{CommandName: "gemapi"},
+				harness.Mock{CommandName: "grove-gemini"},
 				harness.Mock{CommandName: "go"},
 			),
 			setupMockEcosystemStep(),

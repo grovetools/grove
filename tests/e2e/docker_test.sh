@@ -392,14 +392,14 @@ test_dependency_resolution() {
     grove uninstall flow 2>/dev/null || true
     grove uninstall cx 2>/dev/null || true
     grove uninstall grove-context 2>/dev/null || true
-    grove uninstall gemapi 2>/dev/null || true
+    grove uninstall grove-gemini 2>/dev/null || true
     grove uninstall grove-gemini 2>/dev/null || true
     
     # Remove from all versions to ensure clean state
     for version_dir in "$HOME/.grove/versions/"*/; do
       rm -f "$version_dir/bin/flow" 2>/dev/null || true
       rm -f "$version_dir/bin/cx" 2>/dev/null || true  
-      rm -f "$version_dir/bin/gemapi" 2>/dev/null || true
+      rm -f "$version_dir/bin/grove-gemini" 2>/dev/null || true
     done
     
     # Test installing flow and check if dependencies are mentioned
@@ -429,9 +429,9 @@ test_dependency_resolution() {
       warn "grove-context might not have been installed"
     fi
     
-    # Check if gemapi (grove-gemini) is available
+    # Check if grove-gemini (grove-gemini) is available
     if grove list | grep -q "grove-gemini.*●"; then
-      step "✓ grove-gemini (gemapi) was installed as a dependency"
+      step "✓ grove-gemini (grove-gemini) was installed as a dependency"
     else
       warn "grove-gemini might not have been installed"
     fi

@@ -137,8 +137,8 @@ echo "gofmt: SUCCESS"
 exit 0
 `
 
-const gemapiMockScript = `#!/bin/bash
-# Mock gemapi for E2E tests - simulates LLM changelog generation
+const groveGeminiMockScript = `#!/bin/bash
+# Mock grove-gemini for E2E tests - simulates LLM changelog generation
 
 # Default model for testing
 MODEL="gemini-1.5-flash-latest"
@@ -173,7 +173,7 @@ if [ "$REQUEST_MODE" = "true" ]; then
   # Read the prompt file to determine what kind of response is needed
   if [ -n "$PROMPT_FILE" ] && [ -f "$PROMPT_FILE" ]; then
     PROMPT_CONTENT=$(cat "$PROMPT_FILE")
-    
+
     # Check if this is a changelog generation request
     if echo "$PROMPT_CONTENT" | grep -q "changelog" && echo "$PROMPT_CONTENT" | grep -q "JSON"; then
       # Generate a mock changelog response
@@ -186,28 +186,28 @@ if [ "$REQUEST_MODE" = "true" ]; then
 EOF
       exit 0
     fi
-    
+
     # Check if this is a general completion request
     if echo "$PROMPT_CONTENT" | grep -q "complete\|generate\|create"; then
       # Generate a generic response
-      echo "Mock response from gemapi for model $MODEL"
+      echo "Mock response from grove-gemini for model $MODEL"
       echo "This is a simulated LLM response for testing purposes."
       exit 0
     fi
   fi
-  
+
   # Default response for unknown requests
-  echo "Mock gemapi response"
+  echo "Mock grove-gemini response"
   exit 0
 fi
 
 # If not in request mode, show version or help
 if [ "$1" = "--version" ] || [ "$1" = "version" ]; then
-  echo "gemapi mock v0.0.1-test"
+  echo "grove-gemini mock v0.0.1-test"
   echo "Model: $MODEL"
 else
-  echo "gemapi mock - Simulated LLM API for testing"
-  echo "Usage: gemapi request --model <model> --file <prompt-file> --yes"
+  echo "grove-gemini mock - Simulated LLM API for testing"
+  echo "Usage: grove-gemini request --model <model> --file <prompt-file> --yes"
 fi
 `
 

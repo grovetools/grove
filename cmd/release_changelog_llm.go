@@ -273,13 +273,13 @@ func openInEditor(filepath string) error {
 	return cmd.Run()
 }
 
-// generateChangelogWithLLM constructs a prompt and calls gemapi to generate the changelog.
+// generateChangelogWithLLM constructs a prompt and calls grove-gemini to generate the changelog.
 // It now returns the new LLMChangelogResult struct.
 func generateChangelogWithLLM(gitContext, newVersion, repoPath string) (*LLMChangelogResult, error) {
 	return generateChangelogWithLLMInteractive(gitContext, newVersion, repoPath, false)
 }
 
-// generateChangelogWithLLMInteractive constructs a prompt and calls gemapi to generate the changelog.
+// generateChangelogWithLLMInteractive constructs a prompt and calls grove-gemini to generate the changelog.
 // skipPrompt controls whether to skip interactive prompts (useful for TUI mode).
 func generateChangelogWithLLMInteractive(gitContext, newVersion, repoPath string, skipPrompt bool) (*LLMChangelogResult, error) {
 	// Prompt for rules file editing
@@ -366,7 +366,7 @@ Generate the JSON object now:`, newVersion, currentDate, gitContext)
 	outputFile.Close()
 	defer os.Remove(outputPath)
 
-	// Construct and execute the LLM command via grove llm (which delegates to gemapi)
+	// Construct and execute the LLM command via grove llm (which delegates to grove-gemini)
 	// Use --output flag to get clean response without console decoration
 	// Use --max-output-tokens to ensure the full changelog can be generated
 	args := []string{
@@ -379,8 +379,8 @@ Generate the JSON object now:`, newVersion, currentDate, gitContext)
 		"--yes",
 	}
 
-	// Create a log file for gemapi console output
-	logFile, err := os.CreateTemp("", "grove-gemapi-*.log")
+	// Create a log file for grove-gemini console output
+	logFile, err := os.CreateTemp("", "grove-gemini-*.log")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create log file: %w", err)
 	}
@@ -389,11 +389,11 @@ Generate the JSON object now:`, newVersion, currentDate, gitContext)
 
 	// Only show this message if not in skip prompt mode (i.e., not in TUI)
 	if !skipPrompt {
-		fmt.Printf("Calling gemapi with model %s for version suggestion...\n", model)
+		fmt.Printf("Calling grove-gemini with model %s for version suggestion...\n", model)
 		fmt.Printf("Logging output to: %s\n", logPath)
 	}
 
-	// Use 'grove llm' for workspace-awareness (delegates to gemapi for Gemini models)
+	// Use 'grove llm' for workspace-awareness (delegates to grove-gemini for Gemini models)
 	ctx := context.Background()
 	changelogLog.Debug("Calling grove llm").
 		Field("model", model).
@@ -420,16 +420,16 @@ Generate the JSON object now:`, newVersion, currentDate, gitContext)
 			Log(ctx)
 	}
 
-	gemapiCmd := delegation.Command(args[0], args[1:]...)
-	gemapiCmd.Dir = repoPath // Set working directory to the repository being analyzed
+	llmCmd := delegation.Command(args[0], args[1:]...)
+	llmCmd.Dir = repoPath // Set working directory to the repository being analyzed
 
 	// Redirect both stdout and stderr to log file to prevent TUI mangling
-	gemapiCmd.Stdout = logFile
-	gemapiCmd.Stderr = logFile
+	llmCmd.Stdout = logFile
+	llmCmd.Stderr = logFile
 
-	err = gemapiCmd.Run()
+	err = llmCmd.Run()
 
-	changelogLog.Debug("gemapi command completed").
+	changelogLog.Debug("grove-gemini command completed").
 		Field("has_error", err != nil).
 		StructuredOnly().
 		Log(ctx)
@@ -437,13 +437,13 @@ Generate the JSON object now:`, newVersion, currentDate, gitContext)
 	if err != nil {
 		// Read log file content for error details
 		logContent, _ := os.ReadFile(logPath)
-		changelogLog.Error("gemapi request failed").
+		changelogLog.Error("grove-gemini request failed").
 			Err(err).
 			Field("log_path", logPath).
 			Field("log_content", string(logContent)).
 			StructuredOnly().
 			Log(ctx)
-		return nil, fmt.Errorf("failed to execute 'gemapi request': %w\nLog: %s\nOutput: %s", err, logPath, string(logContent))
+		return nil, fmt.Errorf("failed to execute 'grove-gemini request': %w\nLog: %s\nOutput: %s", err, logPath, string(logContent))
 	}
 
 	// Read the LLM response from the output file
@@ -457,14 +457,14 @@ Generate the JSON object now:`, newVersion, currentDate, gitContext)
 		StructuredOnly().
 		Log(ctx)
 
-	changelogLog.Debug("Raw gemapi output").
+	changelogLog.Debug("Raw grove-gemini output").
 		Field("output", string(output)).
 		StructuredOnly().
 		Log(ctx)
 
 	// Clean the output to ensure it's valid JSON
 	// LLMs sometimes wrap JSON in ```json ... ``` blocks
-	// The output may also contain console styling from gemapi, so we need to extract the JSON
+	// The output may also contain console styling from grove-gemini, so we need to extract the JSON
 	jsonString := extractJSONFromOutput(string(output))
 
 	previewLen := len(jsonString)

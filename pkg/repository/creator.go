@@ -694,8 +694,8 @@ func (c *Creator) generateSkeleton(opts CreateOptions, targetPath string) error 
 		BinaryAliasUpper: safeAliasUpper,
 		Description:      opts.Description,
 		GoVersion:        "1.24",
-		CoreVersion:      c.getLatestVersion("grove-core"),
-		TendVersion:      c.getLatestVersion("grove-tend"),
+		CoreVersion:      c.getLatestVersion("core"),
+		TendVersion:      c.getLatestVersion("tend"),
 		ModulePath:       modulePath,
 		IsPublic:         opts.Public,
 	}
@@ -1321,10 +1321,10 @@ func (c *Creator) getLatestVersion(repo string) string {
 	if err != nil {
 		// Fallback to a reasonable default
 		switch repo {
-		case "grove-core":
-			return "v0.2.10"
-		case "grove-tend":
-			return "v0.2.6"
+		case "core":
+			return "v0.5.0"
+		case "tend":
+			return "v0.5.0"
 		default:
 			return "v0.0.1"
 		}
