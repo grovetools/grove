@@ -254,9 +254,12 @@ func checkBinaryAliasConflict(alias string) error {
 		workspaces = append(workspaces, p.Path)
 	}
 
-	// Check each workspace's grove.yml for binary aliases
+	// Check each workspace's grove config for binary aliases
 	for _, ws := range workspaces {
-		configPath := filepath.Join(ws, "grove.yml")
+		configPath, err := config.FindConfigFile(ws)
+		if err != nil {
+			continue // Skip workspaces without config
+		}
 		cfg, err := config.Load(configPath)
 		if err != nil {
 			continue // Skip workspaces with invalid configs
@@ -285,8 +288,8 @@ func getEcosystemRoot() (string, error) {
 	}
 
 	for {
-		// Check if grove.yml exists in this directory
-		if _, err := os.Stat(filepath.Join(dir, "grove.yml")); err == nil {
+		// Check if grove config exists in this directory (supports .yml, .yaml, .toml)
+		if _, err := config.FindConfigFile(dir); err == nil {
 			// Also check if it's the ecosystem root by looking for go.work
 			if _, err := os.Stat(filepath.Join(dir, "go.work")); err == nil {
 				return dir, nil

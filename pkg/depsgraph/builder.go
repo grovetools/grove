@@ -35,9 +35,13 @@ func (b *Builder) Build() (*Graph, error) {
 	for _, ws := range b.workspaces {
 		wsName := filepath.Base(ws)
 
-		// Load grove.yml to get project type
-		groveYmlPath := filepath.Join(ws, "grove.yml")
-		cfg, err := config.Load(groveYmlPath)
+		// Find and load grove config (supports .yml, .yaml, .toml)
+		configPath, err := config.FindConfigFile(ws)
+		if err != nil {
+			b.logger.WithError(err).Warnf("No config found for %s, skipping", wsName)
+			continue
+		}
+		cfg, err := config.Load(configPath)
 		if err != nil {
 			b.logger.WithError(err).Warnf("Failed to load config for %s, skipping", wsName)
 			continue
@@ -89,9 +93,12 @@ func (b *Builder) Build() (*Graph, error) {
 			continue
 		}
 
-		// Load grove.yml to get project type
-		groveYmlPath := filepath.Join(ws, "grove.yml")
-		cfg, err := config.Load(groveYmlPath)
+		// Find and load grove config (supports .yml, .yaml, .toml)
+		configPath, err := config.FindConfigFile(ws)
+		if err != nil {
+			continue
+		}
+		cfg, err := config.Load(configPath)
 		if err != nil {
 			continue
 		}

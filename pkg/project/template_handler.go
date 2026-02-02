@@ -2,8 +2,8 @@ package project
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
+
+	"github.com/grovetools/core/config"
 )
 
 type TemplateHandler struct{}
@@ -13,9 +13,8 @@ func NewTemplateHandler() *TemplateHandler {
 }
 
 func (h *TemplateHandler) HasProjectFile(workspacePath string) bool {
-	// A template project is identified by having a grove.yml
-	groveYmlPath := filepath.Join(workspacePath, "grove.yml")
-	_, err := os.Stat(groveYmlPath)
+	// A template project is identified by having a grove config (supports .yml, .yaml, .toml)
+	_, err := config.FindConfigFile(workspacePath)
 	return err == nil
 }
 

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
+	"github.com/grovetools/core/config"
 	"github.com/spf13/cobra"
 )
 
@@ -121,9 +121,8 @@ func getLocalRepos() []string {
 		if strings.HasPrefix(name, ".") {
 			continue
 		}
-		// Check if it has a grove.yml
-		groveYml := filepath.Join(name, "grove.yml")
-		if _, err := os.Stat(groveYml); err == nil {
+		// Check if it has a grove config (supports .yml, .yaml, .toml)
+		if _, err := config.FindConfigFile(name); err == nil {
 			repos = append(repos, name)
 		}
 	}
