@@ -10,21 +10,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/workspace"
-	"gopkg.in/yaml.v3"
 )
-
-// GroveConfig represents the relevant parts of grove.yml
-type GroveConfig struct {
-	Name        string   `yaml:"name"`
-	Description string   `yaml:"description"`
-	Managed     bool     `yaml:"managed"`
-	BuildAfter  []string `yaml:"build_after"`
-	Binary      struct {
-		Name string `yaml:"name"`
-		Path string `yaml:"path"`
-	} `yaml:"binary"`
-}
 
 // ToolEntry represents a tool to be added to the registry
 type ToolEntry struct {
@@ -63,41 +51,65 @@ func main() {
 		name := entry.Name()
 
 		projectPath := filepath.Join(ecosystemRoot, name)
-		groveYmlPath := filepath.Join(projectPath, "grove.yml")
 
-		// Check if grove.yml exists
-		if _, err := os.Stat(groveYmlPath); os.IsNotExist(err) {
-			continue
-		}
-
-		// Read and parse grove.yml
-		data, err := os.ReadFile(groveYmlPath)
+		// Find grove config (supports .yml, .yaml, .toml)
+		configPath, err := config.FindConfigFile(projectPath)
 		if err != nil {
-			log.Printf("Warning: failed to read %s: %v", groveYmlPath, err)
 			continue
 		}
 
-		var config GroveConfig
-		if err := yaml.Unmarshal(data, &config); err != nil {
-			log.Printf("Warning: failed to parse %s: %v", groveYmlPath, err)
+		// Load and parse config
+		cfg, err := config.Load(configPath)
+		if err != nil {
+			log.Printf("Warning: failed to load %s: %v", configPath, err)
 			continue
+		}
+
+		// Check if managed (stored in Extensions)
+		var managed bool
+		if managedRaw, ok := cfg.Extensions["managed"]; ok {
+			managed, _ = managedRaw.(bool)
 		}
 
 		// Skip if not a managed ecosystem tool
-		if !config.Managed {
+		if !managed {
 			continue
 		}
 
+		// Get binary info from Extensions
+		var binaryName, description string
+		var buildAfter []string
+
+		if descRaw, ok := cfg.Extensions["description"]; ok {
+			description, _ = descRaw.(string)
+		}
+
+		if binaryRaw, ok := cfg.Extensions["binary"]; ok {
+			if binaryMap, ok := binaryRaw.(map[string]interface{}); ok {
+				binaryName, _ = binaryMap["name"].(string)
+			}
+		}
+
+		if buildAfterRaw, ok := cfg.Extensions["build_after"]; ok {
+			if buildAfterList, ok := buildAfterRaw.([]interface{}); ok {
+				for _, item := range buildAfterList {
+					if s, ok := item.(string); ok {
+						buildAfter = append(buildAfter, s)
+					}
+				}
+			}
+		}
+
 		// Skip if no binary defined
-		if config.Binary.Name == "" {
+		if binaryName == "" {
 			continue
 		}
 
 		tools = append(tools, ToolEntry{
-			RepoName:     config.Name,
-			Alias:        config.Binary.Name,
-			Description:  config.Description,
-			Dependencies: config.BuildAfter,
+			RepoName:     cfg.Name,
+			Alias:        binaryName,
+			Description:  description,
+			Dependencies: buildAfter,
 		})
 	}
 
