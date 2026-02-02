@@ -28,7 +28,6 @@ See the [documentation](docs/) for detailed usage instructions:
 - [Installation](docs/02-installation.md)
 - [Binary Management](docs/03-binary-management.md)
 - [Ecosystems](docs/04-ecosystems.md)
-- [Configuration](docs/05-configuration.md)
 - [Command Reference](docs/06-command-reference.md)
 
 <!-- DOCGEN:TOC:END -->
