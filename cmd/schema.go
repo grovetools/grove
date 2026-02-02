@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"github.com/grovetools/core/cli"
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/grove/pkg/discovery"
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 )
 
 // newSchemaCmd creates the `schema` command and its subcommands.
@@ -165,44 +165,19 @@ func runSchemaGenerate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// findEcosystemRoot walks up from the current directory looking for a grove.yml
+// findEcosystemRoot walks up from the current directory looking for a grove config
 // with a 'workspaces' field, indicating it's an ecosystem root.
 func findEcosystemRoot(startDir string) (string, error) {
 	dir := startDir
 
 	for {
-		groveYmlPath := filepath.Join(dir, "grove.yml")
-		if _, err := os.Stat(groveYmlPath); err == nil {
-			// Read and parse the YAML directly without validation
-			// We only need to check for the presence of workspaces
-			data, err := os.ReadFile(groveYmlPath)
-			if err != nil {
-				// If we can't read it, keep searching
-				parent := filepath.Dir(dir)
-				if parent == dir {
-					break
-				}
-				dir = parent
-				continue
-			}
-
-			// Parse YAML to check for workspaces field
-			var raw map[string]interface{}
-			if err := yaml.Unmarshal(data, &raw); err != nil {
-				// If we can't parse it, keep searching
-				parent := filepath.Dir(dir)
-				if parent == dir {
-					break
-				}
-				dir = parent
-				continue
-			}
-
-			// Check if workspaces field exists and is non-empty
-			if workspaces, ok := raw["workspaces"]; ok {
-				if ws, ok := workspaces.([]interface{}); ok && len(ws) > 0 {
-					return dir, nil
-				}
+		// Try to find a config file in this directory
+		configPath, err := config.FindConfigFile(dir)
+		if err == nil && filepath.Dir(configPath) == dir {
+			// Found a config in this exact directory, check if it has workspaces
+			cfg, err := config.Load(configPath)
+			if err == nil && len(cfg.Workspaces) > 0 {
+				return dir, nil
 			}
 		}
 
@@ -215,5 +190,5 @@ func findEcosystemRoot(startDir string) (string, error) {
 		dir = parent
 	}
 
-	return "", fmt.Errorf("no ecosystem root found (looking for grove.yml with workspaces)")
+	return "", fmt.Errorf("no ecosystem root found (looking for grove config with workspaces)")
 }

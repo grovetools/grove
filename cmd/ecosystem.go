@@ -43,7 +43,7 @@ Examples:
 }
 
 // groveConfigFiles lists all valid Grove config file names
-var groveConfigFiles = []string{"grove.yml", "grove.yaml", ".grove.yml", ".grove.yaml"}
+var groveConfigFiles = []string{"grove.toml", "grove.yml", "grove.yaml", ".grove.yml", ".grove.yaml"}
 
 // findGroveConfig finds the grove config file in the current directory
 func findGroveConfig() (string, error) {
