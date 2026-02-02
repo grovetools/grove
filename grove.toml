@@ -1,0 +1,14 @@
+name = "grove"
+description = "Grove package manager and command delegator"
+managed = true
+
+[binary]
+name = "grove"
+path = "./bin/grove"
+
+[logging.file]
+enabled = true
+format = "json"
+
+[context]
+default_rules_path = ".cx/dev-no-tests.rules"
