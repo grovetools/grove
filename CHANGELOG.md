@@ -1,3 +1,37 @@
+## v0.6.1 (2026-02-03)
+
+The release command was fixed, including new flags for explicit version overrides and the ability to generate changelogs in parallel within the TUI (417ad82). Additionally, the installation script has been patched to address execution issues (d48f6fa).
+
+### Features
+- Add explicit version flags and parallel changelog generation (417ad82)
+
+### Bug Fixes
+- Update install script (d48f6fa)
+
+### File Changes
+```
+ .github/workflows/ci.yml       |  2 +-
+ .golangci.yml                  |  2 +-
+ Dockerfile.e2e                 |  8 ++--
+ cmd/dev_use.go                 |  2 +-
+ cmd/release.go                 | 82 +++++++++++++++++++++++++++++++----------
+ cmd/release_subcommands.go     |  4 +-
+ cmd/release_tui.go             | 83 ++++++++++++++++++++++++++++++------------
+ cmd/setup.go                   | 20 +++++-----
+ cmd/version_cmd.go             |  2 +-
+ docs/02-installation.md        |  8 ++--
+ docs/03-binary-management.md   |  6 +--
+ docs/06-command-reference.md   |  4 +-
+ pkg/docs/docs.json             | 14 +++----
+ pkg/repository/creator_test.go |  2 +-
+ scripts/install.sh             | 33 +++++++++++++----
+ scripts/setup-dev.sh           | 28 +++++++-------
+ tests/e2e/docker_test.sh       | 40 ++++++++++----------
+ tests/e2e/mocks/gh_docker_e2e  |  6 +--
+ tests/e2e/mocks/grove_mock     | 24 ++++++------
+ 19 files changed, 238 insertions(+), 132 deletions(-)
+```
+
 ## v0.6.0 (2026-02-02)
 
 The `grove` CLI tool now adheres to the XDG Base Directory specification for configuration, data, and state files (d38db8c, 5e67869), moving away from hardcoded paths. Configuration support has been expanded to include TOML files alongside YAML (3e721c9, 500bba3), with the internal configuration migrated to `grove.toml` (72d25f7). Additionally, the project references have been updated to reflect the move to the `grovetools` GitHub organization (5a140b3, 8caf95e).
