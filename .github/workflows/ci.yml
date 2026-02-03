@@ -31,7 +31,7 @@ jobs:
           git config --global url."https://${{ secrets.GROVE_PAT }}@github.com/".insteadOf "https://github.com/"
           git config --global user.email "ci@grove.build"
           git config --global user.name "Grove CI"
-          go env -w GOPRIVATE=github.com/mattsolo1/*
+          go env -w GOPRIVATE=github.com/grovetools/*
           go env -w GOPROXY=direct
           
       - name: Update dependencies

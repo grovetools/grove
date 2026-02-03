@@ -72,7 +72,7 @@ func newVersionUseCmd() *cobra.Command {
 		Short: "Switch a tool to a specific version",
 		Long: `Switch a specific tool to an installed version.
 
-This command updates the symlink in ~/.grove/bin for the specified tool.
+This command updates the symlink in ~/.local/share/grove/bin for the specified tool.
 
 Examples:
   grove version use cx@v0.1.0

@@ -43,12 +43,13 @@ ELAPSED=$((SECONDS - START_TIME))
 echo "done (${ELAPSED}s)"
 
 # 2. Bootstrap
-echo -ne "Creating ~/.grove/bin... "
-mkdir -p "$HOME/.grove/bin"
+GROVE_BIN="${XDG_DATA_HOME:-$HOME/.local/share}/grove/bin"
+echo -ne "Creating $GROVE_BIN... "
+mkdir -p "$GROVE_BIN"
 echo "done"
 
-echo -ne "Symlinking grove to ~/.grove/bin... "
-ln -sf "$GROVE_DIR/bin/grove" "$HOME/.grove/bin/grove"
+echo -ne "Symlinking grove to $GROVE_BIN... "
+ln -sf "$GROVE_DIR/bin/grove" "$GROVE_BIN/grove"
 echo "done"
 
 echo -ne "Creating ~/.config/grove/grove.yml... "
@@ -64,18 +65,17 @@ ELAPSED=$((SECONDS - START_TIME))
 echo "Ecosystem build complete (${ELAPSED}s)"
 
 # 4. Link dev binaries (from ecosystem root so all binaries are linked)
-echo -ne "Linking dev binaries to ~/.grove/bin... "
+echo -ne "Linking dev binaries to $GROVE_BIN... "
 "$GROVE_DIR/bin/grove" dev cwd >/dev/null 2>&1 || error "dev cwd failed"
 echo "done"
 
 # Summary
-GROVE_BIN="$HOME/.grove/bin"
 echo ""
 echo -e "${GREEN}Setup complete${NC}"
 
 if [[ ":$PATH:" != *":$GROVE_BIN:"* ]]; then
     echo ""
-    echo -e "${YELLOW}~/.grove/bin is not in your PATH${NC}"
+    echo -e "${YELLOW}$GROVE_BIN is not in your PATH${NC}"
     echo ""
 
     # Detect shell and config file
@@ -89,15 +89,15 @@ if [[ ":$PATH:" != *":$GROVE_BIN:"* ]]; then
             else
                 SHELL_RC="$HOME/.bashrc"
             fi
-            PATH_LINE='export PATH="$HOME/.grove/bin:$PATH"'
+            PATH_LINE='export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/grove/bin:$PATH"'
             ;;
         zsh)
             SHELL_RC="$HOME/.zshrc"
-            PATH_LINE='export PATH="$HOME/.grove/bin:$PATH"'
+            PATH_LINE='export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/grove/bin:$PATH"'
             ;;
         fish)
             SHELL_RC="$HOME/.config/fish/config.fish"
-            PATH_LINE='fish_add_path ~/.grove/bin'
+            PATH_LINE='fish_add_path ~/.local/share/grove/bin'
             ;;
         *)
             SHELL_RC=""
@@ -120,13 +120,13 @@ if [[ ":$PATH:" != *":$GROVE_BIN:"* ]]; then
         else
             echo ""
             echo "To add manually:"
-            echo '  export PATH="$HOME/.grove/bin:$PATH"   # bash/zsh'
-            echo '  fish_add_path ~/.grove/bin             # fish'
+            echo '  export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/grove/bin:$PATH"   # bash/zsh'
+            echo '  fish_add_path ~/.local/share/grove/bin                               # fish'
         fi
     else
         echo "Add to PATH:"
-        echo '  export PATH="$HOME/.grove/bin:$PATH"   # bash/zsh'
-        echo '  fish_add_path ~/.grove/bin             # fish'
+        echo '  export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/grove/bin:$PATH"   # bash/zsh'
+        echo '  fish_add_path ~/.local/share/grove/bin                               # fish'
     fi
 fi
 

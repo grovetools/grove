@@ -2,8 +2,10 @@
 # Grove CLI installer
 set -e
 
-GROVE_REPO="mattsolo1/grove-meta"
-INSTALL_DIR="$HOME/.grove/bin"
+GROVE_REPO="grovetools/grove"
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/grove"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/grove"
+INSTALL_DIR="$DATA_DIR/bin"
 GITHUB_API="https://api.github.com"
 
 # Colors
@@ -54,7 +56,7 @@ main() {
     # Download
     BINARY="grove-$(echo $OS_ARCH | tr '/' '-')"
     TEMP=$(mktemp)
-    mkdir -p "$INSTALL_DIR" "$HOME/.grove"
+    mkdir -p "$INSTALL_DIR" "$STATE_DIR"
 
     echo -ne "Downloading... "
     if [ "$USE_GH" = true ]; then
@@ -69,15 +71,32 @@ main() {
     # Install
     mv "$TEMP" "$INSTALL_DIR/grove"
     chmod +x "$INSTALL_DIR/grove"
-    echo "$VERSION" > "$HOME/.grove/.active_version"
-    echo -e "${GREEN}Installed${NC} to ~/.grove/bin/grove"
+    # Write per-tool active version (matches Go SDK format)
+    if [ -f "$STATE_DIR/active_versions.json" ]; then
+        # Update existing versions file
+        TMP_JSON=$(mktemp)
+        if command -v python3 >/dev/null; then
+            python3 -c "
+import json, sys
+with open('$STATE_DIR/active_versions.json') as f:
+    data = json.load(f)
+data.setdefault('versions', {})['grove'] = '$VERSION'
+json.dump(data, sys.stdout, indent=2)
+" > "$TMP_JSON" && mv "$TMP_JSON" "$STATE_DIR/active_versions.json"
+        else
+            echo '{"versions":{"grove":"'"$VERSION"'"}}' > "$STATE_DIR/active_versions.json"
+        fi
+    else
+        echo '{"versions":{"grove":"'"$VERSION"'"}}' > "$STATE_DIR/active_versions.json"
+    fi
+    echo -e "${GREEN}Installed${NC} to $INSTALL_DIR/grove"
 
     # PATH instructions
     if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
         echo ""
         echo -e "${YELLOW}Add to PATH:${NC}"
-        echo '  export PATH="$HOME/.grove/bin:$PATH"   # bash/zsh'
-        echo '  fish_add_path ~/.grove/bin             # fish'
+        echo '  export PATH="$HOME/.local/share/grove/bin:$PATH"   # bash/zsh'
+        echo '  fish_add_path ~/.local/share/grove/bin             # fish'
     fi
 
     # Next step

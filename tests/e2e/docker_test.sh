@@ -59,7 +59,7 @@ EOF
   chmod 600 ~/.netrc
   
   # Set GOPRIVATE to tell Go these are private modules
-  export GOPRIVATE="github.com/mattsolo1/*"
+  export GOPRIVATE="github.com/grovetools/*"
   
   if ! gh auth status >/dev/null 2>&1; then
     error "gh auth status check failed."
@@ -78,12 +78,12 @@ setup_mocks() {
   export PATH="${MOCK_BIN_DIR}:$PATH"
 
   # Create directory structure for mock web server
-  mkdir -p "$MOCK_API_DIR/repos/mattsolo1"
-  mkdir -p "$MOCK_RELEASES_DIR/mattsolo1"
+  mkdir -p "$MOCK_API_DIR/repos/grovetools"
+  mkdir -p "$MOCK_RELEASES_DIR/grovetools"
   mkdir -p "$MOCK_BIN_DIR"
 
   # Tools to mock
-  TOOLS=("grove-meta" "grove-context" "grove-flow" "grove-notebook")
+  TOOLS=("grove" "grove-context" "grove-flow" "grove-notebook")
 
   # Create mock release assets and API responses for each tool
   for repo in "${TOOLS[@]}"; do
@@ -91,7 +91,7 @@ setup_mocks() {
     
     # Determine binary name based on repo
     case "$repo" in
-      grove-meta)
+      grove)
         binary_name="grove"
         ;;
       grove-context)
@@ -109,12 +109,12 @@ setup_mocks() {
     esac
     
     # Mock release binary
-    release_path="${MOCK_RELEASES_DIR}/mattsolo1/${repo}/releases/download/v0.0.1-test"
+    release_path="${MOCK_RELEASES_DIR}/grovetools/${repo}/releases/download/v0.0.1-test"
     mkdir -p "$release_path"
     
     # Create binaries for both amd64 and arm64 architectures
     for arch in amd64 arm64; do
-      if [ "$repo" == "grove-meta" ]; then
+      if [ "$repo" == "grove" ]; then
         # Use the mock grove binary from the container
         cp "/app/bin/grove" "${release_path}/grove-linux-${arch}"
       else
@@ -136,7 +136,7 @@ EOF
     done
 
     # Mock API response for 'latest' release
-    api_path="${MOCK_API_DIR}/repos/mattsolo1/${repo}/releases"
+    api_path="${MOCK_API_DIR}/repos/grovetools/${repo}/releases"
     mkdir -p "$api_path"
     echo '{"tag_name": "v0.0.1-test"}' > "${api_path}/latest"
   done
@@ -169,9 +169,10 @@ test_installation() {
     # Check if we already have a local build of grove (for testing improvements)
     if [ -f "/app/bin/grove" ]; then
       step "Using pre-built grove binary for testing improvements..."
-      mkdir -p "$HOME/.grove/bin"
-      cp /app/bin/grove "$HOME/.grove/bin/grove"
-      chmod +x "$HOME/.grove/bin/grove"
+      GROVE_DATA="${XDG_DATA_HOME:-$HOME/.local/share}/grove"
+      mkdir -p "$GROVE_DATA/bin"
+      cp /app/bin/grove "$GROVE_DATA/bin/grove"
+      chmod +x "$GROVE_DATA/bin/grove"
     else
       step "Running original install.sh against real GitHub..."
       # The real install.sh is smart and will use the authenticated 'gh' CLI
@@ -197,15 +198,16 @@ test_installation() {
   fi
 
   # Verify installation
+  GROVE_DATA="${XDG_DATA_HOME:-$HOME/.local/share}/grove"
   step "Verifying grove binary installation..."
-  if [ ! -x "$HOME/.grove/bin/grove" ]; then
-    error "grove binary not found at ~/.grove/bin/grove"
+  if [ ! -x "$GROVE_DATA/bin/grove" ]; then
+    error "grove binary not found at $GROVE_DATA/bin/grove"
     exit 1
   fi
 
   # Verify directory structure
   step "Verifying grove directory structure..."
-  for dir in "$HOME/.grove" "$HOME/.grove/bin"; do
+  for dir in "$GROVE_DATA" "$GROVE_DATA/bin"; do
     if [ ! -d "$dir" ]; then
       error "Directory $dir not found"
       exit 1
@@ -213,7 +215,7 @@ test_installation() {
   done
 
   # Add grove to PATH for subsequent tests
-  export PATH="$HOME/.grove/bin:$PATH"
+  export PATH="$GROVE_DATA/bin:$PATH"
 
   # Verify 'grove version' command works
   step "Running 'grove version'..."
@@ -396,7 +398,7 @@ test_dependency_resolution() {
     grove uninstall grove-gemini 2>/dev/null || true
     
     # Remove from all versions to ensure clean state
-    for version_dir in "$HOME/.grove/versions/"*/; do
+    for version_dir in "$GROVE_DATA/versions/"*/; do
       rm -f "$version_dir/bin/flow" 2>/dev/null || true
       rm -f "$version_dir/bin/cx" 2>/dev/null || true  
       rm -f "$version_dir/bin/grove-gemini" 2>/dev/null || true
@@ -577,7 +579,7 @@ test_repository_name_usage() {
     step "Testing dependency resolution with repository name 'grove-flow'..."
     
     # First clean up if flow is already installed
-    rm -rf "$HOME/.grove/versions/"*"/bin/flow" 2>/dev/null || true
+    rm -rf "$GROVE_DATA/versions/"*"/bin/flow" 2>/dev/null || true
     
     grove install grove-flow --use-gh 2>&1 | tee /tmp/repo_deps_install.log || true
     
@@ -609,7 +611,7 @@ test_repository_name_usage() {
 grove alias > /tmp/repo_test_aliases.txt 2>&1
 if grep -q "grove-flow.*flow" /tmp/repo_test_aliases.txt && \
    grep -q "grove-context.*cx" /tmp/repo_test_aliases.txt && \
-   grep -q "grove-meta.*grove" /tmp/repo_test_aliases.txt; then
+   grep -q "grove.*grove" /tmp/repo_test_aliases.txt; then
   echo "✓ Alias listing shows repository names and their aliases"
 else
   echo "✗ Alias listing does not show expected repo names"
@@ -659,7 +661,7 @@ EOF
     
     # This would test something like: grove install grove-flow cx grove-notebook
     # But since we're in mock mode, we just verify the command syntax is accepted
-    if grove install grove-flow cx grove-meta --help 2>&1 | grep -q "Install"; then
+    if grove install grove-flow cx grove --help 2>&1 | grep -q "Install"; then
       step "✓ Can mix repository names and aliases in commands"
     else
       error "Cannot mix repository names and aliases"

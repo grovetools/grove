@@ -23,7 +23,7 @@ For certain high-level tasks, `grove` acts as an aggregator, providing a facade 
 
 1.  **Development Workspace**: If the current directory is within a Git worktree managed by Grove (identified by a `.grove-workspace` file), `grove` will prioritize using binaries built from source within that workspace (e.g., from its local `./bin` directory).
 
-2.  **Global Fallbacks**: If not inside a development workspace, `grove` falls back to the globally managed binaries located in `~/.grove/bin`. This path contains symlinks that are managed by the versioning commands.
+2.  **Global Fallbacks**: If not inside a development workspace, `grove` falls back to the globally managed binaries located in `~/.local/share/grove/bin`. This path contains symlinks that are managed by the versioning commands.
 
 ## Version Management Systems
 
@@ -33,8 +33,8 @@ Grove provides two distinct systems for managing the global set of tools that ar
 
 This system manages stable, released versions of tools downloaded from GitHub.
 
-*   `grove install <tool>` downloads a specific, versioned release and stores it in `~/.grove/versions/`.
-*   `grove version use <tool@version>` activates a specific downloaded version by updating a symlink in `~/.grove/bin`.
+*   `grove install <tool>` downloads a specific, versioned release and stores it in `~/.local/share/grove/versions/`.
+*   `grove version use <tool@version>` activates a specific downloaded version by updating a symlink in `~/.local/share/grove/bin`.
 
 ### Development Versions (`grove dev`)
 

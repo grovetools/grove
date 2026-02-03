@@ -23,8 +23,8 @@ RUN mkdir -p /app/bin && \
       if [ -f /app/dist/grove-linux-arm64 ]; then \
         cp /app/dist/grove-linux-arm64 /app/bin/grove && chmod +x /app/bin/grove; \
         # Also copy to the location where install.sh will place it
-        mkdir -p /root/.grove/bin && \
-        cp /app/dist/grove-linux-arm64 /root/.grove/bin/grove && chmod +x /root/.grove/bin/grove; \
+        mkdir -p /root/.local/share/grove/bin && \
+        cp /app/dist/grove-linux-arm64 /root/.local/share/grove/bin/grove && chmod +x /root/.local/share/grove/bin/grove; \
       else \
         cp /app/tests/e2e/mocks/grove_mock /app/bin/grove && chmod +x /app/bin/grove; \
       fi \
@@ -32,8 +32,8 @@ RUN mkdir -p /app/bin && \
       if [ -f /app/dist/grove-linux-amd64 ]; then \
         cp /app/dist/grove-linux-amd64 /app/bin/grove && chmod +x /app/bin/grove; \
         # Also copy to the location where install.sh will place it
-        mkdir -p /root/.grove/bin && \
-        cp /app/dist/grove-linux-amd64 /root/.grove/bin/grove && chmod +x /root/.grove/bin/grove; \
+        mkdir -p /root/.local/share/grove/bin && \
+        cp /app/dist/grove-linux-amd64 /root/.local/share/grove/bin/grove && chmod +x /root/.local/share/grove/bin/grove; \
       else \
         cp /app/tests/e2e/mocks/grove_mock /app/bin/grove && chmod +x /app/bin/grove; \
       fi \

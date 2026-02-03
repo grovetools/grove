@@ -239,7 +239,7 @@ func TestGenerateSkeleton(t *testing.T) {
 		t.Fatalf("Failed to read go.mod: %v", err)
 	}
 
-	if !strings.Contains(string(goModContent), "module github.com/mattsolo1/grove-skeleton") {
+	if !strings.Contains(string(goModContent), "module github.com/grovetools/grove-skeleton") {
 		t.Error("go.mod does not contain expected module path")
 	}
 

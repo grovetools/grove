@@ -20,15 +20,15 @@ The primary installation method is a script that detects the operating system an
 Run the following command in a terminal:
 
 ```bash
-curl -sSfL https://raw.githubusercontent.com/mattsolo1/grove-meta/main/scripts/install.sh | sh
+curl -sSfL https://raw.githubusercontent.com/grovetools/grove/main/scripts/install.sh | sh
 ```
 
 The script performs the following steps:
 1.  Detects the operating system (macOS or Linux) and architecture (amd64 or arm64).
 2.  Checks for an authenticated GitHub CLI (`gh`). If found, it uses `gh` to download assets. Otherwise, it falls back to `curl`.
-3.  Fetches the latest release from the `mattsolo1/grove-meta` GitHub repository.
+3.  Fetches the latest release from the `grovetools/grove` GitHub repository.
 4.  Downloads the appropriate binary for the system.
-5.  Installs the binary to `~/.grove/bin/grove` and makes it executable.
+5.  Installs the binary to `~/.local/share/grove/bin/grove` and makes it executable.
 
 ## Post-Installation Setup
 
@@ -39,7 +39,7 @@ After installation, add the Grove bin directory to the shell's `PATH` environmen
 Add the following line to the shell's configuration file (e.g., `~/.zshrc`, `~/.bashrc`, or `~/.profile`):
 
 ```bash
-export PATH="$HOME/.grove/bin:$PATH"
+export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/grove/bin:$PATH"
 ```
 
 #### 2. Apply Changes

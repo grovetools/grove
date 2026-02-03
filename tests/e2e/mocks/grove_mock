@@ -13,9 +13,10 @@ case "$1" in
     ;;
   list)
     # Show installed tools
-    if [ -d "$HOME/.grove/bin" ]; then
+    GROVE_DATA="${XDG_DATA_HOME:-$HOME/.local/share}/grove"
+    if [ -d "$GROVE_DATA/bin" ]; then
       echo "Installed Grove tools:"
-      for tool in $HOME/.grove/bin/*; do
+      for tool in $GROVE_DATA/bin/*; do
         if [ -f "$tool" ] && [ "$(basename "$tool")" != "grove" ]; then
           echo "  $(basename "$tool")"
         fi
@@ -25,7 +26,8 @@ case "$1" in
   install)
     shift
     # Mock install command
-    mkdir -p "$HOME/.grove/versions/v0.0.1-test/bin"
+    GROVE_DATA="${XDG_DATA_HOME:-$HOME/.local/share}/grove"
+    mkdir -p "$GROVE_DATA/versions/v0.0.1-test/bin"
     for tool in "$@"; do
       echo "Installing $tool..."
       case "$tool" in
@@ -36,18 +38,18 @@ case "$1" in
           [ "$tool" = "nb" ] && tool_repo="grove-notebook"
           
           arch=$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')
-          src="/tmp/web/releases/mattsolo1/${tool_repo}/releases/download/v0.0.1-test/${tool}-linux-${arch}"
-          
+          src="/tmp/web/releases/grovetools/${tool_repo}/releases/download/v0.0.1-test/${tool}-linux-${arch}"
+
           if [ -f "$src" ]; then
-            cp "$src" "$HOME/.grove/versions/v0.0.1-test/bin/${tool}"
+            cp "$src" "$GROVE_DATA/versions/v0.0.1-test/bin/${tool}"
           else
-            echo "#!/bin/bash" > "$HOME/.grove/versions/v0.0.1-test/bin/${tool}"
-            echo "echo 'Mock $tool v0.0.1-test'" >> "$HOME/.grove/versions/v0.0.1-test/bin/${tool}"
+            echo "#!/bin/bash" > "$GROVE_DATA/versions/v0.0.1-test/bin/${tool}"
+            echo "echo 'Mock $tool v0.0.1-test'" >> "$GROVE_DATA/versions/v0.0.1-test/bin/${tool}"
           fi
-          chmod +x "$HOME/.grove/versions/v0.0.1-test/bin/${tool}"
-          
+          chmod +x "$GROVE_DATA/versions/v0.0.1-test/bin/${tool}"
+
           # Create symlink
-          ln -sf "../versions/v0.0.1-test/bin/${tool}" "$HOME/.grove/bin/${tool}"
+          ln -sf "../versions/v0.0.1-test/bin/${tool}" "$GROVE_DATA/bin/${tool}"
           echo "✓ Installed $tool v0.0.1-test"
           ;;
         *)

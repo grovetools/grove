@@ -726,19 +726,19 @@ func (m *setupModel) setupTmuxBindings() {
 set -g popup-border-lines none
 
 # --- Grove Flow Plan Status ---
-bind-key -n C-p run-shell "PATH=$PATH:$HOME/.grove/bin flow tmux status"
+bind-key -n C-p run-shell "PATH=$PATH:$HOME/.local/share/grove/bin flow tmux status"
 
 # --- Gmux Session Switcher ---
-bind-key -n C-f display-popup -w 100% -h 98% -x C -y C -E "HOME=$HOME PATH=$PATH:$HOME/.grove/bin gmux sz"
+bind-key -n C-f display-popup -w 100% -h 98% -x C -y C -E "HOME=$HOME PATH=$PATH:$HOME/.local/share/grove/bin gmux sz"
 
 # --- Context (cx) View ---
-bind-key -n M-v display-popup -w 100% -h 98% -x C -y C -E "PATH=$PATH:$HOME/.grove/bin cx view"
+bind-key -n M-v display-popup -w 100% -h 98% -x C -y C -E "PATH=$PATH:$HOME/.local/share/grove/bin cx view"
 
 # --- NB (Notes) TUI ---
-bind-key -n C-n run-shell "PATH=$PATH:$HOME/.grove/bin nb tmux tui"
+bind-key -n C-n run-shell "PATH=$PATH:$HOME/.local/share/grove/bin nb tmux tui"
 
 # --- Core Editor ---
-bind-key -n C-e run-shell "PATH=$PATH:$HOME/.grove/bin core tmux editor"
+bind-key -n C-e run-shell "PATH=$PATH:$HOME/.local/share/grove/bin core tmux editor"
 `
 	m.service.WriteFile("~/.config/tmux/popups.conf", []byte(popupsContent), 0644)
 
@@ -1396,19 +1396,19 @@ Add projects to this directory and they will be automatically discovered by Grov
 set -g popup-border-lines none
 
 # --- Grove Flow Plan Status ---
-bind-key -n C-p run-shell "PATH=$PATH:$HOME/.grove/bin flow tmux status"
+bind-key -n C-p run-shell "PATH=$PATH:$HOME/.local/share/grove/bin flow tmux status"
 
 # --- Gmux Session Switcher ---
-bind-key -n C-f display-popup -w 100% -h 98% -x C -y C -E "HOME=$HOME PATH=$PATH:$HOME/.grove/bin gmux sz"
+bind-key -n C-f display-popup -w 100% -h 98% -x C -y C -E "HOME=$HOME PATH=$PATH:$HOME/.local/share/grove/bin gmux sz"
 
 # --- Context (cx) View ---
-bind-key -n M-v display-popup -w 100% -h 98% -x C -y C -E "PATH=$PATH:$HOME/.grove/bin cx view"
+bind-key -n M-v display-popup -w 100% -h 98% -x C -y C -E "PATH=$PATH:$HOME/.local/share/grove/bin cx view"
 
 # --- NB (Notes) TUI ---
-bind-key -n C-n run-shell "PATH=$PATH:$HOME/.grove/bin nb tmux tui"
+bind-key -n C-n run-shell "PATH=$PATH:$HOME/.local/share/grove/bin nb tmux tui"
 
 # --- Core Editor ---
-bind-key -n C-e run-shell "PATH=$PATH:$HOME/.grove/bin core tmux editor"
+bind-key -n C-e run-shell "PATH=$PATH:$HOME/.local/share/grove/bin core tmux editor"
 `
 		service.WriteFile("~/.config/tmux/popups.conf", []byte(popupsContent), 0644)
 

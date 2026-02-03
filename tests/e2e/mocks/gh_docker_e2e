@@ -49,7 +49,7 @@ case "$COMMAND" in
           esac
         done
         
-        # Extract repo name like 'grove-meta' from 'mattsolo1/grove-meta'
+        # Extract repo name like 'grove' from 'grovetools/grove'
         REPO_NAME=$(basename "$REPO")
 
         if [[ "$JSON_FIELDS" == *"assets"* ]]; then
@@ -57,7 +57,7 @@ case "$COMMAND" in
             # Map repo names to binary names
             BINARY_NAME="$REPO_NAME"
             case "$REPO_NAME" in
-              grove-meta)
+              grove)
                 BINARY_NAME="grove"
                 ;;
               grove-context)
@@ -133,7 +133,7 @@ EOF
         
         # Map repo to binary name
         case "$REPO_NAME" in
-          grove-meta)
+          grove)
             BINARY_BASE="grove"
             ;;
           grove-context)

@@ -132,7 +132,7 @@ grove list
 **Syntax**: `grove alias [subcommand]`
 
 **Description**:
-Manages custom aliases for Grove tools, which can resolve PATH conflicts or suit personal preferences. When an alias is set, the tool's binary/symlink in `~/.grove/bin` is renamed.
+Manages custom aliases for Grove tools, which can resolve PATH conflicts or suit personal preferences. When an alias is set, the tool's binary/symlink in `~/.local/share/grove/bin` is renamed.
 
 **Subcommands**:
 -   `set <tool> <new-alias>`: Sets a custom alias for a tool.
@@ -327,7 +327,7 @@ Provides tools for managing Go module dependencies across all Grove submodules w
 grove deps sync --commit
 
 # Bump a specific core library to a specific version
-grove deps bump github.com/mattsolo1/grove-core@v0.3.0
+grove deps bump github.com/grovetools/core@v0.3.0
 
 # View the entire dependency graph
 grove deps tree

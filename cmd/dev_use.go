@@ -19,7 +19,7 @@ func newDevUseCmd() *cobra.Command {
 	cmd := cli.NewStandardCommand("use", "Switch to a specific version of a binary")
 
 	cmd.Long = `Activates a specific locally-linked version of a Grove binary.
-This will update the symlink in ~/.grove/bin to point to the selected version.
+This will update the symlink in ~/.local/share/grove/bin to point to the selected version.
 
 With the --release flag, switches the binary back to the currently active released version.`
 
