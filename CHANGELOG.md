@@ -1,3 +1,107 @@
+## v0.6.0 (2026-02-02)
+
+The `grove` CLI tool now adheres to the XDG Base Directory specification for configuration, data, and state files (d38db8c, 5e67869), moving away from hardcoded paths. Configuration support has been expanded to include TOML files alongside YAML (3e721c9, 500bba3), with the internal configuration migrated to `grove.toml` (72d25f7). Additionally, the project references have been updated to reflect the move to the `grovetools` GitHub organization (5a140b3, 8caf95e).
+
+### Features
+- Add configuration and README updates (83cf330)
+- Update README and overview documentation (1219284, 9642442)
+
+### Refactor
+- Migrate to XDG-compliant paths package for config, data, and state (d38db8c)
+- Update GitHub owner and import paths to grovetools (5a140b3)
+- Use core config discovery to support TOML configuration files (3e721c9)
+- Update registry generator to use core config discovery (500bba3)
+- Update docgen title to match package name (11ce8b2)
+
+### Fixes
+- Use XDG paths for reconciler and tool delegation (5e67869)
+- Update setup-dev.sh to use correct directory name (e2b8cab)
+- Update registry generator to use core config discovery (4a2859c)
+- Make LLM delegation log debug-level to avoid stdout pollution (c208410)
+- Update VERSION_PKG to grovetools/core path for correct version injection (a49ea97)
+- Reorganize introduction text (77c29cf)
+
+### Documentation
+- Add concept lookup instructions to CLAUDE.md (6f4af52)
+- Add MIT License (a007ad7)
+
+### Chores
+- Migrate grove.yml to grove.toml (72d25f7)
+- Update go.mod for grovetools migration (8caf95e)
+- Move docs.rules to .cx/ directory (3eca1d8)
+- Remove docgen files from repo (7dd33e8)
+- Move README template to notebook (270b745)
+- Restore release workflow (b077fa0)
+
+### File Changes
+```
+ .cx/docs.rules                           |   5 ++
+ .github/workflows/release.yml            |  73 ++++---------------
+ CLAUDE.md                                |  15 +++-
+ LICENSE                                  |  21 ++++++
+ Makefile                                 |   2 +-
+ README.md                                |  62 ++++------------
+ cmd/add_repo.go                          |  10 +--
+ cmd/bootstrap.go                         |  24 +++---
+ cmd/deps.go                              |  18 ++---
+ cmd/dev_current.go                       |   3 +-
+ cmd/dev_link.go                          |  10 +--
+ cmd/dev_prune.go                         |   2 +-
+ cmd/dev_use.go                           |   5 +-
+ cmd/ecosystem.go                         |   2 +-
+ cmd/ecosystem_import.go                  |   4 +-
+ cmd/ecosystem_list.go                    |   7 +-
+ cmd/install_cmd.go                       |  15 ++--
+ cmd/list_cmd.go                          |   9 ++-
+ cmd/llm.go                               |  10 +--
+ cmd/release.go                           |  10 +--
+ cmd/release_changelog_llm.go             |  34 ++++-----
+ cmd/release_subcommands.go               |   9 +--
+ cmd/release_tui.go                       |   2 +-
+ cmd/repo_add.go                          |   8 +-
+ cmd/root.go                              |   8 +-
+ cmd/schema.go                            |  61 +++++-----------
+ cmd/setup.go                             |  13 +++-
+ cmd/version_cmd.go                       |   7 +-
+ docs/00-introduction.md                  |  21 ------
+ docs/01-overview.md                      |  62 ++++------------
+ docs/06-command-reference.md             |   2 +-
+ docs/README.md.tpl                       |   6 --
+ docs/docgen.config.yml                   |  54 --------------
+ docs/docs.rules                          |   1 -
+ go.mod                                   |   9 ++-
+ go.sum                                   |  41 ++++++++++-
+ grove.toml                               |  14 ++++
+ grove.yml                                |  14 ----
+ llm.schema.json                          |   2 +-
+ pkg/delegation/config.go                 |  13 ++--
+ pkg/depsgraph/builder.go                 |  19 +++--
+ pkg/devlinks/registry.go                 |  26 ++-----
+ pkg/docs/docs.json                       |  63 +---------------
+ pkg/project/go_handler.go                |  12 +--
+ pkg/project/template_handler.go          |   9 +--
+ pkg/reconciler/reconciler.go             |   5 +-
+ pkg/release/plan.go                      |  32 ++++----
+ pkg/release/wait.go                      |   2 +-
+ pkg/repository/creator.go                |  72 +++++++++---------
+ pkg/repository/ecosystem.go              |  11 ++-
+ pkg/sdk/manager.go                       |  87 +++++++++-------------
+ pkg/sdk/versions.go                      |  42 ++++++++---
+ pkg/setup/service.go                     |  23 ++----
+ pkg/templates/manager.go                 |   2 +-
+ pkg/workspace/local_binary.go            | 121 +++++++++++++++++--------------
+ scripts/setup-dev.sh                     |  24 +++---
+ tests/e2e/docker_test.sh                 |   8 +-
+ tests/e2e/mocks/{gemapi => grove-gemini} |  18 ++---
+ tests/mocks.go                           |  20 ++---
+ tests/scenarios_changelog_dirty.go       |   8 +-
+ tests/scenarios_llm_changelog.go         |  29 ++++----
+ tests/scenarios_release_refactor.go      |   6 +-
+ tests/scenarios_repo.go                  |   2 +-
+ tools/registry-generator/main.go         |  70 ++++++++++--------
+ 64 files changed, 598 insertions(+), 801 deletions(-)
+```
+
 ## v0.5.1-nightly.19d8276 (2025-10-03)
 
 ## v0.5.0 (2025-10-01)
