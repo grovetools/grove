@@ -46,10 +46,10 @@ github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f/go.mod h1:vw97
 github.com/gdamore/encoding v0.0.0-20151215212835-b23993cbb635/go.mod h1:yrQYJKKDTrHmbYxI7CYi+/hbdiDT2m4Hj+t0ikCjsrQ=
 github.com/gdamore/tcell v1.0.1-0.20180608172421-b3cebc399d6f/go.mod h1:tqyG50u7+Ctv1w5VX67kLzKcj9YXR/JSBZQq/+mLl1A=
 github.com/gopherjs/gopherjs v0.0.0-20181017120253-0766667cb4d1/go.mod h1:wJfORRmW1u3UXTncJ5qlYoELFm8eSnnEO6hX4iZ3EWY=
-github.com/grovetools/core v0.0.1 h1:o3h/EQBCBA7kk3xGI9On6KaDm5KwhPvC1eVP/OBg/EE=
-github.com/grovetools/core v0.0.1/go.mod h1:be/Q4hF6XpD8PVHkk6jTjiPHUKbWzKxNzkPBCAc40oE=
-github.com/grovetools/tend v0.0.1 h1:KVeX1L1OW4h8naZAdx9eapj1/p9/83Eo9EzTp5Tg62k=
-github.com/grovetools/tend v0.0.1/go.mod h1:02yOrDK/NTYtMvyBhuCjQAm8V5tNd1T+tkdYuVg0H68=
+github.com/grovetools/core v0.6.1 h1:UtvCCHweLlHae9n6YtvgQP9oziPO23pagEhGCGqtgmw=
+github.com/grovetools/core v0.6.1/go.mod h1:RDFAOmjoEbh9ygGpmZU1oAK9YeU1psek3GIFxIB30fA=
+github.com/grovetools/tend v0.6.0 h1:LGz8CK3pPQC5RLw7BIaQcqHU66UqAYte39Ojlxo2GCk=
+github.com/grovetools/tend v0.6.0/go.mod h1:o36W0Kgx7ZmLUuutLH9afqgnaWahjXlV4rIVet2Adoc=
 github.com/hinshun/vt10x v0.0.0-20180809195222-d55458df857c/go.mod h1:DqJ97dSdRW1W22yXSB90986pcOyQ7r45iio1KN2ez1A=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
