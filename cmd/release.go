@@ -37,6 +37,8 @@ var (
 	releaseMajor          []string
 	releaseMinor          []string
 	releasePatch          []string
+	releaseVersions       []string // Explicit version settings like "repo=v1.2.3"
+	releaseVersionAll     string   // Set all repos to this version
 	releaseYes            bool
 	releaseSkipParent     bool
 	releaseWithDeps       bool
@@ -682,6 +684,31 @@ func calculateNextVersions(ctx context.Context, rootDir string, workspaces []str
 		bumpTypes[repo] = "patch"
 	}
 
+	// Parse explicit version settings (format: repo=v1.2.3)
+	explicitVersions := make(map[string]string)
+	for _, v := range releaseVersions {
+		parts := strings.SplitN(v, "=", 2)
+		if len(parts) == 2 {
+			repo := strings.TrimSpace(parts[0])
+			version := strings.TrimSpace(parts[1])
+			// Ensure version starts with 'v'
+			if !strings.HasPrefix(version, "v") {
+				version = "v" + version
+			}
+			explicitVersions[repo] = version
+			logger.WithFields(logrus.Fields{"repo": repo, "version": version}).Info("Using explicit version")
+		}
+	}
+
+	// If --version-all is set, it will be applied to all repos in the loop below
+	if releaseVersionAll != "" {
+		// Ensure version starts with 'v'
+		if !strings.HasPrefix(releaseVersionAll, "v") {
+			releaseVersionAll = "v" + releaseVersionAll
+		}
+		logger.WithField("version", releaseVersionAll).Info("Using --version-all for all repositories")
+	}
+
 	// Process each workspace
 	for _, wsPath := range workspaces {
 		repoName := filepath.Base(wsPath)
@@ -744,7 +771,10 @@ func calculateNextVersions(ctx context.Context, rootDir string, workspaces []str
 
 			commitCountStr := strings.TrimSpace(string(countOutput))
 			commitCount, _ := strconv.Atoi(commitCountStr)
-			if commitCount == 0 && !releaseForceIncrement {
+			// Check if there's an explicit version set for this repo (either --version or --version-all)
+			_, hasExplicitVersion := explicitVersions[repoName]
+			hasVersionOverride := hasExplicitVersion || releaseVersionAll != ""
+			if commitCount == 0 && !releaseForceIncrement && !hasVersionOverride {
 				// Check if current commit already has the tag
 				tagCheckCmd, err := cmdBuilder.Build(ctx, "git", "describe", "--exact-match", "--tags", "HEAD")
 				if err != nil {
@@ -763,8 +793,12 @@ func calculateNextVersions(ctx context.Context, rootDir string, workspaces []str
 				}
 			}
 
-			// Either there are new commits, or force increment is enabled
+			// Either there are new commits, force increment is enabled, or explicit version is set
 			commitsSinceTag[repoName] = commitCount
+			// If explicit version is set, ensure at least 1 commit is marked so repo is included
+			if hasVersionOverride && commitCount == 0 {
+				commitsSinceTag[repoName] = 1
+			}
 		}
 
 		if isRC {
@@ -805,24 +839,34 @@ func calculateNextVersions(ctx context.Context, rootDir string, workspaces []str
 			}
 			versions[repoName] = "v" + finalVersion.String()
 		} else {
-			// Determine bump type (default to patch)
-			bumpType, ok := bumpTypes[repoName]
-			if !ok {
-				bumpType = "patch"
-			}
+			// Check for explicit version first (--version repo=vX.Y.Z takes precedence)
+			if explicitVer, hasExplicit := explicitVersions[repoName]; hasExplicit {
+				versions[repoName] = explicitVer
+				logger.WithFields(logrus.Fields{"repo": repoName, "version": explicitVer}).Info("Using explicit version override")
+			} else if releaseVersionAll != "" {
+				// Use --version-all if set
+				versions[repoName] = releaseVersionAll
+				logger.WithFields(logrus.Fields{"repo": repoName, "version": releaseVersionAll}).Info("Using --version-all override")
+			} else {
+				// Determine bump type (default to patch)
+				bumpType, ok := bumpTypes[repoName]
+				if !ok {
+					bumpType = "patch"
+				}
 
-			// Calculate new version
-			var newVersion semver.Version
-			switch bumpType {
-			case "major":
-				newVersion = currentVersion.IncMajor()
-			case "minor":
-				newVersion = currentVersion.IncMinor()
-			case "patch":
-				newVersion = currentVersion.IncPatch()
-			}
+				// Calculate new version
+				var newVersion semver.Version
+				switch bumpType {
+				case "major":
+					newVersion = currentVersion.IncMajor()
+				case "minor":
+					newVersion = currentVersion.IncMinor()
+				case "patch":
+					newVersion = currentVersion.IncPatch()
+				}
 
-			versions[repoName] = "v" + newVersion.String()
+				versions[repoName] = "v" + newVersion.String()
+			}
 		}
 	}
 
@@ -2181,7 +2225,7 @@ func checkForOutdatedDependencies(ctx context.Context, rootDir string, workspace
 				fmt.Printf("    %s %s: %s\n", theme.IconBullet, depName, versions)
 			}
 		}
-		fmt.Printf("\n%s Consider running `grove deps sync --commit --push` before releasing\n\n", theme.IconLightbulb)
+		fmt.Printf("\n%s Dependencies will be automatically updated during release\n\n", theme.IconLightbulb)
 	}
 
 	return nil

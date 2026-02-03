@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/logging"
 	tablecomponent "github.com/grovetools/core/tui/components/table"
 	"github.com/grovetools/core/tui/components/help"
@@ -193,13 +194,16 @@ type releaseTuiModel struct {
 	generating    bool          // Whether changelog generation is in progress
 	genProgress   string        // Progress message for generation
 	spinner       int           // Spinner animation frame
-	genQueue      []string      // Queue of repos to generate changelogs for
-	genCurrent    string        // Current repo being generated
+	genQueue      []string      // Queue of repos being generated (tracks pending)
+	genCurrent    string        // Current repo being generated (for single mode display)
 	genCompleted  int           // Number of completed generations
+	genTotal      int           // Total number of repos being generated (for parallel mode)
 	dryRun        bool          // Whether to run in dry-run mode
 	shouldApply   bool          // Flag to indicate we should exit and apply
 	push          bool          // Whether to push to remote
 	settingsIndex int           // Currently selected setting in settings view
+	llmModel      string        // LLM model being used for changelog generation
+	cxRulesPath   string        // Path to cx rules being used
 }
 
 func initialReleaseModel(plan *release.ReleasePlan) releaseTuiModel {
@@ -221,6 +225,35 @@ func initialReleaseModel(plan *release.ReleasePlan) releaseTuiModel {
 		repoNames = sortedNames
 	}
 
+	// Determine LLM model from config
+	llmModel := "gemini-1.5-flash-latest" // Default
+	if cfg, err := config.Load(filepath.Join(plan.RootDir, "grove.yml")); err == nil {
+		var llmCfg struct {
+			DefaultModel string `yaml:"default_model"`
+		}
+		if err := cfg.UnmarshalExtension("llm", &llmCfg); err == nil && llmCfg.DefaultModel != "" {
+			llmModel = llmCfg.DefaultModel
+		}
+	}
+
+	// Look for cx rules path (check first repo with .grove/rules or .cx/docs.rules)
+	cxRulesPath := ""
+	for _, repoName := range repoNames {
+		rulesPath := filepath.Join(plan.RootDir, repoName, ".grove", "rules")
+		if _, err := os.Stat(rulesPath); err == nil {
+			cxRulesPath = ".grove/rules"
+			break
+		}
+		cxPath := filepath.Join(plan.RootDir, repoName, ".cx", "docs.rules")
+		if _, err := os.Stat(cxPath); err == nil {
+			cxRulesPath = ".cx/docs.rules"
+			break
+		}
+	}
+	if cxRulesPath == "" {
+		cxRulesPath = "(none)"
+	}
+
 	return releaseTuiModel{
 		plan:        plan,
 		keys:        releaseKeys,
@@ -229,6 +262,8 @@ func initialReleaseModel(plan *release.ReleasePlan) releaseTuiModel {
 		viewport:    viewport.New(80, 20),
 		help:        help.New(releaseKeys),
 		dryRun:      true, // Start in dry-run mode for safety
+		llmModel:    llmModel,
+		cxRulesPath: cxRulesPath,
 	}
 }
 
@@ -285,7 +320,7 @@ func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		
 		// Check if we have more in the queue
 		if len(m.genQueue) > 0 {
-			// Remove completed repo from queue
+			// Remove completed repo from queue (parallel mode - all already running)
 			for i, name := range m.genQueue {
 				if name == msg.repoName {
 					m.genQueue = append(m.genQueue[:i], m.genQueue[i+1:]...)
@@ -293,16 +328,10 @@ func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					break
 				}
 			}
-			
-			// Process next in queue
+
+			// Update progress (parallel mode - just track completion)
 			if len(m.genQueue) > 0 {
-				m.genCurrent = m.genQueue[0]
-				total := m.genCompleted + len(m.genQueue)
-				m.genProgress = fmt.Sprintf("Generating changelog for %s (%d/%d)", m.genCurrent, m.genCompleted+1, total)
-				
-				if repo, ok := m.plan.Repos[m.genCurrent]; ok {
-					return m, generateChangelogCmd(m.plan.RootDir, m.genCurrent, repo)
-				}
+				m.genProgress = fmt.Sprintf("Generating changelogs... (%d/%d completed)", m.genCompleted, m.genTotal)
 			} else {
 				// All done
 				m.generating = false
@@ -310,10 +339,12 @@ func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.genQueue = nil
 				m.genCurrent = ""
 				m.genCompleted = 0
+				m.genTotal = 0
 				return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 					return clearProgressMsg{}
 				})
 			}
+			return m, nil
 		} else {
 			// Single generation mode
 			m.generating = false
@@ -820,21 +851,24 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
-			
+
 			if len(queue) > 0 {
 				m.generating = true
 				m.genQueue = queue
+				m.genTotal = len(queue)
 				m.genCompleted = 0
-				m.genCurrent = queue[0]
-				m.genProgress = fmt.Sprintf("Generating changelog for %s (%d/%d)", m.genCurrent, 1, len(queue))
-				
-				// Start generating the first one
-				if repo, ok := m.plan.Repos[m.genCurrent]; ok {
-					return m, tea.Batch(
-						generateChangelogCmd(m.plan.RootDir, m.genCurrent, repo),
-						tickSpinner(),
-					)
+				m.genCurrent = ""
+				m.genProgress = fmt.Sprintf("Generating changelogs for %d repositories in parallel...", len(queue))
+
+				// Launch ALL changelog generations in parallel
+				var cmds []tea.Cmd
+				cmds = append(cmds, tickSpinner())
+				for _, repoName := range queue {
+					if repo, ok := m.plan.Repos[repoName]; ok {
+						cmds = append(cmds, generateChangelogCmd(m.plan.RootDir, repoName, repo))
+					}
 				}
+				return m, tea.Batch(cmds...)
 			} else {
 				m.genProgress = "No repositories selected or need changes"
 				return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
@@ -1000,6 +1034,9 @@ func (m releaseTuiModel) viewTable() string {
 		headerText += " [" + strings.Join(modes, " | ") + "]"
 	}
 	header := theme.DefaultTheme.Header.Render(headerText)
+
+	// LLM info line
+	llmInfo := theme.DefaultTheme.Muted.Render(fmt.Sprintf("  LLM: %s  |  Rules: %s", m.llmModel, m.cxRulesPath))
 
 	// Create table
 	t := tablecomponent.NewStyledTable().
@@ -1279,7 +1316,7 @@ func (m releaseTuiModel) viewTable() string {
 	m.viewport.SetContent(fullContent)
 
 	// Create content with margin
-	content := fmt.Sprintf("%s\n\n%s\n\n%s", header, m.viewport.View(), footer)
+	content := fmt.Sprintf("%s\n%s\n\n%s\n\n%s", header, llmInfo, m.viewport.View(), footer)
 
 	// Apply margin around the entire TUI
 	marginStyle := lipgloss.NewStyle().

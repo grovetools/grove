@@ -81,13 +81,15 @@ and documentation updates.`,
 	}
 	
 	cmd.Flags().BoolVar(&isRC, "rc", false, "Generate a Release Candidate plan (skip docs/changelogs)")
-	
+
 	// Add the same repo selection flags as main release command
 	cmd.Flags().StringSliceVar(&releaseRepos, "repos", []string{}, "Only release specified repositories")
 	cmd.Flags().BoolVar(&releaseWithDeps, "with-deps", false, "Include all dependencies of specified repositories")
 	cmd.Flags().StringSliceVar(&releaseMajor, "major", []string{}, "Repositories to receive major version bump")
 	cmd.Flags().StringSliceVar(&releaseMinor, "minor", []string{}, "Repositories to receive minor version bump")
 	cmd.Flags().StringSliceVar(&releasePatch, "patch", []string{}, "Repositories to receive patch version bump")
+	cmd.Flags().StringSliceVar(&releaseVersions, "version", []string{}, "Set explicit version for repositories (format: repo=v1.2.3)")
+	cmd.Flags().StringVar(&releaseVersionAll, "version-all", "", "Set all repositories to this version (e.g., v0.6.0)")
 	cmd.Flags().BoolVar(&releaseLLMChangelog, "llm-changelog", false, "Generate changelog using an LLM")
 	
 	return cmd
