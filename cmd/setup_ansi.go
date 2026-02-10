@@ -25,6 +25,17 @@ func renderGmuxView(ecosystemName string, projectName string, isNew bool, width 
 		paddedEcoName = paddedEcoName[:14]
 	}
 
+	// Calculate available space
+	// Full table needs ~96 chars
+	// Compact table (no path) needs ~58 chars
+	useCompact := width < 100
+	useMinimal := width < 60
+
+	if useMinimal {
+		// Just a simple list for very narrow screens
+		return renderMinimalGmuxView(ecoName, projectName)
+	}
+
 	// Captured from real gmux sz output - using \x1b for escape character
 	// Shows a minimal ecosystem with sample projects
 	var template string
@@ -34,6 +45,22 @@ func renderGmuxView(ecosystemName string, projectName string, isNew bool, width 
 		paddedProjectName := fmt.Sprintf("%-12s", projectName)
 		if len(paddedProjectName) > 12 {
 			paddedProjectName = paddedProjectName[:12]
+		}
+
+		if useCompact {
+			template = "\x1b[1m\x1b[36m[Focus: %s]\x1b[0m > \x1b[38;5;240mPress / to filter...\x1b[39m\n" +
+				"\n" +
+				"  \x1b[90m╭──────────────────┬──────────┬─────────┬───────────────╮\x1b[39m\n" +
+				"  \x1b[90m│\x1b[39m \x1b[1mWORKSPACE\x1b[0m        \x1b[90m│\x1b[39m \x1b[1m BRANCH\x1b[0m \x1b[90m│\x1b[39m \x1b[1m󰊢 GIT\x1b[0m   \x1b[90m│\x1b[39m \x1b[1m󰊢 CHANGES\x1b[0m     \x1b[90m│\x1b[39m\n" +
+				"  \x1b[90m├──────────────────┼──────────┼─────────┼───────────────┤\x1b[39m\n" +
+				"  \x1b[90m│\x1b[39m \x1b[1m\x1b[36m\x1b[0m%s \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[32m*\x1b[0m       \x1b[90m│\x1b[39m -             \x1b[90m│\x1b[39m\n" +
+				"  \x1b[90m│\x1b[39m ├─ \x1b[2m\x1b[0mgrove-core   \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[36m↑1\x1b[0m      \x1b[90m│\x1b[39m -             \x1b[90m│\x1b[39m\n" +
+				"  \x1b[90m│\x1b[39m ├─ \x1b[2m\x1b[0mgrove-flow   \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[33mx\x1b[0m \x1b[1m\x1b[36m↑2\x1b[0m    \x1b[90m│\x1b[39m \x1b[1m\x1b[33mM:1\x1b[0m \x1b[1m\x1b[32m+6\x1b[0m \x1b[1m\x1b[31m-2\x1b[0m    \x1b[90m│\x1b[39m\n" +
+				"  \x1b[90m│\x1b[39m └─ \x1b[1m\x1b[32m\x1b[0m%s \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[32m(new)\x1b[0m   \x1b[90m│\x1b[39m -             \x1b[90m│\x1b[39m\n" +
+				"  \x1b[90m╰──────────────────┴──────────┴─────────┴───────────────╯\x1b[39m\n" +
+				"  \x1b[2mIcons: \x1b[1m\x1b[36m\x1b[0m current • \x1b[1m\x1b[93m\x1b[0m active\x1b[0m"
+
+			return fmt.Sprintf(template, ecoName, paddedEcoName, paddedProjectName)
 		}
 
 		template = "\x1b[1m\x1b[36m[Focus: %s]\x1b[0m > \x1b[38;5;240mPress / to filter...\x1b[39m\n" +
@@ -52,6 +79,22 @@ func renderGmuxView(ecosystemName string, projectName string, isNew bool, width 
 	}
 
 	// Template without new project
+	if useCompact {
+		template = "\x1b[1m\x1b[36m[Focus: %s]\x1b[0m > \x1b[38;5;240mPress / to filter...\x1b[39m\n" +
+			"\n" +
+			"  \x1b[90m╭──────────────────┬──────────┬─────────┬───────────────╮\x1b[39m\n" +
+			"  \x1b[90m│\x1b[39m \x1b[1mWORKSPACE\x1b[0m        \x1b[90m│\x1b[39m \x1b[1m BRANCH\x1b[0m \x1b[90m│\x1b[39m \x1b[1m󰊢 GIT\x1b[0m   \x1b[90m│\x1b[39m \x1b[1m󰊢 CHANGES\x1b[0m     \x1b[90m│\x1b[39m\n" +
+			"  \x1b[90m├──────────────────┼──────────┼─────────┼───────────────┤\x1b[39m\n" +
+			"  \x1b[90m│\x1b[39m \x1b[1m\x1b[36m\x1b[0m%s \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[32m*\x1b[0m       \x1b[90m│\x1b[39m -             \x1b[90m│\x1b[39m\n" +
+			"  \x1b[90m│\x1b[39m ├─ \x1b[2m\x1b[0mgrove-core   \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[36m↑1\x1b[0m      \x1b[90m│\x1b[39m -             \x1b[90m│\x1b[39m\n" +
+			"  \x1b[90m│\x1b[39m ├─ \x1b[2m\x1b[0mgrove-flow   \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[33mx\x1b[0m \x1b[1m\x1b[36m↑2\x1b[0m    \x1b[90m│\x1b[39m \x1b[1m\x1b[33mM:1\x1b[0m \x1b[1m\x1b[32m+6\x1b[0m \x1b[1m\x1b[31m-2\x1b[0m    \x1b[90m│\x1b[39m\n" +
+			"  \x1b[90m│\x1b[39m └─ \x1b[2m\x1b[0mapi-server   \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[32m*\x1b[0m       \x1b[90m│\x1b[39m \x1b[1m\x1b[32m+21\x1b[0m \x1b[1m\x1b[31m-5\x1b[0m       \x1b[90m│\x1b[39m\n" +
+			"  \x1b[90m╰──────────────────┴──────────┴─────────┴───────────────╯\x1b[39m\n" +
+			"  \x1b[2mIcons: \x1b[1m\x1b[36m\x1b[0m current • \x1b[1m\x1b[93m\x1b[0m active\x1b[0m"
+
+		return fmt.Sprintf(template, ecoName, paddedEcoName)
+	}
+
 	template = "\x1b[1m\x1b[36m[Focus: %s]\x1b[0m > \x1b[38;5;240mPress / to filter...\x1b[39m\n" +
 		"\n" +
 		"  \x1b[90m╭──────────────────┬──────────┬─────────┬───────────────┬──────────────────────────────────────╮\x1b[39m\n" +
@@ -67,12 +110,40 @@ func renderGmuxView(ecosystemName string, projectName string, isNew bool, width 
 	return fmt.Sprintf(template, ecoName, paddedEcoName, ecoName, ecoName, ecoName, ecoName)
 }
 
+// renderMinimalGmuxView renders a simple list for very narrow screens
+func renderMinimalGmuxView(ecosystemName, projectName string) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("\x1b[1m\x1b[36m[Focus: %s]\x1b[0m\n", ecosystemName))
+	sb.WriteString("  • " + ecosystemName + "\n")
+	sb.WriteString("    • grove-core\n")
+	sb.WriteString("    • grove-flow\n")
+	if projectName != "" {
+		sb.WriteString("    • \x1b[1m\x1b[32m" + projectName + "\x1b[0m (new)\n")
+	} else {
+		sb.WriteString("    • api-server\n")
+	}
+	return sb.String()
+}
+
 // renderNbView returns a captured nb tui tree view with ANSI styling
 // The workspace name is substituted into the template
 func renderNbView(workspaceName string, width int) string {
 	wsName := workspaceName
 	if wsName == "" {
 		wsName = "my-project"
+	}
+
+	// Use a simpler view if width is very constrained
+	if width < 50 {
+		template := "  \x1b[1mnb > %s\x1b[0m\n" +
+			"\n" +
+			"   \x1b[93m▶ \x1b[39m󰇧 \x1b[3;4mglobal\x1b[0m\n" +
+			"      \x1b[3m%s\x1b[0m\n" +
+			"     \x1b[2m│ \x1b[0m\x1b[93m󰚇\x1b[39m inbox\x1b[2m (2)\x1b[0m\n" +
+			"     \x1b[2m│ \x1b[0m\x1b[34m󰠡\x1b[39m \x1b[3mplans\x1b[0m\x1b[2m (2)\x1b[0m\n" +
+			"     \x1b[2m└ \x1b[0m\x1b[32m󰄳\x1b[39m completed\x1b[2m (2)\x1b[0m\n"
+
+		return fmt.Sprintf(template, wsName, wsName)
 	}
 
 	// Captured from real nb tui output - using \x1b for escape character
