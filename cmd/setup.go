@@ -57,6 +57,12 @@ const (
 	formatTOML
 )
 
+// Checkbox icons for the setup wizard
+const (
+	iconCheckboxSelected   = "󰱒" // md-checkbox_outline (U+F0C52)
+	iconCheckboxUnselected = "󰄱" // md-checkbox_blank_outline (U+F0131)
+)
+
 // componentItem represents a configurable component in the setup wizard
 type componentItem struct {
 	id          string
@@ -123,11 +129,11 @@ func (d componentDelegate) Render(w io.Writer, m list.Model, index int, item lis
 		cursor = theme.DefaultTheme.Highlight.Render(theme.IconArrowRightBold) + " "
 	}
 
-	// Checkbox using theme icons
-	checkbox := theme.IconStatusTodo
+	// Checkbox using nerd font icons
+	checkbox := iconCheckboxUnselected
 	checkStyle := theme.DefaultTheme.Muted
 	if i.selected {
-		checkbox = theme.IconStatusCompleted
+		checkbox = iconCheckboxSelected
 		checkStyle = theme.DefaultTheme.Success
 	}
 
@@ -322,7 +328,7 @@ func newSetupModel(service *setup.Service, selectedOnly map[string]bool) *setupM
 
 	// Set default paths
 	homeDir, _ := os.UserHomeDir()
-	defaultEcosystemPath := filepath.Join(homeDir, "Code", "grove-projects")
+	defaultEcosystemPath := filepath.Join(homeDir, "Code", "my-projects")
 	defaultNotebookPath := filepath.Join(homeDir, "notebooks")
 
 	return &setupModel{
@@ -337,7 +343,7 @@ func newSetupModel(service *setup.Service, selectedOnly map[string]bool) *setupM
 		tuiTheme:        "terminal",
 		themeList:       themeList,
 		ecosystemPath:   defaultEcosystemPath,
-		ecosystemName:   "grove-projects",
+		ecosystemName:   "my-projects",
 		notebookPath:    defaultNotebookPath,
 		geminiMethod:    geminiMethodCommand,
 		geminiValue:     "op read 'op://Private/Gemini API Key/credential' --no-newline",
@@ -588,15 +594,13 @@ func (m *setupModel) updateEcosystemStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.prevStep()
 		return m, nil
 	case key.Matches(msg, m.keys.Confirm):
-		if m.currentInput == inputPath {
-			m.ecosystemPath = m.textInput.Value()
-			m.currentInput = inputName
-			m.textInput.SetValue(m.ecosystemName)
-			m.textInput.Placeholder = "Ecosystem name"
-		} else {
-			m.ecosystemName = m.textInput.Value()
-			m.nextStep()
+		m.ecosystemPath = m.textInput.Value()
+		// Automatically derive ecosystem name from directory
+		m.ecosystemName = filepath.Base(m.ecosystemPath)
+		if m.ecosystemName == "." || m.ecosystemName == "/" || m.ecosystemName == "" {
+			m.ecosystemName = "my-projects"
 		}
+		m.nextStep()
 		return m, nil
 	}
 
@@ -1050,8 +1054,8 @@ set -g popup-border-lines none
 # --- Grove Flow Plan Status ---
 bind-key -n C-p run-shell "PATH=$PATH:$HOME/.local/share/grove/bin flow tmux status"
 
-# --- Gmux Session Switcher ---
-bind-key -n C-f display-popup -w 100% -h 98% -x C -y C -E "HOME=$HOME PATH=$PATH:$HOME/.local/share/grove/bin gmux sz"
+# --- Nav Session Switcher ---
+bind-key -n C-f display-popup -w 100% -h 98% -x C -y C -E "HOME=$HOME PATH=$PATH:$HOME/.local/share/grove/bin nav sz"
 
 # --- Context (cx) View ---
 bind-key -n M-v display-popup -w 100% -h 98% -x C -y C -E "PATH=$PATH:$HOME/.local/share/grove/bin cx view"
@@ -1241,10 +1245,10 @@ YAML is supported for backwards compatibility.`
 		var cursor, icon string
 		if i == m.formatList.Index() {
 			cursor = theme.DefaultTheme.Highlight.Render(theme.IconArrowRightBold) + " "
-			icon = theme.DefaultTheme.Success.Render(theme.IconStatusCompleted)
+			icon = theme.DefaultTheme.Success.Render(iconCheckboxSelected)
 		} else {
 			cursor = "  "
-			icon = theme.DefaultTheme.Muted.Render(theme.IconStatusTodo)
+			icon = theme.DefaultTheme.Muted.Render(iconCheckboxUnselected)
 		}
 
 		title := f.name
@@ -1289,7 +1293,7 @@ func (m *setupModel) viewTUIThemeStep() string {
 
 	// Explanation
 	explanation := `Select a color theme for Grove terminal interfaces.
-This affects tools like gmux, nb, and flow TUIs.`
+This affects tools like nav, nb, and flow TUIs.`
 	content.WriteString(theme.DefaultTheme.Muted.Render(explanation))
 	content.WriteString("\n\n")
 
@@ -1308,10 +1312,10 @@ This affects tools like gmux, nb, and flow TUIs.`
 		var cursor, icon string
 		if i == m.themeList.Index() {
 			cursor = theme.DefaultTheme.Highlight.Render(theme.IconArrowRightBold) + " "
-			icon = theme.DefaultTheme.Success.Render(theme.IconStatusCompleted)
+			icon = theme.DefaultTheme.Success.Render(iconCheckboxSelected)
 		} else {
 			cursor = "  "
-			icon = theme.DefaultTheme.Muted.Render(theme.IconStatusTodo)
+			icon = theme.DefaultTheme.Muted.Render(iconCheckboxUnselected)
 		}
 
 		title := t.name
@@ -1336,27 +1340,16 @@ across several possibly related git repositories.`
 	content.WriteString(theme.DefaultTheme.Muted.Render(explanation))
 	content.WriteString("\n\n")
 
-	// Box using theme
-	boxStyle := theme.DefaultTheme.Box.Copy().Width(m.width - 8)
-
-	var boxContent strings.Builder
-	if m.currentInput == inputPath {
-		boxContent.WriteString(theme.DefaultTheme.Bold.Render("Where should your ecosystem be created?") + "\n\n")
-		boxContent.WriteString(m.textInput.View() + "\n\n")
-		boxContent.WriteString(theme.DefaultTheme.Muted.Render("The filesystem directory where your projects will live."))
-	} else {
-		boxContent.WriteString(theme.DefaultTheme.Bold.Render("What should this ecosystem be called?") + "\n\n")
-		boxContent.WriteString(m.textInput.View() + "\n\n")
-		boxContent.WriteString(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Used in config files to identify this ecosystem. Path: %s", m.ecosystemPath)))
-	}
-
-	content.WriteString(boxStyle.Render(boxContent.String()))
+	// Clean input section without box borders
+	content.WriteString(theme.DefaultTheme.Bold.Render("Where should your ecosystem be created?") + "\n\n")
+	content.WriteString("  " + m.textInput.View() + "\n\n")
+	content.WriteString("  " + theme.DefaultTheme.Muted.Render("The filesystem directory where your projects will live."))
 	content.WriteString("\n\n")
 
-	// Show gmux preview
-	content.WriteString(theme.DefaultTheme.Muted.Render("Preview: Your ecosystem in gmux"))
+	// Show nav preview with dynamic path from user input
+	content.WriteString(theme.DefaultTheme.Muted.Render("Preview: Your ecosystem in nav"))
 	content.WriteString("\n")
-	content.WriteString(renderGmuxView(m.ecosystemName, "", false, m.width-6))
+	content.WriteString(renderNavPreview(m.textInput.Value(), "", m.width-6))
 
 	return content.String()
 }
@@ -1370,28 +1363,21 @@ Leave blank and press Enter to skip this step.`
 	content.WriteString(theme.DefaultTheme.Muted.Render(explanation))
 	content.WriteString("\n\n")
 
-	// Box using theme
-	boxStyle := theme.DefaultTheme.Box.Copy().Width(m.width - 8)
-
-	var boxContent strings.Builder
-	boxContent.WriteString(theme.DefaultTheme.Bold.Render("What should your first project be called?") + "\n\n")
-	boxContent.WriteString(m.textInput.View() + "\n\n")
+	// Clean input section without box borders
+	content.WriteString(theme.DefaultTheme.Bold.Render("What should your first project be called?") + "\n\n")
+	content.WriteString("  " + m.textInput.View() + "\n\n")
 	projectPath := filepath.Join(m.ecosystemPath, m.textInput.Value())
 	if m.textInput.Value() == "" {
 		projectPath = filepath.Join(m.ecosystemPath, "<project-name>")
 	}
-	boxContent.WriteString(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Will be created at: %s", projectPath)))
-
-	content.WriteString(boxStyle.Render(boxContent.String()))
+	content.WriteString("  " + theme.DefaultTheme.Muted.Render(fmt.Sprintf("Will be created at: %s", projectPath)))
 	content.WriteString("\n\n")
 
-	// Show gmux preview with the new project
+	// Show nav preview with the new project
+	content.WriteString(theme.DefaultTheme.Muted.Render("Preview: Your ecosystem in nav"))
+	content.WriteString("\n")
 	projectName := m.textInput.Value()
-	if projectName != "" {
-		content.WriteString(theme.DefaultTheme.Muted.Render("Preview: Your new project in the ecosystem"))
-		content.WriteString("\n")
-		content.WriteString(renderGmuxView(m.ecosystemName, projectName, true, m.width-6))
-	}
+	content.WriteString(renderNavPreview(m.ecosystemPath, projectName, m.width-6))
 
 	return content.String()
 }
@@ -1405,23 +1391,16 @@ Each workspace gets its own section, keeping project context organized.`
 	content.WriteString(theme.DefaultTheme.Muted.Render(explanation))
 	content.WriteString("\n\n")
 
-	// Box using theme
-	boxStyle := theme.DefaultTheme.Box.Copy().Width(m.width - 8)
-
-	var boxContent strings.Builder
-	boxContent.WriteString(theme.DefaultTheme.Bold.Render("Enter the path for your notebook directory:") + "\n\n")
-	boxContent.WriteString(m.textInput.View() + "\n\n")
-	boxContent.WriteString(theme.DefaultTheme.Muted.Render("This directory will store your notes and plans."))
-
-	content.WriteString(boxStyle.Render(boxContent.String()))
+	// Clean input section without box borders
+	content.WriteString(theme.DefaultTheme.Bold.Render("Where should your notebooks be stored?") + "\n\n")
+	content.WriteString("  " + m.textInput.View() + "\n\n")
+	content.WriteString("  " + theme.DefaultTheme.Muted.Render("This directory will store your notes and plans."))
 	content.WriteString("\n\n")
 
-	// Show nb preview and note creation example
-	content.WriteString(theme.DefaultTheme.Muted.Render("Preview: The nb notes interface"))
+	// Show a simple preview of the notebook structure
+	content.WriteString(theme.DefaultTheme.Muted.Render("Preview: Your notebook structure"))
 	content.WriteString("\n")
-	content.WriteString(renderNbView(m.ecosystemName, m.width-6))
-	content.WriteString("\n\n")
-	content.WriteString(renderNoteCreationExample(m.textInput.Value(), m.width-6))
+	content.WriteString(renderNotebookPreview(m.textInput.Value(), m.width-6))
 
 	return content.String()
 }
@@ -1749,8 +1728,8 @@ func runSetupDefaults(service *setup.Service, selectedOnly map[string]bool, logg
 
 	if runAll || selectedOnly["ecosystem"] {
 		pretty.InfoPretty("Setting up ecosystem directory...")
-		ecosystemPath := filepath.Join(homeDir, "Code", "grove-projects")
-		ecosystemName := "grove-projects"
+		ecosystemPath := filepath.Join(homeDir, "Code", "my-projects")
+		ecosystemName := "my-projects"
 
 		service.MkdirAll(ecosystemPath, 0755)
 
@@ -1817,8 +1796,8 @@ set -g popup-border-lines none
 # --- Grove Flow Plan Status ---
 bind-key -n C-p run-shell "PATH=$PATH:$HOME/.local/share/grove/bin flow tmux status"
 
-# --- Gmux Session Switcher ---
-bind-key -n C-f display-popup -w 100% -h 98% -x C -y C -E "HOME=$HOME PATH=$PATH:$HOME/.local/share/grove/bin gmux sz"
+# --- Nav Session Switcher ---
+bind-key -n C-f display-popup -w 100% -h 98% -x C -y C -E "HOME=$HOME PATH=$PATH:$HOME/.local/share/grove/bin nav sz"
 
 # --- Context (cx) View ---
 bind-key -n M-v display-popup -w 100% -h 98% -x C -y C -E "PATH=$PATH:$HOME/.local/share/grove/bin cx view"

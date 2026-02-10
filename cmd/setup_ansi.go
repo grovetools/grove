@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -11,117 +12,182 @@ import (
 // ANSI art generation helpers for the setup wizard
 // These provide visual previews of what the configured tools will look like
 
-// renderGmuxView returns a captured gmux sessionize view with ANSI styling
-// The ecosystem name and optional new project name are substituted into the template
-func renderGmuxView(ecosystemName string, projectName string, isNew bool, width int) string {
-	ecoName := ecosystemName
-	if ecoName == "" {
-		ecoName = "my-projects"
+// renderNavPreview renders a preview of the ecosystem structure in nav
+// Shows just Workspace and Path columns with proper alignment
+// The ecosystemPath and optional newProjectName are used to generate the preview
+func renderNavPreview(ecosystemPath string, newProjectName string, width int) string {
+	t := theme.DefaultTheme
+
+	// Resolve root info from path
+	rootPath := ecosystemPath
+	if rootPath == "" {
+		rootPath = "~/Code/my-projects"
 	}
 
-	// Pad ecosystem name to 14 chars for alignment in header and table
-	paddedEcoName := fmt.Sprintf("%-14s", ecoName)
-	if len(paddedEcoName) > 14 {
-		paddedEcoName = paddedEcoName[:14]
+	// Clean the path and get root name
+	cleanRoot := filepath.Clean(rootPath)
+	rootName := filepath.Base(cleanRoot)
+	if rootName == "." || rootName == "/" || rootName == "" {
+		rootName = "my-projects"
 	}
 
-	// Calculate available space
-	// Full table needs ~96 chars
-	// Compact table (no path) needs ~58 chars
-	useCompact := width < 100
-	useMinimal := width < 60
-
-	if useMinimal {
-		// Just a simple list for very narrow screens
-		return renderMinimalGmuxView(ecoName, projectName)
+	// Use minimal layout for very narrow screens
+	if width < 60 {
+		return renderMinimalNavPreview(rootName, rootPath, newProjectName)
 	}
 
-	// Captured from real gmux sz output - using \x1b for escape character
-	// Shows a minimal ecosystem with sample projects
-	var template string
+	var sb strings.Builder
 
-	if projectName != "" {
-		// Template with new project highlighted
-		paddedProjectName := fmt.Sprintf("%-12s", projectName)
-		if len(paddedProjectName) > 12 {
-			paddedProjectName = paddedProjectName[:12]
+	// Calculate column widths - use more space for workspace to fit names
+	wsColWidth := 20
+	pathColWidth := width - wsColWidth - 10 // Account for borders and spacing
+	if pathColWidth < 20 {
+		pathColWidth = 20
+	}
+	if pathColWidth > 45 {
+		pathColWidth = 45
+	}
+
+	// Build the table using lipgloss styles
+	borderStyle := t.Muted
+	headerStyle := t.Bold
+	ecoStyle := t.Highlight
+	projectStyle := t.Normal
+	pathStyle := t.Muted
+
+	// Helper to truncate a name if needed (before adding prefix/icon)
+	truncateName := func(name string, maxLen int) string {
+		if len(name) > maxLen {
+			return name[:maxLen-1] + "…"
+		}
+		return name
+	}
+
+	// Helper to pad string to width
+	padTo := func(s string, w int) string {
+		// Count visible length (approximate - icons are ~2 chars wide visually)
+		return fmt.Sprintf("%-*s", w, s)
+	}
+
+	// Table header
+	sb.WriteString(borderStyle.Render("  ╭" + strings.Repeat("─", wsColWidth+2) + "┬" + strings.Repeat("─", pathColWidth+2) + "╮") + "\n")
+	sb.WriteString(borderStyle.Render("  │ ") + headerStyle.Render(padTo("WORKSPACE", wsColWidth)) + borderStyle.Render(" │ ") + headerStyle.Render(padTo("PATH", pathColWidth)) + borderStyle.Render(" │") + "\n")
+	sb.WriteString(borderStyle.Render("  ├" + strings.Repeat("─", wsColWidth+2) + "┼" + strings.Repeat("─", pathColWidth+2) + "┤") + "\n")
+
+	// Root row (ecosystem) - icon takes ~2 visual chars + 1 space = 3
+	displayName := truncateName(rootName, wsColWidth-3)
+	rootDisplay := padTo(theme.IconTree+" "+displayName, wsColWidth)
+	pathDisplay := truncateName(rootPath, pathColWidth)
+	sb.WriteString(borderStyle.Render("  │ ") + ecoStyle.Render(rootDisplay) + borderStyle.Render(" │ ") + pathStyle.Render(padTo(pathDisplay, pathColWidth)) + borderStyle.Render(" │") + "\n")
+
+	// Generic example projects
+	exampleProjects := []struct {
+		name   string
+		prefix string
+	}{
+		{"project-a", "├─"},
+		{"project-b", "├─"},
+	}
+
+	// If new project is being added, use it as the last one
+	if newProjectName != "" {
+		exampleProjects = append(exampleProjects, struct {
+			name   string
+			prefix string
+		}{newProjectName, "└─"})
+		// Fix the previous last item's prefix
+		exampleProjects[len(exampleProjects)-2].prefix = "├─"
+	} else {
+		exampleProjects = append(exampleProjects, struct {
+			name   string
+			prefix string
+		}{"project-c", "└─"})
+	}
+
+	for _, proj := range exampleProjects {
+		// prefix (3) + icon (2) + space (1) = 6 chars of overhead
+		projNameTrunc := truncateName(proj.name, wsColWidth-6)
+		projDisplay := padTo(proj.prefix+" "+theme.IconRepo+" "+projNameTrunc, wsColWidth)
+		projPath := truncateName(filepath.Join(rootPath, proj.name), pathColWidth)
+
+		var nameStyle lipgloss.Style
+		if proj.name == newProjectName && newProjectName != "" {
+			nameStyle = t.Success // Highlight new project
+		} else {
+			nameStyle = projectStyle
 		}
 
-		if useCompact {
-			template = "\x1b[1m\x1b[36m[Focus: %s]\x1b[0m > \x1b[38;5;240mPress / to filter...\x1b[39m\n" +
-				"\n" +
-				"  \x1b[90m╭──────────────────┬──────────┬─────────┬───────────────╮\x1b[39m\n" +
-				"  \x1b[90m│\x1b[39m \x1b[1mWORKSPACE\x1b[0m        \x1b[90m│\x1b[39m \x1b[1m BRANCH\x1b[0m \x1b[90m│\x1b[39m \x1b[1m󰊢 GIT\x1b[0m   \x1b[90m│\x1b[39m \x1b[1m󰊢 CHANGES\x1b[0m     \x1b[90m│\x1b[39m\n" +
-				"  \x1b[90m├──────────────────┼──────────┼─────────┼───────────────┤\x1b[39m\n" +
-				"  \x1b[90m│\x1b[39m \x1b[1m\x1b[36m\x1b[0m%s \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[32m*\x1b[0m       \x1b[90m│\x1b[39m -             \x1b[90m│\x1b[39m\n" +
-				"  \x1b[90m│\x1b[39m ├─ \x1b[2m\x1b[0mgrove-core   \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[36m↑1\x1b[0m      \x1b[90m│\x1b[39m -             \x1b[90m│\x1b[39m\n" +
-				"  \x1b[90m│\x1b[39m ├─ \x1b[2m\x1b[0mgrove-flow   \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[33mx\x1b[0m \x1b[1m\x1b[36m↑2\x1b[0m    \x1b[90m│\x1b[39m \x1b[1m\x1b[33mM:1\x1b[0m \x1b[1m\x1b[32m+6\x1b[0m \x1b[1m\x1b[31m-2\x1b[0m    \x1b[90m│\x1b[39m\n" +
-				"  \x1b[90m│\x1b[39m └─ \x1b[1m\x1b[32m\x1b[0m%s \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[32m(new)\x1b[0m   \x1b[90m│\x1b[39m -             \x1b[90m│\x1b[39m\n" +
-				"  \x1b[90m╰──────────────────┴──────────┴─────────┴───────────────╯\x1b[39m\n" +
-				"  \x1b[2mIcons: \x1b[1m\x1b[36m\x1b[0m current • \x1b[1m\x1b[93m\x1b[0m active\x1b[0m"
-
-			return fmt.Sprintf(template, ecoName, paddedEcoName, paddedProjectName)
-		}
-
-		template = "\x1b[1m\x1b[36m[Focus: %s]\x1b[0m > \x1b[38;5;240mPress / to filter...\x1b[39m\n" +
-			"\n" +
-			"  \x1b[90m╭──────────────────┬──────────┬─────────┬───────────────┬──────────────────────────────────────╮\x1b[39m\n" +
-			"  \x1b[90m│\x1b[39m \x1b[1mWORKSPACE\x1b[0m        \x1b[90m│\x1b[39m \x1b[1m BRANCH\x1b[0m \x1b[90m│\x1b[39m \x1b[1m󰊢 GIT\x1b[0m   \x1b[90m│\x1b[39m \x1b[1m󰊢 CHANGES\x1b[0m     \x1b[90m│\x1b[39m \x1b[1mPATH\x1b[0m                                 \x1b[90m│\x1b[39m\n" +
-			"  \x1b[90m├──────────────────┼──────────┼─────────┼───────────────┼──────────────────────────────────────┤\x1b[39m\n" +
-			"  \x1b[90m│\x1b[39m \x1b[1m\x1b[36m\x1b[0m%s \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[32m*\x1b[0m       \x1b[90m│\x1b[39m -             \x1b[90m│\x1b[39m \x1b[2m~/Code/%s\x1b[0m                    \x1b[90m│\x1b[39m\n" +
-			"  \x1b[90m│\x1b[39m ├─ \x1b[2m\x1b[0mgrove-core   \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[36m↑1\x1b[0m      \x1b[90m│\x1b[39m -             \x1b[90m│\x1b[39m \x1b[2m~/Code/%s/grove-core\x1b[0m         \x1b[90m│\x1b[39m\n" +
-			"  \x1b[90m│\x1b[39m ├─ \x1b[2m\x1b[0mgrove-flow   \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[33mx\x1b[0m \x1b[1m\x1b[36m↑2\x1b[0m    \x1b[90m│\x1b[39m \x1b[1m\x1b[33mM:1\x1b[0m \x1b[1m\x1b[32m+6\x1b[0m \x1b[1m\x1b[31m-2\x1b[0m    \x1b[90m│\x1b[39m \x1b[2m~/Code/%s/grove-flow\x1b[0m         \x1b[90m│\x1b[39m\n" +
-			"  \x1b[90m│\x1b[39m └─ \x1b[1m\x1b[32m\x1b[0m%s \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[32m(new)\x1b[0m   \x1b[90m│\x1b[39m -             \x1b[90m│\x1b[39m \x1b[2m~/Code/%s/%s\x1b[0m  \x1b[90m│\x1b[39m\n" +
-			"  \x1b[90m╰──────────────────┴──────────┴─────────┴───────────────┴──────────────────────────────────────╯\x1b[39m\n" +
-			"  \x1b[2mIcons: \x1b[1m\x1b[36m\x1b[0m current • \x1b[1m\x1b[93m\x1b[0m active • \x1b[0m ecosystem • \x1b[0m repo\x1b[0m"
-
-		return fmt.Sprintf(template, ecoName, paddedEcoName, ecoName, ecoName, ecoName, paddedProjectName, ecoName, projectName)
+		sb.WriteString(borderStyle.Render("  │ ") + nameStyle.Render(projDisplay) + borderStyle.Render(" │ ") + pathStyle.Render(padTo(projPath, pathColWidth)) + borderStyle.Render(" │") + "\n")
 	}
 
-	// Template without new project
-	if useCompact {
-		template = "\x1b[1m\x1b[36m[Focus: %s]\x1b[0m > \x1b[38;5;240mPress / to filter...\x1b[39m\n" +
-			"\n" +
-			"  \x1b[90m╭──────────────────┬──────────┬─────────┬───────────────╮\x1b[39m\n" +
-			"  \x1b[90m│\x1b[39m \x1b[1mWORKSPACE\x1b[0m        \x1b[90m│\x1b[39m \x1b[1m BRANCH\x1b[0m \x1b[90m│\x1b[39m \x1b[1m󰊢 GIT\x1b[0m   \x1b[90m│\x1b[39m \x1b[1m󰊢 CHANGES\x1b[0m     \x1b[90m│\x1b[39m\n" +
-			"  \x1b[90m├──────────────────┼──────────┼─────────┼───────────────┤\x1b[39m\n" +
-			"  \x1b[90m│\x1b[39m \x1b[1m\x1b[36m\x1b[0m%s \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[32m*\x1b[0m       \x1b[90m│\x1b[39m -             \x1b[90m│\x1b[39m\n" +
-			"  \x1b[90m│\x1b[39m ├─ \x1b[2m\x1b[0mgrove-core   \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[36m↑1\x1b[0m      \x1b[90m│\x1b[39m -             \x1b[90m│\x1b[39m\n" +
-			"  \x1b[90m│\x1b[39m ├─ \x1b[2m\x1b[0mgrove-flow   \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[33mx\x1b[0m \x1b[1m\x1b[36m↑2\x1b[0m    \x1b[90m│\x1b[39m \x1b[1m\x1b[33mM:1\x1b[0m \x1b[1m\x1b[32m+6\x1b[0m \x1b[1m\x1b[31m-2\x1b[0m    \x1b[90m│\x1b[39m\n" +
-			"  \x1b[90m│\x1b[39m └─ \x1b[2m\x1b[0mapi-server   \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[32m*\x1b[0m       \x1b[90m│\x1b[39m \x1b[1m\x1b[32m+21\x1b[0m \x1b[1m\x1b[31m-5\x1b[0m       \x1b[90m│\x1b[39m\n" +
-			"  \x1b[90m╰──────────────────┴──────────┴─────────┴───────────────╯\x1b[39m\n" +
-			"  \x1b[2mIcons: \x1b[1m\x1b[36m\x1b[0m current • \x1b[1m\x1b[93m\x1b[0m active\x1b[0m"
+	// Table footer
+	sb.WriteString(borderStyle.Render("  ╰" + strings.Repeat("─", wsColWidth+2) + "┴" + strings.Repeat("─", pathColWidth+2) + "╯") + "\n")
 
-		return fmt.Sprintf(template, ecoName, paddedEcoName)
-	}
+	// Legend
+	sb.WriteString(t.Muted.Render(fmt.Sprintf("  Icons: %s ecosystem • %s project", theme.IconTree, theme.IconRepo)))
 
-	template = "\x1b[1m\x1b[36m[Focus: %s]\x1b[0m > \x1b[38;5;240mPress / to filter...\x1b[39m\n" +
-		"\n" +
-		"  \x1b[90m╭──────────────────┬──────────┬─────────┬───────────────┬──────────────────────────────────────╮\x1b[39m\n" +
-		"  \x1b[90m│\x1b[39m \x1b[1mWORKSPACE\x1b[0m        \x1b[90m│\x1b[39m \x1b[1m BRANCH\x1b[0m \x1b[90m│\x1b[39m \x1b[1m󰊢 GIT\x1b[0m   \x1b[90m│\x1b[39m \x1b[1m󰊢 CHANGES\x1b[0m     \x1b[90m│\x1b[39m \x1b[1mPATH\x1b[0m                                 \x1b[90m│\x1b[39m\n" +
-		"  \x1b[90m├──────────────────┼──────────┼─────────┼───────────────┼──────────────────────────────────────┤\x1b[39m\n" +
-		"  \x1b[90m│\x1b[39m \x1b[1m\x1b[36m\x1b[0m%s \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[32m*\x1b[0m       \x1b[90m│\x1b[39m -             \x1b[90m│\x1b[39m \x1b[2m~/Code/%s\x1b[0m                    \x1b[90m│\x1b[39m\n" +
-		"  \x1b[90m│\x1b[39m ├─ \x1b[2m\x1b[0mgrove-core   \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[36m↑1\x1b[0m      \x1b[90m│\x1b[39m -             \x1b[90m│\x1b[39m \x1b[2m~/Code/%s/grove-core\x1b[0m         \x1b[90m│\x1b[39m\n" +
-		"  \x1b[90m│\x1b[39m ├─ \x1b[2m\x1b[0mgrove-flow   \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[33mx\x1b[0m \x1b[1m\x1b[36m↑2\x1b[0m    \x1b[90m│\x1b[39m \x1b[1m\x1b[33mM:1\x1b[0m \x1b[1m\x1b[32m+6\x1b[0m \x1b[1m\x1b[31m-2\x1b[0m    \x1b[90m│\x1b[39m \x1b[2m~/Code/%s/grove-flow\x1b[0m         \x1b[90m│\x1b[39m\n" +
-		"  \x1b[90m│\x1b[39m └─ \x1b[2m\x1b[0mapi-server   \x1b[90m│\x1b[39m \x1b[2m\x1b[0mmain   \x1b[90m│\x1b[39m \x1b[1m\x1b[32m*\x1b[0m       \x1b[90m│\x1b[39m \x1b[1m\x1b[32m+21\x1b[0m \x1b[1m\x1b[31m-5\x1b[0m       \x1b[90m│\x1b[39m \x1b[2m~/Code/%s/api-server\x1b[0m         \x1b[90m│\x1b[39m\n" +
-		"  \x1b[90m╰──────────────────┴──────────┴─────────┴───────────────┴──────────────────────────────────────╯\x1b[39m\n" +
-		"  \x1b[2mIcons: \x1b[1m\x1b[36m\x1b[0m current • \x1b[1m\x1b[93m\x1b[0m active • \x1b[0m ecosystem • \x1b[0m repo\x1b[0m"
-
-	return fmt.Sprintf(template, ecoName, paddedEcoName, ecoName, ecoName, ecoName, ecoName)
+	return sb.String()
 }
 
-// renderMinimalGmuxView renders a simple list for very narrow screens
-func renderMinimalGmuxView(ecosystemName, projectName string) string {
+// renderMinimalNavPreview renders a simple list for very narrow screens
+func renderMinimalNavPreview(rootName, rootPath, newProjectName string) string {
+	t := theme.DefaultTheme
+
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("\x1b[1m\x1b[36m[Focus: %s]\x1b[0m\n", ecosystemName))
-	sb.WriteString("  • " + ecosystemName + "\n")
-	sb.WriteString("    • grove-core\n")
-	sb.WriteString("    • grove-flow\n")
-	if projectName != "" {
-		sb.WriteString("    • \x1b[1m\x1b[32m" + projectName + "\x1b[0m (new)\n")
+	sb.WriteString(t.Highlight.Render(theme.IconTree+" "+rootName) + "\n")
+	sb.WriteString(t.Muted.Render("  "+rootPath) + "\n")
+	sb.WriteString("  ├─ " + theme.IconRepo + " project-a\n")
+	sb.WriteString("  ├─ " + theme.IconRepo + " project-b\n")
+	if newProjectName != "" {
+		sb.WriteString("  └─ " + t.Success.Render(theme.IconRepo+" "+newProjectName) + " (new)\n")
 	} else {
-		sb.WriteString("    • api-server\n")
+		sb.WriteString("  └─ " + theme.IconRepo + " project-c\n")
 	}
+	return sb.String()
+}
+
+// renderGmuxView is kept for backward compatibility, delegates to renderNavPreview
+// TODO: Remove once all callers are updated
+func renderGmuxView(ecosystemName string, projectName string, isNew bool, width int) string {
+	// Convert ecosystem name to a path for the new function
+	rootPath := "~/Code/" + ecosystemName
+	if ecosystemName == "" {
+		rootPath = "~/Code/my-projects"
+	}
+	return renderNavPreview(rootPath, projectName, width)
+}
+
+// renderMinimalGmuxView is kept for backward compatibility
+func renderMinimalGmuxView(ecosystemName, projectName string) string {
+	rootPath := "~/Code/" + ecosystemName
+	if ecosystemName == "" {
+		rootPath = "~/Code/my-projects"
+	}
+	return renderMinimalNavPreview(ecosystemName, rootPath, projectName)
+}
+
+// renderNotebookPreview renders a simple preview of the notebook directory structure
+func renderNotebookPreview(notebookPath string, width int) string {
+	t := theme.DefaultTheme
+
+	if notebookPath == "" {
+		notebookPath = "~/notebooks"
+	}
+
+	var sb strings.Builder
+
+	// Show a simple tree structure
+	sb.WriteString("  " + t.Highlight.Render(theme.IconNote+" "+notebookPath) + "\n")
+	sb.WriteString("  " + t.Muted.Render("├── grovetools/") + "\n")
+	sb.WriteString("  " + t.Muted.Render("│   ├── inbox/") + "\n")
+	sb.WriteString("  " + t.Muted.Render("│   └── plans/") + "\n")
+	sb.WriteString("  " + t.Muted.Render("├── my-projects/") + "\n")
+	sb.WriteString("  " + t.Muted.Render("│   └── inbox/") + "\n")
+	sb.WriteString("  " + t.Muted.Render("└── global/") + "\n")
+	sb.WriteString("  " + t.Muted.Render("    └── inbox/") + "\n")
+	sb.WriteString("\n")
+	sb.WriteString("  " + t.Muted.Render("Each workspace gets its own folder for notes and plans."))
+
 	return sb.String()
 }
 
@@ -218,7 +284,7 @@ func renderTmuxConfig(width int) string {
 		desc string
 	}{
 		{"C-p", "Flow status popup"},
-		{"C-f", "Gmux session switcher"},
+		{"C-f", "Nav session switcher"},
 		{"M-v", "Context (cx) viewer"},
 		{"C-n", "Notes TUI"},
 		{"C-e", "Core editor"},
