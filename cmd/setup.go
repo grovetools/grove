@@ -35,14 +35,26 @@ type wizardStep int
 
 const (
 	stepSelectComponents wizardStep = iota
+	stepConfigFormat
+	stepTUITheme
 	stepEcosystem
 	stepFirstProject
 	stepNotebook
 	stepGeminiKey
+	stepFlowSettings
 	stepTmuxBindings
+	stepAgentSettings
 	stepNeovimPlugin
 	stepPlanPreservation
 	stepSummary
+)
+
+// configFormat represents the configuration file format
+type configFormat int
+
+const (
+	formatYAML configFormat = iota
+	formatTOML
 )
 
 // componentItem represents a configurable component in the setup wizard
@@ -163,6 +175,14 @@ type setupModel struct {
 	textInput      textinput.Model
 	currentInput   inputStep
 
+	// Config format step state
+	configFormat   configFormat
+	formatList     list.Model
+
+	// TUI theme step state
+	tuiTheme       string
+	themeList      list.Model
+
 	// Ecosystem step state
 	ecosystemPath  string
 	ecosystemName  string
@@ -179,12 +199,19 @@ type setupModel struct {
 	geminiValue    string
 	methodList     list.Model
 
+	// Flow settings step state
+	flowOneshotModel string
+
+	// Agent settings step state
+	claudeArgs     []string
+
 	// Hooks step state
 	planPreservationEnabled bool
 
-	// Service and config
+	// Service and config handlers
 	service        *setup.Service
 	yamlHandler    *setup.YAMLHandler
+	tomlHandler    *setup.TOMLHandler
 
 	// TUI state
 	keys           setupKeyMap
@@ -213,10 +240,13 @@ func (i methodItem) FilterValue() string { return i.title }
 func newSetupModel(service *setup.Service, selectedOnly map[string]bool) *setupModel {
 	// Initialize components
 	components := []componentItem{
+		{id: "tui", title: "TUI Theme", description: "Select the color theme for terminal interfaces", selected: true},
 		{id: "ecosystem", title: "Ecosystem Directory", description: "Configure a Grove ecosystem directory", selected: true},
 		{id: "notebook", title: "Notebook Directory", description: "Set up a notebook directory for notes and plans", selected: true},
 		{id: "gemini", title: "Gemini API Key", description: "Configure Gemini API access for LLM features", selected: true},
+		{id: "flow", title: "Flow Settings", description: "Configure default model for LLM jobs", selected: true},
 		{id: "tmux", title: "tmux Popup Bindings", description: "Add tmux popup bindings for Grove tools", selected: false},
+		{id: "agent", title: "Agent Settings", description: "Configure Claude agent arguments", selected: false},
 		{id: "nvim", title: "Neovim Plugin", description: "Configure the grove-nvim Neovim plugin", selected: false},
 		{id: "hooks", title: "Hooks Configuration", description: "Configure plan preservation for Claude Code plans", selected: false},
 	}
@@ -244,6 +274,33 @@ func newSetupModel(service *setup.Service, selectedOnly map[string]bool) *setupM
 	componentList.SetFilteringEnabled(false)
 	componentList.DisableQuitKeybindings()
 
+	// Create config format list
+	formatItems := []list.Item{
+		methodItem{id: "toml", title: "TOML", desc: "Modern, clean configuration format (recommended)"},
+		methodItem{id: "yaml", title: "YAML", desc: "Traditional YAML configuration format"},
+	}
+	formatList := list.New(formatItems, list.NewDefaultDelegate(), 0, 0)
+	formatList.Title = "Configuration Format"
+	formatList.SetShowStatusBar(false)
+	formatList.SetShowHelp(false)
+	formatList.SetShowPagination(false)
+	formatList.SetFilteringEnabled(false)
+	formatList.DisableQuitKeybindings()
+
+	// Create theme list
+	themeItems := []list.Item{
+		methodItem{id: "terminal", title: "Terminal", desc: "Uses your terminal's default colors"},
+		methodItem{id: "gruvbox", title: "Gruvbox", desc: "Warm, retro color scheme"},
+		methodItem{id: "kanagawa", title: "Kanagawa", desc: "Dark theme inspired by Japanese art"},
+	}
+	themeList := list.New(themeItems, list.NewDefaultDelegate(), 0, 0)
+	themeList.Title = "TUI Theme"
+	themeList.SetShowStatusBar(false)
+	themeList.SetShowHelp(false)
+	themeList.SetShowPagination(false)
+	themeList.SetFilteringEnabled(false)
+	themeList.DisableQuitKeybindings()
+
 	// Create gemini method list
 	methodItems := []list.Item{
 		methodItem{id: "command", title: "Shell Command", desc: "Retrieve API key via a shell command (recommended)"},
@@ -269,23 +326,30 @@ func newSetupModel(service *setup.Service, selectedOnly map[string]bool) *setupM
 	defaultNotebookPath := filepath.Join(homeDir, "notebooks")
 
 	return &setupModel{
-		step:          stepSelectComponents,
-		selectedSteps: make(map[string]bool),
-		components:    components,
-		componentList: componentList,
-		textInput:     ti,
-		currentInput:  inputPath,
-		ecosystemPath: defaultEcosystemPath,
-		ecosystemName: "grove-projects",
-		notebookPath:  defaultNotebookPath,
-		geminiMethod:  geminiMethodCommand,
-		geminiValue:   "op read 'op://Private/Gemini API Key/credential' --no-newline",
-		methodList:    methodList,
-		service:       service,
-		yamlHandler:   setup.NewYAMLHandler(service),
-		keys:          setupKeys,
-		help:          help.New(setupKeys),
-		ready:         false,
+		step:             stepSelectComponents,
+		selectedSteps:   make(map[string]bool),
+		components:      components,
+		componentList:   componentList,
+		textInput:       ti,
+		currentInput:    inputPath,
+		configFormat:    formatTOML,
+		formatList:      formatList,
+		tuiTheme:        "terminal",
+		themeList:       themeList,
+		ecosystemPath:   defaultEcosystemPath,
+		ecosystemName:   "grove-projects",
+		notebookPath:    defaultNotebookPath,
+		geminiMethod:    geminiMethodCommand,
+		geminiValue:     "op read 'op://Private/Gemini API Key/credential' --no-newline",
+		methodList:      methodList,
+		flowOneshotModel: "gemini-3-pro-preview",
+		claudeArgs:      []string{"--dangerously-skip-permissions", "--chrome"},
+		service:         service,
+		yamlHandler:     setup.NewYAMLHandler(service),
+		tomlHandler:     setup.NewTOMLHandler(service),
+		keys:            setupKeys,
+		help:            help.New(setupKeys),
+		ready:           false,
 	}
 }
 
@@ -301,6 +365,10 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.step {
 		case stepSelectComponents:
 			return m.updateComponentSelection(msg)
+		case stepConfigFormat:
+			return m.updateConfigFormatStep(msg)
+		case stepTUITheme:
+			return m.updateTUIThemeStep(msg)
 		case stepEcosystem:
 			return m.updateEcosystemStep(msg)
 		case stepFirstProject:
@@ -309,8 +377,12 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateNotebookStep(msg)
 		case stepGeminiKey:
 			return m.updateGeminiKeyStep(msg)
+		case stepFlowSettings:
+			return m.updateFlowSettingsStep(msg)
 		case stepTmuxBindings:
 			return m.updateTmuxBindingsStep(msg)
+		case stepAgentSettings:
+			return m.updateAgentSettingsStep(msg)
 		case stepNeovimPlugin:
 			return m.updateNeovimPluginStep(msg)
 		case stepPlanPreservation:
@@ -324,6 +396,8 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.componentList.SetSize(msg.Width-4, msg.Height-8)
 		m.methodList.SetSize(msg.Width-4, 6)
+		m.formatList.SetSize(msg.Width-4, 6)
+		m.themeList.SetSize(msg.Width-4, 8)
 		// Account for box border (2) + padding (4) + some margin
 		m.textInput.Width = msg.Width - 12
 		m.ready = true
@@ -371,12 +445,67 @@ func (m *setupModel) updateComponentSelection(msg tea.KeyMsg) (tea.Model, tea.Cm
 	return m, cmd
 }
 
+func (m *setupModel) updateConfigFormatStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keys.Base.Quit):
+		return m, tea.Quit
+	case key.Matches(msg, m.keys.Back):
+		m.prevStep()
+		return m, nil
+	case key.Matches(msg, m.keys.Confirm):
+		idx := m.formatList.Index()
+		if idx == 0 {
+			m.configFormat = formatTOML
+		} else {
+			m.configFormat = formatYAML
+		}
+		m.nextStep()
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.formatList, cmd = m.formatList.Update(msg)
+	return m, cmd
+}
+
+func (m *setupModel) updateTUIThemeStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keys.Base.Quit):
+		return m, tea.Quit
+	case key.Matches(msg, m.keys.Back):
+		m.prevStep()
+		return m, nil
+	case key.Matches(msg, m.keys.Confirm):
+		idx := m.themeList.Index()
+		switch idx {
+		case 0:
+			m.tuiTheme = "terminal"
+		case 1:
+			m.tuiTheme = "gruvbox"
+		case 2:
+			m.tuiTheme = "kanagawa"
+		}
+		m.nextStep()
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.themeList, cmd = m.themeList.Update(msg)
+	return m, cmd
+}
+
 func (m *setupModel) buildOrderedSteps() {
 	m.orderedSteps = nil
+
+	// Config format is always first
+	m.orderedSteps = append(m.orderedSteps, stepConfigFormat)
+
 	for _, c := range m.components {
 		if c.selected {
 			m.selectedSteps[c.id] = true
 			switch c.id {
+			case "tui":
+				m.orderedSteps = append(m.orderedSteps, stepTUITheme)
 			case "ecosystem":
 				m.orderedSteps = append(m.orderedSteps, stepEcosystem)
 				m.orderedSteps = append(m.orderedSteps, stepFirstProject)
@@ -384,8 +513,12 @@ func (m *setupModel) buildOrderedSteps() {
 				m.orderedSteps = append(m.orderedSteps, stepNotebook)
 			case "gemini":
 				m.orderedSteps = append(m.orderedSteps, stepGeminiKey)
+			case "flow":
+				m.orderedSteps = append(m.orderedSteps, stepFlowSettings)
 			case "tmux":
 				m.orderedSteps = append(m.orderedSteps, stepTmuxBindings)
+			case "agent":
+				m.orderedSteps = append(m.orderedSteps, stepAgentSettings)
 			case "nvim":
 				m.orderedSteps = append(m.orderedSteps, stepNeovimPlugin)
 			case "hooks":
@@ -397,6 +530,10 @@ func (m *setupModel) buildOrderedSteps() {
 
 func (m *setupModel) prepareStepInput() {
 	switch m.step {
+	case stepConfigFormat:
+		// No text input needed, uses formatList
+	case stepTUITheme:
+		// No text input needed, uses themeList
 	case stepEcosystem:
 		m.currentInput = inputPath
 		m.textInput.SetValue(m.ecosystemPath)
@@ -411,6 +548,14 @@ func (m *setupModel) prepareStepInput() {
 		m.textInput.Placeholder = "Path to notebook directory"
 	case stepGeminiKey:
 		m.currentInput = inputMethod
+	case stepFlowSettings:
+		m.currentInput = inputValue
+		m.textInput.SetValue(m.flowOneshotModel)
+		m.textInput.Placeholder = "gemini-3-pro-preview"
+	case stepAgentSettings:
+		m.currentInput = inputValue
+		m.textInput.SetValue(strings.Join(m.claudeArgs, ", "))
+		m.textInput.Placeholder = "--dangerously-skip-permissions, --chrome"
 	}
 }
 
@@ -541,6 +686,24 @@ func (m *setupModel) updateGeminiKeyStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *setupModel) updateFlowSettingsStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keys.Base.Quit):
+		return m, tea.Quit
+	case key.Matches(msg, m.keys.Back):
+		m.prevStep()
+		return m, nil
+	case key.Matches(msg, m.keys.Confirm):
+		m.flowOneshotModel = m.textInput.Value()
+		m.nextStep()
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}
+
 func (m *setupModel) updateTmuxBindingsStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Base.Quit):
@@ -553,6 +716,31 @@ func (m *setupModel) updateTmuxBindingsStep(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		return m, nil
 	}
 	return m, nil
+}
+
+func (m *setupModel) updateAgentSettingsStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keys.Base.Quit):
+		return m, tea.Quit
+	case key.Matches(msg, m.keys.Back):
+		m.prevStep()
+		return m, nil
+	case key.Matches(msg, m.keys.Confirm):
+		// Parse comma-separated args
+		argsStr := m.textInput.Value()
+		if argsStr != "" {
+			m.claudeArgs = strings.Split(argsStr, ",")
+			for i := range m.claudeArgs {
+				m.claudeArgs[i] = strings.TrimSpace(m.claudeArgs[i])
+			}
+		}
+		m.nextStep()
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
 }
 
 func (m *setupModel) updateNeovimPluginStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -602,18 +790,19 @@ func (m *setupModel) updateSummaryStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *setupModel) executeSetup() {
-	// Execute each selected configuration step
+	// Based on format selection, use the appropriate handler
+	if m.configFormat == formatTOML {
+		m.executeSetupTOML()
+	} else {
+		m.executeSetupYAML()
+	}
+
+	// These don't depend on config format
 	if m.selectedSteps["ecosystem"] {
-		m.setupEcosystem()
+		m.setupEcosystemFiles()
 		if !m.skipFirstProject && m.firstProjectName != "" {
 			m.setupFirstProject()
 		}
-	}
-	if m.selectedSteps["notebook"] {
-		m.setupNotebook()
-	}
-	if m.selectedSteps["gemini"] {
-		m.setupGeminiKey()
 	}
 	if m.selectedSteps["tmux"] {
 		m.setupTmuxBindings()
@@ -621,22 +810,178 @@ func (m *setupModel) executeSetup() {
 	if m.selectedSteps["nvim"] {
 		m.setupNeovimPlugin()
 	}
-	if m.selectedSteps["hooks"] {
-		m.setupPlanPreservation()
-	}
 }
 
-func (m *setupModel) setupEcosystem() {
+func (m *setupModel) executeSetupTOML() {
+	// Build the complete config as a map
+	config := make(map[string]interface{})
+
+	// TUI theme
+	if m.selectedSteps["tui"] {
+		config["tui"] = map[string]interface{}{
+			"theme": m.tuiTheme,
+		}
+	}
+
+	// Flow settings
+	if m.selectedSteps["flow"] {
+		config["flow"] = map[string]interface{}{
+			"oneshot_model": m.flowOneshotModel,
+		}
+	}
+
+	// Tmux settings (available keys)
+	if m.selectedSteps["tmux"] {
+		config["tmux"] = map[string]interface{}{
+			"available_keys": []string{"w", "e", "r", "t", "y", "o", "a", "f", "g", "v"},
+		}
+	}
+
+	// Ecosystem/groves
+	if m.selectedSteps["ecosystem"] {
+		config["groves"] = map[string]interface{}{
+			m.ecosystemName: map[string]interface{}{
+				"path":        m.ecosystemPath,
+				"enabled":     true,
+				"description": "My projects",
+				"notebook":    "nb",
+			},
+		}
+	}
+
+	// Notebook
+	if m.selectedSteps["notebook"] {
+		config["notebooks"] = map[string]interface{}{
+			"path": m.notebookPath,
+			"rules": map[string]interface{}{
+				"default": "personal",
+			},
+		}
+		// Create notebook directory
+		m.service.MkdirAll(m.notebookPath, 0755)
+	}
+
+	// Agent settings
+	if m.selectedSteps["agent"] {
+		config["agent"] = map[string]interface{}{
+			"providers": map[string]interface{}{
+				"claude": map[string]interface{}{
+					"args": m.claudeArgs,
+				},
+			},
+		}
+	}
+
+	// Gemini settings
+	if m.selectedSteps["gemini"] {
+		geminiConfig := make(map[string]interface{})
+		if m.geminiMethod == geminiMethodCommand {
+			geminiConfig["api_key_command"] = m.geminiValue
+		} else {
+			geminiConfig["api_key"] = m.geminiValue
+		}
+		config["gemini"] = geminiConfig
+	}
+
+	// Hooks / plan preservation
+	if m.selectedSteps["hooks"] {
+		config["hooks"] = map[string]interface{}{
+			"plan_preservation": map[string]interface{}{
+				"enabled":      m.planPreservationEnabled,
+				"job_type":     "file",
+				"title_prefix": "claude-plan",
+				"kebab_case":   true,
+			},
+		}
+	}
+
+	// Save the config
+	m.tomlHandler.SaveGlobalConfig(config)
+}
+
+func (m *setupModel) executeSetupYAML() {
+	// Use the existing YAML handler for backwards compatibility
+	root, _ := m.yamlHandler.LoadGlobalConfig()
+
+	// TUI theme
+	if m.selectedSteps["tui"] {
+		setup.SetValue(root, m.tuiTheme, "tui", "theme")
+	}
+
+	// Flow settings
+	if m.selectedSteps["flow"] {
+		setup.SetValue(root, m.flowOneshotModel, "flow", "oneshot_model")
+	}
+
+	// Tmux settings
+	if m.selectedSteps["tmux"] {
+		setup.SetValue(root, []string{"w", "e", "r", "t", "y", "o", "a", "f", "g", "v"}, "tmux", "available_keys")
+	}
+
+	// Ecosystem/groves
+	if m.selectedSteps["ecosystem"] {
+		setup.SetValue(root, map[string]interface{}{
+			"path":        m.ecosystemPath,
+			"enabled":     true,
+			"description": "My projects",
+			"notebook":    "nb",
+		}, "groves", m.ecosystemName)
+	}
+
+	// Notebook
+	if m.selectedSteps["notebook"] {
+		setup.SetValue(root, m.notebookPath, "notebooks", "path")
+		setup.SetValue(root, "personal", "notebooks", "rules", "default")
+		// Create notebook directory
+		m.service.MkdirAll(m.notebookPath, 0755)
+	}
+
+	// Agent settings
+	if m.selectedSteps["agent"] {
+		setup.SetValue(root, m.claudeArgs, "agent", "providers", "claude", "args")
+	}
+
+	// Gemini settings
+	if m.selectedSteps["gemini"] {
+		if m.geminiMethod == geminiMethodCommand {
+			setup.SetValue(root, m.geminiValue, "gemini", "api_key_command")
+		} else {
+			setup.SetValue(root, m.geminiValue, "gemini", "api_key")
+		}
+	}
+
+	// Hooks / plan preservation
+	if m.selectedSteps["hooks"] {
+		setup.SetValue(root, m.planPreservationEnabled, "hooks", "plan_preservation", "enabled")
+		if m.planPreservationEnabled {
+			setup.SetValue(root, "file", "hooks", "plan_preservation", "job_type")
+			setup.SetValue(root, "claude-plan", "hooks", "plan_preservation", "title_prefix")
+			setup.SetValue(root, true, "hooks", "plan_preservation", "kebab_case")
+		}
+	}
+
+	m.yamlHandler.SaveGlobalConfig(root)
+}
+
+func (m *setupModel) setupEcosystemFiles() {
 	// Create ecosystem directory
 	m.service.MkdirAll(m.ecosystemPath, 0755)
 
-	// Create grove.yml for ecosystem
-	groveYMLContent := fmt.Sprintf(`name: %s
+	// Create grove.yml or grove.toml for ecosystem based on format selection
+	if m.configFormat == formatTOML {
+		groveTOMLContent := fmt.Sprintf(`name = "%s"
+description = "A Grove ecosystem"
+workspaces = ["*"]
+`, m.ecosystemName)
+		m.service.WriteFile(filepath.Join(m.ecosystemPath, "grove.toml"), []byte(groveTOMLContent), 0644)
+	} else {
+		groveYMLContent := fmt.Sprintf(`name: %s
 description: A Grove ecosystem
 workspaces:
   - "*"
 `, m.ecosystemName)
-	m.service.WriteFile(filepath.Join(m.ecosystemPath, "grove.yml"), []byte(groveYMLContent), 0644)
+		m.service.WriteFile(filepath.Join(m.ecosystemPath, "grove.yml"), []byte(groveYMLContent), 0644)
+	}
 
 	// Create .gitignore
 	gitignoreContent := `# OS files
@@ -663,17 +1008,6 @@ Add projects to this directory and they will be automatically discovered by Grov
 
 	// Initialize git repository
 	m.service.RunGitInit(m.ecosystemPath)
-
-	// Update global config with ecosystem path
-	root, err := m.yamlHandler.LoadGlobalConfig()
-	if err == nil {
-		// Add to groves section
-		setup.SetValue(root, map[string]interface{}{
-			"path":    m.ecosystemPath,
-			"enabled": true,
-		}, "groves", m.ecosystemName)
-		m.yamlHandler.SaveGlobalConfig(root)
-	}
 }
 
 func (m *setupModel) setupFirstProject() {
@@ -682,11 +1016,18 @@ func (m *setupModel) setupFirstProject() {
 	// Create project directory
 	m.service.MkdirAll(projectPath, 0755)
 
-	// Create grove.yml for the project
-	groveYMLContent := fmt.Sprintf(`name: %s
+	// Create grove.yml or grove.toml for the project based on format selection
+	if m.configFormat == formatTOML {
+		groveTOMLContent := fmt.Sprintf(`name = "%s"
+description = "A Grove project"
+`, m.firstProjectName)
+		m.service.WriteFile(filepath.Join(projectPath, "grove.toml"), []byte(groveTOMLContent), 0644)
+	} else {
+		groveYMLContent := fmt.Sprintf(`name: %s
 description: A Grove project
 `, m.firstProjectName)
-	m.service.WriteFile(filepath.Join(projectPath, "grove.yml"), []byte(groveYMLContent), 0644)
+		m.service.WriteFile(filepath.Join(projectPath, "grove.yml"), []byte(groveYMLContent), 0644)
+	}
 
 	// Create README.md
 	readmeContent := fmt.Sprintf(`# %s
@@ -697,30 +1038,6 @@ A Grove project.
 
 	// Initialize git repository
 	m.service.RunGitInit(projectPath)
-}
-
-func (m *setupModel) setupNotebook() {
-	// Create notebook directory
-	m.service.MkdirAll(m.notebookPath, 0755)
-
-	// Update global config
-	root, err := m.yamlHandler.LoadGlobalConfig()
-	if err == nil {
-		setup.SetValue(root, m.notebookPath, "notebooks", "path")
-		m.yamlHandler.SaveGlobalConfig(root)
-	}
-}
-
-func (m *setupModel) setupGeminiKey() {
-	root, err := m.yamlHandler.LoadGlobalConfig()
-	if err == nil {
-		if m.geminiMethod == geminiMethodCommand {
-			setup.SetValue(root, m.geminiValue, "gemini", "api_key_command")
-		} else {
-			setup.SetValue(root, m.geminiValue, "gemini", "api_key")
-		}
-		m.yamlHandler.SaveGlobalConfig(root)
-	}
 }
 
 func (m *setupModel) setupTmuxBindings() {
@@ -796,28 +1113,6 @@ return {
 	m.service.WriteFile("~/.config/nvim/lua/plugins/grove.lua", []byte(nvimPluginContent), 0644)
 }
 
-func (m *setupModel) setupPlanPreservation() {
-	root, err := m.yamlHandler.LoadGlobalConfig()
-	if err != nil {
-		m.err = err
-		return
-	}
-
-	// Set hooks.plan_preservation.enabled
-	setup.SetValue(root, m.planPreservationEnabled, "hooks", "plan_preservation", "enabled")
-
-	// Also set reasonable defaults if enabling
-	if m.planPreservationEnabled {
-		setup.SetValue(root, "file", "hooks", "plan_preservation", "job_type")
-		setup.SetValue(root, "claude-plan", "hooks", "plan_preservation", "title_prefix")
-		setup.SetValue(root, true, "hooks", "plan_preservation", "kebab_case")
-	}
-
-	if err := m.yamlHandler.SaveGlobalConfig(root); err != nil {
-		m.err = err
-	}
-}
-
 func (m *setupModel) View() string {
 	if !m.ready {
 		return "Initializing..."
@@ -833,22 +1128,30 @@ func (m *setupModel) View() string {
 	switch m.step {
 	case stepSelectComponents:
 		title = theme.DefaultTheme.Success.Render(theme.IconTree) + " Grove Setup Wizard"
+	case stepConfigFormat:
+		title = theme.DefaultTheme.Info.Render(theme.IconNote) + " Configuration Format"
+	case stepTUITheme:
+		title = theme.DefaultTheme.Highlight.Render(theme.IconSparkle) + " TUI Theme"
 	case stepEcosystem:
-		title = "Ecosystem Directory"
+		title = theme.DefaultTheme.Success.Render(theme.IconTree) + " Ecosystem Directory"
 	case stepFirstProject:
-		title = "First Project"
+		title = theme.DefaultTheme.Info.Render(theme.IconRepo) + " First Project"
 	case stepNotebook:
-		title = "Notebook Directory"
+		title = theme.DefaultTheme.Warning.Render(theme.IconNote) + " Notebook Directory"
 	case stepGeminiKey:
-		title = "Gemini API Key"
+		title = theme.DefaultTheme.Highlight.Render(theme.IconSparkle) + " Gemini API Key"
+	case stepFlowSettings:
+		title = theme.DefaultTheme.Info.Render(theme.IconRunning) + " Flow Settings"
 	case stepTmuxBindings:
-		title = "tmux Popup Bindings"
+		title = theme.DefaultTheme.Success.Render(theme.IconShell) + " tmux Popup Bindings"
+	case stepAgentSettings:
+		title = theme.DefaultTheme.Highlight.Render(theme.IconLightbulb) + " Agent Settings"
 	case stepNeovimPlugin:
-		title = "Neovim Plugin"
+		title = theme.DefaultTheme.Info.Render(theme.IconNote) + " Neovim Plugin"
 	case stepPlanPreservation:
-		title = "Plan Preservation"
+		title = theme.DefaultTheme.Warning.Render(theme.IconPlan) + " Plan Preservation"
 	case stepSummary:
-		title = "Setup Complete"
+		title = theme.DefaultTheme.Success.Render(theme.IconSuccess) + " Setup Complete"
 	}
 
 	// Header using theme
@@ -859,6 +1162,10 @@ func (m *setupModel) View() string {
 	switch m.step {
 	case stepSelectComponents:
 		content.WriteString(m.viewComponentSelection())
+	case stepConfigFormat:
+		content.WriteString(m.viewConfigFormatStep())
+	case stepTUITheme:
+		content.WriteString(m.viewTUIThemeStep())
 	case stepEcosystem:
 		content.WriteString(m.viewEcosystemStep())
 	case stepFirstProject:
@@ -867,8 +1174,12 @@ func (m *setupModel) View() string {
 		content.WriteString(m.viewNotebookStep())
 	case stepGeminiKey:
 		content.WriteString(m.viewGeminiKeyStep())
+	case stepFlowSettings:
+		content.WriteString(m.viewFlowSettingsStep())
 	case stepTmuxBindings:
 		content.WriteString(m.viewTmuxBindingsStep())
+	case stepAgentSettings:
+		content.WriteString(m.viewAgentSettingsStep())
 	case stepNeovimPlugin:
 		content.WriteString(m.viewNeovimPluginStep())
 	case stepPlanPreservation:
@@ -903,6 +1214,115 @@ func (m *setupModel) viewComponentSelection() string {
 	content.WriteString(theme.DefaultTheme.Muted.Render("Select Components to Configure"))
 	content.WriteString("\n\n")
 	content.WriteString(m.componentList.View())
+	return content.String()
+}
+
+func (m *setupModel) viewConfigFormatStep() string {
+	var content strings.Builder
+
+	// Explanation
+	explanation := `Choose the format for your Grove configuration file.
+TOML is recommended for new setups - it's cleaner and easier to read.
+YAML is supported for backwards compatibility.`
+	content.WriteString(theme.DefaultTheme.Muted.Render(explanation))
+	content.WriteString("\n\n")
+
+	// Render format options with theme styling
+	formats := []struct {
+		id   string
+		name string
+		desc string
+	}{
+		{"toml", "TOML", "Modern, clean configuration format (recommended)"},
+		{"yaml", "YAML", "Traditional YAML configuration format"},
+	}
+
+	for i, f := range formats {
+		var cursor, icon string
+		if i == m.formatList.Index() {
+			cursor = theme.DefaultTheme.Highlight.Render(theme.IconArrowRightBold) + " "
+			icon = theme.DefaultTheme.Success.Render(theme.IconStatusCompleted)
+		} else {
+			cursor = "  "
+			icon = theme.DefaultTheme.Muted.Render(theme.IconStatusTodo)
+		}
+
+		title := f.name
+		if i == m.formatList.Index() {
+			title = theme.DefaultTheme.Bold.Render(title)
+		}
+
+		content.WriteString(fmt.Sprintf("%s%s %s\n", cursor, icon, title))
+		content.WriteString(fmt.Sprintf("     %s\n", theme.DefaultTheme.Muted.Render(f.desc)))
+	}
+
+	content.WriteString("\n")
+
+	// Show preview of config format
+	content.WriteString(theme.DefaultTheme.Muted.Render("Preview:"))
+	content.WriteString("\n")
+
+	var formatPreview string
+	if m.formatList.Index() == 0 {
+		formatPreview = `[tui]
+theme = "terminal"
+
+[groves.projects]
+path = "~/Code/projects"
+enabled = true`
+	} else {
+		formatPreview = `tui:
+  theme: terminal
+
+groves:
+  projects:
+    path: ~/Code/projects
+    enabled: true`
+	}
+	content.WriteString(theme.DefaultTheme.Box.Copy().Width(m.width - 12).Render(formatPreview))
+
+	return content.String()
+}
+
+func (m *setupModel) viewTUIThemeStep() string {
+	var content strings.Builder
+
+	// Explanation
+	explanation := `Select a color theme for Grove terminal interfaces.
+This affects tools like gmux, nb, and flow TUIs.`
+	content.WriteString(theme.DefaultTheme.Muted.Render(explanation))
+	content.WriteString("\n\n")
+
+	// Render theme options with theme styling
+	themes := []struct {
+		id   string
+		name string
+		desc string
+	}{
+		{"terminal", "Terminal", "Uses your terminal's default colors"},
+		{"gruvbox", "Gruvbox", "Warm, retro color scheme"},
+		{"kanagawa", "Kanagawa", "Dark theme inspired by Japanese art"},
+	}
+
+	for i, t := range themes {
+		var cursor, icon string
+		if i == m.themeList.Index() {
+			cursor = theme.DefaultTheme.Highlight.Render(theme.IconArrowRightBold) + " "
+			icon = theme.DefaultTheme.Success.Render(theme.IconStatusCompleted)
+		} else {
+			cursor = "  "
+			icon = theme.DefaultTheme.Muted.Render(theme.IconStatusTodo)
+		}
+
+		title := t.name
+		if i == m.themeList.Index() {
+			title = theme.DefaultTheme.Bold.Render(title)
+		}
+
+		content.WriteString(fmt.Sprintf("%s%s %s\n", cursor, icon, title))
+		content.WriteString(fmt.Sprintf("     %s\n", theme.DefaultTheme.Muted.Render(t.desc)))
+	}
+
 	return content.String()
 }
 
@@ -1042,6 +1462,37 @@ This step is optional. You can skip it and configure the key later.`
 	return content.String()
 }
 
+func (m *setupModel) viewFlowSettingsStep() string {
+	var content strings.Builder
+
+	// Explanation
+	explanation := `Configure the default model for grove-flow LLM jobs.
+This model will be used for oneshot and chat API submissions.`
+	content.WriteString(theme.DefaultTheme.Muted.Render(explanation))
+	content.WriteString("\n\n")
+
+	// Label with icon
+	content.WriteString(theme.DefaultTheme.Highlight.Render(theme.IconArrowRightBold) + " ")
+	content.WriteString(theme.DefaultTheme.Bold.Render("Default LLM Model"))
+	content.WriteString("\n\n")
+
+	// Text input
+	content.WriteString("  " + m.textInput.View())
+	content.WriteString("\n\n")
+
+	// Common models with theme styling
+	content.WriteString(theme.DefaultTheme.Muted.Render("  Common models:"))
+	content.WriteString("\n")
+	models := []string{"gemini-3-pro-preview", "claude-3-opus", "gpt-4o"}
+	for _, model := range models {
+		content.WriteString(fmt.Sprintf("    %s %s\n",
+			theme.DefaultTheme.Muted.Render(theme.IconBullet),
+			theme.DefaultTheme.Info.Render(model)))
+	}
+
+	return content.String()
+}
+
 func (m *setupModel) viewTmuxBindingsStep() string {
 	var content strings.Builder
 
@@ -1066,6 +1517,45 @@ These bindings give you quick keyboard access to Grove tools from any tmux sessi
 
 	// Show the keybindings that will be added
 	content.WriteString(renderTmuxConfig(m.width - 6))
+
+	return content.String()
+}
+
+func (m *setupModel) viewAgentSettingsStep() string {
+	var content strings.Builder
+
+	// Explanation
+	explanation := `Configure default arguments for the Claude agent.
+These arguments will be passed when spawning Claude Code sessions.`
+	content.WriteString(theme.DefaultTheme.Muted.Render(explanation))
+	content.WriteString("\n\n")
+
+	// Label with icon
+	content.WriteString(theme.DefaultTheme.Highlight.Render(theme.IconArrowRightBold) + " ")
+	content.WriteString(theme.DefaultTheme.Bold.Render("Claude Agent Arguments"))
+	content.WriteString("\n\n")
+
+	// Text input
+	content.WriteString("  " + m.textInput.View())
+	content.WriteString("\n\n")
+
+	// Common args with theme styling
+	content.WriteString(theme.DefaultTheme.Muted.Render("  Common arguments:"))
+	content.WriteString("\n")
+	args := []struct {
+		arg  string
+		desc string
+	}{
+		{"--dangerously-skip-permissions", "Skip permission prompts"},
+		{"--chrome", "Enable Chrome browser automation"},
+		{"--verbose", "Verbose output logging"},
+	}
+	for _, a := range args {
+		content.WriteString(fmt.Sprintf("    %s %s %s\n",
+			theme.DefaultTheme.Muted.Render(theme.IconBullet),
+			theme.DefaultTheme.Info.Render(a.arg),
+			theme.DefaultTheme.Muted.Render("- "+a.desc)))
+	}
 
 	return content.String()
 }
