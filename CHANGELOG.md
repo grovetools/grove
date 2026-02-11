@@ -1,3 +1,29 @@
+## v0.6.2 (2026-02-10)
+
+The setup wizard receives a significant overhaul with support for TOML configuration (5cfff7f), responsive terminal layouts (2df6fd1), and standardized theming (6e4b58d). Additionally, the install script is now POSIX-compatible (90d5d95), and the release command correctly loads LLM configuration from TOML files (bba0226).
+
+### Features
+- Add TOML config format and extension options (5cfff7f)
+- Make wizard responsive to terminal width (2df6fd1)
+
+### Bug Fixes
+- Respect grove.toml for LLM model config (bba0226)
+- Make install script POSIX-compatible (90d5d95)
+
+### Improvements
+- Simplify ecosystem wizard UI and rename gmux to nav (921c567)
+- Refactor wizard to use standardized core themes (6e4b58d)
+
+### File Changes
+```
+ cmd/release_tui.go        |    4 +-
+ cmd/setup.go              | 1092 +++++++++++++++++++++++++++++++--------------
+ cmd/setup_ansi.go         |  227 ++++++++--
+ pkg/setup/toml_handler.go |   78 ++++
+ scripts/install.sh        |   72 ++-
+ 5 files changed, 1035 insertions(+), 438 deletions(-)
+```
+
 ## v0.6.1 (2026-02-03)
 
 The release command was fixed, including new flags for explicit version overrides and the ability to generate changelogs in parallel within the TUI (417ad82). Additionally, the installation script has been patched to address execution issues (d48f6fa).
