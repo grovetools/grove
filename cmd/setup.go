@@ -75,6 +75,13 @@ func (i componentItem) Title() string       { return i.title }
 func (i componentItem) Description() string { return i.description }
 func (i componentItem) FilterValue() string { return i.title }
 
+// agentArgItem represents a selectable agent argument
+type agentArgItem struct {
+	arg      string
+	desc     string
+	selected bool
+}
+
 // setupKeyMap defines key bindings for the setup wizard
 type setupKeyMap struct {
 	keymap.Base
@@ -209,7 +216,11 @@ type setupModel struct {
 	flowOneshotModel string
 
 	// Agent settings step state
-	claudeArgs     []string
+	claudeArgs        []string
+	agentArgItems     []agentArgItem
+	agentArgCursor    int
+	agentExtraArgs    string
+	agentInputFocused bool
 
 	// Hooks step state
 	planPreservationEnabled bool
@@ -331,6 +342,13 @@ func newSetupModel(service *setup.Service, selectedOnly map[string]bool) *setupM
 	defaultEcosystemPath := filepath.Join(homeDir, "Code", "my-projects")
 	defaultNotebookPath := filepath.Join(homeDir, "notebooks")
 
+	// Initialize agent argument items
+	agentArgs := []agentArgItem{
+		{arg: "--dangerously-skip-permissions", desc: "Skip permission prompts", selected: true},
+		{arg: "--chrome", desc: "Enable Chrome browser automation", selected: true},
+		{arg: "--verbose", desc: "Verbose output logging", selected: false},
+	}
+
 	return &setupModel{
 		step:             stepSelectComponents,
 		selectedSteps:   make(map[string]bool),
@@ -350,6 +368,10 @@ func newSetupModel(service *setup.Service, selectedOnly map[string]bool) *setupM
 		methodList:      methodList,
 		flowOneshotModel: "gemini-3-pro-preview",
 		claudeArgs:      []string{"--dangerously-skip-permissions", "--chrome"},
+		agentArgItems:   agentArgs,
+		agentArgCursor:  0,
+		agentExtraArgs:  "",
+		agentInputFocused: false,
 		service:         service,
 		yamlHandler:     setup.NewYAMLHandler(service),
 		tomlHandler:     setup.NewTOMLHandler(service),
@@ -560,8 +582,10 @@ func (m *setupModel) prepareStepInput() {
 		m.textInput.Placeholder = "gemini-3-pro-preview"
 	case stepAgentSettings:
 		m.currentInput = inputValue
-		m.textInput.SetValue(strings.Join(m.claudeArgs, ", "))
-		m.textInput.Placeholder = "--dangerously-skip-permissions, --chrome"
+		m.textInput.SetValue(m.agentExtraArgs)
+		m.textInput.Placeholder = "--model, claude-sonnet-4-20250514"
+		m.agentInputFocused = false
+		m.textInput.Blur()
 	}
 }
 
@@ -730,21 +754,64 @@ func (m *setupModel) updateAgentSettingsStep(msg tea.KeyMsg) (tea.Model, tea.Cmd
 		m.prevStep()
 		return m, nil
 	case key.Matches(msg, m.keys.Confirm):
-		// Parse comma-separated args
-		argsStr := m.textInput.Value()
-		if argsStr != "" {
-			m.claudeArgs = strings.Split(argsStr, ",")
-			for i := range m.claudeArgs {
-				m.claudeArgs[i] = strings.TrimSpace(m.claudeArgs[i])
+		// Build claudeArgs from selected checkboxes + extra args
+		m.claudeArgs = []string{}
+		for _, item := range m.agentArgItems {
+			if item.selected {
+				m.claudeArgs = append(m.claudeArgs, item.arg)
+			}
+		}
+		// Add extra args if provided
+		if m.agentExtraArgs != "" {
+			extras := strings.Split(m.agentExtraArgs, ",")
+			for _, e := range extras {
+				e = strings.TrimSpace(e)
+				if e != "" {
+					m.claudeArgs = append(m.claudeArgs, e)
+				}
 			}
 		}
 		m.nextStep()
 		return m, nil
 	}
 
-	var cmd tea.Cmd
-	m.textInput, cmd = m.textInput.Update(msg)
-	return m, cmd
+	// Handle input focus switching with tab
+	if msg.String() == "tab" {
+		m.agentInputFocused = !m.agentInputFocused
+		if m.agentInputFocused {
+			m.textInput.Focus()
+		} else {
+			m.textInput.Blur()
+		}
+		return m, nil
+	}
+
+	// If text input is focused, handle text input
+	if m.agentInputFocused {
+		var cmd tea.Cmd
+		m.textInput, cmd = m.textInput.Update(msg)
+		m.agentExtraArgs = m.textInput.Value()
+		return m, cmd
+	}
+
+	// Handle checkbox navigation and toggling
+	switch {
+	case key.Matches(msg, m.keys.Base.Up):
+		if m.agentArgCursor > 0 {
+			m.agentArgCursor--
+		}
+	case key.Matches(msg, m.keys.Base.Down):
+		if m.agentArgCursor < len(m.agentArgItems)-1 {
+			m.agentArgCursor++
+		}
+	case key.Matches(msg, m.keys.Select):
+		// Toggle checkbox
+		if m.agentArgCursor >= 0 && m.agentArgCursor < len(m.agentArgItems) {
+			m.agentArgItems[m.agentArgCursor].selected = !m.agentArgItems[m.agentArgCursor].selected
+		}
+	}
+
+	return m, nil
 }
 
 func (m *setupModel) updateNeovimPluginStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1052,19 +1119,31 @@ func (m *setupModel) setupTmuxBindings() {
 set -g popup-border-lines none
 
 # --- Grove Flow Plan Status ---
-bind-key -n C-p run-shell "PATH=$PATH:$HOME/.local/share/grove/bin flow tmux status"
+bind-key -n C-p run-shell "flow tmux status"
 
 # --- Nav Session Switcher ---
-bind-key -n C-f display-popup -w 100% -h 98% -x C -y C -E "HOME=$HOME PATH=$PATH:$HOME/.local/share/grove/bin nav sz"
+bind-key -n C-f display-popup -w 100% -h 98% -x C -y C -E "nav sz"
+
+# --- Nav Key Manager ---
+bind-key -n M-p display-popup -w 100% -h 98% -x C -y C -E "nav km"
+
+# --- Nav Session History ---
+bind-key -n M-h display-popup -w 100% -h 98% -x C -y C -E "nav history"
+
+# --- Nav Window Selector ---
+bind-key -n M-w display-popup -w 100% -h 98% -x C -y C -E "nav windows"
 
 # --- Context (cx) View ---
-bind-key -n M-v display-popup -w 100% -h 98% -x C -y C -E "PATH=$PATH:$HOME/.local/share/grove/bin cx view"
+bind-key -n M-v display-popup -w 100% -h 98% -x C -y C -E "cx view"
 
 # --- NB (Notes) TUI ---
-bind-key -n C-n run-shell "PATH=$PATH:$HOME/.local/share/grove/bin nb tmux tui"
+bind-key -n C-n run-shell "nb tmux tui"
+
+# --- Hooks Sessions ---
+bind-key -n M-s display-popup -w 100% -h 98% -x C -y C "hooks sessions browse"
 
 # --- Core Editor ---
-bind-key -n C-e run-shell "PATH=$PATH:$HOME/.local/share/grove/bin core tmux editor"
+bind-key -n C-e run-shell "core tmux editor"
 `
 	m.service.WriteFile("~/.config/tmux/popups.conf", []byte(popupsContent), 0644)
 
@@ -1131,19 +1210,19 @@ func (m *setupModel) View() string {
 	var title string
 	switch m.step {
 	case stepSelectComponents:
-		title = theme.DefaultTheme.Success.Render(theme.IconTree) + " Grove Setup Wizard"
+		title = theme.DefaultTheme.Success.Render(theme.IconPineTreeBox) + " Grove Setup Wizard"
 	case stepConfigFormat:
 		title = theme.DefaultTheme.Info.Render(theme.IconNote) + " Configuration Format"
 	case stepTUITheme:
 		title = theme.DefaultTheme.Highlight.Render(theme.IconSparkle) + " TUI Theme"
 	case stepEcosystem:
-		title = theme.DefaultTheme.Success.Render(theme.IconTree) + " Ecosystem Directory"
+		title = theme.DefaultTheme.Success.Render(theme.IconPineTreeBox) + " Ecosystem Directory"
 	case stepFirstProject:
 		title = theme.DefaultTheme.Info.Render(theme.IconRepo) + " First Project"
 	case stepNotebook:
-		title = theme.DefaultTheme.Warning.Render(theme.IconNote) + " Notebook Directory"
+		title = theme.DefaultTheme.Highlight.Render(theme.IconNotebook) + " Notebook Directory"
 	case stepGeminiKey:
-		title = theme.DefaultTheme.Highlight.Render(theme.IconSparkle) + " Gemini API Key"
+		title = theme.DefaultTheme.Info.Render(theme.IconRobot) + " Gemini API Key"
 	case stepFlowSettings:
 		title = theme.DefaultTheme.Info.Render(theme.IconRunning) + " Flow Settings"
 	case stepTmuxBindings:
@@ -1151,7 +1230,7 @@ func (m *setupModel) View() string {
 	case stepAgentSettings:
 		title = theme.DefaultTheme.Highlight.Render(theme.IconLightbulb) + " Agent Settings"
 	case stepNeovimPlugin:
-		title = theme.DefaultTheme.Info.Render(theme.IconNote) + " Neovim Plugin"
+		title = theme.DefaultTheme.Success.Render(theme.IconCode) + " Neovim Plugin"
 	case stepPlanPreservation:
 		title = theme.DefaultTheme.Warning.Render(theme.IconPlan) + " Plan Preservation"
 	case stepSummary:
@@ -1410,9 +1489,8 @@ func (m *setupModel) viewGeminiKeyStep() string {
 
 	// Explanation
 	explanation := `A Gemini API key enables AI-powered features in Grove:
-  - grove flow: Run LLM jobs for code analysis and generation
-  - grove llm request: Direct LLM queries from the command line
-  - AI-assisted changelog generation during releases
+  - Oneshot jobs: Submit code and prompts to LLMs for analysis and planning
+  - Chat sessions: Interactive conversations with LLMs using codebase context
 
 This step is optional. You can skip it and configure the key later.`
 	content.WriteString(theme.DefaultTheme.Muted.Render(explanation))
@@ -1509,32 +1587,58 @@ These arguments will be passed when spawning Claude Code sessions.`
 	content.WriteString(theme.DefaultTheme.Muted.Render(explanation))
 	content.WriteString("\n\n")
 
-	// Label with icon
-	content.WriteString(theme.DefaultTheme.Highlight.Render(theme.IconArrowRightBold) + " ")
-	content.WriteString(theme.DefaultTheme.Bold.Render("Claude Agent Arguments"))
+	// Section header
+	content.WriteString(theme.DefaultTheme.Bold.Render("  Select Arguments:"))
 	content.WriteString("\n\n")
 
-	// Text input
-	content.WriteString("  " + m.textInput.View())
-	content.WriteString("\n\n")
+	// Render checkbox items
+	for i, item := range m.agentArgItems {
+		// Cursor indicator
+		cursor := "  "
+		if !m.agentInputFocused && i == m.agentArgCursor {
+			cursor = theme.DefaultTheme.Highlight.Render(theme.IconArrowRightBold) + " "
+		}
 
-	// Common args with theme styling
-	content.WriteString(theme.DefaultTheme.Muted.Render("  Common arguments:"))
+		// Checkbox
+		checkbox := iconCheckboxUnselected
+		checkStyle := theme.DefaultTheme.Muted
+		if item.selected {
+			checkbox = iconCheckboxSelected
+			checkStyle = theme.DefaultTheme.Success
+		}
+
+		// Render line
+		content.WriteString(fmt.Sprintf("  %s%s %s %s\n",
+			cursor,
+			checkStyle.Render(checkbox),
+			theme.DefaultTheme.Info.Render(item.arg),
+			theme.DefaultTheme.Muted.Render("- "+item.desc)))
+	}
+
+	// Warning about dangerously-skip-permissions
 	content.WriteString("\n")
-	args := []struct {
-		arg  string
-		desc string
-	}{
-		{"--dangerously-skip-permissions", "Skip permission prompts"},
-		{"--chrome", "Enable Chrome browser automation"},
-		{"--verbose", "Verbose output logging"},
+	warning := "  " + theme.DefaultTheme.Warning.Render(theme.IconWarning) + " " +
+		theme.DefaultTheme.Warning.Render("Warning:") + " " +
+		theme.DefaultTheme.Muted.Render("Using --dangerously-skip-permissions grants the agent") + "\n" +
+		theme.DefaultTheme.Muted.Render("    full access to your system. Consider using a sandboxed environment") + "\n" +
+		theme.DefaultTheme.Muted.Render("    (e.g., VMs, containers) to limit potential impact.")
+	content.WriteString(warning)
+	content.WriteString("\n\n")
+
+	// Additional arguments text input
+	inputCursor := "  "
+	if m.agentInputFocused {
+		inputCursor = theme.DefaultTheme.Highlight.Render(theme.IconArrowRightBold) + " "
 	}
-	for _, a := range args {
-		content.WriteString(fmt.Sprintf("    %s %s %s\n",
-			theme.DefaultTheme.Muted.Render(theme.IconBullet),
-			theme.DefaultTheme.Info.Render(a.arg),
-			theme.DefaultTheme.Muted.Render("- "+a.desc)))
-	}
+	content.WriteString(inputCursor + theme.DefaultTheme.Bold.Render("Additional Arguments:"))
+	content.WriteString("\n")
+	content.WriteString("    " + m.textInput.View())
+	content.WriteString("\n")
+	content.WriteString(theme.DefaultTheme.Muted.Render("    (comma-separated, e.g., --model, claude-sonnet-4-20250514)"))
+	content.WriteString("\n\n")
+
+	// Help text
+	content.WriteString(theme.DefaultTheme.Muted.Render("  space: toggle • tab: switch focus • enter: confirm"))
 
 	return content.String()
 }
@@ -1794,19 +1898,31 @@ Add projects to this directory and they will be automatically discovered by Grov
 set -g popup-border-lines none
 
 # --- Grove Flow Plan Status ---
-bind-key -n C-p run-shell "PATH=$PATH:$HOME/.local/share/grove/bin flow tmux status"
+bind-key -n C-p run-shell "flow tmux status"
 
 # --- Nav Session Switcher ---
-bind-key -n C-f display-popup -w 100% -h 98% -x C -y C -E "HOME=$HOME PATH=$PATH:$HOME/.local/share/grove/bin nav sz"
+bind-key -n C-f display-popup -w 100% -h 98% -x C -y C -E "nav sz"
+
+# --- Nav Key Manager ---
+bind-key -n M-p display-popup -w 100% -h 98% -x C -y C -E "nav km"
+
+# --- Nav Session History ---
+bind-key -n M-h display-popup -w 100% -h 98% -x C -y C -E "nav history"
+
+# --- Nav Window Selector ---
+bind-key -n M-w display-popup -w 100% -h 98% -x C -y C -E "nav windows"
 
 # --- Context (cx) View ---
-bind-key -n M-v display-popup -w 100% -h 98% -x C -y C -E "PATH=$PATH:$HOME/.local/share/grove/bin cx view"
+bind-key -n M-v display-popup -w 100% -h 98% -x C -y C -E "cx view"
 
 # --- NB (Notes) TUI ---
-bind-key -n C-n run-shell "PATH=$PATH:$HOME/.local/share/grove/bin nb tmux tui"
+bind-key -n C-n run-shell "nb tmux tui"
+
+# --- Hooks Sessions ---
+bind-key -n M-s display-popup -w 100% -h 98% -x C -y C "hooks sessions browse"
 
 # --- Core Editor ---
-bind-key -n C-e run-shell "PATH=$PATH:$HOME/.local/share/grove/bin core tmux editor"
+bind-key -n C-e run-shell "core tmux editor"
 `
 		service.WriteFile("~/.config/tmux/popups.conf", []byte(popupsContent), 0644)
 

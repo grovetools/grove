@@ -285,8 +285,12 @@ func renderTmuxConfig(width int) string {
 	}{
 		{"C-p", "Flow status popup"},
 		{"C-f", "Nav session switcher"},
+		{"M-p", "Nav key manager"},
+		{"M-h", "Nav session history"},
+		{"M-w", "Nav window selector"},
 		{"M-v", "Context (cx) viewer"},
 		{"C-n", "Notes TUI"},
+		{"M-s", "Hooks sessions"},
 		{"C-e", "Core editor"},
 	}
 
