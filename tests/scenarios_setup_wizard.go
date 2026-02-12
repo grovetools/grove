@@ -53,7 +53,7 @@ func SetupWizardCLIDefaultsScenario() *harness.Scenario {
 			}),
 			harness.NewStep("Verify files and directories created", func(ctx *harness.Context) error {
 				return ctx.Verify(func(v *verify.Collector) {
-					ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-projects")
+					ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "my-projects")
 					notebookPath := filepath.Join(ctx.HomeDir(), "notebooks")
 					configPath := filepath.Join(ctx.ConfigDir(), "grove", "grove.yml")
 
@@ -63,7 +63,7 @@ func SetupWizardCLIDefaultsScenario() *harness.Scenario {
 				})
 			}),
 			harness.NewStep("Verify ecosystem files", func(ctx *harness.Context) error {
-				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-projects")
+				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "my-projects")
 				return ctx.Verify(func(v *verify.Collector) {
 					v.Equal("grove.yml exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "grove.yml")))
 					v.Equal("README.md exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "README.md")))
@@ -90,7 +90,7 @@ func SetupWizardCLIDryRunScenario() *harness.Scenario {
 				return nil
 			}),
 			harness.NewStep("Verify no files created in dry-run mode", func(ctx *harness.Context) error {
-				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-projects")
+				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "my-projects")
 				notebookPath := filepath.Join(ctx.HomeDir(), "notebooks")
 
 				return ctx.Verify(func(v *verify.Collector) {
@@ -119,7 +119,7 @@ func SetupWizardCLIOnlyScenario() *harness.Scenario {
 				return nil
 			}),
 			harness.NewStep("Verify only notebook was created", func(ctx *harness.Context) error {
-				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-projects")
+				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "my-projects")
 				notebookPath := filepath.Join(ctx.HomeDir(), "notebooks")
 
 				return ctx.Verify(func(v *verify.Collector) {
@@ -148,7 +148,7 @@ func SetupWizardEcosystemFilesScenario() *harness.Scenario {
 				return nil
 			}),
 			harness.NewStep("Verify ecosystem files created", func(ctx *harness.Context) error {
-				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-projects")
+				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "my-projects")
 
 				return ctx.Verify(func(v *verify.Collector) {
 					v.Equal("grove.yml exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "grove.yml")))
@@ -156,11 +156,11 @@ func SetupWizardEcosystemFilesScenario() *harness.Scenario {
 				})
 			}),
 			harness.NewStep("Verify grove.yml content", func(ctx *harness.Context) error {
-				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-projects")
+				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "my-projects")
 				groveYMLPath := filepath.Join(ecosystemPath, "grove.yml")
 
 				return ctx.Verify(func(v *verify.Collector) {
-					v.Equal("grove.yml contains name", nil, fs.AssertContains(groveYMLPath, "name: grove-projects"))
+					v.Equal("grove.yml contains name", nil, fs.AssertContains(groveYMLPath, "name: my-projects"))
 					v.Equal("grove.yml contains workspaces", nil, fs.AssertContains(groveYMLPath, "workspaces:"))
 				})
 			}),
@@ -409,6 +409,28 @@ func SetupWizardTUINavigationScenario() *harness.Scenario {
 					return err
 				}
 
+				// Wait for config format step
+				if err := session.WaitForText("Configuration Format", 5*time.Second); err != nil {
+					content, _ := session.Capture(tui.WithCleanedOutput())
+					return fmt.Errorf("config format step not reached: %w\nContent:\n%s", err, content)
+				}
+
+				// Accept default format (TOML)
+				if err := session.Type("Enter"); err != nil {
+					return err
+				}
+
+				// Wait for TUI theme step
+				if err := session.WaitForText("TUI Theme", 5*time.Second); err != nil {
+					content, _ := session.Capture(tui.WithCleanedOutput())
+					return fmt.Errorf("TUI theme step not reached: %w\nContent:\n%s", err, content)
+				}
+
+				// Accept default theme
+				if err := session.Type("Enter"); err != nil {
+					return err
+				}
+
 				// Wait for ecosystem step
 				if err := session.WaitForText("Where should your ecosystem be created", 5*time.Second); err != nil {
 					content, _ := session.Capture(tui.WithCleanedOutput())
@@ -420,10 +442,6 @@ func SetupWizardTUINavigationScenario() *harness.Scenario {
 				session := ctx.Get("tui_session").(*tui.Session)
 
 				// Ecosystem path -> Enter
-				if err := session.Type("Enter"); err != nil {
-					return err
-				}
-				// Ecosystem name -> Enter
 				if err := session.Type("Enter"); err != nil {
 					return err
 				}
@@ -440,7 +458,7 @@ func SetupWizardTUINavigationScenario() *harness.Scenario {
 				}
 
 				// Should be at Notebook step now
-				if err := session.WaitForText("nb new", 5*time.Second); err != nil {
+				if err := session.WaitForText("notebook", 5*time.Second); err != nil {
 					content, _ := session.Capture(tui.WithCleanedOutput())
 					return fmt.Errorf("notebook step not reached: %w\nContent:\n%s", err, content)
 				}
@@ -515,16 +533,24 @@ func SetupWizardTUIFullWorkflowScenario() *harness.Scenario {
 					return err
 				}
 
-				// Accept default ecosystem path
-				if err := session.WaitForText("Where should your ecosystem be created", 5*time.Second); err != nil {
+				// Config format step - accept TOML default
+				if err := session.WaitForText("Configuration Format", 5*time.Second); err != nil {
 					return err
 				}
 				if err := session.Type("Enter"); err != nil {
 					return err
 				}
 
-				// Accept default ecosystem name
-				if err := session.WaitForText("What should this ecosystem be called", 5*time.Second); err != nil {
+				// TUI theme step - accept default
+				if err := session.WaitForText("TUI Theme", 5*time.Second); err != nil {
+					return err
+				}
+				if err := session.Type("Enter"); err != nil {
+					return err
+				}
+
+				// Accept default ecosystem path
+				if err := session.WaitForText("Where should your ecosystem be created", 5*time.Second); err != nil {
 					return err
 				}
 				if err := session.Type("Enter"); err != nil {
@@ -540,7 +566,23 @@ func SetupWizardTUIFullWorkflowScenario() *harness.Scenario {
 				}
 
 				// Accept default notebook path
-				if err := session.WaitForText("nb new", 5*time.Second); err != nil {
+				if err := session.WaitForText("notebook", 5*time.Second); err != nil {
+					return err
+				}
+				if err := session.Type("Enter"); err != nil {
+					return err
+				}
+
+				// Flow settings step - accept default model
+				if err := session.WaitForText("Flow Settings", 5*time.Second); err != nil {
+					return err
+				}
+				if err := session.Type("Enter"); err != nil {
+					return err
+				}
+
+				// Review step - confirm to apply
+				if err := session.WaitForText("Review Configuration", 5*time.Second); err != nil {
 					return err
 				}
 				if err := session.Type("Enter"); err != nil {
@@ -574,9 +616,9 @@ func SetupWizardTUIFullWorkflowScenario() *harness.Scenario {
 			}),
 			harness.NewStep("Verify files were created", func(ctx *harness.Context) error {
 				return ctx.Verify(func(v *verify.Collector) {
-					ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-projects")
+					ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "my-projects")
 					notebookPath := filepath.Join(ctx.HomeDir(), "notebooks")
-					configPath := filepath.Join(ctx.ConfigDir(), "grove", "grove.yml")
+					configPath := filepath.Join(ctx.ConfigDir(), "grove", "grove.toml")
 
 					v.Equal("ecosystem directory created", nil, fs.AssertExists(ecosystemPath))
 					v.Equal("notebook directory created", nil, fs.AssertExists(notebookPath))
@@ -640,7 +682,25 @@ func SetupWizardTUIDeselectAllScenario() *harness.Scenario {
 					return err
 				}
 
-				// Should go directly to summary
+				// Config format step still appears
+				if err := session.WaitForText("Configuration Format", 5*time.Second); err != nil {
+					content, _ := session.Capture(tui.WithCleanedOutput())
+					return fmt.Errorf("config format not reached: %w\nContent:\n%s", err, content)
+				}
+				if err := session.Type("Enter"); err != nil {
+					return err
+				}
+
+				// Review step
+				if err := session.WaitForText("Review Configuration", 5*time.Second); err != nil {
+					content, _ := session.Capture(tui.WithCleanedOutput())
+					return fmt.Errorf("review not reached: %w\nContent:\n%s", err, content)
+				}
+				if err := session.Type("Enter"); err != nil {
+					return err
+				}
+
+				// Should go to summary
 				_, err := session.WaitForAnyText([]string{
 					"Setup Complete",
 					"Setup completed",
@@ -817,7 +877,23 @@ func SetupWizardTUIQuitScenario() *harness.Scenario {
 					return err
 				}
 
-				// Navigate to ecosystem step
+				// Navigate through config format and TUI theme to reach ecosystem step
+				if err := session.Type("Enter"); err != nil {
+					return err
+				}
+
+				// Config format step
+				if err := session.WaitForText("Configuration Format", 5*time.Second); err != nil {
+					return err
+				}
+				if err := session.Type("Enter"); err != nil {
+					return err
+				}
+
+				// TUI theme step
+				if err := session.WaitForText("TUI Theme", 5*time.Second); err != nil {
+					return err
+				}
 				if err := session.Type("Enter"); err != nil {
 					return err
 				}
@@ -833,7 +909,7 @@ func SetupWizardTUIQuitScenario() *harness.Scenario {
 				return nil
 			}),
 			harness.NewStep("Verify no files created", func(ctx *harness.Context) error {
-				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "grove-projects")
+				ecosystemPath := filepath.Join(ctx.HomeDir(), "Code", "my-projects")
 				return ctx.Check("no ecosystem created", fs.AssertNotExists(ecosystemPath))
 			}),
 		},

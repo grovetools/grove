@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/cli"
@@ -19,8 +20,10 @@ import (
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/grove/pkg/setup"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 // Command flags
@@ -46,6 +49,7 @@ const (
 	stepAgentSettings
 	stepNeovimPlugin
 	stepPlanPreservation
+	stepReview
 	stepSummary
 )
 
@@ -225,6 +229,12 @@ type setupModel struct {
 	// Hooks step state
 	planPreservationEnabled bool
 
+	// Review step state - generated config preview
+	generatedContent []byte
+	targetPath       string
+	isDraft          bool
+	reviewViewport   viewport.Model
+
 	// Service and config handlers
 	service        *setup.Service
 	yamlHandler    *setup.YAMLHandler
@@ -375,6 +385,7 @@ func newSetupModel(service *setup.Service, selectedOnly map[string]bool) *setupM
 		service:         service,
 		yamlHandler:     setup.NewYAMLHandler(service),
 		tomlHandler:     setup.NewTOMLHandler(service),
+		reviewViewport:  viewport.New(80, 20),
 		keys:            setupKeys,
 		help:            help.New(setupKeys),
 		ready:           false,
@@ -415,6 +426,8 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateNeovimPluginStep(msg)
 		case stepPlanPreservation:
 			return m.updatePlanPreservationStep(msg)
+		case stepReview:
+			return m.updateReviewStep(msg)
 		case stepSummary:
 			return m.updateSummaryStep(msg)
 		}
@@ -428,6 +441,9 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.themeList.SetSize(msg.Width-4, 8)
 		// Account for box border (2) + padding (4) + some margin
 		m.textInput.Width = msg.Width - 12
+		// Review viewport: account for header, status message, and footer
+		m.reviewViewport.Width = msg.Width - 8
+		m.reviewViewport.Height = msg.Height - 14
 		m.ready = true
 		return m, nil
 	}
@@ -595,8 +611,9 @@ func (m *setupModel) nextStep() {
 		m.step = m.orderedSteps[m.currentStepIdx]
 		m.prepareStepInput()
 	} else {
-		m.step = stepSummary
-		m.executeSetup()
+		// All config steps done, go to review step
+		m.step = stepReview
+		m.generateConfig()
 	}
 }
 
@@ -852,6 +869,31 @@ func (m *setupModel) updatePlanPreservationStep(msg tea.KeyMsg) (tea.Model, tea.
 	return m, nil
 }
 
+func (m *setupModel) updateReviewStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keys.Base.Quit):
+		return m, tea.Quit
+	case key.Matches(msg, m.keys.Back):
+		// Go back to the last ordered step
+		if len(m.orderedSteps) > 0 {
+			m.currentStepIdx = len(m.orderedSteps) - 1
+			m.step = m.orderedSteps[m.currentStepIdx]
+			m.prepareStepInput()
+		}
+		return m, nil
+	case key.Matches(msg, m.keys.Confirm):
+		// Execute the setup and transition to summary
+		m.executeSetup()
+		m.step = stepSummary
+		return m, nil
+	}
+
+	// Pass other keys to viewport for scrolling
+	var cmd tea.Cmd
+	m.reviewViewport, cmd = m.reviewViewport.Update(msg)
+	return m, cmd
+}
+
 func (m *setupModel) updateSummaryStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Base.Quit), key.Matches(msg, m.keys.Confirm):
@@ -861,11 +903,14 @@ func (m *setupModel) updateSummaryStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *setupModel) executeSetup() {
-	// Based on format selection, use the appropriate handler
-	if m.configFormat == formatTOML {
-		m.executeSetupTOML()
-	} else {
-		m.executeSetupYAML()
+	// Write the config file
+	if err := m.service.WriteFile(m.targetPath, m.generatedContent, 0644); err != nil {
+		m.err = err
+	}
+
+	// Create notebook directory if selected
+	if m.selectedSteps["notebook"] {
+		m.service.MkdirAll(m.notebookPath, 0755)
 	}
 
 	// These don't depend on config format
@@ -883,7 +928,36 @@ func (m *setupModel) executeSetup() {
 	}
 }
 
-func (m *setupModel) executeSetupTOML() {
+// generateConfig builds the configuration content and determines the target path.
+// If the config file already exists, it will use a .draft suffix to avoid overwriting.
+func (m *setupModel) generateConfig() {
+	var content []byte
+	var configPath string
+
+	if m.configFormat == formatTOML {
+		content, configPath = m.generateTOMLConfig()
+	} else {
+		content, configPath = m.generateYAMLConfig()
+	}
+
+	m.generatedContent = content
+
+	// Check if target file already exists
+	if m.service.FileExists(configPath) {
+		m.isDraft = true
+		m.targetPath = configPath + ".draft"
+	} else {
+		m.isDraft = false
+		m.targetPath = configPath
+	}
+
+	// Set viewport content for scrolling
+	m.reviewViewport.SetContent(string(content))
+	m.reviewViewport.GotoTop()
+}
+
+// generateTOMLConfig builds the TOML configuration content and returns it along with the path.
+func (m *setupModel) generateTOMLConfig() ([]byte, string) {
 	// Build the complete config as a map
 	config := make(map[string]interface{})
 
@@ -928,8 +1002,6 @@ func (m *setupModel) executeSetupTOML() {
 				"default": "personal",
 			},
 		}
-		// Create notebook directory
-		m.service.MkdirAll(m.notebookPath, 0755)
 	}
 
 	// Agent settings
@@ -966,13 +1038,23 @@ func (m *setupModel) executeSetupTOML() {
 		}
 	}
 
-	// Save the config
-	m.tomlHandler.SaveGlobalConfig(config)
+	// Marshal to TOML
+	data, _ := toml.Marshal(config)
+	return data, setup.GlobalTOMLConfigPath()
 }
 
-func (m *setupModel) executeSetupYAML() {
-	// Use the existing YAML handler for backwards compatibility
-	root, _ := m.yamlHandler.LoadGlobalConfig()
+// generateYAMLConfig builds the YAML configuration content and returns it along with the path.
+// Note: The wizard always creates fresh config; it does not merge with existing config.
+func (m *setupModel) generateYAMLConfig() ([]byte, string) {
+	// Start with empty document - wizard does not merge with existing config
+	root := &yaml.Node{
+		Kind: yaml.DocumentNode,
+		Content: []*yaml.Node{
+			{
+				Kind: yaml.MappingNode,
+			},
+		},
+	}
 
 	// TUI theme
 	if m.selectedSteps["tui"] {
@@ -1003,8 +1085,6 @@ func (m *setupModel) executeSetupYAML() {
 	if m.selectedSteps["notebook"] {
 		setup.SetValue(root, m.notebookPath, "notebooks", "path")
 		setup.SetValue(root, "personal", "notebooks", "rules", "default")
-		// Create notebook directory
-		m.service.MkdirAll(m.notebookPath, 0755)
 	}
 
 	// Agent settings
@@ -1031,7 +1111,9 @@ func (m *setupModel) executeSetupYAML() {
 		}
 	}
 
-	m.yamlHandler.SaveGlobalConfig(root)
+	// Marshal to YAML
+	data, _ := yaml.Marshal(root)
+	return data, setup.GlobalConfigPath()
 }
 
 func (m *setupModel) setupEcosystemFiles() {
@@ -1233,6 +1315,8 @@ func (m *setupModel) View() string {
 		title = theme.DefaultTheme.Success.Render(theme.IconCode) + " Neovim Plugin"
 	case stepPlanPreservation:
 		title = theme.DefaultTheme.Warning.Render(theme.IconPlan) + " Plan Preservation"
+	case stepReview:
+		title = theme.DefaultTheme.Info.Render(theme.IconNote) + " Review Configuration"
 	case stepSummary:
 		title = theme.DefaultTheme.Success.Render(theme.IconSuccess) + " Setup Complete"
 	}
@@ -1267,6 +1351,8 @@ func (m *setupModel) View() string {
 		content.WriteString(m.viewNeovimPluginStep())
 	case stepPlanPreservation:
 		content.WriteString(m.viewPlanPreservationStep())
+	case stepReview:
+		content.WriteString(m.viewReviewStep())
 	case stepSummary:
 		content.WriteString(m.viewSummary())
 	}
@@ -1696,6 +1782,43 @@ in your current flow plan directory with a kebab-case title.`
 	boxContent.WriteString(theme.DefaultTheme.Muted.Render("Press space/y/n to select, Enter to confirm, esc to go back."))
 
 	content.WriteString(boxStyle.Render(boxContent.String()))
+	return content.String()
+}
+
+func (m *setupModel) viewReviewStep() string {
+	var content strings.Builder
+
+	// Status message based on whether this is a draft
+	if m.isDraft {
+		warning := theme.DefaultTheme.Warning.Render(theme.IconWarning) + " " +
+			theme.DefaultTheme.Warning.Render("Configuration already exists")
+		content.WriteString(warning + "\n")
+		content.WriteString(theme.DefaultTheme.Muted.Render("To protect your existing settings, this new config will be saved as:"))
+		content.WriteString("\n")
+		content.WriteString(theme.DefaultTheme.Info.Render(setup.AbbreviatePath(m.targetPath)))
+		content.WriteString("\n\n")
+	} else {
+		success := theme.DefaultTheme.Success.Render(theme.IconSuccess) + " " +
+			theme.DefaultTheme.Success.Render("Creating new configuration")
+		content.WriteString(success + "\n")
+		content.WriteString(theme.DefaultTheme.Muted.Render("Configuration will be written to:"))
+		content.WriteString("\n")
+		content.WriteString(theme.DefaultTheme.Info.Render(setup.AbbreviatePath(m.targetPath)))
+		content.WriteString("\n\n")
+	}
+
+	// Preview header with scroll indicator
+	scrollInfo := fmt.Sprintf("%d%%", int(m.reviewViewport.ScrollPercent()*100))
+	content.WriteString(theme.DefaultTheme.Bold.Render("Preview:") + " " +
+		theme.DefaultTheme.Muted.Render("(↑/↓ to scroll, "+scrollInfo+")"))
+	content.WriteString("\n")
+
+	// Config preview in a box using viewport for scrolling
+	previewStyle := theme.DefaultTheme.Box.Copy().
+		Width(m.width - 8)
+
+	content.WriteString(previewStyle.Render(m.reviewViewport.View()))
+
 	return content.String()
 }
 
