@@ -87,9 +87,10 @@ json.dump(data, sys.stdout, indent=2)
             ;;
     esac
 
-    # Next step
+    # Run onboarding wizard
     echo ""
-    echo "Run: grove install all"
+    echo "Starting Grove onboarding..."
+    "$INSTALL_DIR/grove" onboard
 }
 
 main "$@"
