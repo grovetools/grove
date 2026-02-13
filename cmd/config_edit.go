@@ -193,6 +193,7 @@ func (d configDelegate) Render(w io.Writer, m list.Model, index int, item list.I
 }
 
 // renderLayerBadge renders a colored badge for the config source.
+// Override sources show an asterisk (e.g., [Global*]) to indicate they're from an override file.
 func renderLayerBadge(source config.ConfigSource) string {
 	var style lipgloss.Style
 	var label string
@@ -202,11 +203,11 @@ func renderLayerBadge(source config.ConfigSource) string {
 		style = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Blue)
 		label = "[Global]"
 	case config.SourceGlobalOverride:
-		style = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Cyan)
-		label = "[Global Override]"
+		style = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Blue)
+		label = "[Global*]"
 	case config.SourceEnvOverlay:
 		style = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Yellow)
-		label = "[Env Overlay]"
+		label = "[Env*]"
 	case config.SourceEcosystem:
 		style = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Violet)
 		label = "[Ecosystem]"
@@ -214,8 +215,8 @@ func renderLayerBadge(source config.ConfigSource) string {
 		style = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Green)
 		label = "[Project]"
 	case config.SourceOverride:
-		style = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Orange)
-		label = "[Override]"
+		style = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Green)
+		label = "[Local*]"
 	case config.SourceDefault:
 		style = theme.DefaultTheme.Muted
 		label = "[Default]"
@@ -233,15 +234,15 @@ func layerDisplayName(source config.ConfigSource) string {
 	case config.SourceGlobal:
 		return "Global"
 	case config.SourceGlobalOverride:
-		return "Global Override"
+		return "Global*"
 	case config.SourceEnvOverlay:
-		return "Env Overlay"
+		return "Env*"
 	case config.SourceEcosystem:
 		return "Ecosystem"
 	case config.SourceProject:
 		return "Project"
 	case config.SourceOverride:
-		return "Override"
+		return "Local*"
 	case config.SourceDefault:
 		return "Default"
 	default:
@@ -994,14 +995,14 @@ func (m configModel) renderInfoView() string {
 	if m.layered.GlobalOverride != nil {
 		globalOverrideVal := formatLayerVal(node.LayerValues.GlobalOverride)
 		globalOverridePath := m.layered.FilePaths[config.SourceGlobalOverride]
-		layerRows = append(layerRows, m.renderLayerRow("Global Override", globalOverrideVal, globalOverridePath, node.ActiveSource == config.SourceGlobalOverride))
+		layerRows = append(layerRows, m.renderLayerRow("Global*", globalOverrideVal, globalOverridePath, node.ActiveSource == config.SourceGlobalOverride))
 	}
 
 	// Env Overlay layer (only show if exists)
 	if m.layered.EnvOverlay != nil {
 		envOverlayVal := formatLayerVal(node.LayerValues.EnvOverlay)
 		envOverlayPath := m.layered.FilePaths[config.SourceEnvOverlay]
-		layerRows = append(layerRows, m.renderLayerRow("Env Overlay", envOverlayVal, envOverlayPath, node.ActiveSource == config.SourceEnvOverlay))
+		layerRows = append(layerRows, m.renderLayerRow("Env*", envOverlayVal, envOverlayPath, node.ActiveSource == config.SourceEnvOverlay))
 	}
 
 	// Ecosystem layer
@@ -1018,7 +1019,7 @@ func (m configModel) renderInfoView() string {
 	if len(m.layered.Overrides) > 0 {
 		overrideVal := formatLayerVal(node.LayerValues.Override)
 		overridePath := m.layered.FilePaths[config.SourceOverride]
-		layerRows = append(layerRows, m.renderLayerRow("Override", overrideVal, overridePath, node.ActiveSource == config.SourceOverride))
+		layerRows = append(layerRows, m.renderLayerRow("Local*", overrideVal, overridePath, node.ActiveSource == config.SourceOverride))
 	}
 
 	layersContent := strings.Join(layerRows, "\n")

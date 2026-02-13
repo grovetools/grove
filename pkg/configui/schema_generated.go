@@ -35,11 +35,6 @@ var SchemaFields = []FieldMeta{
 				RefType:     "NotebookRules",
 				Children: []FieldMeta{
 					{
-						Path:        []string{"notebooks", "rules", "default"},
-						Type:        FieldString,
-						Description: "Name of the default notebook to use",
-					},
-					{
 						Path:        []string{"notebooks", "rules", "global"},
 						Type:        FieldObject,
 						Description: "Configuration for the system-wide global notebook",
@@ -52,6 +47,11 @@ var SchemaFields = []FieldMeta{
 								Required:    true,
 							},
 						},
+					},
+					{
+						Path:        []string{"notebooks", "rules", "default"},
+						Type:        FieldString,
+						Description: "Name of the default notebook to use",
 					},
 				},
 			},
