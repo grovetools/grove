@@ -59,6 +59,27 @@ func (h *TOMLHandler) SaveTOML(path string, config map[string]interface{}) error
 	return nil
 }
 
+// LoadTOML loads a TOML file into a map[string]interface{}.
+// If the file doesn't exist, returns an empty map.
+func (h *TOMLHandler) LoadTOML(path string) (map[string]interface{}, error) {
+	expandedPath := expandPath(path)
+
+	data, err := os.ReadFile(expandedPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return make(map[string]interface{}), nil
+		}
+		return nil, fmt.Errorf("failed to read TOML file %s: %w", path, err)
+	}
+
+	result := make(map[string]interface{})
+	if err := toml.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse TOML file %s: %w", path, err)
+	}
+
+	return result, nil
+}
+
 // GlobalTOMLConfigPath returns the path to the global grove TOML configuration file.
 func GlobalTOMLConfigPath() string {
 	configDir := configDir()
