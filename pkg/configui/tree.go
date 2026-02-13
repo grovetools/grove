@@ -628,3 +628,15 @@ func getNestedMapValueInterface(v interface{}, path []string) interface{} {
 	return nil
 }
 
+// FilterSchema returns a subset of fields belonging to the specified layer.
+// This is used by tabbed config pages to show only fields relevant to each layer.
+func FilterSchema(schema []FieldMeta, layer config.ConfigSource) []FieldMeta {
+	var filtered []FieldMeta
+	for _, f := range schema {
+		if f.Layer == layer {
+			filtered = append(filtered, f)
+		}
+	}
+	return filtered
+}
+

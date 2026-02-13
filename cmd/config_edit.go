@@ -66,6 +66,8 @@ type configKeyMap struct {
 	Toggle      key.Binding // Space to toggle expand/collapse
 	Expand      key.Binding // Right/l to expand
 	Collapse    key.Binding // Left/h to collapse
+	NextPage    key.Binding // Tab to next page
+	PrevPage    key.Binding // Shift+Tab to prev page
 }
 
 var configKeys = configKeyMap{
@@ -106,6 +108,14 @@ var configKeys = configKeyMap{
 		key.WithKeys("left", "h"),
 		key.WithHelp("h/←", "collapse/parent"),
 	),
+	NextPage: key.NewBinding(
+		key.WithKeys("tab"),
+		key.WithHelp("tab", "next page"),
+	),
+	PrevPage: key.NewBinding(
+		key.WithKeys("shift+tab"),
+		key.WithHelp("shift+tab", "prev page"),
+	),
 }
 
 func (k configKeyMap) ShortHelp() []key.Binding {
@@ -114,6 +124,8 @@ func (k configKeyMap) ShortHelp() []key.Binding {
 
 func (k configKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
+		// Page navigation
+		{k.NextPage, k.PrevPage},
 		// Navigation
 		{k.Base.Up, k.Base.Down, k.Base.PageUp, k.Base.PageDown},
 		// Tree navigation
@@ -288,11 +300,11 @@ const (
 )
 
 type configModel struct {
-	list  list.Model
-	input textinput.Model
+	// Paging model
+	pages      []configui.ConfigPage
+	activePage int
 
-	// Tree-based config state
-	treeRoots []*configui.ConfigNode // Root nodes of the config tree
+	input textinput.Model
 
 	// Layered config state
 	layered *config.LayeredConfig
@@ -303,10 +315,10 @@ type configModel struct {
 
 	// View state
 	state       viewState
-	editIndex   int                 // Index in list being edited
-	selectIndex int                 // Index in options list if typeSelect
-	targetLayer config.ConfigSource // Which layer to save to during edit
-	boolValue   bool                // Current bool value for typeBool editing
+	editNode    *configui.ConfigNode // Node being edited (replaces editIndex)
+	selectIndex int                  // Index in options list if typeSelect
+	targetLayer config.ConfigSource  // Which layer to save to during edit
+	boolValue   bool                 // Current bool value for typeBool editing
 
 	statusMsg string
 	keys      configKeyMap
@@ -328,8 +340,18 @@ func runConfigEdit(cmd *cobra.Command, args []string) error {
 	// Initialize Setup Service and handlers
 	svc := setup.NewService(false) // Not dry-run
 
+	// Initialize pages for each config layer
+	width, height := 80, 24 // Initial dummy size, will be updated on WindowSizeMsg
+	pages := []configui.ConfigPage{
+		NewLayerPage("Global", config.SourceGlobal, layered, width, height),
+		NewLayerPage("Ecosystem", config.SourceEcosystem, layered, width, height),
+		NewLayerPage("Project", config.SourceProject, layered, width, height),
+	}
+
 	// Initialize Model
 	m := configModel{
+		pages:       pages,
+		activePage:  0,
 		layered:     layered,
 		input:       textinput.New(),
 		keys:        configKeys,
@@ -343,42 +365,29 @@ func runConfigEdit(cmd *cobra.Command, args []string) error {
 	m.input.CharLimit = 200
 	m.input.Width = 50
 
-	// Build tree from schema and config
-	m.treeRoots = configui.BuildTree(configui.SchemaFields, layered)
-
-	// Create list with tree-based items
-	delegate := configDelegate{}
-	m.list = list.New([]list.Item{}, delegate, 0, 0)
-	m.refreshList()
-
-	// Show context in title
-	contextPath := cwd
-	if m.layered.FilePaths[config.SourceProject] != "" {
-		contextPath = filepath.Dir(m.layered.FilePaths[config.SourceProject])
-	} else if m.layered.FilePaths[config.SourceEcosystem] != "" {
-		contextPath = filepath.Dir(m.layered.FilePaths[config.SourceEcosystem])
-	}
-	m.list.Title = fmt.Sprintf("Configuration  %s", theme.DefaultTheme.Muted.Render(setup.AbbreviatePath(contextPath)))
-	m.list.SetShowStatusBar(false)
-	m.list.SetShowHelp(false)
-	m.list.SetShowPagination(false)
-	m.list.SetFilteringEnabled(false)
-	m.list.DisableQuitKeybindings()
-	m.list.InfiniteScrolling = true
+	// Focus the first page
+	m.pages[0].Focus()
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err = p.Run()
 	return err
 }
 
-// refreshList flattens the tree and updates the list items.
-func (m *configModel) refreshList() {
-	visibleNodes := configui.Flatten(m.treeRoots)
-	var items []list.Item
-	for _, node := range visibleNodes {
-		items = append(items, configItem{node: node})
+// nextPage switches to the next page (cycles)
+func (m *configModel) nextPage() {
+	m.pages[m.activePage].Blur()
+	m.activePage = (m.activePage + 1) % len(m.pages)
+	m.pages[m.activePage].Focus()
+}
+
+// prevPage switches to the previous page (cycles)
+func (m *configModel) prevPage() {
+	m.pages[m.activePage].Blur()
+	m.activePage--
+	if m.activePage < 0 {
+		m.activePage = len(m.pages) - 1
 	}
-	m.list.SetItems(items)
+	m.pages[m.activePage].Focus()
 }
 
 // setTomlValue sets a value in a nested TOML map using a path
@@ -425,9 +434,23 @@ func (m configModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.list.SetSize(msg.Width, msg.Height-6) // Reserve space for footer/edit box
+		// Reserve space for tabs (2 lines) and footer (4 lines)
+		pageHeight := msg.Height - 6
+		for _, p := range m.pages {
+			p.SetSize(msg.Width, pageHeight)
+		}
 		m.help.Width = msg.Width
 		m.help.Height = msg.Height
+
+	// Handle custom messages from pages
+	case editNodeMsg:
+		m.startEditFromNode(msg.node)
+		return m, nil
+
+	case infoNodeMsg:
+		m.state = viewInfo
+		m.editNode = msg.node
+		return m, nil
 
 	case tea.KeyMsg:
 		// If help is showing, pass messages to help component
@@ -448,8 +471,11 @@ func (m configModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Delegate non-key messages to active page when in list view
 	if m.state == viewList {
-		m.list, cmd = m.list.Update(msg)
+		activePage, pageCmd := m.pages[m.activePage].Update(msg)
+		m.pages[m.activePage] = activePage
+		cmd = pageCmd
 	}
 
 	return m, cmd
@@ -464,73 +490,37 @@ func (m configModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.help.Toggle()
 		return m, nil
 
-	// Toggle expansion with space
-	case " ":
-		idx := m.list.Index()
-		if idx >= 0 && idx < len(m.list.Items()) {
-			node := m.list.Items()[idx].(configItem).node
-			if node.IsExpandable() {
-				configui.ToggleNode(node)
-				m.refreshList()
-			}
+	// Tab switching
+	case "tab":
+		m.nextPage()
+		return m, nil
+
+	case "shift+tab":
+		m.prevPage()
+		return m, nil
+
+	// Direct page jumps
+	case "1":
+		if m.activePage != 0 {
+			m.pages[m.activePage].Blur()
+			m.activePage = 0
+			m.pages[m.activePage].Focus()
 		}
 		return m, nil
 
-	// Expand with right/l
-	case "right", "l":
-		idx := m.list.Index()
-		if idx >= 0 && idx < len(m.list.Items()) {
-			node := m.list.Items()[idx].(configItem).node
-			if node.IsExpandable() && node.Collapsed {
-				node.Collapsed = false
-				m.refreshList()
-			}
+	case "2":
+		if m.activePage != 1 {
+			m.pages[m.activePage].Blur()
+			m.activePage = 1
+			m.pages[m.activePage].Focus()
 		}
 		return m, nil
 
-	// Collapse with left/h
-	case "left", "h":
-		idx := m.list.Index()
-		if idx >= 0 && idx < len(m.list.Items()) {
-			node := m.list.Items()[idx].(configItem).node
-			if node.IsExpandable() && !node.Collapsed {
-				// If expanded, collapse it
-				node.Collapsed = true
-				m.refreshList()
-			} else if node.Parent != nil {
-				// If collapsed or leaf, try to select parent
-				visibleNodes := configui.Flatten(m.treeRoots)
-				parentIdx := configui.FindParentIndex(visibleNodes, node)
-				if parentIdx >= 0 {
-					m.list.Select(parentIdx)
-				}
-			}
-		}
-		return m, nil
-
-	case "enter":
-		idx := m.list.Index()
-		if idx >= 0 && idx < len(m.list.Items()) {
-			itm := m.list.Items()[idx].(configItem)
-			node := itm.node
-
-			// If it's a container with children, toggle expand
-			if node.IsExpandable() {
-				configui.ToggleNode(node)
-				m.refreshList()
-				return m, nil
-			}
-
-			// If it's a leaf, start editing
-			m.startEdit(idx, itm)
-		}
-		return m, nil
-
-	case "i":
-		idx := m.list.Index()
-		if idx >= 0 && idx < len(m.list.Items()) {
-			m.editIndex = idx
-			m.state = viewInfo
+	case "3":
+		if m.activePage != 2 {
+			m.pages[m.activePage].Blur()
+			m.activePage = 2
+			m.pages[m.activePage].Focus()
 		}
 		return m, nil
 
@@ -539,8 +529,9 @@ func (m configModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
+	// Delegate to active page
+	activePage, cmd := m.pages[m.activePage].Update(msg)
+	m.pages[m.activePage] = activePage
 	return m, cmd
 }
 
@@ -551,8 +542,9 @@ func (m configModel) updateInfo(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		// Start editing from info view
-		itm := m.list.Items()[m.editIndex].(configItem)
-		m.startEdit(m.editIndex, itm)
+		if m.editNode != nil {
+			m.startEditFromNode(m.editNode)
+		}
 		return m, nil
 	}
 	return m, nil
@@ -567,9 +559,8 @@ func (m configModel) updateSources(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *configModel) startEdit(idx int, itm configItem) {
-	node := itm.node
-
+// startEditFromNode starts editing a node (used by pages)
+func (m *configModel) startEditFromNode(node *configui.ConfigNode) {
 	// Don't allow editing container types directly
 	if node.IsContainer() {
 		m.statusMsg = "Expand node to edit children"
@@ -577,7 +568,7 @@ func (m *configModel) startEdit(idx int, itm configItem) {
 	}
 
 	m.state = viewEdit
-	m.editIndex = idx
+	m.editNode = node
 	m.statusMsg = ""
 
 	// Start with the recommended layer, but use active source if it's already set there
@@ -627,8 +618,11 @@ func (m *configModel) startEdit(idx int, itm configItem) {
 }
 
 func (m *configModel) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	itm := m.list.Items()[m.editIndex].(configItem)
-	node := itm.node
+	if m.editNode == nil {
+		m.state = viewList
+		return m, nil
+	}
+	node := m.editNode
 
 	// Get the full path with namespace
 	path := node.Field.Path
@@ -835,7 +829,7 @@ func (m *configModel) saveToYAML(filePath string, path []string, value string) e
 	return m.yamlHandler.SaveYAML(filePath, root)
 }
 
-// reloadConfig reloads the layered config and refreshes the tree.
+// reloadConfig reloads the layered config and refreshes all pages.
 func (m *configModel) reloadConfig() error {
 	cwd, _ := os.Getwd()
 	layered, err := config.LoadLayered(cwd)
@@ -844,11 +838,10 @@ func (m *configModel) reloadConfig() error {
 	}
 	m.layered = layered
 
-	// Rebuild tree from schema and config
-	m.treeRoots = configui.BuildTree(configui.SchemaFields, layered)
-
-	// Refresh the list
-	m.refreshList()
+	// Refresh all pages with updated config
+	for _, page := range m.pages {
+		page.Refresh(layered)
+	}
 
 	return nil
 }
@@ -874,9 +867,13 @@ func (m configModel) View() string {
 func (m configModel) renderListView() string {
 	var b strings.Builder
 
-	// List view
-	b.WriteString(m.list.View())
+	// Tab bar
+	b.WriteString(renderConfigTabs(m.pages, m.activePage))
 	b.WriteString("\n\n")
+
+	// Active page content
+	b.WriteString(m.pages[m.activePage].View())
+	b.WriteString("\n")
 
 	// Status message
 	if m.statusMsg != "" {
@@ -895,8 +892,10 @@ func (m configModel) renderListView() string {
 }
 
 func (m configModel) renderEditView() string {
-	itm := m.list.Items()[m.editIndex].(configItem)
-	node := itm.node
+	if m.editNode == nil {
+		return "No node selected for editing"
+	}
+	node := m.editNode
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -983,8 +982,10 @@ func (m configModel) renderEditView() string {
 }
 
 func (m configModel) renderInfoView() string {
-	itm := m.list.Items()[m.editIndex].(configItem)
-	node := itm.node
+	if m.editNode == nil {
+		return "No node selected for info"
+	}
+	node := m.editNode
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
