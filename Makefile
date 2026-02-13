@@ -23,7 +23,7 @@ LDFLAGS = -ldflags="\
 -X '$(VERSION_PKG).Branch=$(GIT_BRANCH)' \
 -X '$(VERSION_PKG).BuildDate=$(BUILD_DATE)'"
 
-.PHONY: all build test clean fmt vet lint run check dev build-all schema registry help
+.PHONY: all build test clean fmt vet lint run check dev build-all schema registry config-schema help
 
 all: build
 
@@ -35,7 +35,11 @@ registry:
 	@echo "Generating tool registry..."
 	@go run ./tools/registry-generator
 
-build: registry schema
+config-schema:
+	@echo "Generating config UI schema..."
+	@go run ./tools/config-schema-generator
+
+build: registry schema config-schema
 	@mkdir -p $(BIN_DIR)
 	@echo "Building $(BINARY_NAME) version $(VERSION)..."
 	@go build $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) .
@@ -120,15 +124,16 @@ test-e2e-docker: build-all
 # Show available targets
 help:
 	@echo "Available targets:"
-	@echo "  make build       - Build the binary"
-	@echo "  make test        - Run tests"
-	@echo "  make clean       - Clean build artifacts"
-	@echo "  make fmt         - Format code"
-	@echo "  make vet         - Run go vet"
-	@echo "  make lint        - Run linter"
-	@echo "  make run ARGS=.. - Run the CLI with arguments"
-	@echo "  make check       - Run all checks"
-	@echo "  make dev         - Build with race detector"
-	@echo "  make build-all   - Build for multiple platforms"
+	@echo "  make build         - Build the binary"
+	@echo "  make test          - Run tests"
+	@echo "  make clean         - Clean build artifacts"
+	@echo "  make fmt           - Format code"
+	@echo "  make vet           - Run go vet"
+	@echo "  make lint          - Run linter"
+	@echo "  make run ARGS=..   - Run the CLI with arguments"
+	@echo "  make check         - Run all checks"
+	@echo "  make dev           - Build with race detector"
+	@echo "  make build-all     - Build for multiple platforms"
+	@echo "  make config-schema - Generate config UI schema from JSON schemas"
 	@echo "  make test-e2e ARGS=...- Run E2E test runner binary"
 	@echo "  make test-e2e ARGS=...- Run E2E tests (e.g., ARGS=\"run -i add-repo-dry-run\")"

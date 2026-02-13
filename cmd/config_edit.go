@@ -18,6 +18,7 @@ import (
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/grove/pkg/configui"
 	"github.com/grovetools/grove/pkg/setup"
 	"github.com/spf13/cobra"
 )
@@ -41,24 +42,7 @@ Supports both YAML (with comment preservation) and TOML formats.`
 }
 
 // --- Schema Definition ---
-
-type configFieldType int
-
-const (
-	typeString configFieldType = iota
-	typeSelect
-	typeBool
-)
-
-// configFieldSchema defines a configuration field with its recommended layer.
-type configFieldSchema struct {
-	Path             []string            // e.g., ["tui", "theme"]
-	Label            string              // Human-readable label
-	Description      string              // Help text
-	Type             configFieldType     // String, Select, Bool
-	Options          []string            // For Select type
-	RecommendedLayer config.ConfigSource // Where this field should typically live
-}
+// Field types and schema are now defined in pkg/configui and generated from JSON schemas.
 
 // LayeredConfigValue holds the value for a field across all layers.
 type LayeredConfigValue struct {
@@ -68,99 +52,18 @@ type LayeredConfigValue struct {
 	Project   string // Value from project config
 }
 
-// configSchema defines all configurable fields with their recommended layers.
-var configSchema = []configFieldSchema{
-	// --- Global Fields (Personal Preferences) ---
-	{
-		Path:             []string{"tui", "theme"},
-		Label:            "TUI Theme",
-		Description:      "Color theme for terminal interfaces",
-		Type:             typeSelect,
-		Options:          []string{"terminal", "gruvbox", "kanagawa"},
-		RecommendedLayer: config.SourceGlobal,
-	},
-	{
-		Path:             []string{"tui", "icons"},
-		Label:            "Icon Set",
-		Description:      "Icons for terminal interfaces",
-		Type:             typeSelect,
-		Options:          []string{"nerd", "ascii"},
-		RecommendedLayer: config.SourceGlobal,
-	},
-	{
-		Path:             []string{"flow", "oneshot_model"},
-		Label:            "Flow Model",
-		Description:      "Default LLM model for oneshot jobs",
-		Type:             typeString,
-		RecommendedLayer: config.SourceGlobal,
-	},
-	{
-		Path:             []string{"logging", "file", "enabled"},
-		Label:            "File Logging",
-		Description:      "Enable logging to file",
-		Type:             typeBool,
-		RecommendedLayer: config.SourceGlobal,
-	},
-	{
-		Path:             []string{"daemon", "git_interval"},
-		Label:            "Git Poll Interval",
-		Description:      "How often to poll git status (e.g. 10s)",
-		Type:             typeString,
-		RecommendedLayer: config.SourceGlobal,
-	},
-	{
-		Path:             []string{"gemini", "api_key_command"},
-		Label:            "Gemini Key Command",
-		Description:      "Command to retrieve API key (e.g. 1password)",
-		Type:             typeString,
-		RecommendedLayer: config.SourceGlobal,
-	},
-	{
-		Path:             []string{"notebooks", "path"},
-		Label:            "Notebook Path",
-		Description:      "Location of your notebooks directory",
-		Type:             typeString,
-		RecommendedLayer: config.SourceGlobal,
-	},
-
-	// --- Ecosystem Fields (Shared Settings) ---
-	{
-		Path:             []string{"name"},
-		Label:            "Ecosystem/Project Name",
-		Description:      "Name shown in UI and logs",
-		Type:             typeString,
-		RecommendedLayer: config.SourceEcosystem,
-	},
-
-	// --- Project Fields (This Project Only) ---
-	{
-		Path:             []string{"build_cmd"},
-		Label:            "Build Command",
-		Description:      "Custom build command for this project",
-		Type:             typeString,
-		RecommendedLayer: config.SourceProject,
-	},
-	{
-		Path:             []string{"description"},
-		Label:            "Description",
-		Description:      "Project description",
-		Type:             typeString,
-		RecommendedLayer: config.SourceProject,
-	},
-}
-
 // --- Model & State ---
 
 type configItem struct {
-	field        configFieldSchema
+	field        configui.FieldMeta
 	value        string              // Final merged value
 	activeSource config.ConfigSource // Which layer provided the value
 	layerValues  LayeredConfigValue  // Values at each layer
 }
 
-func (i configItem) Title() string       { return i.field.Label }
+func (i configItem) Title() string       { return i.field.Label() }
 func (i configItem) Description() string { return i.field.Description }
-func (i configItem) FilterValue() string { return i.field.Label }
+func (i configItem) FilterValue() string { return i.field.Label() }
 
 // configKeyMap defines key bindings for the config editor
 type configKeyMap struct {
@@ -226,8 +129,11 @@ func (d configDelegate) Render(w io.Writer, m list.Model, index int, item list.I
 		cursor = theme.DefaultTheme.Highlight.Render(theme.IconArrowRightBold) + " "
 	}
 
-	// Title styling
-	title := i.field.Label
+	// Title styling with wizard indicator
+	title := i.field.Label()
+	if i.field.Wizard {
+		title = title + " " + theme.DefaultTheme.Highlight.Render("★")
+	}
 	if index == m.Index() {
 		title = theme.DefaultTheme.Bold.Render(title)
 	}
@@ -237,8 +143,8 @@ func (d configDelegate) Render(w io.Writer, m list.Model, index int, item list.I
 	if val == "" {
 		val = "(unset)"
 	}
-	// Mask API keys for display
-	if strings.Contains(strings.ToLower(i.field.Label), "api key") && val != "(unset)" && len(val) > 8 {
+	// Mask sensitive fields for display
+	if i.field.Sensitive && val != "(unset)" && len(val) > 8 {
 		val = val[:4] + "..." + val[len(val)-4:]
 	}
 	valueStyle := theme.DefaultTheme.Muted
@@ -385,12 +291,14 @@ func runConfigEdit(cmd *cobra.Command, args []string) error {
 	m.input.CharLimit = 200
 	m.input.Width = 50
 
-	// Populate list from layered config
+	// Populate list from generated schema (flattening nested fields for display)
 	var listItems []list.Item
-	for _, schema := range configSchema {
-		itm := m.buildConfigItem(schema)
-		m.items = append(m.items, itm)
-		listItems = append(listItems, itm)
+	for _, schema := range configui.SchemaFields {
+		items := m.buildConfigItems(schema)
+		for _, itm := range items {
+			m.items = append(m.items, itm)
+			listItems = append(listItems, itm)
+		}
 	}
 
 	delegate := configDelegate{}
@@ -415,8 +323,27 @@ func runConfigEdit(cmd *cobra.Command, args []string) error {
 	return err
 }
 
-// buildConfigItem extracts values from all layers for a schema field.
-func (m *configModel) buildConfigItem(schema configFieldSchema) configItem {
+// buildConfigItems extracts values from all layers for a schema field.
+// For nested object types, it flattens the children into separate list items.
+func (m *configModel) buildConfigItems(schema configui.FieldMeta) []configItem {
+	var items []configItem
+
+	// Get the path with namespace prefix if needed
+	path := schema.Path
+	if schema.Namespace != "" {
+		path = append([]string{schema.Namespace}, schema.Path...)
+	}
+
+	// For object/map types with children, only show the leaf fields (children)
+	if schema.Type == configui.FieldObject && len(schema.Children) > 0 {
+		for _, child := range schema.Children {
+			childItems := m.buildConfigItems(child)
+			items = append(items, childItems...)
+		}
+		return items
+	}
+
+	// For non-object types or objects without children, create the item
 	item := configItem{
 		field:        schema,
 		activeSource: config.SourceDefault,
@@ -425,21 +352,21 @@ func (m *configModel) buildConfigItem(schema configFieldSchema) configItem {
 
 	// Extract values from each layer
 	if m.layered.Default != nil {
-		item.layerValues.Default = getConfigValue(m.layered.Default, schema.Path)
+		item.layerValues.Default = getConfigValue(m.layered.Default, path)
 	}
 	if m.layered.Global != nil {
-		item.layerValues.Global = getConfigValue(m.layered.Global, schema.Path)
+		item.layerValues.Global = getConfigValue(m.layered.Global, path)
 	}
 	if m.layered.Ecosystem != nil {
-		item.layerValues.Ecosystem = getConfigValue(m.layered.Ecosystem, schema.Path)
+		item.layerValues.Ecosystem = getConfigValue(m.layered.Ecosystem, path)
 	}
 	if m.layered.Project != nil {
-		item.layerValues.Project = getConfigValue(m.layered.Project, schema.Path)
+		item.layerValues.Project = getConfigValue(m.layered.Project, path)
 	}
 
 	// Get final merged value
 	if m.layered.Final != nil {
-		item.value = getConfigValue(m.layered.Final, schema.Path)
+		item.value = getConfigValue(m.layered.Final, path)
 	}
 
 	// Determine which layer the final value came from (highest priority wins)
@@ -454,7 +381,8 @@ func (m *configModel) buildConfigItem(schema configFieldSchema) configItem {
 		item.activeSource = config.SourceDefault
 	}
 
-	return item
+	items = append(items, item)
+	return items
 }
 
 // getConfigValue extracts a value from a Config struct using a path.
@@ -755,7 +683,10 @@ func (m *configModel) startEdit(idx int, itm configItem) {
 	m.statusMsg = ""
 
 	// Start with the recommended layer, but use active source if it's already set there
-	m.targetLayer = itm.field.RecommendedLayer
+	m.targetLayer = itm.field.Layer
+	if m.targetLayer == config.SourceDefault {
+		m.targetLayer = config.SourceGlobal // Fallback to global if no layer specified
+	}
 
 	// If the value is already set in a specific layer, default to that layer
 	if itm.activeSource != config.SourceDefault {
@@ -763,10 +694,10 @@ func (m *configModel) startEdit(idx int, itm configItem) {
 	}
 
 	switch itm.field.Type {
-	case typeString:
+	case configui.FieldString:
 		m.input.SetValue(itm.value)
 		m.input.Focus()
-	case typeSelect:
+	case configui.FieldSelect:
 		// Find current option index
 		m.selectIndex = 0
 		for i, opt := range itm.field.Options {
@@ -775,13 +706,27 @@ func (m *configModel) startEdit(idx int, itm configItem) {
 				break
 			}
 		}
-	case typeBool:
+	case configui.FieldBool:
 		m.boolValue = itm.value == "true"
+	case configui.FieldArray:
+		// For arrays, use the text input with comma-separated values
+		m.input.SetValue(itm.value)
+		m.input.Focus()
+	default:
+		// For map, object, int - use text input as fallback
+		m.input.SetValue(itm.value)
+		m.input.Focus()
 	}
 }
 
 func (m *configModel) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	itm := m.list.Items()[m.editIndex].(configItem)
+
+	// Get the full path with namespace
+	path := itm.field.Path
+	if itm.field.Namespace != "" {
+		path = append([]string{itm.field.Namespace}, itm.field.Path...)
+	}
 
 	switch msg.Type {
 	case tea.KeyEsc:
@@ -797,20 +742,22 @@ func (m *configModel) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		var newValue string
 		switch itm.field.Type {
-		case typeString:
+		case configui.FieldString, configui.FieldArray, configui.FieldInt:
 			newValue = m.input.Value()
-		case typeSelect:
+		case configui.FieldSelect:
 			newValue = itm.field.Options[m.selectIndex]
-		case typeBool:
+		case configui.FieldBool:
 			if m.boolValue {
 				newValue = "true"
 			} else {
 				newValue = "false"
 			}
+		default:
+			newValue = m.input.Value()
 		}
 
 		// Save to the target layer
-		if err := m.saveToLayer(itm.field.Path, newValue, m.targetLayer); err != nil {
+		if err := m.saveToLayer(path, newValue, m.targetLayer); err != nil {
 			m.statusMsg = fmt.Sprintf("Error: %v", err)
 			return m, nil
 		}
@@ -828,7 +775,7 @@ func (m *configModel) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Handle navigation for Select type
-	if itm.field.Type == typeSelect {
+	if itm.field.Type == configui.FieldSelect {
 		switch msg.String() {
 		case "up", "k":
 			if m.selectIndex > 0 {
@@ -843,7 +790,7 @@ func (m *configModel) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Handle navigation for Bool type
-	if itm.field.Type == typeBool {
+	if itm.field.Type == configui.FieldBool {
 		switch msg.String() {
 		case "up", "k", "down", "j", " ":
 			m.boolValue = !m.boolValue
@@ -851,7 +798,7 @@ func (m *configModel) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Handle input for String type
+	// Handle input for String/Array/Int types
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
@@ -964,10 +911,12 @@ func (m *configModel) reloadConfig() error {
 	// Rebuild list items
 	var listItems []list.Item
 	m.items = nil
-	for _, schema := range configSchema {
-		itm := m.buildConfigItem(schema)
-		m.items = append(m.items, itm)
-		listItems = append(listItems, itm)
+	for _, schema := range configui.SchemaFields {
+		items := m.buildConfigItems(schema)
+		for _, itm := range items {
+			m.items = append(m.items, itm)
+			listItems = append(listItems, itm)
+		}
 	}
 	m.list.SetItems(listItems)
 
@@ -1017,19 +966,25 @@ func (m configModel) renderEditView() string {
 		Padding(1, 2).
 		Width(65)
 
-	title := theme.DefaultTheme.Bold.Render("Edit: " + itm.field.Label)
+	title := theme.DefaultTheme.Bold.Render("Edit: " + itm.field.Label())
 
 	// Current value info
 	currentInfo := theme.DefaultTheme.Muted.Render(
 		fmt.Sprintf("Current: %s (from %s)", itm.value, layerDisplayName(itm.activeSource)),
 	)
 
+	// Show hint for sensitive fields
+	hintText := ""
+	if itm.field.Hint != "" {
+		hintText = theme.DefaultTheme.Muted.Render("Hint: " + itm.field.Hint)
+	}
+
 	// Edit content based on field type
 	var content string
 	switch itm.field.Type {
-	case typeString:
+	case configui.FieldString, configui.FieldArray, configui.FieldInt:
 		content = m.input.View()
-	case typeSelect:
+	case configui.FieldSelect:
 		var opts []string
 		for i, opt := range itm.field.Options {
 			cursor := "  "
@@ -1041,7 +996,7 @@ func (m configModel) renderEditView() string {
 			opts = append(opts, style.Render(cursor+opt))
 		}
 		content = strings.Join(opts, "\n")
-	case typeBool:
+	case configui.FieldBool:
 		trueStyle := theme.DefaultTheme.Normal
 		falseStyle := theme.DefaultTheme.Normal
 		trueCursor := "  "
@@ -1054,6 +1009,8 @@ func (m configModel) renderEditView() string {
 			falseStyle = theme.DefaultTheme.Highlight
 		}
 		content = trueStyle.Render(trueCursor+"true") + "\n" + falseStyle.Render(falseCursor+"false")
+	default:
+		content = m.input.View()
 	}
 
 	// Layer selection info
@@ -1062,7 +1019,7 @@ func (m configModel) renderEditView() string {
 	layerInfo := fmt.Sprintf("Save to: %s %s", layerBadge, theme.DefaultTheme.Path.Render(setup.AbbreviatePath(targetPath)))
 
 	recommendation := ""
-	if m.targetLayer == itm.field.RecommendedLayer {
+	if m.targetLayer == itm.field.Layer {
 		recommendation = theme.DefaultTheme.Muted.Render("         (" + layerRecommendation(m.targetLayer) + ")")
 	}
 
@@ -1070,7 +1027,11 @@ func (m configModel) renderEditView() string {
 	helpText := theme.DefaultTheme.Muted.Render("enter: save • tab: change layer • esc: cancel")
 
 	var parts []string
-	parts = append(parts, title, "", currentInfo, "", content, "", separator, layerInfo)
+	parts = append(parts, title, "", currentInfo)
+	if hintText != "" {
+		parts = append(parts, hintText)
+	}
+	parts = append(parts, "", content, "", separator, layerInfo)
 	if recommendation != "" {
 		parts = append(parts, recommendation)
 	}
@@ -1091,7 +1052,7 @@ func (m configModel) renderInfoView() string {
 		Padding(1, 2).
 		Width(70)
 
-	title := theme.DefaultTheme.Bold.Render(itm.field.Label)
+	title := theme.DefaultTheme.Bold.Render(itm.field.Label())
 	desc := theme.DefaultTheme.Muted.Render(itm.field.Description)
 
 	// Build layer values table
@@ -1142,24 +1103,33 @@ func (m configModel) renderInfoView() string {
 	activeLine := fmt.Sprintf("  %s      %s  %s", activeLabel, activeVal, activeSrc)
 
 	// Recommendation
-	recLayer := layerDisplayName(itm.field.RecommendedLayer)
-	recReason := layerRecommendation(itm.field.RecommendedLayer)
+	recLayer := layerDisplayName(itm.field.Layer)
+	recReason := layerRecommendation(itm.field.Layer)
 	recLine := theme.DefaultTheme.Muted.Render(fmt.Sprintf("Recommended layer: %s (%s)", recLayer, recReason))
+
+	// Field metadata
+	var metaLines []string
+	if itm.field.Wizard {
+		metaLines = append(metaLines, theme.DefaultTheme.Highlight.Render("★ Wizard field"))
+	}
+	if itm.field.Sensitive {
+		metaLines = append(metaLines, theme.DefaultTheme.Error.Render("⚠ Sensitive field"))
+	}
+	if itm.field.Namespace != "" {
+		metaLines = append(metaLines, theme.DefaultTheme.Muted.Render(fmt.Sprintf("Namespace: %s", itm.field.Namespace)))
+	}
 
 	helpText := theme.DefaultTheme.Muted.Render("enter: edit • esc: back")
 
-	ui := lipgloss.JoinVertical(lipgloss.Left,
-		title,
-		desc,
-		"",
-		layersContent,
-		separator,
-		activeLine,
-		"",
-		recLine,
-		"",
-		helpText,
-	)
+	var parts []string
+	parts = append(parts, title, desc, "", layersContent, separator, activeLine, "", recLine)
+	if len(metaLines) > 0 {
+		parts = append(parts, "")
+		parts = append(parts, metaLines...)
+	}
+	parts = append(parts, "", helpText)
+
+	ui := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	dialog := boxStyle.Render(ui)
 
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
