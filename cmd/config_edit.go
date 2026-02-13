@@ -59,6 +59,7 @@ type configKeyMap struct {
 	keymap.Base
 	Edit        key.Binding
 	Info        key.Binding
+	Sources     key.Binding // Show config source files
 	Confirm     key.Binding
 	Cancel      key.Binding
 	SwitchLayer key.Binding
@@ -76,6 +77,10 @@ var configKeys = configKeyMap{
 	Info: key.NewBinding(
 		key.WithKeys("i"),
 		key.WithHelp("i", "field info"),
+	),
+	Sources: key.NewBinding(
+		key.WithKeys("c"),
+		key.WithHelp("c", "config sources"),
 	),
 	Confirm: key.NewBinding(
 		key.WithKeys("enter"),
@@ -104,7 +109,7 @@ var configKeys = configKeyMap{
 }
 
 func (k configKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Edit, k.Toggle, k.Info, k.Base.Help, k.Base.Quit}
+	return []key.Binding{k.Edit, k.Toggle, k.Info, k.Sources, k.Base.Help, k.Base.Quit}
 }
 
 func (k configKeyMap) FullHelp() [][]key.Binding {
@@ -114,7 +119,7 @@ func (k configKeyMap) FullHelp() [][]key.Binding {
 		// Tree navigation
 		{k.Toggle, k.Expand, k.Collapse},
 		// Actions
-		{k.Edit, k.Info},
+		{k.Edit, k.Info, k.Sources},
 		// Exit
 		{k.Base.Quit, k.Base.Help},
 	}
@@ -279,6 +284,7 @@ const (
 	viewList viewState = iota
 	viewEdit
 	viewInfo
+	viewSources // Shows all config source files
 )
 
 type configModel struct {
@@ -434,6 +440,8 @@ func (m configModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateEdit(msg)
 		case viewInfo:
 			return m.updateInfo(msg)
+		case viewSources:
+			return m.updateSources(msg)
 		default:
 			return m.updateList(msg)
 		}
@@ -524,6 +532,10 @@ func (m configModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.state = viewInfo
 		}
 		return m, nil
+
+	case "c":
+		m.state = viewSources
+		return m, nil
 	}
 
 	var cmd tea.Cmd
@@ -540,6 +552,15 @@ func (m configModel) updateInfo(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Start editing from info view
 		itm := m.list.Items()[m.editIndex].(configItem)
 		m.startEdit(m.editIndex, itm)
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m configModel) updateSources(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q", "c":
+		m.state = viewList
 		return m, nil
 	}
 	return m, nil
@@ -842,6 +863,8 @@ func (m configModel) View() string {
 		return m.renderEditView()
 	case viewInfo:
 		return m.renderInfoView()
+	case viewSources:
+		return m.renderSourcesView()
 	default:
 		return m.renderListView()
 	}
@@ -1065,6 +1088,68 @@ func (m configModel) renderInfoView() string {
 		parts = append(parts, metaLines...)
 	}
 	parts = append(parts, "", helpText)
+
+	ui := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	dialog := boxStyle.Render(ui)
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
+}
+
+func (m configModel) renderSourcesView() string {
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.DefaultTheme.Colors.Violet).
+		Padding(1, 2).
+		Width(80)
+
+	title := theme.DefaultTheme.Bold.Render("Configuration Sources")
+
+	// Get current working directory for context
+	cwd, _ := os.Getwd()
+	cwdLine := theme.DefaultTheme.Muted.Render("Working directory: ") + theme.DefaultTheme.Path.Render(setup.AbbreviatePath(cwd))
+
+	separator := theme.DefaultTheme.Muted.Render(strings.Repeat("─", 70))
+
+	// Build list of all config sources with their paths
+	var sourceRows []string
+
+	// Helper to add a source row
+	addSource := func(name string, source config.ConfigSource, exists bool) {
+		path := m.layered.FilePaths[source]
+		var row string
+		nameStyle := theme.DefaultTheme.Normal
+		if exists && path != "" {
+			nameStyle = theme.DefaultTheme.Success
+			row = fmt.Sprintf("  %s  %s",
+				nameStyle.Render(fmt.Sprintf("%-16s", name)),
+				theme.DefaultTheme.Path.Render(path))
+		} else {
+			row = fmt.Sprintf("  %s  %s",
+				theme.DefaultTheme.Muted.Render(fmt.Sprintf("%-16s", name)),
+				theme.DefaultTheme.Muted.Render("(not found)"))
+		}
+		sourceRows = append(sourceRows, row)
+	}
+
+	// Add all layers in priority order (lowest to highest)
+	addSource("Default", config.SourceDefault, true) // Always exists (built-in)
+	addSource("Global", config.SourceGlobal, m.layered.Global != nil)
+	addSource("Global*", config.SourceGlobalOverride, m.layered.GlobalOverride != nil)
+	addSource("Env*", config.SourceEnvOverlay, m.layered.EnvOverlay != nil)
+	addSource("Ecosystem", config.SourceEcosystem, m.layered.Ecosystem != nil)
+	addSource("Project", config.SourceProject, m.layered.Project != nil)
+	addSource("Local*", config.SourceOverride, len(m.layered.Overrides) > 0)
+
+	sourcesContent := strings.Join(sourceRows, "\n")
+
+	// Priority explanation
+	priorityNote := theme.DefaultTheme.Muted.Render("Priority: Local* > Project > Ecosystem > Env* > Global* > Global > Default")
+	overrideNote := theme.DefaultTheme.Muted.Render("* = override file (e.g., grove.override.toml)")
+
+	helpText := theme.DefaultTheme.Muted.Render("esc: back")
+
+	var parts []string
+	parts = append(parts, title, "", cwdLine, "", separator, "", sourcesContent, "", separator, "", priorityNote, overrideNote, "", helpText)
 
 	ui := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	dialog := boxStyle.Render(ui)
