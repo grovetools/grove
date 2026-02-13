@@ -311,7 +311,7 @@ func runConfigEdit(cmd *cobra.Command, args []string) error {
 		layered:     layered,
 		input:       textinput.New(),
 		keys:        configKeys,
-		help:        help.New(configKeys),
+		help:        help.NewBuilder().WithKeys(configKeys).WithTitle("Configuration Editor").Build(),
 		state:       viewList,
 		yamlHandler: setup.NewYAMLHandler(svc),
 		tomlHandler: setup.NewTOMLHandler(svc),
@@ -404,8 +404,15 @@ func (m configModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.list.SetSize(msg.Width, msg.Height-6) // Reserve space for footer/edit box
 		m.help.Width = msg.Width
+		m.help.Height = msg.Height
 
 	case tea.KeyMsg:
+		// If help is showing, pass messages to help component
+		if m.help.ShowAll {
+			m.help, cmd = m.help.Update(msg)
+			return m, cmd
+		}
+
 		switch m.state {
 		case viewEdit:
 			return m.updateEdit(msg)
@@ -427,6 +434,10 @@ func (m configModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
 		return m, tea.Quit
+
+	case "?":
+		m.help.Toggle()
+		return m, nil
 
 	// Toggle expansion with space
 	case " ":
@@ -805,6 +816,11 @@ func (m *configModel) reloadConfig() error {
 }
 
 func (m configModel) View() string {
+	// Show help overlay if active
+	if m.help.ShowAll {
+		return m.help.View()
+	}
+
 	switch m.state {
 	case viewEdit:
 		return m.renderEditView()
