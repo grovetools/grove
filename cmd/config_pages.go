@@ -42,6 +42,7 @@ func NewLayerPage(name string, layer config.ConfigSource, layered *config.Layere
 	// Initialize list
 	delegate := configDelegate{}
 	p.list = list.New([]list.Item{}, delegate, width, height)
+	p.list.SetShowTitle(false)
 	p.list.SetShowStatusBar(false)
 	p.list.SetShowHelp(false)
 	p.list.SetShowPagination(false)

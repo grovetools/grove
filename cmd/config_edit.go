@@ -956,6 +956,11 @@ func (m configModel) View() string {
 func (m configModel) renderListView() string {
 	var b strings.Builder
 
+	// Header with icon (matching setup wizard style)
+	title := theme.DefaultTheme.Highlight.Render(theme.IconGear) + " Configuration Editor"
+	b.WriteString(theme.RenderHeader(title))
+	b.WriteString("\n")
+
 	// Tab bar
 	b.WriteString(renderConfigTabs(m.pages, m.activePage))
 	b.WriteString("\n\n")
@@ -977,7 +982,8 @@ func (m configModel) renderListView() string {
 	// Help
 	b.WriteString(m.help.View())
 
-	return b.String()
+	// Add margin around the content (no top padding, 1 bottom, 2 sides)
+	return lipgloss.NewStyle().PaddingLeft(2).PaddingRight(2).PaddingBottom(1).Render(b.String())
 }
 
 func (m configModel) renderEditView() string {
