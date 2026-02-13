@@ -364,6 +364,7 @@ func runConfigEdit(cmd *cobra.Command, args []string) error {
 	m.list.SetShowPagination(false)
 	m.list.SetFilteringEnabled(false)
 	m.list.DisableQuitKeybindings()
+	m.list.InfiniteScrolling = true
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err = p.Run()
