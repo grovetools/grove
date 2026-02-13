@@ -117,7 +117,7 @@ func (k configKeyMap) FullHelp() [][]key.Binding {
 // configDelegate renders config items with their current values and layer badges.
 type configDelegate struct{}
 
-func (d configDelegate) Height() int                             { return 2 }
+func (d configDelegate) Height() int                             { return 1 }
 func (d configDelegate) Spacing() int                            { return 0 }
 func (d configDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 
@@ -180,26 +180,10 @@ func (d configDelegate) Render(w io.Writer, m list.Model, index int, item list.I
 	// Layer badge with color coding
 	badge := renderLayerBadge(node.ActiveSource)
 
-	// Description (may be empty for dynamic fields)
-	desc := node.Field.Description
-	if desc == "" && node.IsDynamic {
-		// For dynamic map/array entries, don't show description line
-		desc = ""
-	}
-
-	// Render: cursor + indent + indicator + title + value + badge on first line
+	// Render: cursor + indent + indicator + title + value + badge (single line)
 	valDisplay := valueStyle.Render(val)
 	indicatorStyled := theme.DefaultTheme.Muted.Render(indicator)
-	fmt.Fprintf(w, "%s%s%s%s  %s  %s\n", cursor, indent, indicatorStyled, title, valDisplay, badge)
-
-	// Second line: indented description (if present)
-	if desc != "" {
-		descIndent := strings.Repeat(" ", len(cursor)+len(indent)+len(indicator))
-		fmt.Fprintf(w, "%s%s", descIndent, theme.DefaultTheme.Muted.Render(desc))
-	} else {
-		// Empty line to maintain consistent height
-		fmt.Fprint(w, "")
-	}
+	fmt.Fprintf(w, "%s%s%s%s  %s  %s", cursor, indent, indicatorStyled, title, valDisplay, badge)
 }
 
 // renderLayerBadge renders a colored badge for the config source.
