@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -44,42 +43,35 @@ Supports both YAML (with comment preservation) and TOML formats.`
 // --- Schema Definition ---
 // Field types and schema are now defined in pkg/configui and generated from JSON schemas.
 
-// LayeredConfigValue holds the value for a field across all layers.
-type LayeredConfigValue struct {
-	Default   string // Value from defaults
-	Global    string // Value from global config
-	Ecosystem string // Value from ecosystem config
-	Project   string // Value from project config
-}
-
 // --- Model & State ---
 
+// configItem wraps a ConfigNode to implement list.Item interface.
 type configItem struct {
-	field        configui.FieldMeta
-	value        string              // Final merged value
-	activeSource config.ConfigSource // Which layer provided the value
-	layerValues  LayeredConfigValue  // Values at each layer
+	node *configui.ConfigNode
 }
 
-func (i configItem) Title() string       { return i.field.Label() }
-func (i configItem) Description() string { return i.field.Description }
-func (i configItem) FilterValue() string { return i.field.Label() }
+func (i configItem) Title() string       { return i.node.DisplayKey() }
+func (i configItem) Description() string { return i.node.Field.Description }
+func (i configItem) FilterValue() string { return i.node.DisplayKey() }
 
 // configKeyMap defines key bindings for the config editor
 type configKeyMap struct {
 	keymap.Base
-	Edit       key.Binding
-	Info       key.Binding
-	Confirm    key.Binding
-	Cancel     key.Binding
+	Edit        key.Binding
+	Info        key.Binding
+	Confirm     key.Binding
+	Cancel      key.Binding
 	SwitchLayer key.Binding
+	Toggle      key.Binding // Space/Tab to toggle expand/collapse
+	Expand      key.Binding // Right/l to expand
+	Collapse    key.Binding // Left/h to collapse
 }
 
 var configKeys = configKeyMap{
 	Base: keymap.NewBase(),
 	Edit: key.NewBinding(
 		key.WithKeys("enter"),
-		key.WithHelp("enter", "edit"),
+		key.WithHelp("enter", "edit/expand"),
 	),
 	Info: key.NewBinding(
 		key.WithKeys("i"),
@@ -97,16 +89,28 @@ var configKeys = configKeyMap{
 		key.WithKeys("tab"),
 		key.WithHelp("tab", "switch layer"),
 	),
+	Toggle: key.NewBinding(
+		key.WithKeys(" "),
+		key.WithHelp("space", "toggle"),
+	),
+	Expand: key.NewBinding(
+		key.WithKeys("right", "l"),
+		key.WithHelp("→/l", "expand"),
+	),
+	Collapse: key.NewBinding(
+		key.WithKeys("left", "h"),
+		key.WithHelp("←/h", "collapse"),
+	),
 }
 
 func (k configKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Edit, k.Info, k.Base.Quit}
+	return []key.Binding{k.Edit, k.Toggle, k.Info, k.Base.Quit}
 }
 
 func (k configKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Base.Up, k.Base.Down, k.Edit, k.Info},
-		{k.Confirm, k.Cancel, k.SwitchLayer, k.Base.Quit},
+		{k.Base.Up, k.Base.Down, k.Edit, k.Toggle},
+		{k.Expand, k.Collapse, k.Info, k.Base.Quit},
 	}
 }
 
@@ -123,6 +127,23 @@ func (d configDelegate) Render(w io.Writer, m list.Model, index int, item list.I
 		return
 	}
 
+	node := i.node
+
+	// Build indentation based on depth
+	indent := strings.Repeat("  ", node.Depth)
+
+	// Tree indicator: ▶ collapsed, ▼ expanded, • for leaf nodes
+	indicator := "  "
+	if node.IsExpandable() {
+		if node.Collapsed {
+			indicator = "▶ "
+		} else {
+			indicator = "▼ "
+		}
+	} else if node.Depth > 0 {
+		indicator = "• "
+	}
+
 	// Cursor: fat arrow for selected row
 	cursor := "  "
 	if index == m.Index() {
@@ -130,38 +151,55 @@ func (d configDelegate) Render(w io.Writer, m list.Model, index int, item list.I
 	}
 
 	// Title styling with wizard indicator
-	title := i.field.Label()
-	if i.field.Wizard {
+	title := node.DisplayKey()
+	if node.Field.Wizard {
 		title = title + " " + theme.DefaultTheme.Highlight.Render("★")
 	}
 	if index == m.Index() {
 		title = theme.DefaultTheme.Bold.Render(title)
 	}
 
-	// Value display
-	val := i.value
-	if val == "" {
-		val = "(unset)"
-	}
+	// Value display using the new FormatValue function
+	val := configui.FormatValue(node.Value)
+
 	// Mask sensitive fields for display
-	if i.field.Sensitive && val != "(unset)" && len(val) > 8 {
-		val = val[:4] + "..." + val[len(val)-4:]
+	if node.Field.Sensitive && val != "(unset)" && len(val) > 8 {
+		val = "********"
 	}
+
 	valueStyle := theme.DefaultTheme.Muted
-	if val != "(unset)" {
+	if val != "(unset)" && val != "(empty)" {
 		valueStyle = theme.DefaultTheme.Success
 	}
 
+	// For container types that are collapsed, use muted style
+	if node.IsContainer() && node.Collapsed {
+		valueStyle = theme.DefaultTheme.Muted
+	}
+
 	// Layer badge with color coding
-	badge := renderLayerBadge(i.activeSource)
+	badge := renderLayerBadge(node.ActiveSource)
 
-	// Description with current value
-	desc := theme.DefaultTheme.Muted.Render(i.field.Description)
+	// Description (may be empty for dynamic fields)
+	desc := node.Field.Description
+	if desc == "" && node.IsDynamic {
+		// For dynamic map/array entries, don't show description line
+		desc = ""
+	}
+
+	// Render: cursor + indent + indicator + title + value + badge on first line
 	valDisplay := valueStyle.Render(val)
+	indicatorStyled := theme.DefaultTheme.Muted.Render(indicator)
+	fmt.Fprintf(w, "%s%s%s%s  %s  %s\n", cursor, indent, indicatorStyled, title, valDisplay, badge)
 
-	// Render: cursor + title + value + badge on first line, indented description on second
-	fmt.Fprintf(w, "%s%s  %s  %s\n", cursor, title, valDisplay, badge)
-	fmt.Fprintf(w, "     %s", desc)
+	// Second line: indented description (if present)
+	if desc != "" {
+		descIndent := strings.Repeat(" ", len(cursor)+len(indent)+len(indicator))
+		fmt.Fprintf(w, "%s%s", descIndent, theme.DefaultTheme.Muted.Render(desc))
+	} else {
+		// Empty line to maintain consistent height
+		fmt.Fprint(w, "")
+	}
 }
 
 // renderLayerBadge renders a colored badge for the config source.
@@ -239,8 +277,10 @@ const (
 
 type configModel struct {
 	list  list.Model
-	items []configItem
 	input textinput.Model
+
+	// Tree-based config state
+	treeRoots []*configui.ConfigNode // Root nodes of the config tree
 
 	// Layered config state
 	layered *config.LayeredConfig
@@ -291,18 +331,13 @@ func runConfigEdit(cmd *cobra.Command, args []string) error {
 	m.input.CharLimit = 200
 	m.input.Width = 50
 
-	// Populate list from generated schema (flattening nested fields for display)
-	var listItems []list.Item
-	for _, schema := range configui.SchemaFields {
-		items := m.buildConfigItems(schema)
-		for _, itm := range items {
-			m.items = append(m.items, itm)
-			listItems = append(listItems, itm)
-		}
-	}
+	// Build tree from schema and config
+	m.treeRoots = configui.BuildTree(configui.SchemaFields, layered)
 
+	// Create list with tree-based items
 	delegate := configDelegate{}
-	m.list = list.New(listItems, delegate, 0, 0)
+	m.list = list.New([]list.Item{}, delegate, 0, 0)
+	m.refreshList()
 
 	// Show context in title
 	contextPath := cwd
@@ -323,254 +358,14 @@ func runConfigEdit(cmd *cobra.Command, args []string) error {
 	return err
 }
 
-// buildConfigItems extracts values from all layers for a schema field.
-// For nested object types, it flattens the children into separate list items.
-func (m *configModel) buildConfigItems(schema configui.FieldMeta) []configItem {
-	var items []configItem
-
-	// Get the path with namespace prefix if needed
-	path := schema.Path
-	if schema.Namespace != "" {
-		path = append([]string{schema.Namespace}, schema.Path...)
+// refreshList flattens the tree and updates the list items.
+func (m *configModel) refreshList() {
+	visibleNodes := configui.Flatten(m.treeRoots)
+	var items []list.Item
+	for _, node := range visibleNodes {
+		items = append(items, configItem{node: node})
 	}
-
-	// For object/map types with children, only show the leaf fields (children)
-	if schema.Type == configui.FieldObject && len(schema.Children) > 0 {
-		for _, child := range schema.Children {
-			childItems := m.buildConfigItems(child)
-			items = append(items, childItems...)
-		}
-		return items
-	}
-
-	// For non-object types or objects without children, create the item
-	item := configItem{
-		field:        schema,
-		activeSource: config.SourceDefault,
-		layerValues:  LayeredConfigValue{},
-	}
-
-	// Extract values from each layer
-	if m.layered.Default != nil {
-		item.layerValues.Default = getConfigValue(m.layered.Default, path)
-	}
-	if m.layered.Global != nil {
-		item.layerValues.Global = getConfigValue(m.layered.Global, path)
-	}
-	if m.layered.Ecosystem != nil {
-		item.layerValues.Ecosystem = getConfigValue(m.layered.Ecosystem, path)
-	}
-	if m.layered.Project != nil {
-		item.layerValues.Project = getConfigValue(m.layered.Project, path)
-	}
-
-	// Get final merged value
-	if m.layered.Final != nil {
-		item.value = getConfigValue(m.layered.Final, path)
-	}
-
-	// Determine which layer the final value came from (highest priority wins)
-	// Priority: Project > Ecosystem > Global > Default
-	if item.layerValues.Project != "" {
-		item.activeSource = config.SourceProject
-	} else if item.layerValues.Ecosystem != "" {
-		item.activeSource = config.SourceEcosystem
-	} else if item.layerValues.Global != "" {
-		item.activeSource = config.SourceGlobal
-	} else {
-		item.activeSource = config.SourceDefault
-	}
-
-	items = append(items, item)
-	return items
-}
-
-// getConfigValue extracts a value from a Config struct using a path.
-func getConfigValue(cfg *config.Config, path []string) string {
-	if cfg == nil || len(path) == 0 {
-		return ""
-	}
-
-	// Use reflection to navigate the config struct
-	v := reflect.ValueOf(cfg).Elem()
-
-	for i, key := range path {
-		// Try to find the field by tag or name
-		field := findField(v, key)
-		if !field.IsValid() {
-			// Check extensions map for unknown fields
-			if ext, ok := cfg.Extensions[path[0]]; ok {
-				if extMap, ok := ext.(map[string]interface{}); ok {
-					return getNestedMapValue(extMap, path[1:])
-				}
-			}
-			return ""
-		}
-
-		if i == len(path)-1 {
-			// Final field - convert to string
-			return fieldToString(field)
-		}
-
-		// Navigate deeper (handle pointer types)
-		if field.Kind() == reflect.Ptr {
-			if field.IsNil() {
-				return ""
-			}
-			field = field.Elem()
-		}
-		v = field
-	}
-
-	return ""
-}
-
-// findField finds a struct field by TOML/YAML tag or field name.
-func findField(v reflect.Value, key string) reflect.Value {
-	if v.Kind() == reflect.Ptr {
-		if v.IsNil() {
-			return reflect.Value{}
-		}
-		v = v.Elem()
-	}
-
-	if v.Kind() != reflect.Struct {
-		return reflect.Value{}
-	}
-
-	t := v.Type()
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-
-		// Check TOML tag
-		if tag := field.Tag.Get("toml"); tag != "" {
-			tagName := strings.Split(tag, ",")[0]
-			if tagName == key {
-				return v.Field(i)
-			}
-		}
-
-		// Check YAML tag
-		if tag := field.Tag.Get("yaml"); tag != "" {
-			tagName := strings.Split(tag, ",")[0]
-			if tagName == key {
-				return v.Field(i)
-			}
-		}
-
-		// Check field name (case insensitive)
-		if strings.EqualFold(field.Name, key) {
-			return v.Field(i)
-		}
-	}
-
-	return reflect.Value{}
-}
-
-// fieldToString converts a reflect.Value to a string representation.
-func fieldToString(v reflect.Value) string {
-	if !v.IsValid() {
-		return ""
-	}
-
-	// Handle pointers
-	if v.Kind() == reflect.Ptr {
-		if v.IsNil() {
-			return ""
-		}
-		v = v.Elem()
-	}
-
-	switch v.Kind() {
-	case reflect.String:
-		return v.String()
-	case reflect.Bool:
-		if v.Bool() {
-			return "true"
-		}
-		return "false"
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return fmt.Sprintf("%d", v.Int())
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return fmt.Sprintf("%d", v.Uint())
-	case reflect.Float32, reflect.Float64:
-		return fmt.Sprintf("%g", v.Float())
-	default:
-		return fmt.Sprintf("%v", v.Interface())
-	}
-}
-
-// getNestedMapValue extracts a value from a nested map using a path.
-func getNestedMapValue(m map[string]interface{}, path []string) string {
-	if len(path) == 0 {
-		return ""
-	}
-
-	current := m
-	for i, key := range path {
-		val, ok := current[key]
-		if !ok {
-			return ""
-		}
-
-		if i == len(path)-1 {
-			switch v := val.(type) {
-			case string:
-				return v
-			case bool:
-				if v {
-					return "true"
-				}
-				return "false"
-			case int, int64, float64:
-				return fmt.Sprintf("%v", v)
-			default:
-				return fmt.Sprintf("%v", v)
-			}
-		}
-
-		nested, ok := val.(map[string]interface{})
-		if !ok {
-			return ""
-		}
-		current = nested
-	}
-	return ""
-}
-
-// getTomlValue retrieves a value from a nested TOML map using a path
-func getTomlValue(data map[string]interface{}, path ...string) string {
-	if len(path) == 0 {
-		return ""
-	}
-
-	current := data
-	for i, key := range path {
-		val, ok := current[key]
-		if !ok {
-			return ""
-		}
-
-		if i == len(path)-1 {
-			// Last key - return the value as string
-			switch v := val.(type) {
-			case string:
-				return v
-			case int, int64, float64, bool:
-				return fmt.Sprintf("%v", v)
-			default:
-				return ""
-			}
-		}
-
-		// Navigate deeper
-		nested, ok := val.(map[string]interface{})
-		if !ok {
-			return ""
-		}
-		current = nested
-	}
-	return ""
+	m.list.SetItems(items)
 }
 
 // setTomlValue sets a value in a nested TOML map using a path
@@ -642,13 +437,69 @@ func (m configModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
 		return m, tea.Quit
+
+	// Toggle expansion with space
+	case " ":
+		idx := m.list.Index()
+		if idx >= 0 && idx < len(m.list.Items()) {
+			node := m.list.Items()[idx].(configItem).node
+			if node.IsExpandable() {
+				configui.ToggleNode(node)
+				m.refreshList()
+			}
+		}
+		return m, nil
+
+	// Expand with right/l
+	case "right", "l":
+		idx := m.list.Index()
+		if idx >= 0 && idx < len(m.list.Items()) {
+			node := m.list.Items()[idx].(configItem).node
+			if node.IsExpandable() && node.Collapsed {
+				node.Collapsed = false
+				m.refreshList()
+			}
+		}
+		return m, nil
+
+	// Collapse with left/h
+	case "left", "h":
+		idx := m.list.Index()
+		if idx >= 0 && idx < len(m.list.Items()) {
+			node := m.list.Items()[idx].(configItem).node
+			if node.IsExpandable() && !node.Collapsed {
+				// If expanded, collapse it
+				node.Collapsed = true
+				m.refreshList()
+			} else if node.Parent != nil {
+				// If collapsed or leaf, try to select parent
+				visibleNodes := configui.Flatten(m.treeRoots)
+				parentIdx := configui.FindParentIndex(visibleNodes, node)
+				if parentIdx >= 0 {
+					m.list.Select(parentIdx)
+				}
+			}
+		}
+		return m, nil
+
 	case "enter":
 		idx := m.list.Index()
 		if idx >= 0 && idx < len(m.list.Items()) {
 			itm := m.list.Items()[idx].(configItem)
+			node := itm.node
+
+			// If it's a container with children, toggle expand
+			if node.IsExpandable() {
+				configui.ToggleNode(node)
+				m.refreshList()
+				return m, nil
+			}
+
+			// If it's a leaf, start editing
 			m.startEdit(idx, itm)
 		}
 		return m, nil
+
 	case "i":
 		idx := m.list.Index()
 		if idx >= 0 && idx < len(m.list.Items()) {
@@ -678,54 +529,77 @@ func (m configModel) updateInfo(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *configModel) startEdit(idx int, itm configItem) {
+	node := itm.node
+
+	// Don't allow editing container types directly
+	if node.IsContainer() {
+		m.statusMsg = "Expand node to edit children"
+		return
+	}
+
 	m.state = viewEdit
 	m.editIndex = idx
 	m.statusMsg = ""
 
 	// Start with the recommended layer, but use active source if it's already set there
-	m.targetLayer = itm.field.Layer
+	m.targetLayer = node.Field.Layer
 	if m.targetLayer == config.SourceDefault {
 		m.targetLayer = config.SourceGlobal // Fallback to global if no layer specified
 	}
 
 	// If the value is already set in a specific layer, default to that layer
-	if itm.activeSource != config.SourceDefault {
-		m.targetLayer = itm.activeSource
+	if node.ActiveSource != config.SourceDefault {
+		m.targetLayer = node.ActiveSource
 	}
 
-	switch itm.field.Type {
+	// Get the current value as string for the input
+	currentValue := configui.FormatValue(node.Value)
+	if currentValue == "(unset)" || currentValue == "(empty)" {
+		currentValue = ""
+	}
+
+	switch node.Field.Type {
 	case configui.FieldString:
-		m.input.SetValue(itm.value)
+		m.input.SetValue(currentValue)
 		m.input.Focus()
 	case configui.FieldSelect:
 		// Find current option index
 		m.selectIndex = 0
-		for i, opt := range itm.field.Options {
-			if opt == itm.value {
+		for i, opt := range node.Field.Options {
+			if opt == currentValue {
 				m.selectIndex = i
 				break
 			}
 		}
 	case configui.FieldBool:
-		m.boolValue = itm.value == "true"
+		m.boolValue = currentValue == "true"
+	case configui.FieldInt:
+		m.input.SetValue(currentValue)
+		m.input.Focus()
 	case configui.FieldArray:
 		// For arrays, use the text input with comma-separated values
-		m.input.SetValue(itm.value)
+		m.input.SetValue(currentValue)
 		m.input.Focus()
 	default:
-		// For map, object, int - use text input as fallback
-		m.input.SetValue(itm.value)
+		// Fallback to text input
+		m.input.SetValue(currentValue)
 		m.input.Focus()
 	}
 }
 
 func (m *configModel) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	itm := m.list.Items()[m.editIndex].(configItem)
+	node := itm.node
 
 	// Get the full path with namespace
-	path := itm.field.Path
-	if itm.field.Namespace != "" {
-		path = append([]string{itm.field.Namespace}, itm.field.Path...)
+	path := node.Field.Path
+	if node.Field.Namespace != "" {
+		path = append([]string{node.Field.Namespace}, node.Field.Path...)
+	}
+
+	// For dynamic map entries, we need to build the full path including parent keys
+	if node.IsDynamic && node.Parent != nil {
+		path = buildFullPath(node)
 	}
 
 	switch msg.Type {
@@ -741,11 +615,11 @@ func (m *configModel) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyEnter:
 		var newValue string
-		switch itm.field.Type {
+		switch node.Field.Type {
 		case configui.FieldString, configui.FieldArray, configui.FieldInt:
 			newValue = m.input.Value()
 		case configui.FieldSelect:
-			newValue = itm.field.Options[m.selectIndex]
+			newValue = node.Field.Options[m.selectIndex]
 		case configui.FieldBool:
 			if m.boolValue {
 				newValue = "true"
@@ -775,14 +649,14 @@ func (m *configModel) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Handle navigation for Select type
-	if itm.field.Type == configui.FieldSelect {
+	if node.Field.Type == configui.FieldSelect {
 		switch msg.String() {
 		case "up", "k":
 			if m.selectIndex > 0 {
 				m.selectIndex--
 			}
 		case "down", "j":
-			if m.selectIndex < len(itm.field.Options)-1 {
+			if m.selectIndex < len(node.Field.Options)-1 {
 				m.selectIndex++
 			}
 		}
@@ -790,7 +664,7 @@ func (m *configModel) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Handle navigation for Bool type
-	if itm.field.Type == configui.FieldBool {
+	if node.Field.Type == configui.FieldBool {
 		switch msg.String() {
 		case "up", "k", "down", "j", " ":
 			m.boolValue = !m.boolValue
@@ -802,6 +676,29 @@ func (m *configModel) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
+}
+
+// buildFullPath constructs the full config path for a node, including parent keys.
+func buildFullPath(node *configui.ConfigNode) []string {
+	var path []string
+
+	// Walk up the tree to collect path components
+	current := node
+	for current != nil {
+		if current.Key != "" {
+			path = append([]string{current.Key}, path...)
+		} else if len(current.Field.Path) > 0 {
+			path = append(current.Field.Path, path...)
+		}
+		current = current.Parent
+	}
+
+	// Add namespace if present
+	if node.Field.Namespace != "" {
+		path = append([]string{node.Field.Namespace}, path...)
+	}
+
+	return path
 }
 
 // cycleLayer cycles through available layers: Global -> Ecosystem -> Project -> Global
@@ -899,7 +796,7 @@ func (m *configModel) saveToYAML(filePath string, path []string, value string) e
 	return m.yamlHandler.SaveYAML(filePath, root)
 }
 
-// reloadConfig reloads the layered config and refreshes the list items.
+// reloadConfig reloads the layered config and refreshes the tree.
 func (m *configModel) reloadConfig() error {
 	cwd, _ := os.Getwd()
 	layered, err := config.LoadLayered(cwd)
@@ -908,17 +805,11 @@ func (m *configModel) reloadConfig() error {
 	}
 	m.layered = layered
 
-	// Rebuild list items
-	var listItems []list.Item
-	m.items = nil
-	for _, schema := range configui.SchemaFields {
-		items := m.buildConfigItems(schema)
-		for _, itm := range items {
-			m.items = append(m.items, itm)
-			listItems = append(listItems, itm)
-		}
-	}
-	m.list.SetItems(listItems)
+	// Rebuild tree from schema and config
+	m.treeRoots = configui.BuildTree(configui.SchemaFields, layered)
+
+	// Refresh the list
+	m.refreshList()
 
 	return nil
 }
@@ -959,6 +850,7 @@ func (m configModel) renderListView() string {
 
 func (m configModel) renderEditView() string {
 	itm := m.list.Items()[m.editIndex].(configItem)
+	node := itm.node
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -966,27 +858,28 @@ func (m configModel) renderEditView() string {
 		Padding(1, 2).
 		Width(65)
 
-	title := theme.DefaultTheme.Bold.Render("Edit: " + itm.field.Label())
+	title := theme.DefaultTheme.Bold.Render("Edit: " + node.DisplayKey())
 
 	// Current value info
+	currentValue := configui.FormatValue(node.Value)
 	currentInfo := theme.DefaultTheme.Muted.Render(
-		fmt.Sprintf("Current: %s (from %s)", itm.value, layerDisplayName(itm.activeSource)),
+		fmt.Sprintf("Current: %s (from %s)", currentValue, layerDisplayName(node.ActiveSource)),
 	)
 
 	// Show hint for sensitive fields
 	hintText := ""
-	if itm.field.Hint != "" {
-		hintText = theme.DefaultTheme.Muted.Render("Hint: " + itm.field.Hint)
+	if node.Field.Hint != "" {
+		hintText = theme.DefaultTheme.Muted.Render("Hint: " + node.Field.Hint)
 	}
 
 	// Edit content based on field type
 	var content string
-	switch itm.field.Type {
+	switch node.Field.Type {
 	case configui.FieldString, configui.FieldArray, configui.FieldInt:
 		content = m.input.View()
 	case configui.FieldSelect:
 		var opts []string
-		for i, opt := range itm.field.Options {
+		for i, opt := range node.Field.Options {
 			cursor := "  "
 			style := theme.DefaultTheme.Normal
 			if i == m.selectIndex {
@@ -1019,7 +912,7 @@ func (m configModel) renderEditView() string {
 	layerInfo := fmt.Sprintf("Save to: %s %s", layerBadge, theme.DefaultTheme.Path.Render(setup.AbbreviatePath(targetPath)))
 
 	recommendation := ""
-	if m.targetLayer == itm.field.Layer {
+	if m.targetLayer == node.Field.Layer {
 		recommendation = theme.DefaultTheme.Muted.Render("         (" + layerRecommendation(m.targetLayer) + ")")
 	}
 
@@ -1045,6 +938,7 @@ func (m configModel) renderEditView() string {
 
 func (m configModel) renderInfoView() string {
 	itm := m.list.Items()[m.editIndex].(configItem)
+	node := itm.node
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -1052,42 +946,38 @@ func (m configModel) renderInfoView() string {
 		Padding(1, 2).
 		Width(70)
 
-	title := theme.DefaultTheme.Bold.Render(itm.field.Label())
-	desc := theme.DefaultTheme.Muted.Render(itm.field.Description)
+	title := theme.DefaultTheme.Bold.Render(node.DisplayKey())
+	desc := theme.DefaultTheme.Muted.Render(node.Field.Description)
 
 	// Build layer values table
 	var layerRows []string
 
-	// Default layer
-	defaultVal := "(not set)"
-	if itm.layerValues.Default != "" {
-		defaultVal = itm.layerValues.Default
+	// Format layer values
+	formatLayerVal := func(v interface{}) string {
+		if v == nil {
+			return "(not set)"
+		}
+		return configui.FormatValue(v)
 	}
-	layerRows = append(layerRows, m.renderLayerRow("Default", defaultVal, "", itm.activeSource == config.SourceDefault))
+
+	// Default layer
+	defaultVal := formatLayerVal(node.LayerValues.Default)
+	layerRows = append(layerRows, m.renderLayerRow("Default", defaultVal, "", node.ActiveSource == config.SourceDefault))
 
 	// Global layer
-	globalVal := "(not set)"
+	globalVal := formatLayerVal(node.LayerValues.Global)
 	globalPath := m.layered.FilePaths[config.SourceGlobal]
-	if itm.layerValues.Global != "" {
-		globalVal = itm.layerValues.Global
-	}
-	layerRows = append(layerRows, m.renderLayerRow("Global", globalVal, globalPath, itm.activeSource == config.SourceGlobal))
+	layerRows = append(layerRows, m.renderLayerRow("Global", globalVal, globalPath, node.ActiveSource == config.SourceGlobal))
 
 	// Ecosystem layer
-	ecoVal := "(not set)"
+	ecoVal := formatLayerVal(node.LayerValues.Ecosystem)
 	ecoPath := m.layered.FilePaths[config.SourceEcosystem]
-	if itm.layerValues.Ecosystem != "" {
-		ecoVal = itm.layerValues.Ecosystem
-	}
-	layerRows = append(layerRows, m.renderLayerRow("Ecosystem", ecoVal, ecoPath, itm.activeSource == config.SourceEcosystem))
+	layerRows = append(layerRows, m.renderLayerRow("Ecosystem", ecoVal, ecoPath, node.ActiveSource == config.SourceEcosystem))
 
 	// Project layer
-	projVal := "(not set)"
+	projVal := formatLayerVal(node.LayerValues.Project)
 	projPath := m.layered.FilePaths[config.SourceProject]
-	if itm.layerValues.Project != "" {
-		projVal = itm.layerValues.Project
-	}
-	layerRows = append(layerRows, m.renderLayerRow("Project", projVal, projPath, itm.activeSource == config.SourceProject))
+	layerRows = append(layerRows, m.renderLayerRow("Project", projVal, projPath, node.ActiveSource == config.SourceProject))
 
 	layersContent := strings.Join(layerRows, "\n")
 
@@ -1095,28 +985,32 @@ func (m configModel) renderInfoView() string {
 
 	// Active value summary
 	activeLabel := theme.DefaultTheme.Bold.Render("Active")
-	activeVal := theme.DefaultTheme.Success.Render(itm.value)
-	if itm.value == "" {
+	currentValue := configui.FormatValue(node.Value)
+	activeVal := theme.DefaultTheme.Success.Render(currentValue)
+	if currentValue == "(unset)" {
 		activeVal = theme.DefaultTheme.Muted.Render("(unset)")
 	}
-	activeSrc := theme.DefaultTheme.Muted.Render(fmt.Sprintf("(from %s)", layerDisplayName(itm.activeSource)))
+	activeSrc := theme.DefaultTheme.Muted.Render(fmt.Sprintf("(from %s)", layerDisplayName(node.ActiveSource)))
 	activeLine := fmt.Sprintf("  %s      %s  %s", activeLabel, activeVal, activeSrc)
 
 	// Recommendation
-	recLayer := layerDisplayName(itm.field.Layer)
-	recReason := layerRecommendation(itm.field.Layer)
+	recLayer := layerDisplayName(node.Field.Layer)
+	recReason := layerRecommendation(node.Field.Layer)
 	recLine := theme.DefaultTheme.Muted.Render(fmt.Sprintf("Recommended layer: %s (%s)", recLayer, recReason))
 
 	// Field metadata
 	var metaLines []string
-	if itm.field.Wizard {
+	if node.Field.Wizard {
 		metaLines = append(metaLines, theme.DefaultTheme.Highlight.Render("★ Wizard field"))
 	}
-	if itm.field.Sensitive {
+	if node.Field.Sensitive {
 		metaLines = append(metaLines, theme.DefaultTheme.Error.Render("⚠ Sensitive field"))
 	}
-	if itm.field.Namespace != "" {
-		metaLines = append(metaLines, theme.DefaultTheme.Muted.Render(fmt.Sprintf("Namespace: %s", itm.field.Namespace)))
+	if node.Field.Namespace != "" {
+		metaLines = append(metaLines, theme.DefaultTheme.Muted.Render(fmt.Sprintf("Namespace: %s", node.Field.Namespace)))
+	}
+	if node.IsDynamic {
+		metaLines = append(metaLines, theme.DefaultTheme.Muted.Render("(dynamic field)"))
 	}
 
 	helpText := theme.DefaultTheme.Muted.Render("enter: edit • esc: back")
