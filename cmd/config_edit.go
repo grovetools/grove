@@ -62,7 +62,7 @@ type configKeyMap struct {
 	Confirm     key.Binding
 	Cancel      key.Binding
 	SwitchLayer key.Binding
-	Toggle      key.Binding // Space/Tab to toggle expand/collapse
+	Toggle      key.Binding // Space to toggle expand/collapse
 	Expand      key.Binding // Right/l to expand
 	Collapse    key.Binding // Left/h to collapse
 }
@@ -71,11 +71,11 @@ var configKeys = configKeyMap{
 	Base: keymap.NewBase(),
 	Edit: key.NewBinding(
 		key.WithKeys("enter"),
-		key.WithHelp("enter", "edit/expand"),
+		key.WithHelp("enter", "edit value"),
 	),
 	Info: key.NewBinding(
 		key.WithKeys("i"),
-		key.WithHelp("i", "info"),
+		key.WithHelp("i", "field info"),
 	),
 	Confirm: key.NewBinding(
 		key.WithKeys("enter"),
@@ -83,34 +83,40 @@ var configKeys = configKeyMap{
 	),
 	Cancel: key.NewBinding(
 		key.WithKeys("esc"),
-		key.WithHelp("esc", "cancel/back"),
+		key.WithHelp("esc", "cancel"),
 	),
 	SwitchLayer: key.NewBinding(
 		key.WithKeys("tab"),
-		key.WithHelp("tab", "switch layer"),
+		key.WithHelp("tab", "change layer"),
 	),
 	Toggle: key.NewBinding(
 		key.WithKeys(" "),
-		key.WithHelp("space", "toggle"),
+		key.WithHelp("space", "expand/collapse"),
 	),
 	Expand: key.NewBinding(
 		key.WithKeys("right", "l"),
-		key.WithHelp("→/l", "expand"),
+		key.WithHelp("l/→", "expand"),
 	),
 	Collapse: key.NewBinding(
 		key.WithKeys("left", "h"),
-		key.WithHelp("←/h", "collapse"),
+		key.WithHelp("h/←", "collapse/parent"),
 	),
 }
 
 func (k configKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Edit, k.Toggle, k.Info, k.Base.Quit}
+	return []key.Binding{k.Edit, k.Toggle, k.Info, k.Base.Help, k.Base.Quit}
 }
 
 func (k configKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Base.Up, k.Base.Down, k.Edit, k.Toggle},
-		{k.Expand, k.Collapse, k.Info, k.Base.Quit},
+		// Navigation
+		{k.Base.Up, k.Base.Down, k.Base.PageUp, k.Base.PageDown},
+		// Tree navigation
+		{k.Toggle, k.Expand, k.Collapse},
+		// Actions
+		{k.Edit, k.Info},
+		// Exit
+		{k.Base.Quit, k.Base.Help},
 	}
 }
 
