@@ -201,12 +201,21 @@ func renderLayerBadge(source config.ConfigSource) string {
 	case config.SourceGlobal:
 		style = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Blue)
 		label = "[Global]"
+	case config.SourceGlobalOverride:
+		style = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Cyan)
+		label = "[Global Override]"
+	case config.SourceEnvOverlay:
+		style = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Yellow)
+		label = "[Env Overlay]"
 	case config.SourceEcosystem:
 		style = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Violet)
 		label = "[Ecosystem]"
 	case config.SourceProject:
 		style = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Green)
 		label = "[Project]"
+	case config.SourceOverride:
+		style = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Orange)
+		label = "[Override]"
 	case config.SourceDefault:
 		style = theme.DefaultTheme.Muted
 		label = "[Default]"
@@ -223,10 +232,16 @@ func layerDisplayName(source config.ConfigSource) string {
 	switch source {
 	case config.SourceGlobal:
 		return "Global"
+	case config.SourceGlobalOverride:
+		return "Global Override"
+	case config.SourceEnvOverlay:
+		return "Env Overlay"
 	case config.SourceEcosystem:
 		return "Ecosystem"
 	case config.SourceProject:
 		return "Project"
+	case config.SourceOverride:
+		return "Override"
 	case config.SourceDefault:
 		return "Default"
 	default:
@@ -975,6 +990,20 @@ func (m configModel) renderInfoView() string {
 	globalPath := m.layered.FilePaths[config.SourceGlobal]
 	layerRows = append(layerRows, m.renderLayerRow("Global", globalVal, globalPath, node.ActiveSource == config.SourceGlobal))
 
+	// Global Override layer (only show if exists)
+	if m.layered.GlobalOverride != nil {
+		globalOverrideVal := formatLayerVal(node.LayerValues.GlobalOverride)
+		globalOverridePath := m.layered.FilePaths[config.SourceGlobalOverride]
+		layerRows = append(layerRows, m.renderLayerRow("Global Override", globalOverrideVal, globalOverridePath, node.ActiveSource == config.SourceGlobalOverride))
+	}
+
+	// Env Overlay layer (only show if exists)
+	if m.layered.EnvOverlay != nil {
+		envOverlayVal := formatLayerVal(node.LayerValues.EnvOverlay)
+		envOverlayPath := m.layered.FilePaths[config.SourceEnvOverlay]
+		layerRows = append(layerRows, m.renderLayerRow("Env Overlay", envOverlayVal, envOverlayPath, node.ActiveSource == config.SourceEnvOverlay))
+	}
+
 	// Ecosystem layer
 	ecoVal := formatLayerVal(node.LayerValues.Ecosystem)
 	ecoPath := m.layered.FilePaths[config.SourceEcosystem]
@@ -984,6 +1013,13 @@ func (m configModel) renderInfoView() string {
 	projVal := formatLayerVal(node.LayerValues.Project)
 	projPath := m.layered.FilePaths[config.SourceProject]
 	layerRows = append(layerRows, m.renderLayerRow("Project", projVal, projPath, node.ActiveSource == config.SourceProject))
+
+	// Override layer (only show if exists)
+	if len(m.layered.Overrides) > 0 {
+		overrideVal := formatLayerVal(node.LayerValues.Override)
+		overridePath := m.layered.FilePaths[config.SourceOverride]
+		layerRows = append(layerRows, m.renderLayerRow("Override", overrideVal, overridePath, node.ActiveSource == config.SourceOverride))
+	}
 
 	layersContent := strings.Join(layerRows, "\n")
 

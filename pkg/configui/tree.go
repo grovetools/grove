@@ -33,10 +33,13 @@ type ConfigNode struct {
 
 // LayeredValue holds the values for a node across all config layers.
 type LayeredValue struct {
-	Default   interface{}
-	Global    interface{}
-	Ecosystem interface{}
-	Project   interface{}
+	Default        interface{}
+	Global         interface{}
+	GlobalOverride interface{}
+	EnvOverlay     interface{}
+	Ecosystem      interface{}
+	Project        interface{}
+	Override       interface{} // From grove.override.toml
 }
 
 // HasValue returns true if the node has a non-nil value.
@@ -102,11 +105,29 @@ func buildNode(field FieldMeta, layered *config.LayeredConfig, parent *ConfigNod
 	if layered.Global != nil {
 		node.LayerValues.Global = getConfigValueInterface(layered.Global, path)
 	}
+	if layered.GlobalOverride != nil && layered.GlobalOverride.Config != nil {
+		node.LayerValues.GlobalOverride = getConfigValueInterface(layered.GlobalOverride.Config, path)
+	}
+	if layered.EnvOverlay != nil && layered.EnvOverlay.Config != nil {
+		node.LayerValues.EnvOverlay = getConfigValueInterface(layered.EnvOverlay.Config, path)
+	}
 	if layered.Ecosystem != nil {
 		node.LayerValues.Ecosystem = getConfigValueInterface(layered.Ecosystem, path)
 	}
 	if layered.Project != nil {
 		node.LayerValues.Project = getConfigValueInterface(layered.Project, path)
+	}
+	// Check override files (use the last one as highest priority)
+	if len(layered.Overrides) > 0 {
+		for i := len(layered.Overrides) - 1; i >= 0; i-- {
+			if layered.Overrides[i].Config != nil {
+				val := getConfigValueInterface(layered.Overrides[i].Config, path)
+				if val != nil && !isEmptyValue(val) {
+					node.LayerValues.Override = val
+					break
+				}
+			}
+		}
 	}
 
 	// Determine active source (highest priority wins)
@@ -400,12 +421,22 @@ func getFieldName(field reflect.StructField) string {
 }
 
 // determineActiveSource returns the highest-priority layer that has a value.
+// Priority order (highest to lowest): Override > Project > Ecosystem > EnvOverlay > GlobalOverride > Global > Default
 func determineActiveSource(lv LayeredValue) config.ConfigSource {
+	if lv.Override != nil && !isEmptyValue(lv.Override) {
+		return config.SourceOverride
+	}
 	if lv.Project != nil && !isEmptyValue(lv.Project) {
 		return config.SourceProject
 	}
 	if lv.Ecosystem != nil && !isEmptyValue(lv.Ecosystem) {
 		return config.SourceEcosystem
+	}
+	if lv.EnvOverlay != nil && !isEmptyValue(lv.EnvOverlay) {
+		return config.SourceEnvOverlay
+	}
+	if lv.GlobalOverride != nil && !isEmptyValue(lv.GlobalOverride) {
+		return config.SourceGlobalOverride
 	}
 	if lv.Global != nil && !isEmptyValue(lv.Global) {
 		return config.SourceGlobal
