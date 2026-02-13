@@ -3,8 +3,9 @@ package cmd
 import (
 	"fmt"
 	"strings"
+	"time"
 
-	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/config"
@@ -18,18 +19,26 @@ type editNodeMsg struct{ node *configui.ConfigNode }
 type infoNodeMsg struct{ node *configui.ConfigNode }
 
 // LayerPage implements configui.ConfigPage for a specific config layer.
+// Uses viewport for smooth scrolling instead of bubbles/list pagination.
 type LayerPage struct {
 	layer     config.ConfigSource
 	name      string
-	list      list.Model
+	viewport  viewport.Model
 	treeRoots []*configui.ConfigNode
+	nodes     []*configui.ConfigNode // Flattened visible nodes
+	cursor    int                    // Current selected index
 	config    *config.LayeredConfig
 	width     int
 	height    int
 	active    bool
+	ready     bool // Viewport is initialized
+
+	// Vim chord state
+	lastZPress time.Time // For zR/zM/zo/zc
+	lastGPress time.Time // For gg
 }
 
-// NewLayerPage creates a page for a specific layer.
+// NewLayerPage creates a page for a specific layer with viewport-based scrolling.
 func NewLayerPage(name string, layer config.ConfigSource, layered *config.LayeredConfig, width, height int) *LayerPage {
 	p := &LayerPage{
 		layer:  layer,
@@ -39,16 +48,9 @@ func NewLayerPage(name string, layer config.ConfigSource, layered *config.Layere
 		height: height,
 	}
 
-	// Initialize list
-	delegate := configDelegate{}
-	p.list = list.New([]list.Item{}, delegate, width, height)
-	p.list.SetShowTitle(false)
-	p.list.SetShowStatusBar(false)
-	p.list.SetShowHelp(false)
-	p.list.SetShowPagination(false)
-	p.list.SetFilteringEnabled(false)
-	p.list.DisableQuitKeybindings()
-	p.list.InfiniteScrolling = true
+	// Initialize viewport
+	p.viewport = viewport.New(width, height)
+	p.ready = true
 
 	p.Refresh(layered)
 	return p
@@ -68,20 +70,18 @@ func (p *LayerPage) Refresh(layered *config.LayeredConfig) {
 	// 2. Build tree from filtered schema
 	p.treeRoots = configui.BuildTree(schema, layered)
 
-	// 3. Update list items
-	p.refreshList()
-}
+	// 3. Flatten and update viewport content
+	p.nodes = configui.Flatten(p.treeRoots)
 
-func (p *LayerPage) refreshList() {
-	visibleNodes := configui.Flatten(p.treeRoots)
-	var items []list.Item
-	for _, node := range visibleNodes {
-		items = append(items, configItem{node: node})
+	// Reset cursor if out of bounds
+	if p.cursor >= len(p.nodes) {
+		p.cursor = 0
 	}
-	p.list.SetItems(items)
+
+	p.updateContent()
 }
 
-func (p *LayerPage) Update(msg tea.Msg) (configui.ConfigPage, tea.Cmd) {
+func (p *LayerPage) Update(msg tea.Msg) (*LayerPage, tea.Cmd) {
 	// If not active, do minimal updates
 	if !p.active {
 		return p, nil
@@ -89,81 +89,322 @@ func (p *LayerPage) Update(msg tea.Msg) (configui.ConfigPage, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
+		keyStr := msg.String()
+
+		// === Vim Chords ===
+
+		// Handle zR/zM/zo/zc chords
+		if keyStr == "z" {
+			p.lastZPress = time.Now()
+			return p, nil
+		}
+		if time.Since(p.lastZPress) < 500*time.Millisecond {
+			switch keyStr {
+			case "R", "shift+r": // Expand all
+				configui.ExpandAll(p.treeRoots)
+				p.nodes = configui.Flatten(p.treeRoots)
+				p.updateContent()
+				p.lastZPress = time.Time{}
+				return p, nil
+			case "M", "shift+m": // Collapse all
+				configui.CollapseAll(p.treeRoots)
+				p.nodes = configui.Flatten(p.treeRoots)
+				p.cursor = 0
+				p.updateContent()
+				p.lastZPress = time.Time{}
+				return p, nil
+			case "o": // Open fold
+				if p.cursor < len(p.nodes) {
+					node := p.nodes[p.cursor]
+					if node.IsExpandable() && node.Collapsed {
+						node.Collapsed = false
+						p.nodes = configui.Flatten(p.treeRoots)
+						p.updateContent()
+					}
+				}
+				p.lastZPress = time.Time{}
+				return p, nil
+			case "c": // Close fold
+				if p.cursor < len(p.nodes) {
+					node := p.nodes[p.cursor]
+					if node.IsExpandable() && !node.Collapsed {
+						node.Collapsed = true
+						p.nodes = configui.Flatten(p.treeRoots)
+						p.updateContent()
+					} else if node.Parent != nil {
+						// Jump to parent and collapse it
+						parentIdx := configui.FindParentIndex(p.nodes, node)
+						if parentIdx >= 0 {
+							p.cursor = parentIdx
+							p.nodes[p.cursor].Collapsed = true
+							p.nodes = configui.Flatten(p.treeRoots)
+							p.updateContent()
+						}
+					}
+				}
+				p.lastZPress = time.Time{}
+				return p, nil
+			}
+		}
+
+		// Handle gg chord (go to top)
+		if keyStr == "g" {
+			if time.Since(p.lastGPress) < 500*time.Millisecond {
+				p.cursor = 0
+				p.updateContent()
+				p.lastGPress = time.Time{}
+				return p, nil
+			}
+			p.lastGPress = time.Now()
+			return p, nil
+		}
+
+		// G (Shift+g) - go to end
+		if keyStr == "G" {
+			if len(p.nodes) > 0 {
+				p.cursor = len(p.nodes) - 1
+				p.updateContent()
+			}
+			return p, nil
+		}
+
+		// === Standard Navigation ===
+		switch keyStr {
+		case "up", "k":
+			if p.cursor > 0 {
+				p.cursor--
+				p.updateContent()
+			}
+			return p, nil
+
+		case "down", "j":
+			if p.cursor < len(p.nodes)-1 {
+				p.cursor++
+				p.updateContent()
+			}
+			return p, nil
+
+		case "ctrl+u": // Half page up
+			p.cursor -= p.height / 2
+			if p.cursor < 0 {
+				p.cursor = 0
+			}
+			p.updateContent()
+			return p, nil
+
+		case "ctrl+d": // Half page down
+			p.cursor += p.height / 2
+			if p.cursor >= len(p.nodes) {
+				p.cursor = len(p.nodes) - 1
+			}
+			if p.cursor < 0 {
+				p.cursor = 0
+			}
+			p.updateContent()
+			return p, nil
+
+		case "pgup", "ctrl+b": // Full page up
+			p.cursor -= p.height
+			if p.cursor < 0 {
+				p.cursor = 0
+			}
+			p.updateContent()
+			return p, nil
+
+		case "pgdown", "ctrl+f": // Full page down
+			p.cursor += p.height
+			if p.cursor >= len(p.nodes) {
+				p.cursor = len(p.nodes) - 1
+			}
+			if p.cursor < 0 {
+				p.cursor = 0
+			}
+			p.updateContent()
+			return p, nil
+
 		case "enter":
 			// Handle selection
-			if idx := p.list.Index(); idx >= 0 && idx < len(p.list.Items()) {
-				item := p.list.Items()[idx].(configItem)
-				if item.node.IsExpandable() {
-					configui.ToggleNode(item.node)
-					p.refreshList()
+			if p.cursor >= 0 && p.cursor < len(p.nodes) {
+				node := p.nodes[p.cursor]
+				if node.IsExpandable() {
+					configui.ToggleNode(node)
+					p.nodes = configui.Flatten(p.treeRoots)
+					p.updateContent()
 					return p, nil
 				}
 				// It's a leaf, trigger edit
-				return p, func() tea.Msg { return editNodeMsg{node: item.node} }
+				return p, func() tea.Msg { return editNodeMsg{node: node} }
 			}
+
 		case "i":
-			if idx := p.list.Index(); idx >= 0 && idx < len(p.list.Items()) {
-				item := p.list.Items()[idx].(configItem)
-				return p, func() tea.Msg { return infoNodeMsg{node: item.node} }
+			if p.cursor >= 0 && p.cursor < len(p.nodes) {
+				node := p.nodes[p.cursor]
+				return p, func() tea.Msg { return infoNodeMsg{node: node} }
 			}
+
 		// Tree navigation - expand
 		case "right", "l":
-			if idx := p.list.Index(); idx >= 0 && idx < len(p.list.Items()) {
-				node := p.list.Items()[idx].(configItem).node
+			if p.cursor >= 0 && p.cursor < len(p.nodes) {
+				node := p.nodes[p.cursor]
 				if node.IsExpandable() && node.Collapsed {
 					node.Collapsed = false
-					p.refreshList()
-					return p, nil
+					p.nodes = configui.Flatten(p.treeRoots)
+					p.updateContent()
 				}
 			}
+			return p, nil
+
 		// Tree navigation - collapse or go to parent
 		case "left", "h":
-			if idx := p.list.Index(); idx >= 0 && idx < len(p.list.Items()) {
-				node := p.list.Items()[idx].(configItem).node
+			if p.cursor >= 0 && p.cursor < len(p.nodes) {
+				node := p.nodes[p.cursor]
 				if node.IsExpandable() && !node.Collapsed {
 					node.Collapsed = true
-					p.refreshList()
-					return p, nil
+					p.nodes = configui.Flatten(p.treeRoots)
+					p.updateContent()
 				} else if node.Parent != nil {
 					// Jump to parent
-					parentIdx := configui.FindParentIndex(configui.Flatten(p.treeRoots), node)
+					parentIdx := configui.FindParentIndex(p.nodes, node)
 					if parentIdx >= 0 {
-						p.list.Select(parentIdx)
-						return p, nil
+						p.cursor = parentIdx
+						p.updateContent()
 					}
 				}
 			}
+			return p, nil
+
 		// Space to toggle
 		case " ":
-			if idx := p.list.Index(); idx >= 0 && idx < len(p.list.Items()) {
-				node := p.list.Items()[idx].(configItem).node
+			if p.cursor >= 0 && p.cursor < len(p.nodes) {
+				node := p.nodes[p.cursor]
 				if node.IsExpandable() {
 					configui.ToggleNode(node)
-					p.refreshList()
-					return p, nil
+					p.nodes = configui.Flatten(p.treeRoots)
+					p.updateContent()
 				}
 			}
+			return p, nil
 		}
 	}
 
-	var cmd tea.Cmd
-	p.list, cmd = p.list.Update(msg)
-	return p, cmd
+	return p, nil
 }
 
 func (p *LayerPage) View() string {
-	if len(p.list.Items()) == 0 {
+	if len(p.nodes) == 0 {
 		return p.renderEmptyState()
 	}
 
-	// Render list content
-	content := p.list.View()
+	// Render viewport content
+	content := p.viewport.View()
 
 	// Render footer with file path
 	footer := p.renderFooter()
 
 	return lipgloss.JoinVertical(lipgloss.Left, content, footer)
+}
+
+// updateContent renders all nodes and updates the viewport.
+func (p *LayerPage) updateContent() {
+	if !p.ready || len(p.nodes) == 0 {
+		p.viewport.SetContent("")
+		return
+	}
+
+	var lines []string
+	for i, node := range p.nodes {
+		lines = append(lines, p.renderRow(node, i == p.cursor))
+	}
+
+	p.viewport.SetContent(strings.Join(lines, "\n"))
+
+	// Auto-scroll to keep cursor visible
+	if p.cursor < p.viewport.YOffset {
+		p.viewport.SetYOffset(p.cursor)
+	} else if p.cursor >= p.viewport.YOffset+p.viewport.Height {
+		p.viewport.SetYOffset(p.cursor - p.viewport.Height + 1)
+	}
+}
+
+// renderRow renders a single config node line.
+func (p *LayerPage) renderRow(node *configui.ConfigNode, isSelected bool) string {
+	// Build indentation based on depth
+	indent := strings.Repeat("  ", node.Depth)
+
+	// Tree indicator: ▶ collapsed, ▼ expanded, • for leaf nodes
+	indicator := "  "
+	if node.IsExpandable() {
+		if node.Collapsed {
+			indicator = "▶ "
+		} else {
+			indicator = "▼ "
+		}
+	} else if node.Depth > 0 {
+		indicator = "• "
+	}
+
+	// Cursor: fat arrow for selected row
+	cursor := "  "
+	if isSelected {
+		cursor = theme.DefaultTheme.Highlight.Render(theme.IconArrowRightBold) + " "
+	}
+
+	// Title styling with wizard indicator
+	titleRaw := node.DisplayKey()
+	wizardStar := ""
+	if node.Field.Wizard {
+		wizardStar = " " + theme.DefaultTheme.Highlight.Render("★")
+	}
+	title := titleRaw
+	if isSelected {
+		title = theme.DefaultTheme.Bold.Render(title)
+	}
+	title = title + wizardStar
+
+	// Calculate remaining width for value preview
+	// prefix = cursor(2) + indent(depth*2) + indicator(2) + title + wizardStar(2) + spacing(2)
+	prefixLen := 2 + (node.Depth * 2) + 2 + len(titleRaw) + 2
+	if node.Field.Wizard {
+		prefixLen += 2 // " ★"
+	}
+	availableWidth := p.width - prefixLen - 4 // Reserve space for override mark and padding
+	if availableWidth < 10 {
+		availableWidth = 10
+	}
+
+	// Value display - use preview for collapsed containers if enabled
+	var val string
+	if node.IsContainer() && node.Collapsed && configShowPreview {
+		val = configui.FormatValuePreview(node.Value, availableWidth)
+	} else {
+		val = configui.FormatValue(node.Value)
+	}
+
+	// Mask sensitive fields for display
+	if node.Field.Sensitive && val != "(unset)" && len(val) > 8 {
+		val = "********"
+	}
+
+	valueStyle := theme.DefaultTheme.Muted
+	if val != "(unset)" && val != "(empty)" {
+		valueStyle = theme.DefaultTheme.Success
+	}
+
+	// For container types that are collapsed, use muted style
+	if node.IsContainer() && node.Collapsed {
+		valueStyle = theme.DefaultTheme.Muted
+	}
+
+	// Override indicator: muted asterisk for values from override files
+	overrideMark := ""
+	if isOverrideSource(node.ActiveSource) {
+		overrideMark = theme.DefaultTheme.Muted.Render(" *")
+	}
+
+	// Render: cursor + indent + indicator + title + value + override mark (single line)
+	valDisplay := valueStyle.Render(val)
+	indicatorStyled := theme.DefaultTheme.Muted.Render(indicator)
+	return fmt.Sprintf("%s%s%s%s  %s%s", cursor, indent, indicatorStyled, title, valDisplay, overrideMark)
 }
 
 func (p *LayerPage) renderEmptyState() string {
@@ -221,15 +462,22 @@ func (p *LayerPage) Blur() {
 	p.active = false
 }
 
+// IsZChordPending returns true if a 'z' key was recently pressed (for zR/zM/zo/zc chords).
+func (p *LayerPage) IsZChordPending() bool {
+	return time.Since(p.lastZPress) < 500*time.Millisecond
+}
+
 func (p *LayerPage) SetSize(width, height int) {
 	p.width = width
 	p.height = height
 	// Reserve space for footer (approx 2 lines)
-	listHeight := height - 3
-	if listHeight < 1 {
-		listHeight = 1
+	viewportHeight := height - 3
+	if viewportHeight < 1 {
+		viewportHeight = 1
 	}
-	p.list.SetSize(width, listHeight)
+	p.viewport.Width = width
+	p.viewport.Height = viewportHeight
+	p.updateContent()
 }
 
 // layerPageTitle returns the title to display for a layer page
@@ -256,7 +504,7 @@ func layerPageTitle(layer config.ConfigSource, layered *config.LayeredConfig) st
 
 // renderTabs renders the tab bar for the config pages.
 // This follows the pattern from cx/cmd/view/view.go renderTabs().
-func renderConfigTabs(pages []configui.ConfigPage, activePage int) string {
+func renderConfigTabs(pages []*LayerPage, activePage int) string {
 	t := theme.DefaultTheme
 
 	inactiveTab := lipgloss.NewStyle().

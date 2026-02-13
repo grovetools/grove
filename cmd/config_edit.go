@@ -3,13 +3,11 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -87,15 +85,6 @@ Supports both YAML (with comment preservation) and TOML formats.`
 // Field types and schema are now defined in pkg/configui and generated from JSON schemas.
 
 // --- Model & State ---
-
-// configItem wraps a ConfigNode to implement list.Item interface.
-type configItem struct {
-	node *configui.ConfigNode
-}
-
-func (i configItem) Title() string       { return i.node.DisplayKey() }
-func (i configItem) Description() string { return i.node.Field.Description }
-func (i configItem) FilterValue() string { return i.node.DisplayKey() }
 
 // configKeyMap defines key bindings for the config editor
 type configKeyMap struct {
@@ -183,100 +172,6 @@ func (k configKeyMap) FullHelp() [][]key.Binding {
 		// Exit
 		{k.Base.Quit, k.Base.Help},
 	}
-}
-
-// configDelegate renders config items with their current values.
-type configDelegate struct{}
-
-func (d configDelegate) Height() int                             { return 1 }
-func (d configDelegate) Spacing() int                            { return 0 }
-func (d configDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
-
-func (d configDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
-	i, ok := item.(configItem)
-	if !ok {
-		return
-	}
-
-	node := i.node
-
-	// Build indentation based on depth
-	indent := strings.Repeat("  ", node.Depth)
-
-	// Tree indicator: ▶ collapsed, ▼ expanded, • for leaf nodes
-	indicator := "  "
-	if node.IsExpandable() {
-		if node.Collapsed {
-			indicator = "▶ "
-		} else {
-			indicator = "▼ "
-		}
-	} else if node.Depth > 0 {
-		indicator = "• "
-	}
-
-	// Cursor: fat arrow for selected row
-	cursor := "  "
-	if index == m.Index() {
-		cursor = theme.DefaultTheme.Highlight.Render(theme.IconArrowRightBold) + " "
-	}
-
-	// Title styling with wizard indicator
-	titleRaw := node.DisplayKey()
-	wizardStar := ""
-	if node.Field.Wizard {
-		wizardStar = " " + theme.DefaultTheme.Highlight.Render("★")
-	}
-	title := titleRaw
-	if index == m.Index() {
-		title = theme.DefaultTheme.Bold.Render(title)
-	}
-	title = title + wizardStar
-
-	// Calculate remaining width for value preview
-	// prefix = cursor(2) + indent(depth*2) + indicator(2) + title + wizardStar(2) + spacing(2)
-	prefixLen := 2 + (node.Depth * 2) + 2 + len(titleRaw) + 2
-	if node.Field.Wizard {
-		prefixLen += 2 // " ★"
-	}
-	availableWidth := m.Width() - prefixLen - 4 // Reserve space for override mark and padding
-	if availableWidth < 10 {
-		availableWidth = 10
-	}
-
-	// Value display - use preview for collapsed containers if enabled
-	var val string
-	if node.IsContainer() && node.Collapsed && configShowPreview {
-		val = configui.FormatValuePreview(node.Value, availableWidth)
-	} else {
-		val = configui.FormatValue(node.Value)
-	}
-
-	// Mask sensitive fields for display
-	if node.Field.Sensitive && val != "(unset)" && len(val) > 8 {
-		val = "********"
-	}
-
-	valueStyle := theme.DefaultTheme.Muted
-	if val != "(unset)" && val != "(empty)" {
-		valueStyle = theme.DefaultTheme.Success
-	}
-
-	// For container types that are collapsed, use muted style
-	if node.IsContainer() && node.Collapsed {
-		valueStyle = theme.DefaultTheme.Muted
-	}
-
-	// Override indicator: muted asterisk for values from override files
-	overrideMark := ""
-	if isOverrideSource(node.ActiveSource) {
-		overrideMark = theme.DefaultTheme.Muted.Render(" *")
-	}
-
-	// Render: cursor + indent + indicator + title + value + override mark (single line)
-	valDisplay := valueStyle.Render(val)
-	indicatorStyled := theme.DefaultTheme.Muted.Render(indicator)
-	fmt.Fprintf(w, "%s%s%s%s  %s%s", cursor, indent, indicatorStyled, title, valDisplay, overrideMark)
 }
 
 // isOverrideSource returns true if the source is an override file (not the main config).
@@ -380,7 +275,7 @@ const (
 
 type configModel struct {
 	// Paging model
-	pages      []configui.ConfigPage
+	pages      []*LayerPage
 	activePage int
 
 	input textinput.Model
@@ -425,7 +320,7 @@ func runConfigEdit(cmd *cobra.Command, args []string) error {
 
 	// Initialize pages for each config layer
 	width, height := 80, 24 // Initial dummy size, will be updated on WindowSizeMsg
-	pages := []configui.ConfigPage{
+	pages := []*LayerPage{
 		NewLayerPage("Global", config.SourceGlobal, layered, width, height),
 		NewLayerPage("Ecosystem", config.SourceEcosystem, layered, width, height),
 		NewLayerPage("Project", config.SourceProject, layered, width, height),
@@ -614,6 +509,10 @@ func (m configModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "c":
+		// Don't intercept 'c' if a z-chord is pending (zc = close fold)
+		if m.pages[m.activePage].IsZChordPending() {
+			break // Let it fall through to page delegation
+		}
 		m.state = viewSources
 		return m, nil
 	}

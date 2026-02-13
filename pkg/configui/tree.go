@@ -499,10 +499,10 @@ func ExpandAll(nodes []*ConfigNode) {
 	}
 }
 
-// CollapseAll collapses all nodes in the tree (except root level).
+// CollapseAll collapses all expandable nodes in the tree including root level.
 func CollapseAll(nodes []*ConfigNode) {
 	for _, node := range nodes {
-		if node.Depth > 0 {
+		if node.IsExpandable() {
 			node.Collapsed = true
 		}
 		if len(node.Children) > 0 {
