@@ -318,12 +318,19 @@ func (p *LayerPage) updateContent() {
 
 	p.viewport.SetContent(strings.Join(lines, "\n"))
 
-	// Auto-scroll to keep cursor visible
-	if p.cursor < p.viewport.YOffset {
-		p.viewport.SetYOffset(p.cursor)
-	} else if p.cursor >= p.viewport.YOffset+p.viewport.Height {
-		p.viewport.SetYOffset(p.cursor - p.viewport.Height + 1)
+	// Keep cursor centered in viewport
+	targetOffset := p.cursor - p.viewport.Height/2
+	if targetOffset < 0 {
+		targetOffset = 0
 	}
+	maxOffset := len(p.nodes) - p.viewport.Height
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if targetOffset > maxOffset {
+		targetOffset = maxOffset
+	}
+	p.viewport.SetYOffset(targetOffset)
 }
 
 // renderRow renders a single config node line.
