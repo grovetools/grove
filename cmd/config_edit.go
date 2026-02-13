@@ -109,7 +109,7 @@ var configKeys = configKeyMap{
 }
 
 func (k configKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Edit, k.Toggle, k.Info, k.Sources, k.Base.Help, k.Base.Quit}
+	return []key.Binding{k.Base.Quit}
 }
 
 func (k configKeyMap) FullHelp() [][]key.Binding {
