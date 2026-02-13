@@ -24,6 +24,11 @@ var SchemaFields = []FieldMeta{
 		RefType:     "NotebooksConfig",
 		Children: []FieldMeta{
 			{
+				Path:        []string{"notebooks", "definitions"},
+				Type:        FieldMap,
+				Description: "Map of notebook name to notebook configuration",
+			},
+			{
 				Path:        []string{"notebooks", "rules"},
 				Type:        FieldObject,
 				Description: "Rules for notebook usage (default notebook",
@@ -49,11 +54,6 @@ var SchemaFields = []FieldMeta{
 						},
 					},
 				},
-			},
-			{
-				Path:        []string{"notebooks", "definitions"},
-				Type:        FieldMap,
-				Description: "Map of notebook name to notebook configuration",
 			},
 		},
 	},
@@ -117,12 +117,16 @@ var SchemaFields = []FieldMeta{
 				Priority:    52,
 			},
 			{
-				Path:        []string{"tui", "nvim_embed"},
-				Type:        FieldObject,
-				Description: "Embedded Neovim configuration",
-				Layer:       config.SourceGlobal,
-				Priority:    53,
-				RefType:     "NvimEmbedConfig",
+				Path:          []string{"tui", "nvim_embed"},
+				Type:          FieldObject,
+				Description:   "Embedded Neovim configuration",
+				Layer:         config.SourceGlobal,
+				Priority:      53,
+				RefType:       "NvimEmbedConfig",
+				Status:        StatusAlpha,
+				StatusMessage: "Experimental Neovim embedding",
+				StatusSince:   "v0.6.0",
+				StatusTarget:  "v1.0",
 				Children: []FieldMeta{
 					{
 						Path:        []string{"tui", "nvim_embed", "user_config"},
@@ -199,6 +203,18 @@ var SchemaFields = []FieldMeta{
 		Hint:        "Consider using api_key_command to fetch from a secrets manager",
 		Namespace:   "gemini",
 	},
+	{
+		Path:             []string{"search_paths"},
+		Type:             FieldMap,
+		Description:      "DEPRECATED: Use groves instead",
+		Layer:            config.SourceGlobal,
+		Priority:         1000,
+		Status:           StatusDeprecated,
+		StatusMessage:    "Use 'groves' for project discovery",
+		StatusSince:      "v0.5.0",
+		StatusTarget:     "v1.0.0",
+		StatusReplacedBy: "groves",
+	},
 }
 
 // FieldsByPath provides O(1) lookup by full path.
@@ -217,6 +233,7 @@ var FieldsByPath = map[string]*FieldMeta{
 	"context":                   &SchemaFields[11],
 	"version":                   &SchemaFields[12],
 	"gemini.api_key":            &SchemaFields[13],
+	"search_paths":              &SchemaFields[14],
 }
 
 // WizardFields contains only fields marked for the setup wizard.

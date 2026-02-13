@@ -37,10 +37,22 @@ type JSONSchema struct {
 	// Custom x-* extensions for UI metadata
 	// Note: jsonschema library outputs these as strings, so we use interface{}
 	XLayer     string      `json:"x-layer"`
-	XPriority  interface{} `json:"x-priority"` // Can be string or int from JSON
-	XWizard    interface{} `json:"x-wizard"`   // Can be string or bool from JSON
+	XPriority  interface{} `json:"x-priority"`  // Can be string or int from JSON
+	XWizard    interface{} `json:"x-wizard"`    // Can be string or bool from JSON
 	XSensitive interface{} `json:"x-sensitive"` // Can be string or bool from JSON
 	XHint      string      `json:"x-hint"`
+
+	// Unified status extensions (alpha, beta, deprecated)
+	XStatus           string `json:"x-status"`             // "alpha", "beta", "deprecated"
+	XStatusMessage    string `json:"x-status-message"`     // Human-readable notice
+	XStatusSince      string `json:"x-status-since"`       // Version when entered this status
+	XStatusTarget     string `json:"x-status-target"`      // Graduation/removal target version
+	XStatusReplaces   string `json:"x-status-replaces"`    // Alpha/Beta: what this will replace
+	XStatusReplacedBy string `json:"x-status-replaced-by"` // Deprecated: what to use instead
+
+	// Legacy deprecation (for backwards compatibility parsing)
+	Deprecated  bool        `json:"deprecated"`
+	XDeprecated interface{} `json:"x-deprecated"` // handle bool or string "true"
 }
 
 // SchemaSource represents a schema file to process.
@@ -65,6 +77,14 @@ type FieldInfo struct {
 	Required    bool
 	RefType     string
 	Children    []FieldInfo
+
+	// Unified status fields (alpha, beta, stable, deprecated)
+	Status           string // "alpha", "beta", "deprecated" (stable is default/absent)
+	StatusMessage    string
+	StatusSince      string
+	StatusTarget     string
+	StatusReplaces   string
+	StatusReplacedBy string
 }
 
 func main() {
@@ -159,6 +179,19 @@ func extractField(name string, prop *JSONSchema, path []string, namespace string
 		Namespace:   namespace,
 		Required:    required,
 		Default:     prop.Default,
+
+		// Unified status fields
+		Status:           prop.XStatus,
+		StatusMessage:    prop.XStatusMessage,
+		StatusSince:      prop.XStatusSince,
+		StatusTarget:     prop.XStatusTarget,
+		StatusReplaces:   prop.XStatusReplaces,
+		StatusReplacedBy: prop.XStatusReplacedBy,
+	}
+
+	// Handle legacy deprecated flag - convert to unified status
+	if field.Status == "" && (prop.Deprecated || parseBoolValue(prop.XDeprecated)) {
+		field.Status = "deprecated"
 	}
 
 	// Handle $ref
@@ -399,6 +432,26 @@ func writeFieldMeta(buf *bytes.Buffer, field FieldInfo, indent string) {
 		buf.WriteString(indent + fmt.Sprintf("\tRefType: %q,\n", field.RefType))
 	}
 
+	// Unified status fields
+	if field.Status != "" {
+		buf.WriteString(indent + fmt.Sprintf("\tStatus: %s,\n", statusConstant(field.Status)))
+	}
+	if field.StatusMessage != "" {
+		buf.WriteString(indent + fmt.Sprintf("\tStatusMessage: %q,\n", field.StatusMessage))
+	}
+	if field.StatusSince != "" {
+		buf.WriteString(indent + fmt.Sprintf("\tStatusSince: %q,\n", field.StatusSince))
+	}
+	if field.StatusTarget != "" {
+		buf.WriteString(indent + fmt.Sprintf("\tStatusTarget: %q,\n", field.StatusTarget))
+	}
+	if field.StatusReplaces != "" {
+		buf.WriteString(indent + fmt.Sprintf("\tStatusReplaces: %q,\n", field.StatusReplaces))
+	}
+	if field.StatusReplacedBy != "" {
+		buf.WriteString(indent + fmt.Sprintf("\tStatusReplacedBy: %q,\n", field.StatusReplacedBy))
+	}
+
 	// Children
 	if len(field.Children) > 0 {
 		buf.WriteString(indent + "\tChildren: []FieldMeta{\n")
@@ -444,6 +497,20 @@ func layerConstant(layer string) string {
 		return "config.SourceProject"
 	default:
 		return "config.SourceDefault"
+	}
+}
+
+// statusConstant returns the Go constant name for a field status.
+func statusConstant(status string) string {
+	switch status {
+	case "alpha":
+		return "StatusAlpha"
+	case "beta":
+		return "StatusBeta"
+	case "deprecated":
+		return "StatusDeprecated"
+	default:
+		return "StatusStable"
 	}
 }
 

@@ -640,3 +640,160 @@ func FilterSchema(schema []FieldMeta, layer config.ConfigSource) []FieldMeta {
 	return filtered
 }
 
+// ShouldShowField determines if a field should be visible based on current filters.
+func ShouldShowField(field FieldMeta, value interface{}, viewMode ViewMode, maturityFilter MaturityFilter) bool {
+	hasValue := !isEmptyValue(value)
+
+	// Rule 1: Always show non-stable fields if they have a value configured
+	// (Users must be able to see/edit what they have set)
+	if field.IsNonStable() && hasValue {
+		return true
+	}
+
+	// Rule 2: Filter non-stable fields that are not configured
+	if field.IsNonStable() {
+		switch maturityFilter {
+		case MaturityStable:
+			return false // hide all non-stable
+		case MaturityExperimental:
+			if field.Status == StatusDeprecated {
+				return false // hide deprecated, show alpha/beta
+			}
+		case MaturityDeprecated:
+			if field.Status == StatusAlpha || field.Status == StatusBeta {
+				return false // hide alpha/beta, show deprecated
+			}
+		case MaturityAll:
+			// show everything
+		}
+	}
+
+	// Rule 3: View Mode - Configured Only
+	if viewMode == ViewConfigured && !hasValue {
+		return false
+	}
+
+	return true
+}
+
+// CycleMaturityFilter returns the next filter in the rotation.
+func CycleMaturityFilter(current MaturityFilter) MaturityFilter {
+	switch current {
+	case MaturityStable:
+		return MaturityExperimental
+	case MaturityExperimental:
+		return MaturityDeprecated
+	case MaturityDeprecated:
+		return MaturityAll
+	case MaturityAll:
+		return MaturityStable
+	default:
+		return MaturityStable
+	}
+}
+
+// CycleSortMode returns the next sort mode in the rotation.
+func CycleSortMode(current SortMode) SortMode {
+	switch current {
+	case SortConfiguredFirst:
+		return SortPriority
+	case SortPriority:
+		return SortAlpha
+	case SortAlpha:
+		return SortConfiguredFirst
+	default:
+		return SortConfiguredFirst
+	}
+}
+
+// CycleMaturityFilterReverse returns the previous filter in the rotation.
+func CycleMaturityFilterReverse(current MaturityFilter) MaturityFilter {
+	switch current {
+	case MaturityStable:
+		return MaturityAll
+	case MaturityExperimental:
+		return MaturityStable
+	case MaturityDeprecated:
+		return MaturityExperimental
+	case MaturityAll:
+		return MaturityDeprecated
+	default:
+		return MaturityStable
+	}
+}
+
+// CycleSortModeReverse returns the previous sort mode in the rotation.
+func CycleSortModeReverse(current SortMode) SortMode {
+	switch current {
+	case SortConfiguredFirst:
+		return SortAlpha
+	case SortPriority:
+		return SortConfiguredFirst
+	case SortAlpha:
+		return SortPriority
+	default:
+		return SortConfiguredFirst
+	}
+}
+
+// CycleViewMode toggles between ViewAll and ViewConfigured.
+func CycleViewMode(current ViewMode) ViewMode {
+	if current == ViewAll {
+		return ViewConfigured
+	}
+	return ViewAll
+}
+
+// SortNodes sorts a slice of config nodes in place based on the sort mode.
+// Note: This only sorts the given slice, not recursively. Use SortTree for recursive sorting.
+func SortNodes(nodes []*ConfigNode, mode SortMode) {
+	switch mode {
+	case SortConfiguredFirst:
+		sort.SliceStable(nodes, func(i, j int) bool {
+			iHasValue := !isEmptyValue(nodes[i].Value)
+			jHasValue := !isEmptyValue(nodes[j].Value)
+
+			// If one has value and other doesn't, put the one with value first
+			if iHasValue != jHasValue {
+				return iHasValue
+			}
+			// If both have/don't have values, maintain original order (stable)
+			return false
+		})
+	case SortPriority:
+		sort.SliceStable(nodes, func(i, j int) bool {
+			// Lower priority number = higher in list
+			return nodes[i].Field.Priority < nodes[j].Field.Priority
+		})
+	case SortAlpha:
+		sort.SliceStable(nodes, func(i, j int) bool {
+			return nodes[i].DisplayKey() < nodes[j].DisplayKey()
+		})
+	}
+}
+
+// SortTree recursively sorts the tree at each level, preserving parent-child relationships.
+// This should be called on tree roots BEFORE flattening.
+func SortTree(nodes []*ConfigNode, mode SortMode) {
+	// Sort this level
+	SortNodes(nodes, mode)
+
+	// Recursively sort children
+	for _, node := range nodes {
+		if len(node.Children) > 0 {
+			SortTree(node.Children, mode)
+		}
+	}
+}
+
+// FilterNodes returns a filtered list of nodes based on view mode and maturity filter.
+func FilterNodes(nodes []*ConfigNode, viewMode ViewMode, maturityFilter MaturityFilter) []*ConfigNode {
+	var filtered []*ConfigNode
+	for _, node := range nodes {
+		if ShouldShowField(node.Field, node.Value, viewMode, maturityFilter) {
+			filtered = append(filtered, node)
+		}
+	}
+	return filtered
+}
+

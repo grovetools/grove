@@ -24,7 +24,10 @@ import (
 
 // configUIState holds persisted UI preferences for the config editor.
 type configUIState struct {
-	ShowPreview bool `json:"show_preview"`
+	ShowPreview    bool                   `json:"show_preview"`
+	ViewMode       configui.ViewMode      `json:"view_mode"`
+	MaturityFilter configui.MaturityFilter `json:"maturity_filter"`
+	SortMode       configui.SortMode      `json:"sort_mode"`
 }
 
 // configUIStateFile returns the path to the config UI state file.
@@ -34,7 +37,12 @@ func configUIStateFile() string {
 
 // loadConfigUIState loads the config UI state from disk.
 func loadConfigUIState() configUIState {
-	state := configUIState{ShowPreview: true} // Default to showing preview
+	state := configUIState{
+		ShowPreview:    true,                         // Default to showing preview
+		ViewMode:       configui.ViewAll,             // Default to showing all fields
+		MaturityFilter: configui.MaturityStable,      // Default to stable fields only
+		SortMode:       configui.SortConfiguredFirst, // Default to configured-first sort
+	}
 
 	data, err := os.ReadFile(configUIStateFile())
 	if err != nil {
@@ -61,7 +69,12 @@ func saveConfigUIState(state configUIState) {
 }
 
 // Package-level state for delegate access
-var configShowPreview = true
+var (
+	configShowPreview    = true
+	configViewMode       = configui.ViewAll
+	configMaturityFilter = configui.MaturityStable
+	configSortMode       = configui.SortConfiguredFirst
+)
 
 func init() {
 	rootCmd.AddCommand(newConfigCmd())
@@ -89,18 +102,21 @@ Supports both YAML (with comment preservation) and TOML formats.`
 // configKeyMap defines key bindings for the config editor
 type configKeyMap struct {
 	keymap.Base
-	Edit        key.Binding
-	Info        key.Binding
-	Sources     key.Binding // Show config source files
-	Confirm     key.Binding
-	Cancel      key.Binding
-	SwitchLayer key.Binding
-	Toggle      key.Binding // Space to toggle expand/collapse
-	Expand      key.Binding // Right/l to expand
-	Collapse    key.Binding // Left/h to collapse
-	NextPage    key.Binding // Tab to next page
-	PrevPage    key.Binding // Shift+Tab to prev page
-	Preview     key.Binding // Toggle preview mode
+	Edit           key.Binding
+	Info           key.Binding
+	Sources        key.Binding // Show config source files
+	Confirm        key.Binding
+	Cancel         key.Binding
+	SwitchLayer    key.Binding
+	Toggle         key.Binding // Space to toggle expand/collapse
+	Expand         key.Binding // Right/l to expand
+	Collapse       key.Binding // Left/h to collapse
+	NextPage       key.Binding // Tab to next page
+	PrevPage       key.Binding // Shift+Tab to prev page
+	Preview        key.Binding // Toggle preview mode
+	ViewMode       key.Binding // Toggle view (configured/all)
+	MaturityFilter key.Binding // Cycle maturity filter
+	SortMode       key.Binding // Cycle sort mode
 }
 
 var configKeys = configKeyMap{
@@ -153,6 +169,18 @@ var configKeys = configKeyMap{
 		key.WithKeys("p"),
 		key.WithHelp("p", "toggle preview"),
 	),
+	ViewMode: key.NewBinding(
+		key.WithKeys("v"),
+		key.WithHelp("v", "toggle view"),
+	),
+	MaturityFilter: key.NewBinding(
+		key.WithKeys("m"),
+		key.WithHelp("m", "cycle maturity"),
+	),
+	SortMode: key.NewBinding(
+		key.WithKeys("s"),
+		key.WithHelp("s", "cycle sort"),
+	),
 }
 
 func (k configKeyMap) ShortHelp() []key.Binding {
@@ -169,6 +197,8 @@ func (k configKeyMap) FullHelp() [][]key.Binding {
 		{k.Toggle, k.Expand, k.Collapse},
 		// Actions
 		{k.Edit, k.Info, k.Sources, k.Preview},
+		// Filtering/Sorting
+		{k.ViewMode, k.MaturityFilter, k.SortMode},
 		// Exit
 		{k.Base.Quit, k.Base.Help},
 	}
@@ -305,9 +335,12 @@ type configModel struct {
 func runConfigEdit(cmd *cobra.Command, args []string) error {
 	cwd, _ := os.Getwd()
 
-	// Load UI state (preview preference)
+	// Load UI state (preview preference, view mode, maturity filter, sort mode)
 	uiState := loadConfigUIState()
 	configShowPreview = uiState.ShowPreview
+	configViewMode = uiState.ViewMode
+	configMaturityFilter = uiState.MaturityFilter
+	configSortMode = uiState.SortMode
 
 	// Load layered configuration
 	layered, err := config.LoadLayered(cwd)
@@ -505,7 +538,42 @@ func (m configModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "p":
 		// Toggle preview mode and persist
 		configShowPreview = !configShowPreview
-		saveConfigUIState(configUIState{ShowPreview: configShowPreview})
+		m.saveUIState()
+		return m, nil
+
+	case "v":
+		// Toggle view mode (configured/all) and persist
+		configViewMode = configui.CycleViewMode(configViewMode)
+		m.saveUIState()
+		m.refreshAllPages()
+		return m, nil
+
+	case "m":
+		// Cycle maturity filter forward and persist
+		configMaturityFilter = configui.CycleMaturityFilter(configMaturityFilter)
+		m.saveUIState()
+		m.refreshAllPages()
+		return m, nil
+
+	case "M":
+		// Cycle maturity filter backward and persist
+		configMaturityFilter = configui.CycleMaturityFilterReverse(configMaturityFilter)
+		m.saveUIState()
+		m.refreshAllPages()
+		return m, nil
+
+	case "s":
+		// Cycle sort mode forward and persist
+		configSortMode = configui.CycleSortMode(configSortMode)
+		m.saveUIState()
+		m.refreshAllPages()
+		return m, nil
+
+	case "S":
+		// Cycle sort mode backward and persist
+		configSortMode = configui.CycleSortModeReverse(configSortMode)
+		m.saveUIState()
+		m.refreshAllPages()
 		return m, nil
 
 	case "c":
@@ -817,6 +885,23 @@ func (m *configModel) saveToYAML(filePath string, path []string, value string) e
 	return m.yamlHandler.SaveYAML(filePath, root)
 }
 
+// saveUIState saves the current UI state to disk.
+func (m *configModel) saveUIState() {
+	saveConfigUIState(configUIState{
+		ShowPreview:    configShowPreview,
+		ViewMode:       configViewMode,
+		MaturityFilter: configMaturityFilter,
+		SortMode:       configSortMode,
+	})
+}
+
+// refreshAllPages refreshes all pages to apply new filters/sorting.
+func (m *configModel) refreshAllPages() {
+	for _, page := range m.pages {
+		page.Refresh(m.layered)
+	}
+}
+
 // reloadConfig reloads the layered config and refreshes all pages.
 func (m *configModel) reloadConfig() error {
 	cwd, _ := os.Getwd()
@@ -988,6 +1073,49 @@ func (m configModel) renderInfoView() string {
 		Width(70)
 
 	title := theme.DefaultTheme.Bold.Render(node.DisplayKey())
+
+	// Prepend status block if applicable (alpha, beta, deprecated)
+	var statusBlock string
+	if node.Field.IsNonStable() {
+		notice := node.Field.StatusNotice()
+
+		var blockStyle lipgloss.Style
+		var header string
+
+		switch node.Field.Status {
+		case configui.StatusAlpha:
+			blockStyle = lipgloss.NewStyle().
+				Foreground(theme.DefaultTheme.Colors.Blue).
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(theme.DefaultTheme.Colors.Blue).
+				Padding(0, 1).
+				MarginBottom(1).
+				Width(60)
+			header = lipgloss.NewStyle().Bold(true).Render("α ALPHA FIELD")
+		case configui.StatusBeta:
+			blockStyle = lipgloss.NewStyle().
+				Foreground(theme.DefaultTheme.Colors.Yellow).
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(theme.DefaultTheme.Colors.Yellow).
+				Padding(0, 1).
+				MarginBottom(1).
+				Width(60)
+			header = lipgloss.NewStyle().Bold(true).Render("β BETA FIELD")
+		case configui.StatusDeprecated:
+			blockStyle = lipgloss.NewStyle().
+				Foreground(theme.DefaultTheme.Colors.Red).
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(theme.DefaultTheme.Colors.Red).
+				Padding(0, 1).
+				MarginBottom(1).
+				Width(60)
+			header = lipgloss.NewStyle().Bold(true).Render("⚠ DEPRECATED FIELD")
+		}
+
+		content := theme.DefaultTheme.Normal.Render(notice)
+		statusBlock = blockStyle.Render(lipgloss.JoinVertical(lipgloss.Left, header, "", content))
+	}
+
 	desc := theme.DefaultTheme.Muted.Render(node.Field.Description)
 
 	// Build layer values table
@@ -1078,6 +1206,10 @@ func (m configModel) renderInfoView() string {
 	helpText := theme.DefaultTheme.Muted.Render("enter: edit • esc: back")
 
 	var parts []string
+	// Insert status block at the top if present (alpha, beta, deprecated)
+	if statusBlock != "" {
+		parts = append(parts, statusBlock, "")
+	}
 	parts = append(parts, title, desc, "", layersContent, separator, activeLine, "", recLine)
 	if len(metaLines) > 0 {
 		parts = append(parts, "")

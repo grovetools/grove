@@ -70,8 +70,11 @@ func (p *LayerPage) Refresh(layered *config.LayeredConfig) {
 	// 2. Build tree from filtered schema
 	p.treeRoots = configui.BuildTree(schema, layered)
 
-	// 3. Flatten and update viewport content
-	p.nodes = configui.Flatten(p.treeRoots)
+	// 3. Sort tree at each level (before flattening to preserve hierarchy)
+	configui.SortTree(p.treeRoots, configSortMode)
+
+	// 4. Flatten and apply filters
+	p.rebuildNodeList()
 
 	// Reset cursor if out of bounds
 	if p.cursor >= len(p.nodes) {
@@ -102,13 +105,13 @@ func (p *LayerPage) Update(msg tea.Msg) (*LayerPage, tea.Cmd) {
 			switch keyStr {
 			case "R", "shift+r": // Expand all
 				configui.ExpandAll(p.treeRoots)
-				p.nodes = configui.Flatten(p.treeRoots)
+				p.rebuildNodeList()
 				p.updateContent()
 				p.lastZPress = time.Time{}
 				return p, nil
 			case "M", "shift+m": // Collapse all
 				configui.CollapseAll(p.treeRoots)
-				p.nodes = configui.Flatten(p.treeRoots)
+				p.rebuildNodeList()
 				p.cursor = 0
 				p.updateContent()
 				p.lastZPress = time.Time{}
@@ -118,7 +121,7 @@ func (p *LayerPage) Update(msg tea.Msg) (*LayerPage, tea.Cmd) {
 					node := p.nodes[p.cursor]
 					if node.IsExpandable() && node.Collapsed {
 						node.Collapsed = false
-						p.nodes = configui.Flatten(p.treeRoots)
+						p.rebuildNodeList()
 						p.updateContent()
 					}
 				}
@@ -129,7 +132,7 @@ func (p *LayerPage) Update(msg tea.Msg) (*LayerPage, tea.Cmd) {
 					node := p.nodes[p.cursor]
 					if node.IsExpandable() && !node.Collapsed {
 						node.Collapsed = true
-						p.nodes = configui.Flatten(p.treeRoots)
+						p.rebuildNodeList()
 						p.updateContent()
 					} else if node.Parent != nil {
 						// Jump to parent and collapse it
@@ -137,7 +140,7 @@ func (p *LayerPage) Update(msg tea.Msg) (*LayerPage, tea.Cmd) {
 						if parentIdx >= 0 {
 							p.cursor = parentIdx
 							p.nodes[p.cursor].Collapsed = true
-							p.nodes = configui.Flatten(p.treeRoots)
+							p.rebuildNodeList()
 							p.updateContent()
 						}
 					}
@@ -228,7 +231,7 @@ func (p *LayerPage) Update(msg tea.Msg) (*LayerPage, tea.Cmd) {
 				node := p.nodes[p.cursor]
 				if node.IsExpandable() {
 					configui.ToggleNode(node)
-					p.nodes = configui.Flatten(p.treeRoots)
+					p.rebuildNodeList()
 					p.updateContent()
 					return p, nil
 				}
@@ -248,7 +251,7 @@ func (p *LayerPage) Update(msg tea.Msg) (*LayerPage, tea.Cmd) {
 				node := p.nodes[p.cursor]
 				if node.IsExpandable() && node.Collapsed {
 					node.Collapsed = false
-					p.nodes = configui.Flatten(p.treeRoots)
+					p.rebuildNodeList()
 					p.updateContent()
 				}
 			}
@@ -260,7 +263,7 @@ func (p *LayerPage) Update(msg tea.Msg) (*LayerPage, tea.Cmd) {
 				node := p.nodes[p.cursor]
 				if node.IsExpandable() && !node.Collapsed {
 					node.Collapsed = true
-					p.nodes = configui.Flatten(p.treeRoots)
+					p.rebuildNodeList()
 					p.updateContent()
 				} else if node.Parent != nil {
 					// Jump to parent
@@ -279,7 +282,7 @@ func (p *LayerPage) Update(msg tea.Msg) (*LayerPage, tea.Cmd) {
 				node := p.nodes[p.cursor]
 				if node.IsExpandable() {
 					configui.ToggleNode(node)
-					p.nodes = configui.Flatten(p.treeRoots)
+					p.rebuildNodeList()
 					p.updateContent()
 				}
 			}
@@ -362,7 +365,21 @@ func (p *LayerPage) renderRow(node *configui.ConfigNode, isSelected bool) string
 	if node.Field.Wizard {
 		wizardStar = " " + theme.DefaultTheme.Highlight.Render("★")
 	}
+
+	// Handle status styling (alpha, beta, deprecated)
 	title := titleRaw
+	if node.Field.IsDeprecated() {
+		// Strikethrough for deprecated fields
+		title = lipgloss.NewStyle().Strikethrough(true).Render(titleRaw)
+		// Add warning icon prefix
+		title = theme.DefaultTheme.Warning.Render("⚠ ") + title
+	} else if node.Field.Status == configui.StatusAlpha {
+		// Add alpha prefix
+		title = theme.DefaultTheme.Muted.Render("α ") + title
+	} else if node.Field.Status == configui.StatusBeta {
+		// Add beta prefix
+		title = theme.DefaultTheme.Highlight.Render("β ") + title
+	}
 	if isSelected {
 		title = theme.DefaultTheme.Bold.Render(title)
 	}
@@ -408,10 +425,24 @@ func (p *LayerPage) renderRow(node *configui.ConfigNode, isSelected bool) string
 		overrideMark = theme.DefaultTheme.Muted.Render(" *")
 	}
 
-	// Render: cursor + indent + indicator + title + value + override mark (single line)
+	// Status badge (alpha, beta, deprecated)
+	statusBadge := ""
+	if node.Field.IsNonStable() {
+		badge := node.Field.StatusBadge()
+		switch node.Field.Status {
+		case configui.StatusAlpha:
+			statusBadge = "  " + theme.DefaultTheme.Muted.Render(badge)
+		case configui.StatusBeta:
+			statusBadge = "  " + theme.DefaultTheme.Highlight.Render(badge)
+		case configui.StatusDeprecated:
+			statusBadge = "  " + theme.DefaultTheme.Error.Render(badge)
+		}
+	}
+
+	// Render: cursor + indent + indicator + title + value + override mark + status badge (single line)
 	valDisplay := valueStyle.Render(val)
 	indicatorStyled := theme.DefaultTheme.Muted.Render(indicator)
-	return fmt.Sprintf("%s%s%s%s  %s%s", cursor, indent, indicatorStyled, title, valDisplay, overrideMark)
+	return fmt.Sprintf("%s%s%s%s  %s%s%s", cursor, indent, indicatorStyled, title, valDisplay, overrideMark, statusBadge)
 }
 
 func (p *LayerPage) renderEmptyState() string {
@@ -453,11 +484,58 @@ func (p *LayerPage) renderFooter() string {
 		path = setup.AbbreviatePath(path)
 	}
 
+	// Build filter state indicator
+	filterState := renderFilterState()
+
 	style := lipgloss.NewStyle().
 		Foreground(theme.DefaultTheme.Colors.MutedText).
 		PaddingTop(1)
 
-	return style.Render(path)
+	return style.Render(path + "  " + filterState)
+}
+
+// renderFilterState renders the current filter state as a compact indicator.
+func renderFilterState() string {
+	t := theme.DefaultTheme
+
+	// View mode indicator
+	viewIcon := "◉" // all
+	if configViewMode == configui.ViewConfigured {
+		viewIcon = "◐" // configured only
+	}
+
+	// Maturity filter indicator
+	var maturityIcon string
+	switch configMaturityFilter {
+	case configui.MaturityStable:
+		maturityIcon = "stable"
+	case configui.MaturityExperimental:
+		maturityIcon = "+exp"
+	case configui.MaturityDeprecated:
+		maturityIcon = "+dep"
+	case configui.MaturityAll:
+		maturityIcon = "all"
+	}
+
+	// Sort mode indicator - spell out clearly
+	var sortLabel string
+	switch configSortMode {
+	case configui.SortConfiguredFirst:
+		sortLabel = "configured"
+	case configui.SortPriority:
+		sortLabel = "priority"
+	case configui.SortAlpha:
+		sortLabel = "alphabetical"
+	}
+
+	return t.Muted.Render(fmt.Sprintf("[v:%s] [m:%s] [s:%s]", viewIcon, maturityIcon, sortLabel))
+}
+
+// rebuildNodeList flattens the tree and applies filters.
+// Call this after any tree structure change (expand/collapse/toggle).
+func (p *LayerPage) rebuildNodeList() {
+	allNodes := configui.Flatten(p.treeRoots)
+	p.nodes = configui.FilterNodes(allNodes, configViewMode, configMaturityFilter)
 }
 
 func (p *LayerPage) Focus() tea.Cmd {
