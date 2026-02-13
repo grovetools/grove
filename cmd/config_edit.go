@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
@@ -21,6 +23,47 @@ import (
 	"github.com/grovetools/grove/pkg/setup"
 	"github.com/spf13/cobra"
 )
+
+// configUIState holds persisted UI preferences for the config editor.
+type configUIState struct {
+	ShowPreview bool `json:"show_preview"`
+}
+
+// configUIStateFile returns the path to the config UI state file.
+func configUIStateFile() string {
+	return filepath.Join(paths.StateDir(), "config-ui.json")
+}
+
+// loadConfigUIState loads the config UI state from disk.
+func loadConfigUIState() configUIState {
+	state := configUIState{ShowPreview: true} // Default to showing preview
+
+	data, err := os.ReadFile(configUIStateFile())
+	if err != nil {
+		return state
+	}
+
+	_ = json.Unmarshal(data, &state)
+	return state
+}
+
+// saveConfigUIState saves the config UI state to disk.
+func saveConfigUIState(state configUIState) {
+	data, err := json.Marshal(state)
+	if err != nil {
+		return
+	}
+
+	stateDir := paths.StateDir()
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		return
+	}
+
+	_ = os.WriteFile(configUIStateFile(), data, 0644)
+}
+
+// Package-level state for delegate access
+var configShowPreview = true
 
 func init() {
 	rootCmd.AddCommand(newConfigCmd())
@@ -68,6 +111,7 @@ type configKeyMap struct {
 	Collapse    key.Binding // Left/h to collapse
 	NextPage    key.Binding // Tab to next page
 	PrevPage    key.Binding // Shift+Tab to prev page
+	Preview     key.Binding // Toggle preview mode
 }
 
 var configKeys = configKeyMap{
@@ -116,6 +160,10 @@ var configKeys = configKeyMap{
 		key.WithKeys("shift+tab"),
 		key.WithHelp("shift+tab", "prev page"),
 	),
+	Preview: key.NewBinding(
+		key.WithKeys("p"),
+		key.WithHelp("p", "toggle preview"),
+	),
 }
 
 func (k configKeyMap) ShortHelp() []key.Binding {
@@ -131,13 +179,13 @@ func (k configKeyMap) FullHelp() [][]key.Binding {
 		// Tree navigation
 		{k.Toggle, k.Expand, k.Collapse},
 		// Actions
-		{k.Edit, k.Info, k.Sources},
+		{k.Edit, k.Info, k.Sources, k.Preview},
 		// Exit
 		{k.Base.Quit, k.Base.Help},
 	}
 }
 
-// configDelegate renders config items with their current values and layer badges.
+// configDelegate renders config items with their current values.
 type configDelegate struct{}
 
 func (d configDelegate) Height() int                             { return 1 }
@@ -174,16 +222,35 @@ func (d configDelegate) Render(w io.Writer, m list.Model, index int, item list.I
 	}
 
 	// Title styling with wizard indicator
-	title := node.DisplayKey()
+	titleRaw := node.DisplayKey()
+	wizardStar := ""
 	if node.Field.Wizard {
-		title = title + " " + theme.DefaultTheme.Highlight.Render("★")
+		wizardStar = " " + theme.DefaultTheme.Highlight.Render("★")
 	}
+	title := titleRaw
 	if index == m.Index() {
 		title = theme.DefaultTheme.Bold.Render(title)
 	}
+	title = title + wizardStar
 
-	// Value display using the new FormatValue function
-	val := configui.FormatValue(node.Value)
+	// Calculate remaining width for value preview
+	// prefix = cursor(2) + indent(depth*2) + indicator(2) + title + wizardStar(2) + spacing(2)
+	prefixLen := 2 + (node.Depth * 2) + 2 + len(titleRaw) + 2
+	if node.Field.Wizard {
+		prefixLen += 2 // " ★"
+	}
+	availableWidth := m.Width() - prefixLen - 4 // Reserve space for override mark and padding
+	if availableWidth < 10 {
+		availableWidth = 10
+	}
+
+	// Value display - use preview for collapsed containers if enabled
+	var val string
+	if node.IsContainer() && node.Collapsed && configShowPreview {
+		val = configui.FormatValuePreview(node.Value, availableWidth)
+	} else {
+		val = configui.FormatValue(node.Value)
+	}
 
 	// Mask sensitive fields for display
 	if node.Field.Sensitive && val != "(unset)" && len(val) > 8 {
@@ -200,13 +267,25 @@ func (d configDelegate) Render(w io.Writer, m list.Model, index int, item list.I
 		valueStyle = theme.DefaultTheme.Muted
 	}
 
-	// Layer badge with color coding
-	badge := renderLayerBadge(node.ActiveSource)
+	// Override indicator: muted asterisk for values from override files
+	overrideMark := ""
+	if isOverrideSource(node.ActiveSource) {
+		overrideMark = theme.DefaultTheme.Muted.Render(" *")
+	}
 
-	// Render: cursor + indent + indicator + title + value + badge (single line)
+	// Render: cursor + indent + indicator + title + value + override mark (single line)
 	valDisplay := valueStyle.Render(val)
 	indicatorStyled := theme.DefaultTheme.Muted.Render(indicator)
-	fmt.Fprintf(w, "%s%s%s%s  %s  %s", cursor, indent, indicatorStyled, title, valDisplay, badge)
+	fmt.Fprintf(w, "%s%s%s%s  %s%s", cursor, indent, indicatorStyled, title, valDisplay, overrideMark)
+}
+
+// isOverrideSource returns true if the source is an override file (not the main config).
+func isOverrideSource(source config.ConfigSource) bool {
+	switch source {
+	case config.SourceGlobalOverride, config.SourceEnvOverlay, config.SourceOverride:
+		return true
+	}
+	return false
 }
 
 // renderLayerBadge renders a colored badge for the config source.
@@ -330,6 +409,10 @@ type configModel struct {
 
 func runConfigEdit(cmd *cobra.Command, args []string) error {
 	cwd, _ := os.Getwd()
+
+	// Load UI state (preview preference)
+	uiState := loadConfigUIState()
+	configShowPreview = uiState.ShowPreview
 
 	// Load layered configuration
 	layered, err := config.LoadLayered(cwd)
@@ -522,6 +605,12 @@ func (m configModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.activePage = 2
 			m.pages[m.activePage].Focus()
 		}
+		return m, nil
+
+	case "p":
+		// Toggle preview mode and persist
+		configShowPreview = !configShowPreview
+		saveConfigUIState(configUIState{ShowPreview: configShowPreview})
 		return m, nil
 
 	case "c":
