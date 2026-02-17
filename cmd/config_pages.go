@@ -359,11 +359,11 @@ func (p *LayerPage) renderRow(node *configui.ConfigNode, isSelected bool) string
 		cursor = theme.DefaultTheme.Highlight.Render(theme.IconArrowRightBold) + " "
 	}
 
-	// Title styling with wizard indicator
+	// Title styling with important indicator
 	titleRaw := node.DisplayKey()
-	wizardStar := ""
-	if node.Field.Wizard {
-		wizardStar = " " + theme.DefaultTheme.Highlight.Render("★")
+	importantStar := ""
+	if node.Field.Important {
+		importantStar = " " + theme.DefaultTheme.Highlight.Render("★")
 	}
 
 	// Handle status styling (alpha, beta, deprecated)
@@ -383,12 +383,12 @@ func (p *LayerPage) renderRow(node *configui.ConfigNode, isSelected bool) string
 	if isSelected {
 		title = theme.DefaultTheme.Bold.Render(title)
 	}
-	title = title + wizardStar
+	title = title + importantStar
 
 	// Calculate remaining width for value preview
-	// prefix = cursor(2) + indent(depth*2) + indicator(2) + title + wizardStar(2) + spacing(2)
+	// prefix = cursor(2) + indent(depth*2) + indicator(2) + title + importantStar(2) + spacing(2)
 	prefixLen := 2 + (node.Depth * 2) + 2 + len(titleRaw) + 2
-	if node.Field.Wizard {
+	if node.Field.Important {
 		prefixLen += 2 // " ★"
 	}
 	availableWidth := p.width - prefixLen - 4 // Reserve space for override mark and padding

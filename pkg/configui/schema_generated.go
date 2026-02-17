@@ -12,7 +12,7 @@ var SchemaFields = []FieldMeta{
 		Description: "Root directories to search for projects and ecosystems",
 		Layer:       config.SourceGlobal,
 		Priority:    1,
-		Wizard:      true,
+		Important:   true,
 	},
 	{
 		Path:        []string{"notebooks"},
@@ -20,20 +20,20 @@ var SchemaFields = []FieldMeta{
 		Description: "Notebook configuration",
 		Layer:       config.SourceGlobal,
 		Priority:    2,
-		Wizard:      true,
+		Important:   true,
 		RefType:     "NotebooksConfig",
 		Children: []FieldMeta{
+			{
+				Path:        []string{"notebooks", "definitions"},
+				Type:        FieldMap,
+				Description: "Map of notebook name to notebook configuration",
+			},
 			{
 				Path:        []string{"notebooks", "rules"},
 				Type:        FieldObject,
 				Description: "Rules for notebook usage (default notebook",
 				RefType:     "NotebookRules",
 				Children: []FieldMeta{
-					{
-						Path:        []string{"notebooks", "rules", "default"},
-						Type:        FieldString,
-						Description: "Name of the default notebook to use",
-					},
 					{
 						Path:        []string{"notebooks", "rules", "global"},
 						Type:        FieldObject,
@@ -48,12 +48,12 @@ var SchemaFields = []FieldMeta{
 							},
 						},
 					},
+					{
+						Path:        []string{"notebooks", "rules", "default"},
+						Type:        FieldString,
+						Description: "Name of the default notebook to use",
+					},
 				},
-			},
-			{
-				Path:        []string{"notebooks", "definitions"},
-				Type:        FieldMap,
-				Description: "Map of notebook name to notebook configuration",
 			},
 		},
 	},
@@ -206,7 +206,7 @@ var SchemaFields = []FieldMeta{
 	{
 		Path:             []string{"search_paths"},
 		Type:             FieldMap,
-		Description:      "Root directories to scan for projects",
+		Description:      "DEPRECATED: Use groves instead",
 		Layer:            config.SourceGlobal,
 		Priority:         1000,
 		Status:           StatusDeprecated,
@@ -236,8 +236,8 @@ var FieldsByPath = map[string]*FieldMeta{
 	"search_paths":              &SchemaFields[14],
 }
 
-// WizardFields contains only fields marked for the setup wizard.
-var WizardFields = []*FieldMeta{
+// ImportantFields contains only fields marked as important/key configuration options.
+var ImportantFields = []*FieldMeta{
 	&SchemaFields[0],
 	&SchemaFields[1],
 }

@@ -107,8 +107,8 @@ type FieldMeta struct {
 	// If true, the UI should mask the value and suggest alternatives.
 	Sensitive bool
 
-	// Wizard indicates if the field appears in the setup wizard (from x-wizard).
-	Wizard bool
+	// Important indicates if the field is a key/important configuration option (from x-important).
+	Important bool
 
 	// Hint provides additional guidance shown in the edit dialog (from x-hint).
 	Hint string
@@ -162,9 +162,9 @@ func (f FieldMeta) FullPath() string {
 	return result
 }
 
-// IsWizardField returns true if this field should appear in the setup wizard.
-func (f FieldMeta) IsWizardField() bool {
-	return f.Wizard
+// IsImportant returns true if this field is a key/important configuration option.
+func (f FieldMeta) IsImportant() bool {
+	return f.Important
 }
 
 // IsSensitive returns true if this field contains sensitive data.

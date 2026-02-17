@@ -1190,8 +1190,8 @@ func (m configModel) renderInfoView() string {
 
 	// Field metadata
 	var metaLines []string
-	if node.Field.Wizard {
-		metaLines = append(metaLines, theme.DefaultTheme.Highlight.Render("★ Wizard field"))
+	if node.Field.Important {
+		metaLines = append(metaLines, theme.DefaultTheme.Highlight.Render("★ Important"))
 	}
 	if node.Field.Sensitive {
 		metaLines = append(metaLines, theme.DefaultTheme.Error.Render("⚠ Sensitive field"))

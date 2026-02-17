@@ -38,7 +38,7 @@ type JSONSchema struct {
 	// Note: jsonschema library outputs these as strings, so we use interface{}
 	XLayer     string      `json:"x-layer"`
 	XPriority  interface{} `json:"x-priority"`  // Can be string or int from JSON
-	XWizard    interface{} `json:"x-wizard"`    // Can be string or bool from JSON
+	XImportant interface{} `json:"x-important"` // Can be string or bool from JSON
 	XSensitive interface{} `json:"x-sensitive"` // Can be string or bool from JSON
 	XHint      string      `json:"x-hint"`
 
@@ -71,7 +71,7 @@ type FieldInfo struct {
 	Layer       string // "global", "ecosystem", "project"
 	Priority    int
 	Sensitive   bool
-	Wizard      bool
+	Important   bool
 	Hint        string
 	Namespace   string
 	Required    bool
@@ -174,7 +174,7 @@ func extractField(name string, prop *JSONSchema, path []string, namespace string
 		Layer:       prop.XLayer,
 		Priority:    parseIntValue(prop.XPriority),
 		Sensitive:   parseBoolValue(prop.XSensitive),
-		Wizard:      parseBoolValue(prop.XWizard),
+		Important:   parseBoolValue(prop.XImportant),
 		Hint:        prop.XHint,
 		Namespace:   namespace,
 		Required:    required,
@@ -343,12 +343,12 @@ func generateCode(fields []FieldInfo) ([]byte, error) {
 
 	buf.WriteString("}\n\n")
 
-	// Generate WizardFields slice
-	buf.WriteString("// WizardFields contains only fields marked for the setup wizard.\n")
-	buf.WriteString("var WizardFields = []*FieldMeta{\n")
+	// Generate ImportantFields slice
+	buf.WriteString("// ImportantFields contains only fields marked as important/key configuration options.\n")
+	buf.WriteString("var ImportantFields = []*FieldMeta{\n")
 
 	for i, field := range fields {
-		if field.Wizard {
+		if field.Important {
 			buf.WriteString(fmt.Sprintf("\t&SchemaFields[%d],\n", i))
 		}
 	}
@@ -407,9 +407,9 @@ func writeFieldMeta(buf *bytes.Buffer, field FieldInfo, indent string) {
 		buf.WriteString(indent + "\tSensitive: true,\n")
 	}
 
-	// Wizard
-	if field.Wizard {
-		buf.WriteString(indent + "\tWizard: true,\n")
+	// Important
+	if field.Important {
+		buf.WriteString(indent + "\tImportant: true,\n")
 	}
 
 	// Hint
