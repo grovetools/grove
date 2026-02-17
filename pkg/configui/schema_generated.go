@@ -24,11 +24,6 @@ var SchemaFields = []FieldMeta{
 		RefType:     "NotebooksConfig",
 		Children: []FieldMeta{
 			{
-				Path:        []string{"notebooks", "definitions"},
-				Type:        FieldMap,
-				Description: "Map of notebook name to notebook configuration",
-			},
-			{
 				Path:        []string{"notebooks", "rules"},
 				Type:        FieldObject,
 				Description: "Rules for notebook usage (default notebook",
@@ -54,6 +49,11 @@ var SchemaFields = []FieldMeta{
 						},
 					},
 				},
+			},
+			{
+				Path:        []string{"notebooks", "definitions"},
+				Type:        FieldMap,
+				Description: "Map of notebook name to notebook configuration",
 			},
 		},
 	},
@@ -206,7 +206,7 @@ var SchemaFields = []FieldMeta{
 	{
 		Path:             []string{"search_paths"},
 		Type:             FieldMap,
-		Description:      "DEPRECATED: Use groves instead",
+		Description:      "Root directories to scan for projects",
 		Layer:            config.SourceGlobal,
 		Priority:         1000,
 		Status:           StatusDeprecated,
