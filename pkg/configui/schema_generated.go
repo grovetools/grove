@@ -156,12 +156,6 @@ var SchemaFields = []FieldMeta{
 		RefType:     "LoggingSchemaConfig",
 		Children: []FieldMeta{
 			{
-				Path:        []string{"logging", "log_startup"},
-				Type:        FieldBool,
-				Description: "Log 'Grove binary started' on first init",
-				Required:    true,
-			},
-			{
 				Path:        []string{"logging", "report_caller"},
 				Type:        FieldBool,
 				Description: "Include file/line/function in output",
@@ -181,6 +175,12 @@ var SchemaFields = []FieldMeta{
 				Path:        []string{"logging", "level"},
 				Type:        FieldString,
 				Description: "Minimum log level (debug",
+				Required:    true,
+			},
+			{
+				Path:        []string{"logging", "log_startup"},
+				Type:        FieldBool,
+				Description: "Log 'Grove binary started' on first init",
 				Required:    true,
 			},
 		},
