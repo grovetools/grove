@@ -35,6 +35,11 @@ var SchemaFields = []FieldMeta{
 				RefType:     "NotebookRules",
 				Children: []FieldMeta{
 					{
+						Path:        []string{"notebooks", "rules", "default"},
+						Type:        FieldString,
+						Description: "Name of the default notebook to use",
+					},
+					{
 						Path:        []string{"notebooks", "rules", "global"},
 						Type:        FieldObject,
 						Description: "Configuration for the system-wide global notebook",
@@ -47,11 +52,6 @@ var SchemaFields = []FieldMeta{
 								Required:    true,
 							},
 						},
-					},
-					{
-						Path:        []string{"notebooks", "rules", "default"},
-						Type:        FieldString,
-						Description: "Name of the default notebook to use",
 					},
 				},
 			},
@@ -144,7 +144,46 @@ var SchemaFields = []FieldMeta{
 		Description: "Shell command to retrieve API key (e.g. gcloud secrets or 1password)",
 		Layer:       config.SourceGlobal,
 		Priority:    60,
+		Important:   true,
 		Namespace:   "gemini",
+	},
+	{
+		Path:        []string{"logging"},
+		Type:        FieldObject,
+		Description: "Logging configuration",
+		Layer:       config.SourceGlobal,
+		Priority:    60,
+		RefType:     "LoggingSchemaConfig",
+		Children: []FieldMeta{
+			{
+				Path:        []string{"logging", "log_startup"},
+				Type:        FieldBool,
+				Description: "Log 'Grove binary started' on first init",
+				Required:    true,
+			},
+			{
+				Path:        []string{"logging", "report_caller"},
+				Type:        FieldBool,
+				Description: "Include file/line/function in output",
+				Required:    true,
+			},
+			{
+				Path:        []string{"logging", "show_current_project"},
+				Type:        FieldBool,
+				Description: "Always show logs from current project regardless of filters",
+			},
+			{
+				Path:        []string{"logging", "groups"},
+				Type:        FieldMap,
+				Description: "Named collections of component loggers for filtering",
+			},
+			{
+				Path:        []string{"logging", "level"},
+				Type:        FieldString,
+				Description: "Minimum log level (debug",
+				Required:    true,
+			},
+		},
 	},
 	{
 		Path:        []string{"available_keys"},
@@ -152,6 +191,7 @@ var SchemaFields = []FieldMeta{
 		Description: "Keys available for tmux pane shortcuts",
 		Layer:       config.SourceGlobal,
 		Priority:    70,
+		Important:   true,
 		Namespace:   "tmux",
 	},
 	{
@@ -200,6 +240,7 @@ var SchemaFields = []FieldMeta{
 		Layer:       config.SourceGlobal,
 		Priority:    200,
 		Sensitive:   true,
+		Important:   true,
 		Hint:        "Consider using api_key_command to fetch from a secrets manager",
 		Namespace:   "gemini",
 	},
@@ -228,16 +269,20 @@ var FieldsByPath = map[string]*FieldMeta{
 	"build_after":               &SchemaFields[6],
 	"tui":                       &SchemaFields[7],
 	"gemini.api_key_command":    &SchemaFields[8],
-	"tmux.available_keys":       &SchemaFields[9],
-	"tmux.show_child_processes": &SchemaFields[10],
-	"context":                   &SchemaFields[11],
-	"version":                   &SchemaFields[12],
-	"gemini.api_key":            &SchemaFields[13],
-	"search_paths":              &SchemaFields[14],
+	"logging":                   &SchemaFields[9],
+	"tmux.available_keys":       &SchemaFields[10],
+	"tmux.show_child_processes": &SchemaFields[11],
+	"context":                   &SchemaFields[12],
+	"version":                   &SchemaFields[13],
+	"gemini.api_key":            &SchemaFields[14],
+	"search_paths":              &SchemaFields[15],
 }
 
 // ImportantFields contains only fields marked as important/key configuration options.
 var ImportantFields = []*FieldMeta{
 	&SchemaFields[0],
 	&SchemaFields[1],
+	&SchemaFields[8],
+	&SchemaFields[10],
+	&SchemaFields[14],
 }
