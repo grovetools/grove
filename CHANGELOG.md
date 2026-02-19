@@ -1,3 +1,131 @@
+## v0.6.3 (2026-02-19)
+
+This release introduces a major overhaul to configuration management with a new interactive TUI editor. It features hierarchical tree navigation (51d4826), schema-driven validation (14fe2c9), and tabbed pages for editing Global, Ecosystem, and Project layers (c9b82e5). The editor supports override layers (5920938), status filtering for alpha/beta fields (58136df), and vim-style navigation with smooth scrolling (0da9a07).
+
+A new `grove onboard` command provides a seamless first-run experience (8d6e17e), guiding users through shell configuration and tool installation. The setup wizard has also been enhanced with a configuration review step (02cc96e), better visual cues, and improved agent argument selection (3c877a6).
+
+### Features
+- **onboard:** add interactive onboarding wizard for new users (8d6e17e)
+- **config:** add layer-aware configuration editor (2dfd6ce)
+- **config:** add schema-driven config UI (14fe2c9)
+- **config:** add hierarchical tree navigation to config TUI (51d4826)
+- **config:** add tabbed pages for layer-based config editing (c9b82e5)
+- **config:** add status filtering and display for alpha/beta/deprecated fields (58136df)
+- **config:** implement smooth scrolling with vim-style navigation (0da9a07)
+- **config:** add config sources view (c key) (5493957)
+- **config:** add support for override config layers (5920938)
+- **config:** improve list display with preview and toggle (9e6fdb9)
+- **config:** add header with gear icon and improve layout (c741840)
+- **config:** keep cursor centered in viewport while navigating (44cedd5)
+- **setup:** add review step with config preview before writing (02cc96e)
+- **setup:** improve wizard with checkbox agent args and website-aligned icons (3c877a6)
+
+### Bug Fixes
+- **config:** enable infinite scrolling in config list (2b4881b)
+- **config:** wire up help toggle with ? key (3b1f470)
+- **config:** improve help menu with comprehensive keybindings (3315eff)
+
+### Documentation
+- fix PATH export to use XDG_DATA_HOME (1750f30)
+
+### Refactor
+- rename x-wizard to x-important (018f53e)
+- **config:** use asterisk notation for override layers (96d5d22)
+- **config:** switch to compact single-line list items (1fa301d)
+
+### File Changes
+```
+ Makefile                              |   29 +-
+ cmd/config_edit.go                    | 1327 ++++++++++++++++++++++++++++++
+ cmd/config_pages.go                   |  644 +++++++++++++++
+ cmd/onboard.go                        |  699 ++++++++++++++++
+ cmd/setup.go                          |  377 +++++++--
+ cmd/setup_ansi.go                     |    4 +
+ docs/07-cli-reference.md              | 1420 +++++++++++++++++++++++++++++++++
+ docs/08-configuration.json            |   11 +
+ docs/08-configuration.md              |    5 +
+ docs/grove.descriptions.json          |    3 +
+ docs/grove.examples.json              |    6 +
+ pkg/configui/format.go                |  414 ++++++++++
+ pkg/configui/format_test.go           |   51 ++
+ pkg/configui/page.go                  |   30 +
+ pkg/configui/schema_generated.go      |  273 +++++++
+ pkg/configui/tree.go                  |  799 +++++++++++++++++++
+ pkg/configui/tree_test.go             |  182 +++++
+ pkg/configui/types.go                 |  241 ++++++
+ pkg/docs/docs.json                    |    2 +-
+ pkg/setup/toml_handler.go             |   21 +
+ pkg/shell/manager.go                  |  196 +++++
+ scripts/install.sh                    |    5 +-
+ tests/scenarios_setup_wizard.go       |  120 ++-
+ tools/config-schema-generator/main.go |  561 +++++++++++++
+ 24 files changed, 7314 insertions(+), 106 deletions(-)
+```
+
+## v0.6.3 (2026-02-19)
+
+This release introduces a major overhaul to configuration management with a new interactive TUI editor. It features hierarchical tree navigation (51d4826), schema-driven validation (14fe2c9), and tabbed pages for editing Global, Ecosystem, and Project layers (c9b82e5). The editor supports override layers (5920938), status filtering for alpha/beta fields (58136df), and vim-style navigation with smooth scrolling (0da9a07).
+
+A new `grove onboard` command provides a seamless first-run experience (8d6e17e), guiding users through shell configuration and tool installation. The setup wizard has also been enhanced with a configuration review step (02cc96e), better visual cues, and improved agent argument selection (3c877a6).
+
+### Features
+- **onboard:** add interactive onboarding wizard for new users (8d6e17e)
+- **config:** add layer-aware configuration editor (2dfd6ce)
+- **config:** add schema-driven config UI (14fe2c9)
+- **config:** add hierarchical tree navigation to config TUI (51d4826)
+- **config:** add tabbed pages for layer-based config editing (c9b82e5)
+- **config:** add status filtering and display for alpha/beta/deprecated fields (58136df)
+- **config:** implement smooth scrolling with vim-style navigation (0da9a07)
+- **config:** add config sources view (c key) (5493957)
+- **config:** add support for override config layers (5920938)
+- **config:** improve list display with preview and toggle (9e6fdb9)
+- **config:** add header with gear icon and improve layout (c741840)
+- **config:** keep cursor centered in viewport while navigating (44cedd5)
+- **setup:** add review step with config preview before writing (02cc96e)
+- **setup:** improve wizard with checkbox agent args and website-aligned icons (3c877a6)
+
+### Bug Fixes
+- **config:** enable infinite scrolling in config list (2b4881b)
+- **config:** wire up help toggle with ? key (3b1f470)
+- **config:** improve help menu with comprehensive keybindings (3315eff)
+
+### Documentation
+- fix PATH export to use XDG_DATA_HOME (1750f30)
+
+### Refactor
+- rename x-wizard to x-important (018f53e)
+- **config:** use asterisk notation for override layers (96d5d22)
+- **config:** switch to compact single-line list items (1fa301d)
+
+### File Changes
+```
+ Makefile                              |   29 +-
+ cmd/config_edit.go                    | 1327 ++++++++++++++++++++++++++++++
+ cmd/config_pages.go                   |  644 +++++++++++++++
+ cmd/onboard.go                        |  699 ++++++++++++++++
+ cmd/setup.go                          |  377 +++++++--
+ cmd/setup_ansi.go                     |    4 +
+ docs/07-cli-reference.md              | 1420 +++++++++++++++++++++++++++++++++
+ docs/08-configuration.json            |   11 +
+ docs/08-configuration.md              |    5 +
+ docs/grove.descriptions.json          |    3 +
+ docs/grove.examples.json              |    6 +
+ pkg/configui/format.go                |  414 ++++++++++
+ pkg/configui/format_test.go           |   51 ++
+ pkg/configui/page.go                  |   30 +
+ pkg/configui/schema_generated.go      |  273 +++++++
+ pkg/configui/tree.go                  |  799 +++++++++++++++++++
+ pkg/configui/tree_test.go             |  182 +++++
+ pkg/configui/types.go                 |  241 ++++++
+ pkg/docs/docs.json                    |    2 +-
+ pkg/setup/toml_handler.go             |   21 +
+ pkg/shell/manager.go                  |  196 +++++
+ scripts/install.sh                    |    5 +-
+ tests/scenarios_setup_wizard.go       |  120 ++-
+ tools/config-schema-generator/main.go |  561 +++++++++++++
+ 24 files changed, 7314 insertions(+), 106 deletions(-)
+```
+
 ## v0.6.2 (2026-02-10)
 
 The setup wizard receives a significant overhaul with support for TOML configuration (5cfff7f), responsive terminal layouts (2df6fd1), and standardized theming (6e4b58d). Additionally, the install script is now POSIX-compatible (90d5d95), and the release command correctly loads LLM configuration from TOML files (bba0226).
