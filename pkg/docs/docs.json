@@ -127,7 +127,7 @@
           "title": "Post-Installation Setup",
           "content": "After installation, add the Grove bin directory to the shell's `PATH` environment variable.\n\n#### 1. Configure PATH\n\nAdd the following line to the shell's configuration file (e.g., `~/.zshrc`, `~/.bashrc`, or `~/.profile`):\n\n\n#### 2. Apply Changes\n\nFor the changes to take effect, either restart the terminal or source the configuration file:\n\n\n#### 3. Verify Installation\n\nRun the `version` command to confirm that the `grove` CLI is installed and accessible:\n\n\nThis should display the version, commit, and build date of the `grove` binary.",
           "code_blocks": [
-            "export PATH=\"$HOME/.local/share/grove/bin:$PATH\"",
+            "export PATH=\"${XDG_DATA_HOME:-$HOME/.local/share}/grove/bin:$PATH\"",
             "# For Zsh\nsource ~/.zshrc\n\n# For Bash\nsource ~/.bashrc",
             "grove version"
           ]

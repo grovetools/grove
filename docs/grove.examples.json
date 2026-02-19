@@ -1,0 +1,6 @@
+{
+  "default_model": {
+    "example": "[llm]\ndefault_model = \"gemini-2.0-flash\"",
+    "description": "Sets Gemini 2.0 Flash as the default model for AI-powered grove commands."
+  }
+}

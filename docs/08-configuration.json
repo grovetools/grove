@@ -1,0 +1,11 @@
+{
+  "title": "Configuration",
+  "properties": [
+    {
+      "name": "default_model",
+      "path": "default_model",
+      "type": "string",
+      "description": "Sets the default LLM model to use for grove commands that require AI generation (e.g., changelog generation). This model will be used unless explicitly overridden by command-line flags."
+    }
+  ]
+}
