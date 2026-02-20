@@ -35,6 +35,12 @@ var SchemaFields = []FieldMeta{
 				RefType:     "NotebookRules",
 				Children: []FieldMeta{
 					{
+						Path:        []string{"notebooks", "rules", "default"},
+						Type:        FieldString,
+						Description: "Name of the default notebook to use",
+						Important:   true,
+					},
+					{
 						Path:        []string{"notebooks", "rules", "global"},
 						Type:        FieldObject,
 						Description: "Configuration for the system-wide global notebook",
@@ -49,12 +55,6 @@ var SchemaFields = []FieldMeta{
 								Required:    true,
 							},
 						},
-					},
-					{
-						Path:        []string{"notebooks", "rules", "default"},
-						Type:        FieldString,
-						Description: "Name of the default notebook to use",
-						Important:   true,
 					},
 				},
 			},
@@ -144,6 +144,15 @@ var SchemaFields = []FieldMeta{
 		},
 	},
 	{
+		Path:        []string{"api_key_command"},
+		Type:        FieldString,
+		Description: "Shell command to retrieve API key (e.g. gcloud secrets or 1password)",
+		Layer:       config.SourceGlobal,
+		Priority:    60,
+		Important:   true,
+		Namespace:   "gemini",
+	},
+	{
 		Path:        []string{"logging"},
 		Type:        FieldObject,
 		Description: "Logging configuration",
@@ -180,15 +189,6 @@ var SchemaFields = []FieldMeta{
 				Description: "Always show logs from current project regardless of filters",
 			},
 		},
-	},
-	{
-		Path:        []string{"api_key_command"},
-		Type:        FieldString,
-		Description: "Shell command to retrieve API key (e.g. gcloud secrets or 1password)",
-		Layer:       config.SourceGlobal,
-		Priority:    60,
-		Important:   true,
-		Namespace:   "gemini",
 	},
 	{
 		Path:        []string{"context"},
@@ -256,8 +256,8 @@ var FieldsByPath = map[string]*FieldMeta{
 	"build_cmd":              &SchemaFields[5],
 	"build_after":            &SchemaFields[6],
 	"tui":                    &SchemaFields[7],
-	"logging":                &SchemaFields[8],
-	"gemini.api_key_command": &SchemaFields[9],
+	"gemini.api_key_command": &SchemaFields[8],
+	"logging":                &SchemaFields[9],
 	"context":                &SchemaFields[10],
 	"version":                &SchemaFields[11],
 	"gemini.api_key":         &SchemaFields[12],
@@ -268,6 +268,6 @@ var FieldsByPath = map[string]*FieldMeta{
 var ImportantFields = []*FieldMeta{
 	&SchemaFields[0],
 	&SchemaFields[1],
-	&SchemaFields[9],
+	&SchemaFields[8],
 	&SchemaFields[12],
 }
