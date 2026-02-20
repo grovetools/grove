@@ -170,6 +170,43 @@ func (k releaseKeyMap) FullHelp() [][]key.Binding {
 	}
 }
 
+// Sections returns grouped sections of key bindings for the full help view.
+// Only includes sections that the release TUI actually implements.
+func (k releaseKeyMap) Sections() []keymap.Section {
+	// Customize navigation for release TUI
+	nav := k.Base.NavigationSection()
+	nav.Bindings = []key.Binding{k.Up, k.Down, k.Tab}
+
+	return []keymap.Section{
+		nav,
+		{
+			Name:     "Selection",
+			Bindings: []key.Binding{k.Toggle, k.SelectAll, k.DeselectAll},
+		},
+		{
+			Name:     "Version Bumps",
+			Bindings: []key.Binding{k.SelectMajor, k.SelectMinor, k.SelectPatch, k.ApplySuggestion},
+		},
+		{
+			Name:     "Changelog",
+			Bindings: []key.Binding{k.ViewChangelog, k.EditChangelog, k.EditRepoChangelog, k.GenerateChangelog, k.GenerateAll, k.WriteChangelog},
+		},
+		{
+			Name:     "LLM Rules",
+			Bindings: []key.Binding{k.EditRules, k.ResetRules},
+		},
+		{
+			Name:     "Settings",
+			Bindings: []key.Binding{k.ToggleDryRun, k.TogglePush, k.ToggleSyncDeps},
+		},
+		{
+			Name:     "Actions",
+			Bindings: []key.Binding{k.Approve, k.Back},
+		},
+		k.Base.SystemSection(),
+	}
+}
+
 // TUI views
 const (
 	viewTable     = "table"
