@@ -23,7 +23,7 @@ LDFLAGS = -ldflags="\
 -X '$(VERSION_PKG).Branch=$(GIT_BRANCH)' \
 -X '$(VERSION_PKG).BuildDate=$(BUILD_DATE)'"
 
-.PHONY: all build test clean fmt vet lint run check dev build-all schema registry config-schema help
+.PHONY: all build test clean fmt vet lint run check dev build-all schema registry config-schema keys-registry help
 
 all: build
 
@@ -39,7 +39,11 @@ config-schema:
 	@echo "Generating config UI schema..."
 	@go run ./tools/config-schema-generator
 
-build: registry schema config-schema
+keys-registry:
+	@echo "Generating keys registry..."
+	@go run ./tools/keys-registry-generator
+
+build: registry schema config-schema keys-registry
 	@mkdir -p $(BIN_DIR)
 	@echo "Building $(BINARY_NAME) version $(VERSION)..."
 	@go build $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) .
@@ -135,5 +139,6 @@ help:
 	@echo "  make dev           - Build with race detector"
 	@echo "  make build-all     - Build for multiple platforms"
 	@echo "  make config-schema - Generate config UI schema from JSON schemas"
+	@echo "  make keys-registry - Generate TUI keybindings registry"
 	@echo "  make test-e2e ARGS=...- Run E2E test runner binary"
 	@echo "  make test-e2e ARGS=...- Run E2E tests (e.g., ARGS=\"run -i add-repo-dry-run\")"

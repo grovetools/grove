@@ -104,6 +104,34 @@ var SchemaFields = []FieldMeta{
 		RefType:     "TUISchemaConfig",
 		Children: []FieldMeta{
 			{
+				Path:        []string{"tui", "nvim_embed"},
+				Type:        FieldObject,
+				Description: "Embedded Neovim configuration",
+				RefType:     "NvimEmbedConfig",
+				Children: []FieldMeta{
+					{
+						Path:        []string{"tui", "nvim_embed", "user_config"},
+						Type:        FieldBool,
+						Description: "If true",
+						Required:    true,
+					},
+				},
+			},
+			{
+				Path:        []string{"tui", "preset"},
+				Type:        FieldSelect,
+				Description: "Keybinding preset: vim (default) emacs or arrows",
+				Options:     []string{"vim", "emacs", "arrows"},
+				Important:   true,
+			},
+			{
+				Path:        []string{"tui", "theme"},
+				Type:        FieldSelect,
+				Description: "Color theme for terminal interfaces",
+				Options:     []string{"kanagawa", "gruvbox", "terminal"},
+				Important:   true,
+			},
+			{
 				Path:        []string{"tui", "icons"},
 				Type:        FieldSelect,
 				Description: "Icon set to use: nerd or ascii",
@@ -165,34 +193,6 @@ var SchemaFields = []FieldMeta{
 					},
 				},
 			},
-			{
-				Path:        []string{"tui", "nvim_embed"},
-				Type:        FieldObject,
-				Description: "Embedded Neovim configuration",
-				RefType:     "NvimEmbedConfig",
-				Children: []FieldMeta{
-					{
-						Path:        []string{"tui", "nvim_embed", "user_config"},
-						Type:        FieldBool,
-						Description: "If true",
-						Required:    true,
-					},
-				},
-			},
-			{
-				Path:        []string{"tui", "preset"},
-				Type:        FieldSelect,
-				Description: "Keybinding preset: vim (default) emacs or arrows",
-				Options:     []string{"vim", "emacs", "arrows"},
-				Important:   true,
-			},
-			{
-				Path:        []string{"tui", "theme"},
-				Type:        FieldSelect,
-				Description: "Color theme for terminal interfaces",
-				Options:     []string{"kanagawa", "gruvbox", "terminal"},
-				Important:   true,
-			},
 		},
 	},
 	{
@@ -203,17 +203,6 @@ var SchemaFields = []FieldMeta{
 		Priority:    60,
 		RefType:     "LoggingSchemaConfig",
 		Children: []FieldMeta{
-			{
-				Path:        []string{"logging", "report_caller"},
-				Type:        FieldBool,
-				Description: "Include file/line/function in output",
-				Required:    true,
-			},
-			{
-				Path:        []string{"logging", "show_current_project"},
-				Type:        FieldBool,
-				Description: "Always show logs from current project regardless of filters",
-			},
 			{
 				Path:        []string{"logging", "groups"},
 				Type:        FieldMap,
@@ -230,6 +219,17 @@ var SchemaFields = []FieldMeta{
 				Type:        FieldBool,
 				Description: "Log 'Grove binary started' on first init",
 				Required:    true,
+			},
+			{
+				Path:        []string{"logging", "report_caller"},
+				Type:        FieldBool,
+				Description: "Include file/line/function in output",
+				Required:    true,
+			},
+			{
+				Path:        []string{"logging", "show_current_project"},
+				Type:        FieldBool,
+				Description: "Always show logs from current project regardless of filters",
 			},
 		},
 	},

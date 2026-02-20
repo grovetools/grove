@@ -31,6 +31,7 @@ func init() {
 	rootCmd.AddCommand(newBootstrapCmd())
 	rootCmd.AddCommand(newBuildCmd())
 	rootCmd.AddCommand(newDepsCmd())
+	rootCmd.AddCommand(newKeysCmd())
 	rootCmd.AddCommand(newSchemaCmd())
 	rootCmd.AddCommand(newSetupCmd())
 	rootCmd.AddCommand(internal.NewInternalCmd())
