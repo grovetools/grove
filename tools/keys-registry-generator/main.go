@@ -21,8 +21,10 @@ import (
 	// TUI keymap imports - add new TUIs here
 	cx_rules "github.com/grovetools/cx/cmd/rules"
 	cx_view "github.com/grovetools/cx/cmd/view"
+	flow_cmd "github.com/grovetools/flow/cmd"
 	flow_status "github.com/grovetools/flow/cmd/status_tui"
 	gemini_cmd "github.com/grovetools/grove-gemini/cmd"
+	grove_cmd "github.com/grovetools/grove/cmd"
 	hooks_cmd "github.com/grovetools/hooks/cmd"
 	nav_cmd "github.com/grovetools/nav/cmd"
 	nb_cmd "github.com/grovetools/nb/cmd"
@@ -38,6 +40,12 @@ func getTUIInfos() []keymap.TUIInfo {
 		cx_view.KeymapInfo(),
 		// flow
 		flow_status.KeymapInfo(),
+		flow_cmd.PlanListKeymapInfo(),
+		flow_cmd.PlanAddKeymapInfo(),
+		flow_cmd.PlanInitKeymapInfo(),
+		flow_cmd.PlanFinishKeymapInfo(),
+		// grove
+		grove_cmd.KeysKeymapInfo(),
 		// grove-gemini
 		gemini_cmd.QueryTuiKeymapInfo(),
 		gemini_cmd.DashboardKeymapInfo(),
@@ -46,10 +54,14 @@ func getTUIInfos() []keymap.TUIInfo {
 		hooks_cmd.BrowseKeymapInfo(),
 		// nav
 		nav_cmd.SessionizeKeymapInfo(),
+		nav_cmd.HistoryKeymapInfo(),
+		nav_cmd.ManageKeymapInfo(),
+		nav_cmd.WindowsKeymapInfo(),
 		// nb
 		nb_cmd.BrowserKeymapInfo(),
 		// tend
 		tend_cmd.RunnerKeymapInfo(),
+		tend_cmd.SessionsKeymapInfo(),
 	}
 }
 

@@ -104,6 +104,68 @@ var SchemaFields = []FieldMeta{
 		RefType:     "TUISchemaConfig",
 		Children: []FieldMeta{
 			{
+				Path:        []string{"tui", "icons"},
+				Type:        FieldSelect,
+				Description: "Icon set to use: nerd or ascii",
+				Options:     []string{"nerd", "ascii"},
+				Important:   true,
+			},
+			{
+				Path:        []string{"tui", "keybindings"},
+				Type:        FieldObject,
+				Description: "Custom keybinding overrides",
+				RefType:     "KeybindingsSchemaConfig",
+				Children: []FieldMeta{
+					{
+						Path:        []string{"tui", "keybindings", "overrides"},
+						Type:        FieldMap,
+						Description: "Per-TUI keybinding overrides (e.g.",
+					},
+					{
+						Path:        []string{"tui", "keybindings", "search"},
+						Type:        FieldString,
+						Description: "Search keybindings (search",
+						RefType:     "KeybindingSectionSchemaConfig",
+					},
+					{
+						Path:        []string{"tui", "keybindings", "selection"},
+						Type:        FieldString,
+						Description: "Selection keybindings (select",
+						RefType:     "KeybindingSectionSchemaConfig",
+					},
+					{
+						Path:        []string{"tui", "keybindings", "system"},
+						Type:        FieldString,
+						Description: "System keybindings (quit",
+						RefType:     "KeybindingSectionSchemaConfig",
+					},
+					{
+						Path:        []string{"tui", "keybindings", "view"},
+						Type:        FieldString,
+						Description: "View keybindings (switch_view",
+						RefType:     "KeybindingSectionSchemaConfig",
+					},
+					{
+						Path:        []string{"tui", "keybindings", "actions"},
+						Type:        FieldString,
+						Description: "Action keybindings (confirm",
+						RefType:     "KeybindingSectionSchemaConfig",
+					},
+					{
+						Path:        []string{"tui", "keybindings", "fold"},
+						Type:        FieldString,
+						Description: "Fold keybindings (open",
+						RefType:     "KeybindingSectionSchemaConfig",
+					},
+					{
+						Path:        []string{"tui", "keybindings", "navigation"},
+						Type:        FieldString,
+						Description: "Navigation keybindings (up",
+						RefType:     "KeybindingSectionSchemaConfig",
+					},
+				},
+			},
+			{
 				Path:        []string{"tui", "nvim_embed"},
 				Type:        FieldObject,
 				Description: "Embedded Neovim configuration",
@@ -131,68 +193,6 @@ var SchemaFields = []FieldMeta{
 				Options:     []string{"kanagawa", "gruvbox", "terminal"},
 				Important:   true,
 			},
-			{
-				Path:        []string{"tui", "icons"},
-				Type:        FieldSelect,
-				Description: "Icon set to use: nerd or ascii",
-				Options:     []string{"nerd", "ascii"},
-				Important:   true,
-			},
-			{
-				Path:        []string{"tui", "keybindings"},
-				Type:        FieldObject,
-				Description: "Custom keybinding overrides",
-				RefType:     "KeybindingsSchemaConfig",
-				Children: []FieldMeta{
-					{
-						Path:        []string{"tui", "keybindings", "view"},
-						Type:        FieldString,
-						Description: "View keybindings (switch_view",
-						RefType:     "KeybindingSectionSchemaConfig",
-					},
-					{
-						Path:        []string{"tui", "keybindings", "actions"},
-						Type:        FieldString,
-						Description: "Action keybindings (confirm",
-						RefType:     "KeybindingSectionSchemaConfig",
-					},
-					{
-						Path:        []string{"tui", "keybindings", "fold"},
-						Type:        FieldString,
-						Description: "Fold keybindings (open",
-						RefType:     "KeybindingSectionSchemaConfig",
-					},
-					{
-						Path:        []string{"tui", "keybindings", "navigation"},
-						Type:        FieldString,
-						Description: "Navigation keybindings (up",
-						RefType:     "KeybindingSectionSchemaConfig",
-					},
-					{
-						Path:        []string{"tui", "keybindings", "overrides"},
-						Type:        FieldMap,
-						Description: "Per-TUI keybinding overrides (e.g.",
-					},
-					{
-						Path:        []string{"tui", "keybindings", "search"},
-						Type:        FieldString,
-						Description: "Search keybindings (search",
-						RefType:     "KeybindingSectionSchemaConfig",
-					},
-					{
-						Path:        []string{"tui", "keybindings", "selection"},
-						Type:        FieldString,
-						Description: "Selection keybindings (select",
-						RefType:     "KeybindingSectionSchemaConfig",
-					},
-					{
-						Path:        []string{"tui", "keybindings", "system"},
-						Type:        FieldString,
-						Description: "System keybindings (quit",
-						RefType:     "KeybindingSectionSchemaConfig",
-					},
-				},
-			},
 		},
 	},
 	{
@@ -203,6 +203,12 @@ var SchemaFields = []FieldMeta{
 		Priority:    60,
 		RefType:     "LoggingSchemaConfig",
 		Children: []FieldMeta{
+			{
+				Path:        []string{"logging", "report_caller"},
+				Type:        FieldBool,
+				Description: "Include file/line/function in output",
+				Required:    true,
+			},
 			{
 				Path:        []string{"logging", "show_current_project"},
 				Type:        FieldBool,
@@ -223,12 +229,6 @@ var SchemaFields = []FieldMeta{
 				Path:        []string{"logging", "log_startup"},
 				Type:        FieldBool,
 				Description: "Log 'Grove binary started' on first init",
-				Required:    true,
-			},
-			{
-				Path:        []string{"logging", "report_caller"},
-				Type:        FieldBool,
-				Description: "Include file/line/function in output",
 				Required:    true,
 			},
 		},

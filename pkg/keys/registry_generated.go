@@ -96,6 +96,148 @@ var TUIRegistry = []TUIRegistryEntry{
 		},
 	},
 	{
+		Name:        "flow-plan-add",
+		Package:     "flow",
+		Description: "Add new job to a plan",
+		Sections: []SectionEntry{
+			{
+				Name: "Navigation",
+				Bindings: []BindingEntry{
+					{Name: "next field", Keys: []string{"tab"}, Description: "next field", Enabled: true},
+					{Name: "prev field", Keys: []string{"shift+tab"}, Description: "prev field", Enabled: true},
+					{Name: "go to top", Keys: []string{"gg", "home"}, Description: "go to top", Enabled: true},
+					{Name: "go to bottom", Keys: []string{"G", "end"}, Description: "go to bottom", Enabled: true},
+					{Name: "page up", Keys: []string{"ctrl+u", "pgup"}, Description: "page up", Enabled: true},
+					{Name: "page down", Keys: []string{"ctrl+d", "pgdown"}, Description: "page down", Enabled: true},
+				},
+			},
+			{
+				Name: "Actions",
+				Bindings: []BindingEntry{
+					{Name: "toggle", Keys: []string{" "}, Description: "toggle", Enabled: true},
+					{Name: "submit", Keys: []string{"ctrl+s"}, Description: "submit", Enabled: true},
+				},
+			},
+			{
+				Name: "System",
+				Bindings: []BindingEntry{
+					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true},
+					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true},
+				},
+			},
+		},
+	},
+	{
+		Name:        "flow-plan-finish",
+		Package:     "flow",
+		Description: "Finish and clean up a plan",
+		Sections: []SectionEntry{
+			{
+				Name: "Navigation",
+				Bindings: []BindingEntry{
+					{Name: "up", Keys: []string{"k", "up"}, Description: "up", Enabled: true},
+					{Name: "down", Keys: []string{"j", "down"}, Description: "down", Enabled: true},
+				},
+			},
+			{
+				Name: "Selection",
+				Bindings: []BindingEntry{
+					{Name: "toggle selection", Keys: []string{" "}, Description: "toggle selection", Enabled: true},
+					{Name: "select all", Keys: []string{"a"}, Description: "select all", Enabled: true},
+					{Name: "select none", Keys: []string{"n"}, Description: "select none", Enabled: true},
+				},
+			},
+			{
+				Name: "Actions",
+				Bindings: []BindingEntry{
+					{Name: "confirm and proceed", Keys: []string{"enter"}, Description: "confirm and proceed", Enabled: true},
+				},
+			},
+			{
+				Name: "System",
+				Bindings: []BindingEntry{
+					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true},
+					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true},
+				},
+			},
+		},
+	},
+	{
+		Name:        "flow-plan-init",
+		Package:     "flow",
+		Description: "Create a new plan",
+		Sections: []SectionEntry{
+			{
+				Name: "Navigation",
+				Bindings: []BindingEntry{
+					{Name: "next field", Keys: []string{"tab", "j"}, Description: "next field", Enabled: true},
+					{Name: "prev field", Keys: []string{"shift+tab", "k"}, Description: "prev field", Enabled: true},
+				},
+			},
+			{
+				Name: "Actions",
+				Bindings: []BindingEntry{
+					{Name: "toggle checkbox", Keys: []string{" "}, Description: "toggle checkbox", Enabled: true},
+					{Name: "submit form", Keys: []string{"enter"}, Description: "submit form", Enabled: true},
+					{Name: "toggle advanced", Keys: []string{"a"}, Description: "toggle advanced", Enabled: true},
+					{Name: "insert mode", Keys: []string{"i"}, Description: "insert mode", Enabled: true},
+					{Name: "normal mode", Keys: []string{"esc"}, Description: "normal mode", Enabled: true},
+				},
+			},
+			{
+				Name: "System",
+				Bindings: []BindingEntry{
+					{Name: "show help", Keys: []string{"?"}, Description: "show help", Enabled: true},
+					{Name: "back to plan list", Keys: []string{"q"}, Description: "back to plan list", Enabled: true},
+					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true},
+				},
+			},
+		},
+	},
+	{
+		Name:        "flow-plan-list",
+		Package:     "flow",
+		Description: "Plan browser and manager",
+		Sections: []SectionEntry{
+			{
+				Name: "Navigation",
+				Bindings: []BindingEntry{
+					{Name: "move up", Keys: []string{"k", "up"}, Description: "move up", Enabled: true},
+					{Name: "move down", Keys: []string{"j", "down"}, Description: "move down", Enabled: true},
+					{Name: "view plan details", Keys: []string{"enter"}, Description: "view plan details", Enabled: true},
+					{Name: "open plan workspace", Keys: []string{"o"}, Description: "open plan workspace", Enabled: true},
+				},
+			},
+			{
+				Name: "Actions",
+				Bindings: []BindingEntry{
+					{Name: "create new plan", Keys: []string{"n"}, Description: "create new plan", Enabled: true},
+					{Name: "set active plan", Keys: []string{"s"}, Description: "set active plan", Enabled: true},
+					{Name: "edit notes", Keys: []string{"e"}, Description: "edit notes", Enabled: true},
+					{Name: "review changes", Keys: []string{"r"}, Description: "review changes", Enabled: true},
+					{Name: "finish plan", Keys: []string{"ctrl+x"}, Description: "finish plan", Enabled: true},
+					{Name: "hold/unhold plan", Keys: []string{"h"}, Description: "hold/unhold plan", Enabled: true},
+					{Name: "update from main", Keys: []string{"U"}, Description: "update from main", Enabled: true},
+					{Name: "merge to main", Keys: []string{"M"}, Description: "merge to main", Enabled: true},
+				},
+			},
+			{
+				Name: "View",
+				Bindings: []BindingEntry{
+					{Name: "toggle git log", Keys: []string{"g"}, Description: "toggle git log", Enabled: true},
+					{Name: "toggle on-hold", Keys: []string{"H"}, Description: "toggle on-hold", Enabled: true},
+				},
+			},
+			{
+				Name: "System",
+				Bindings: []BindingEntry{
+					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true},
+					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true},
+				},
+			},
+		},
+	},
+	{
 		Name:        "flow-status",
 		Package:     "flow",
 		Description: "Flow plan status browser and job manager",
@@ -332,6 +474,46 @@ var TUIRegistry = []TUIRegistryEntry{
 		},
 	},
 	{
+		Name:        "grove-keys",
+		Package:     "grove",
+		Description: "Keybinding browser and analyzer",
+		Sections: []SectionEntry{
+			{
+				Name: "Navigation",
+				Bindings: []BindingEntry{
+					{Name: "up", Keys: []string{"k", "up"}, Description: "up", Enabled: true},
+					{Name: "down", Keys: []string{"j", "down"}, Description: "down", Enabled: true},
+					{Name: "page up", Keys: []string{"ctrl+u", "pgup"}, Description: "page up", Enabled: true},
+					{Name: "page down", Keys: []string{"ctrl+d", "pgdown"}, Description: "page down", Enabled: true},
+					{Name: "next tab", Keys: []string{"]"}, Description: "next tab", Enabled: true},
+					{Name: "prev tab", Keys: []string{"["}, Description: "prev tab", Enabled: true},
+				},
+			},
+			{
+				Name: "Actions",
+				Bindings: []BindingEntry{
+					{Name: "search", Keys: []string{"/"}, Description: "search", Enabled: true},
+					{Name: "toggle view", Keys: []string{"v"}, Description: "toggle view", Enabled: true},
+					{Name: "edit config", Keys: []string{"e"}, Description: "edit config", Enabled: true},
+				},
+			},
+			{
+				Name: "Matrix View",
+				Bindings: []BindingEntry{
+					{Name: "scroll TUIs left", Keys: []string{"h"}, Description: "scroll TUIs left", Enabled: true},
+					{Name: "scroll TUIs right", Keys: []string{"l"}, Description: "scroll TUIs right", Enabled: true},
+				},
+			},
+			{
+				Name: "System",
+				Bindings: []BindingEntry{
+					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true},
+					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true},
+				},
+			},
+		},
+	},
+	{
 		Name:        "hooks-browser",
 		Package:     "hooks",
 		Description: "Hook session browser and manager",
@@ -379,6 +561,83 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "mark complete", Keys: []string{"c"}, Description: "mark complete", Enabled: true},
 					{Name: "kill session", Keys: []string{"ctrl+k"}, Description: "kill session", Enabled: true},
+				},
+			},
+			{
+				Name: "System",
+				Bindings: []BindingEntry{
+					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true},
+					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true},
+				},
+			},
+		},
+	},
+	{
+		Name:        "nav-history",
+		Package:     "nav",
+		Description: "Session history browser",
+		Sections: []SectionEntry{
+			{
+				Name: "Navigation",
+				Bindings: []BindingEntry{
+					{Name: "up", Keys: []string{"up", "k"}, Description: "up", Enabled: true},
+					{Name: "down", Keys: []string{"down", "j"}, Description: "down", Enabled: true},
+					{Name: "jump to row", Keys: []string{"1-9"}, Description: "jump to row", Enabled: true},
+				},
+			},
+			{
+				Name: "Actions",
+				Bindings: []BindingEntry{
+					{Name: "filter", Keys: []string{"/"}, Description: "filter", Enabled: true},
+					{Name: "switch to session", Keys: []string{"o", "enter"}, Description: "switch to session", Enabled: true},
+				},
+			},
+			{
+				Name: "System",
+				Bindings: []BindingEntry{
+					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true},
+					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true},
+				},
+			},
+		},
+	},
+	{
+		Name:        "nav-manage",
+		Package:     "nav",
+		Description: "Session hotkey manager",
+		Sections: []SectionEntry{
+			{
+				Name: "Navigation",
+				Bindings: []BindingEntry{
+					{Name: "up", Keys: []string{"up", "k"}, Description: "up", Enabled: true},
+					{Name: "down", Keys: []string{"down", "j"}, Description: "down", Enabled: true},
+					{Name: "jump to row", Keys: []string{"1-9"}, Description: "jump to row", Enabled: true},
+					{Name: "switch to session", Keys: []string{"enter"}, Description: "switch to session", Enabled: true},
+				},
+			},
+			{
+				Name: "Actions",
+				Bindings: []BindingEntry{
+					{Name: "map CWD", Keys: []string{"e"}, Description: "map CWD", Enabled: true},
+					{Name: "set key mode", Keys: []string{"h"}, Description: "set key mode", Enabled: true},
+					{Name: "quick toggle", Keys: []string{" "}, Description: "quick toggle", Enabled: true},
+					{Name: "clear mapping", Keys: []string{"d", "delete"}, Description: "clear mapping", Enabled: true},
+					{Name: "save & exit", Keys: []string{"s", "ctrl+s"}, Description: "save & exit", Enabled: true},
+				},
+			},
+			{
+				Name: "Reorder",
+				Bindings: []BindingEntry{
+					{Name: "enter move mode", Keys: []string{"m"}, Description: "enter move mode", Enabled: true},
+					{Name: "toggle lock", Keys: []string{"l"}, Description: "toggle lock", Enabled: true},
+					{Name: "move row (in move mode)", Keys: []string{"j/k"}, Description: "move row (in move mode)", Enabled: true},
+					{Name: "confirm move", Keys: []string{"enter"}, Description: "confirm move", Enabled: true},
+				},
+			},
+			{
+				Name: "View",
+				Bindings: []BindingEntry{
+					{Name: "toggle paths", Keys: []string{"p"}, Description: "toggle paths", Enabled: true},
 				},
 			},
 			{
@@ -441,6 +700,44 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "toggle release", Keys: []string{"r"}, Description: "toggle release", Enabled: true},
 					{Name: "toggle tool/version", Keys: []string{"y"}, Description: "toggle tool/version", Enabled: true},
 					{Name: "toggle remote", Keys: []string{"l"}, Description: "toggle remote", Enabled: true},
+				},
+			},
+			{
+				Name: "System",
+				Bindings: []BindingEntry{
+					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true},
+					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true},
+				},
+			},
+		},
+	},
+	{
+		Name:        "nav-windows",
+		Package:     "nav",
+		Description: "Tmux window manager",
+		Sections: []SectionEntry{
+			{
+				Name: "Navigation",
+				Bindings: []BindingEntry{
+					{Name: "up", Keys: []string{"k", "up"}, Description: "up", Enabled: true},
+					{Name: "down", Keys: []string{"j", "down"}, Description: "down", Enabled: true},
+					{Name: "jump to window", Keys: []string{"0-9"}, Description: "jump to window", Enabled: true},
+				},
+			},
+			{
+				Name: "Actions",
+				Bindings: []BindingEntry{
+					{Name: "switch", Keys: []string{"enter"}, Description: "switch", Enabled: true},
+					{Name: "filter", Keys: []string{"/"}, Description: "filter", Enabled: true},
+					{Name: "rename", Keys: []string{"r"}, Description: "rename", Enabled: true},
+					{Name: "close", Keys: []string{"X"}, Description: "close", Enabled: true},
+				},
+			},
+			{
+				Name: "Reorder",
+				Bindings: []BindingEntry{
+					{Name: "move window", Keys: []string{"m"}, Description: "move window", Enabled: true},
+					{Name: "move (in move mode)", Keys: []string{"j/k"}, Description: "move (in move mode)", Enabled: true},
 				},
 			},
 			{
@@ -612,6 +909,37 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "run in debug mode", Keys: []string{"d"}, Description: "run in debug mode", Enabled: true},
 					{Name: "run in debug session", Keys: []string{"D"}, Description: "run in debug session", Enabled: true},
 					{Name: "search", Keys: []string{"/"}, Description: "search", Enabled: true},
+					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true},
+					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true},
+				},
+			},
+		},
+	},
+	{
+		Name:        "tend-sessions",
+		Package:     "tend",
+		Description: "Debug session manager",
+		Sections: []SectionEntry{
+			{
+				Name: "Navigation",
+				Bindings: []BindingEntry{
+					{Name: "up", Keys: []string{"k", "up"}, Description: "up", Enabled: true},
+					{Name: "down", Keys: []string{"j", "down"}, Description: "down", Enabled: true},
+					{Name: "page up", Keys: []string{"ctrl+u", "pgup"}, Description: "page up", Enabled: true},
+					{Name: "page down", Keys: []string{"ctrl+d", "pgdown"}, Description: "page down", Enabled: true},
+				},
+			},
+			{
+				Name: "Actions",
+				Bindings: []BindingEntry{
+					{Name: "attach to session", Keys: []string{"enter"}, Description: "attach to session", Enabled: true},
+					{Name: "kill session", Keys: []string{"x", "X"}, Description: "kill session", Enabled: true},
+					{Name: "refresh list", Keys: []string{"r"}, Description: "refresh list", Enabled: true},
+				},
+			},
+			{
+				Name: "System",
+				Bindings: []BindingEntry{
 					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true},
 					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true},
 				},

@@ -1,6 +1,9 @@
 package keys
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // MatrixRow represents a single key and its usage across TUIs.
 type MatrixRow struct {
@@ -47,7 +50,16 @@ func BuildMatrix(bindings []KeyBinding) MatrixReport {
 	for t := range tuiSet {
 		report.TUINames = append(report.TUINames, t)
 	}
-	sort.Strings(report.TUINames)
+	// Sort by package first, then by TUI name within package
+	// TUI names are formatted as "tui-name (package)"
+	sort.Slice(report.TUINames, func(i, j int) bool {
+		pkgI := extractPackage(report.TUINames[i])
+		pkgJ := extractPackage(report.TUINames[j])
+		if pkgI != pkgJ {
+			return pkgI < pkgJ
+		}
+		return report.TUINames[i] < report.TUINames[j]
+	})
 
 	for _, row := range rowMap {
 		// Determine consistency - check if all TUIs that use this key
@@ -73,4 +85,14 @@ func BuildMatrix(bindings []KeyBinding) MatrixReport {
 	})
 
 	return report
+}
+
+// extractPackage extracts the package name from a TUI name formatted as "tui-name (package)".
+func extractPackage(tuiName string) string {
+	start := strings.LastIndex(tuiName, "(")
+	end := strings.LastIndex(tuiName, ")")
+	if start != -1 && end > start {
+		return tuiName[start+1 : end]
+	}
+	return tuiName
 }

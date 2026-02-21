@@ -18,10 +18,73 @@ import (
 	"github.com/grovetools/grove/pkg/keys"
 )
 
+// keysTUIKeyMap defines the keybindings for the keys browser TUI.
+type keysTUIKeyMap struct {
+	keymap.Base
+	EditConfig    key.Binding
+	ToggleView    key.Binding
+	ScrollTUILeft key.Binding
+	ScrollTUIRight key.Binding
+}
+
+func (k keysTUIKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Search, k.NextTab, k.PrevTab, k.ToggleView, k.Quit}
+}
+
+func (k keysTUIKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Up, k.Down, k.PageUp, k.PageDown},
+		{k.Search, k.NextTab, k.PrevTab, k.ToggleView, k.EditConfig},
+		{k.ScrollTUILeft, k.ScrollTUIRight},
+		{k.Help, k.Quit},
+	}
+}
+
+// Sections returns grouped sections of key bindings for the full help view.
+func (k keysTUIKeyMap) Sections() []keymap.Section {
+	return []keymap.Section{
+		{
+			Name:     "Navigation",
+			Bindings: []key.Binding{k.Up, k.Down, k.PageUp, k.PageDown, k.NextTab, k.PrevTab},
+		},
+		{
+			Name:     "Actions",
+			Bindings: []key.Binding{k.Search, k.ToggleView, k.EditConfig},
+		},
+		{
+			Name:     "Matrix View",
+			Bindings: []key.Binding{k.ScrollTUILeft, k.ScrollTUIRight},
+		},
+		k.Base.SystemSection(),
+	}
+}
+
+func newKeysTUIKeyMap() keysTUIKeyMap {
+	return keysTUIKeyMap{
+		Base: keymap.NewBase(),
+		EditConfig: key.NewBinding(
+			key.WithKeys("e"),
+			key.WithHelp("e", "edit config"),
+		),
+		ToggleView: key.NewBinding(
+			key.WithKeys("v"),
+			key.WithHelp("v", "toggle view"),
+		),
+		ScrollTUILeft: key.NewBinding(
+			key.WithKeys("h"),
+			key.WithHelp("h", "scroll TUIs left"),
+		),
+		ScrollTUIRight: key.NewBinding(
+			key.WithKeys("l"),
+			key.WithHelp("l", "scroll TUIs right"),
+		),
+	}
+}
+
 // keysModel holds the state for the keys TUI browser.
 type keysModel struct {
 	cfg       *config.Config
-	baseKeys  keymap.Base
+	keys      keysTUIKeyMap
 	bindings  []keys.KeyBinding
 	conflicts []keys.Conflict
 	analysis  keys.AnalysisReport
@@ -61,7 +124,7 @@ func runKeysTUI() error {
 
 	m := keysModel{
 		cfg:           cfg,
-		baseKeys:      keymap.Load(cfg, ""),
+		keys:          newKeysTUIKeyMap(),
 		bindings:      bindings,
 		conflicts:     conflicts,
 		analysis:      analysis,
@@ -97,7 +160,7 @@ func (m keysModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if m.searchActive {
-			if key.Matches(msg, m.baseKeys.Confirm) || key.Matches(msg, m.baseKeys.Back) {
+			if key.Matches(msg, m.keys.Confirm) || key.Matches(msg, m.keys.Back) {
 				m.searchActive = false
 				m.searchInput.Blur()
 				m.updateViewport()
@@ -108,24 +171,50 @@ func (m keysModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-		if key.Matches(msg, m.baseKeys.Quit) {
+		if key.Matches(msg, m.keys.Quit) {
 			return m, tea.Quit
 		}
 
-		if key.Matches(msg, m.baseKeys.Search) {
+		if key.Matches(msg, m.keys.Search) {
 			m.searchActive = true
 			m.searchInput.Focus()
 			return m, textinput.Blink
 		}
 
-		if key.Matches(msg, m.baseKeys.NextTab) || key.Matches(msg, m.baseKeys.Right) {
+		// Toggle view mode with 'v'
+		if key.Matches(msg, m.keys.ToggleView) {
+			m.viewMode = (m.viewMode + 1) % 3
+			m.matrixScrollX = 0 // Reset horizontal scroll when switching views
+			m.vp.GotoTop()
+			m.updateViewport()
+			return m, nil
+		}
+
+		// Horizontal scroll for matrix view with h/l (check BEFORE tab navigation)
+		if m.viewMode == 2 {
+			if key.Matches(msg, m.keys.ScrollTUIRight) || msg.String() == "right" {
+				m.matrixScrollX++
+				m.updateViewport()
+				return m, nil
+			}
+			if key.Matches(msg, m.keys.ScrollTUILeft) || msg.String() == "left" {
+				if m.matrixScrollX > 0 {
+					m.matrixScrollX--
+				}
+				m.updateViewport()
+				return m, nil
+			}
+		}
+
+		// Tab navigation (not in matrix view where h/l scroll TUIs)
+		if key.Matches(msg, m.keys.NextTab) || key.Matches(msg, m.keys.Right) {
 			m.activeTab = (m.activeTab + 1) % len(m.domains)
 			m.vp.GotoTop()
 			m.updateViewport()
 			return m, nil
 		}
 
-		if key.Matches(msg, m.baseKeys.PrevTab) || key.Matches(msg, m.baseKeys.Left) {
+		if key.Matches(msg, m.keys.PrevTab) || key.Matches(msg, m.keys.Left) {
 			m.activeTab--
 			if m.activeTab < 0 {
 				m.activeTab = len(m.domains) - 1
@@ -135,33 +224,8 @@ func (m keysModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Toggle view mode with 'v'
-		if msg.String() == "v" {
-			m.viewMode = (m.viewMode + 1) % 3
-			m.matrixScrollX = 0 // Reset horizontal scroll when switching views
-			m.vp.GotoTop()
-			m.updateViewport()
-			return m, nil
-		}
-
-		// Horizontal scroll for matrix view with h/l
-		if m.viewMode == 2 {
-			if msg.String() == "l" || msg.String() == "right" {
-				m.matrixScrollX++
-				m.updateViewport()
-				return m, nil
-			}
-			if msg.String() == "h" || msg.String() == "left" {
-				if m.matrixScrollX > 0 {
-					m.matrixScrollX--
-				}
-				m.updateViewport()
-				return m, nil
-			}
-		}
-
 		// Edit configuration with 'e' when on TMUX tab
-		if msg.String() == "e" && m.domains[m.activeTab] == keys.DomainTmux {
+		if key.Matches(msg, m.keys.EditConfig) && m.domains[m.activeTab] == keys.DomainTmux {
 			home, _ := os.UserHomeDir()
 			configPath := filepath.Join(home, ".config", "grove", "grove.toml")
 
@@ -222,6 +286,7 @@ func (m *keysModel) renderCanonicalView(b *strings.Builder, searchQuery string, 
 			t.Bold.Render(canon.Name),
 			t.Highlight.Render(strings.Join(res.CanonicalKeys, ", "))))
 
+		// Show TUIs that have this action
 		for tui, ks := range res.TUIs {
 			match := false
 			for _, k := range ks {
@@ -243,6 +308,18 @@ func (m *keysModel) renderCanonicalView(b *strings.Builder, searchQuery string, 
 			// Extract short TUI name
 			shortTUI := strings.Split(tui, " ")[0]
 			b.WriteString(fmt.Sprintf("    %-20s %-10s %s\n", shortTUI, strings.Join(ks, ", "), status))
+		}
+
+		// Show TUIs that don't have this action (subtle indicator)
+		for _, tui := range m.matrix.TUINames {
+			if tui == "tmux-popup" {
+				continue // Skip tmux bindings
+			}
+			if _, hasAction := res.TUIs[tui]; !hasAction {
+				shortTUI := strings.Split(tui, " ")[0]
+				// Pad before styling to maintain alignment
+				b.WriteString(fmt.Sprintf("    %-20s %s %s\n", shortTUI, t.Muted.Render(fmt.Sprintf("%-10s", "-")), t.Muted.Render(theme.IconUnselect)))
+			}
 		}
 		b.WriteString("\n")
 	}
@@ -271,9 +348,18 @@ func (m *keysModel) renderMatrixView(b *strings.Builder, searchQuery string, t *
 		return
 	}
 
-	// Column widths
-	keyColWidth := 12
-	tuiColWidth := 16
+	// Show all TUI names in a compact list at the top
+	b.WriteString("  " + t.Bold.Render(fmt.Sprintf("TUIs (%d): ", len(m.matrix.TUINames))))
+	var tuiList []string
+	for _, tui := range m.matrix.TUINames {
+		shortName := strings.Split(tui, " ")[0]
+		tuiList = append(tuiList, shortName)
+	}
+	b.WriteString(t.Muted.Render(strings.Join(tuiList, ", ")) + "\n\n")
+
+	// Column widths - narrower to fit more TUIs
+	keyColWidth := 10
+	tuiColWidth := 14
 
 	// Visible TUIs based on scroll position
 	visibleTUIs := m.matrix.TUINames
@@ -333,8 +419,8 @@ func (m *keysModel) renderMatrixView(b *strings.Builder, searchQuery string, t *
 
 		// Key column
 		keyStr := row.Key
-		if len(keyStr) > keyColWidth-2 {
-			keyStr = keyStr[:keyColWidth-3] + "…"
+		if len(keyStr) > keyColWidth-1 {
+			keyStr = keyStr[:keyColWidth-2] + "…"
 		}
 		line := fmt.Sprintf("  %s", t.Highlight.Render(fmt.Sprintf("%-*s", keyColWidth, keyStr)))
 
@@ -343,8 +429,8 @@ func (m *keysModel) renderMatrixView(b *strings.Builder, searchQuery string, t *
 			action := "-"
 			if a, ok := row.TUIs[tui]; ok {
 				action = a
-				if len(action) > tuiColWidth-2 {
-					action = action[:tuiColWidth-3] + "…"
+				if len(action) > tuiColWidth-1 {
+					action = action[:tuiColWidth-2] + "…"
 				}
 			}
 			line += fmt.Sprintf("%-*s", tuiColWidth, action)
@@ -366,10 +452,13 @@ func (m *keysModel) renderMatrixView(b *strings.Builder, searchQuery string, t *
 
 	// Scroll indicator
 	if len(m.matrix.TUINames) > maxTUIs {
-		scrollInfo := fmt.Sprintf("\n  %s Showing TUIs %d-%d of %d (h/l to scroll)",
-			t.Muted.Render("◀▶"),
-			startTUI+1, endTUI, len(m.matrix.TUINames))
+		scrollInfo := fmt.Sprintf("\n  %s %s %d-%d of %d %s",
+			t.Highlight.Render("◀"),
+			t.Bold.Render("Showing TUIs"),
+			startTUI+1, endTUI, len(m.matrix.TUINames),
+			t.Highlight.Render("▶"))
 		b.WriteString(scrollInfo + "\n")
+		b.WriteString("  " + t.Muted.Render("Press h/l or ←/→ to scroll through all TUIs") + "\n")
 	}
 }
 
