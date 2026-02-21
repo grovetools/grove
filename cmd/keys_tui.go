@@ -21,9 +21,12 @@ type keysModel struct {
 	baseKeys  keymap.Base
 	bindings  []keys.KeyBinding
 	conflicts []keys.Conflict
+	analysis  keys.AnalysisReport
 
 	domains   []keys.KeyDomain
 	activeTab int
+
+	viewMode int // 0 = By Domain/Section, 1 = By Canonical Action
 
 	searchInput  textinput.Model
 	searchActive bool
@@ -42,6 +45,7 @@ func runKeysTUI() error {
 
 	bindings, _ := keys.Aggregate(cfg)
 	conflicts := keys.DetectConflicts(bindings)
+	analysis := keys.Analyze(bindings)
 
 	ti := textinput.New()
 	ti.Placeholder = "Search bindings or actions..."
@@ -52,8 +56,10 @@ func runKeysTUI() error {
 		baseKeys:    keymap.Load(cfg, ""),
 		bindings:    bindings,
 		conflicts:   conflicts,
+		analysis:    analysis,
 		domains:     keys.AllDomains(),
 		activeTab:   0,
+		viewMode:    0,
 		searchInput: ti,
 		vp:          viewport.New(80, 20),
 	}
@@ -119,6 +125,14 @@ func (m keysModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Toggle view mode with 'v'
+		if msg.String() == "v" {
+			m.viewMode = (m.viewMode + 1) % 2
+			m.vp.GotoTop()
+			m.updateViewport()
+			return m, nil
+		}
+
 		// Let viewport handle scrolling
 		m.vp, cmd = m.vp.Update(msg)
 		return m, cmd
@@ -130,9 +144,77 @@ func (m keysModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *keysModel) updateViewport() {
 	var b strings.Builder
 	t := theme.DefaultTheme
-
-	domain := m.domains[m.activeTab]
 	searchQuery := strings.ToLower(m.searchInput.Value())
+
+	if m.viewMode == 1 {
+		m.renderCanonicalView(&b, searchQuery, t)
+	} else {
+		m.renderDomainView(&b, searchQuery, t)
+	}
+
+	m.vp.SetContent(b.String())
+}
+
+func (m *keysModel) renderCanonicalView(b *strings.Builder, searchQuery string, t *theme.Theme) {
+	b.WriteString("\n" + t.Header.Render(" CANONICAL ACTIONS & CONSISTENCY ") + "\n\n")
+
+	for _, canon := range keys.StandardActions {
+		if searchQuery != "" && !strings.Contains(strings.ToLower(canon.Name), searchQuery) {
+			continue
+		}
+
+		res, exists := m.analysis.Consistency[canon.Name]
+		if !exists {
+			continue
+		}
+
+		b.WriteString(fmt.Sprintf("  %s (Standard: %s)\n",
+			t.Bold.Render(canon.Name),
+			t.Highlight.Render(strings.Join(res.CanonicalKeys, ", "))))
+
+		for tui, ks := range res.TUIs {
+			match := false
+			for _, k := range ks {
+				for _, ck := range res.CanonicalKeys {
+					if k == ck {
+						match = true
+						break
+					}
+				}
+				if match {
+					break
+				}
+			}
+
+			status := t.Success.Render("✓")
+			if !match {
+				status = t.Warning.Render("← differs")
+			}
+			// Extract short TUI name
+			shortTUI := strings.Split(tui, " ")[0]
+			b.WriteString(fmt.Sprintf("    %-20s %-10s %s\n", shortTUI, strings.Join(ks, ", "), status))
+		}
+		b.WriteString("\n")
+	}
+
+	if len(m.analysis.SemanticConflicts) > 0 {
+		b.WriteString("\n" + t.Header.Render(" SEMANTIC CONFLICTS ") + "\n\n")
+		for _, sc := range m.analysis.SemanticConflicts {
+			if searchQuery != "" && !strings.Contains(strings.ToLower(sc.Key), searchQuery) {
+				continue
+			}
+			b.WriteString(fmt.Sprintf("  Key [%s] has different meanings:\n", t.Error.Render(sc.Key)))
+			for tui, meaning := range sc.Meanings {
+				shortTUI := strings.Split(tui, " ")[0]
+				b.WriteString(fmt.Sprintf("    %-20s %q\n", shortTUI, meaning))
+			}
+			b.WriteString("\n")
+		}
+	}
+}
+
+func (m *keysModel) renderDomainView(b *strings.Builder, searchQuery string, t *theme.Theme) {
+	domain := m.domains[m.activeTab]
 
 	// Group by section
 	sections := make(map[string][]keys.KeyBinding)
@@ -208,8 +290,6 @@ func (m *keysModel) updateViewport() {
 			}
 		}
 	}
-
-	m.vp.SetContent(b.String())
 }
 
 func (m keysModel) View() string {
@@ -242,7 +322,11 @@ func (m keysModel) View() string {
 	if m.searchActive || m.searchInput.Value() != "" {
 		s.WriteString(m.searchInput.View() + "\n")
 	} else {
-		s.WriteString(t.Muted.Render(" / to search • ]/[ or h/l to switch domains • j/k to scroll • q to quit\n"))
+		viewLabel := "Domain View"
+		if m.viewMode == 1 {
+			viewLabel = "Canonical Action View"
+		}
+		s.WriteString(t.Muted.Render(fmt.Sprintf(" / to search • ]/[ to switch domains • v to toggle view (%s) • q to quit\n", viewLabel)))
 	}
 
 	// Border
