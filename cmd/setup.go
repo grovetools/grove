@@ -1194,47 +1194,38 @@ A Grove project.
 }
 
 func (m *setupModel) setupTmuxBindings() {
-	popupsContent := `# Grove tmux popup bindings
-# Source this file from your tmux.conf: source-file ~/.config/tmux/popups.conf
+	// Generate tmux popup config using grove keys generate tmux
+	// This reads from [keys.tmux.popups] in grove.toml and writes to ~/.cache/grove/tmux/popups.conf
+	m.service.RunCommand("grove", "keys", "generate", "tmux")
 
-# --- Popup Settings ---
-set -g popup-border-lines none
-
-# --- Grove Flow Plan Status ---
-bind-key -n C-p run-shell "flow tmux status"
-
-# --- Nav Session Switcher ---
-bind-key -n C-f display-popup -w 100% -h 98% -x C -y C -E "nav sz"
-
-# --- Nav Key Manager ---
-bind-key -n M-p display-popup -w 100% -h 98% -x C -y C -E "nav km"
-
-# --- Nav Session History ---
-bind-key -n M-h display-popup -w 100% -h 98% -x C -y C -E "nav history"
-
-# --- Nav Window Selector ---
-bind-key -n M-w display-popup -w 100% -h 98% -x C -y C -E "nav windows"
-
-# --- Context (cx) View ---
-bind-key -n M-v display-popup -w 100% -h 98% -x C -y C -E "cx view"
-
-# --- NB (Notes) TUI ---
-bind-key -n C-n run-shell "nb tmux tui"
-
-# --- Hooks Sessions ---
-bind-key -n M-s display-popup -w 100% -h 98% -x C -y C "hooks sessions browse"
-
-# --- Core Editor ---
-bind-key -n C-e run-shell "core tmux editor"
-`
-	m.service.WriteFile("~/.config/tmux/popups.conf", []byte(popupsContent), 0644)
-
-	// Check if tmux.conf already sources popups.conf
+	// Use if-shell pattern for robust sourcing (only loads if file exists)
 	tmuxConfPath := "~/.config/tmux/tmux.conf"
-	contains, _ := m.service.FileContains(tmuxConfPath, "popups.conf")
-	if !contains {
-		m.service.AppendToFile(tmuxConfPath, "\n# Grove popup bindings\nsource-file ~/.config/tmux/popups.conf\n")
+	ifShellLine := `if-shell "test -f ~/.cache/grove/tmux/popups.conf" "source-file ~/.cache/grove/tmux/popups.conf"`
+
+	// Check if already using if-shell pattern
+	containsIfShell, _ := m.service.FileContains(tmuxConfPath, ifShellLine)
+	if containsIfShell {
+		return // Already configured
 	}
+
+	// Check for and replace old direct source patterns
+	oldPatterns := []string{
+		"source-file ~/.config/tmux/popups.conf",
+		"source-file ~/.config/grove/tmux/popups.conf",
+		"source-file ~/.cache/grove/tmux/popups.conf",
+	}
+
+	for _, old := range oldPatterns {
+		contains, _ := m.service.FileContains(tmuxConfPath, old)
+		if contains {
+			// Replace with if-shell pattern
+			m.service.ReplaceInFile(tmuxConfPath, old, ifShellLine)
+			return
+		}
+	}
+
+	// Add new if-shell line
+	m.service.AppendToFile(tmuxConfPath, "\n# Grove popup bindings (managed by grove keys)\n"+ifShellLine+"\n")
 }
 
 func (m *setupModel) setupNeovimPlugin() {
@@ -1640,8 +1631,8 @@ func (m *setupModel) viewTmuxBindingsStep() string {
 	var content strings.Builder
 
 	// Explanation
-	explanation := `This will add Grove popup bindings to your tmux config directory.
-These bindings give you quick keyboard access to Grove tools from any tmux session.`
+	explanation := `This will configure tmux popup bindings managed by grove keys.
+The bindings are stored in grove.toml and generated to a cache file.`
 	content.WriteString(theme.DefaultTheme.Muted.Render(explanation))
 	content.WriteString("\n\n")
 
@@ -1649,11 +1640,14 @@ These bindings give you quick keyboard access to Grove tools from any tmux sessi
 	boxStyle := theme.DefaultTheme.Box.Copy().Width(m.width - 8)
 
 	var boxContent strings.Builder
-	boxContent.WriteString(theme.DefaultTheme.Bold.Render("Files to be created:") + "\n\n")
-	boxContent.WriteString(theme.DefaultTheme.Muted.Render("  ~/.config/tmux/popups.conf\n"))
-	boxContent.WriteString(theme.DefaultTheme.Muted.Render("  (source-file line appended to tmux.conf)\n"))
-	boxContent.WriteString("\n")
-	boxContent.WriteString(theme.DefaultTheme.Info.Render("Press Enter to continue or esc to go back."))
+	boxContent.WriteString(theme.DefaultTheme.Bold.Render("What will happen:") + "\n\n")
+	boxContent.WriteString(theme.DefaultTheme.Muted.Render("  1. Run 'grove keys generate tmux' to create cache file\n"))
+	boxContent.WriteString(theme.DefaultTheme.Muted.Render("  2. Add if-shell source line to tmux.conf:\n"))
+	boxContent.WriteString(theme.DefaultTheme.Code.Render("     if-shell \"test -f ~/.cache/...\" \"source-file ...\""))
+	boxContent.WriteString("\n\n")
+	boxContent.WriteString(theme.DefaultTheme.Info.Render("Manage bindings with: grove keys popups"))
+	boxContent.WriteString("\n\n")
+	boxContent.WriteString(theme.DefaultTheme.Muted.Render("Press Enter to continue or esc to go back."))
 
 	content.WriteString(boxStyle.Render(boxContent.String()))
 	content.WriteString("\n\n")
@@ -2014,45 +2008,17 @@ Add projects to this directory and they will be automatically discovered by Grov
 
 	if selectedOnly["tmux"] {
 		pretty.InfoPretty("Setting up tmux bindings...")
-		popupsContent := `# Grove tmux popup bindings
-# Source this file from your tmux.conf: source-file ~/.config/tmux/popups.conf
 
-# --- Popup Settings ---
-set -g popup-border-lines none
+		// Generate tmux popup config using grove keys generate tmux
+		service.RunCommand("grove", "keys", "generate", "tmux")
 
-# --- Grove Flow Plan Status ---
-bind-key -n C-p run-shell "flow tmux status"
-
-# --- Nav Session Switcher ---
-bind-key -n C-f display-popup -w 100% -h 98% -x C -y C -E "nav sz"
-
-# --- Nav Key Manager ---
-bind-key -n M-p display-popup -w 100% -h 98% -x C -y C -E "nav km"
-
-# --- Nav Session History ---
-bind-key -n M-h display-popup -w 100% -h 98% -x C -y C -E "nav history"
-
-# --- Nav Window Selector ---
-bind-key -n M-w display-popup -w 100% -h 98% -x C -y C -E "nav windows"
-
-# --- Context (cx) View ---
-bind-key -n M-v display-popup -w 100% -h 98% -x C -y C -E "cx view"
-
-# --- NB (Notes) TUI ---
-bind-key -n C-n run-shell "nb tmux tui"
-
-# --- Hooks Sessions ---
-bind-key -n M-s display-popup -w 100% -h 98% -x C -y C "hooks sessions browse"
-
-# --- Core Editor ---
-bind-key -n C-e run-shell "core tmux editor"
-`
-		service.WriteFile("~/.config/tmux/popups.conf", []byte(popupsContent), 0644)
-
+		// Use if-shell pattern for robust sourcing
 		tmuxConfPath := "~/.config/tmux/tmux.conf"
+		ifShellLine := `if-shell "test -f ~/.cache/grove/tmux/popups.conf" "source-file ~/.cache/grove/tmux/popups.conf"`
+
 		contains, _ := service.FileContains(tmuxConfPath, "popups.conf")
 		if !contains {
-			service.AppendToFile(tmuxConfPath, "\nsource-file ~/.config/tmux/popups.conf\n")
+			service.AppendToFile(tmuxConfPath, "\n# Grove popup bindings (managed by grove keys)\n"+ifShellLine+"\n")
 		}
 	}
 

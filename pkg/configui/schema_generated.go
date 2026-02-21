@@ -104,6 +104,27 @@ var SchemaFields = []FieldMeta{
 		RefType:     "TUISchemaConfig",
 		Children: []FieldMeta{
 			{
+				Path:        []string{"tui", "preset"},
+				Type:        FieldSelect,
+				Description: "Keybinding preset: vim (default) emacs or arrows",
+				Options:     []string{"vim", "emacs", "arrows"},
+				Important:   true,
+			},
+			{
+				Path:        []string{"tui", "theme"},
+				Type:        FieldSelect,
+				Description: "Color theme for terminal interfaces",
+				Options:     []string{"kanagawa", "gruvbox", "terminal"},
+				Important:   true,
+			},
+			{
+				Path:        []string{"tui", "icons"},
+				Type:        FieldSelect,
+				Description: "Icon set to use: nerd or ascii",
+				Options:     []string{"nerd", "ascii"},
+				Important:   true,
+			},
+			{
 				Path:        []string{"tui", "keybindings"},
 				Type:        FieldObject,
 				Description: "Custom keybinding overrides",
@@ -172,27 +193,6 @@ var SchemaFields = []FieldMeta{
 					},
 				},
 			},
-			{
-				Path:        []string{"tui", "preset"},
-				Type:        FieldSelect,
-				Description: "Keybinding preset: vim (default) emacs or arrows",
-				Options:     []string{"vim", "emacs", "arrows"},
-				Important:   true,
-			},
-			{
-				Path:        []string{"tui", "theme"},
-				Type:        FieldSelect,
-				Description: "Color theme for terminal interfaces",
-				Options:     []string{"kanagawa", "gruvbox", "terminal"},
-				Important:   true,
-			},
-			{
-				Path:        []string{"tui", "icons"},
-				Type:        FieldSelect,
-				Description: "Icon set to use: nerd or ascii",
-				Options:     []string{"nerd", "ascii"},
-				Important:   true,
-			},
 		},
 	},
 	{
@@ -203,6 +203,12 @@ var SchemaFields = []FieldMeta{
 		Priority:    60,
 		RefType:     "LoggingSchemaConfig",
 		Children: []FieldMeta{
+			{
+				Path:        []string{"logging", "level"},
+				Type:        FieldString,
+				Description: "Minimum log level (debug",
+				Required:    true,
+			},
 			{
 				Path:        []string{"logging", "log_startup"},
 				Type:        FieldBool,
@@ -224,12 +230,6 @@ var SchemaFields = []FieldMeta{
 				Path:        []string{"logging", "groups"},
 				Type:        FieldMap,
 				Description: "Named collections of component loggers for filtering",
-			},
-			{
-				Path:        []string{"logging", "level"},
-				Type:        FieldString,
-				Description: "Minimum log level (debug",
-				Required:    true,
 			},
 		},
 	},

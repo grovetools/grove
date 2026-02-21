@@ -22,10 +22,14 @@ func BuildMatrix(bindings []KeyBinding) MatrixReport {
 	tuiSet := make(map[string]bool)
 
 	for _, b := range bindings {
-		if b.Domain != DomainTUI {
+		if b.Domain != DomainTUI && b.Domain != DomainTmux {
 			continue
 		}
+
 		tuiName := b.Source
+		if b.Domain == DomainTmux {
+			tuiName = "tmux-popup"
+		}
 		tuiSet[tuiName] = true
 
 		for _, k := range b.Keys {

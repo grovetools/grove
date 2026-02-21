@@ -251,6 +251,55 @@ func AbbreviatePath(path string) string {
 	return path
 }
 
+// RunCommand executes a command, respecting dry-run mode
+func (s *Service) RunCommand(name string, args ...string) error {
+	description := fmt.Sprintf("Run %s %s", name, strings.Join(args, " "))
+
+	if s.dryRun {
+		s.logger.Infof("[dry-run] Would run: %s %s", name, strings.Join(args, " "))
+		s.logAction(ActionCreateDir, description, "", true, nil)
+		return nil
+	}
+
+	cmd := exec.Command(name, args...)
+	if err := cmd.Run(); err != nil {
+		s.logAction(ActionCreateDir, description, "", false, err)
+		return fmt.Errorf("failed to run %s: %w", name, err)
+	}
+
+	s.logger.Infof("Ran: %s %s", name, strings.Join(args, " "))
+	s.logAction(ActionCreateDir, description, "", true, nil)
+	return nil
+}
+
+// ReplaceInFile replaces all occurrences of old with new in a file
+func (s *Service) ReplaceInFile(path, old, new string) error {
+	expandedPath := expandPath(path)
+	description := fmt.Sprintf("Update %s", AbbreviatePath(expandedPath))
+
+	if s.dryRun {
+		s.logger.Infof("[dry-run] Would replace in %s: %q -> %q", path, old, new)
+		s.logAction(ActionWriteFile, description, expandedPath, true, nil)
+		return nil
+	}
+
+	content, err := os.ReadFile(expandedPath)
+	if err != nil {
+		s.logAction(ActionWriteFile, description, expandedPath, false, err)
+		return fmt.Errorf("failed to read %s: %w", path, err)
+	}
+
+	newContent := strings.ReplaceAll(string(content), old, new)
+	if err := os.WriteFile(expandedPath, []byte(newContent), 0644); err != nil {
+		s.logAction(ActionWriteFile, description, expandedPath, false, err)
+		return fmt.Errorf("failed to write %s: %w", path, err)
+	}
+
+	s.logger.Infof("Updated %s", path)
+	s.logAction(ActionWriteFile, description, expandedPath, true, nil)
+	return nil
+}
+
 // GlobalConfigPath returns the path to the global grove configuration file.
 func GlobalConfigPath() string {
 	configDir := paths.ConfigDir()

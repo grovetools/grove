@@ -37,11 +37,33 @@ type Conflict struct {
 	Bindings []KeyBinding // All bindings that use this key
 }
 
+// PopupSize defines the dimensions of a tmux popup.
+type PopupSize struct {
+	Width  string `yaml:"width,omitempty" toml:"width,omitempty"`
+	Height string `yaml:"height,omitempty" toml:"height,omitempty"`
+}
+
+// PopupPosition defines the alignment of a tmux popup.
+type PopupPosition struct {
+	X string `yaml:"x,omitempty" toml:"x,omitempty"`
+	Y string `yaml:"y,omitempty" toml:"y,omitempty"`
+}
+
+// TmuxPopupConfig defines the behavior and appearance of a tmux popup binding.
+type TmuxPopupConfig struct {
+	Key            interface{}    `yaml:"key" toml:"key"`
+	Command        string         `yaml:"command" toml:"command"`
+	Style          string         `yaml:"style,omitempty" toml:"style,omitempty"` // "popup", "run-shell", "window"
+	Size           *PopupSize     `yaml:"size,omitempty" toml:"size,omitempty"`
+	Position       *PopupPosition `yaml:"position,omitempty" toml:"position,omitempty"`
+	ExitOnComplete bool           `yaml:"exit_on_complete,omitempty" toml:"exit_on_complete,omitempty"`
+}
+
 // KeysExtension represents the [keys] block in grove.toml/grove.yml.
 // This captures tmux popup bindings, nav pane keys, and nvim defaults.
 type KeysExtension struct {
 	Tmux struct {
-		Popups map[string]interface{} `yaml:"popups" toml:"popups"`
+		Popups map[string]TmuxPopupConfig `yaml:"popups" toml:"popups"`
 	} `yaml:"tmux" toml:"tmux"`
 	Nav struct {
 		AvailableKeys []string `yaml:"available_keys" toml:"available_keys"`

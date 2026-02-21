@@ -23,12 +23,17 @@ func Aggregate(cfg *config.Config) ([]KeyBinding, error) {
 	}
 
 	// 2. Tmux Popup Bindings
-	for action, keysRaw := range keysExt.Tmux.Popups {
-		keys := parseStringOrSlice(keysRaw)
-		desc := TmuxCommandMap[action]
+	for action, popupCfg := range keysExt.Tmux.Popups {
+		keys := parseStringOrSlice(popupCfg.Key)
+
+		desc := popupCfg.Command
 		if desc == "" {
-			desc = action
+			desc = TmuxCommandMap[action]
+			if desc == "" {
+				desc = action
+			}
 		}
+
 		allBindings = append(allBindings, KeyBinding{
 			Domain:      DomainTmux,
 			Section:     "Popups",

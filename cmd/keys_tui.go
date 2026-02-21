@@ -2,6 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -131,6 +134,26 @@ func (m keysModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.vp.GotoTop()
 			m.updateViewport()
 			return m, nil
+		}
+
+		// Edit configuration with 'e' when on TMUX tab
+		if msg.String() == "e" && m.domains[m.activeTab] == keys.DomainTmux {
+			home, _ := os.UserHomeDir()
+			configPath := filepath.Join(home, ".config", "grove", "grove.toml")
+
+			editor := os.Getenv("EDITOR")
+			if editor == "" {
+				editor = "vim"
+			}
+
+			cmd := exec.Command(editor, configPath)
+			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+				// Re-generate bindings after editor closes
+				if err == nil {
+					_ = exec.Command("grove", "keys", "generate", "tmux").Run()
+				}
+				return nil
+			})
 		}
 
 		// Let viewport handle scrolling
@@ -326,7 +349,12 @@ func (m keysModel) View() string {
 		if m.viewMode == 1 {
 			viewLabel = "Canonical Action View"
 		}
-		s.WriteString(t.Muted.Render(fmt.Sprintf(" / to search • ]/[ to switch domains • v to toggle view (%s) • q to quit\n", viewLabel)))
+		helpText := fmt.Sprintf(" / to search • ]/[ to switch domains • v to toggle view (%s) • q to quit", viewLabel)
+		// Add edit hint when on TMUX tab
+		if m.domains[m.activeTab] == keys.DomainTmux {
+			helpText = " / to search • ]/[ to switch domains • e to edit • v to toggle view • q to quit"
+		}
+		s.WriteString(t.Muted.Render(helpText + "\n"))
 	}
 
 	// Border
