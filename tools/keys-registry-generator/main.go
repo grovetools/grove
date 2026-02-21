@@ -20,24 +20,36 @@ import (
 
 	// TUI keymap imports - add new TUIs here
 	cx_rules "github.com/grovetools/cx/cmd/rules"
+	cx_view "github.com/grovetools/cx/cmd/view"
 	flow_status "github.com/grovetools/flow/cmd/status_tui"
+	gemini_cmd "github.com/grovetools/grove-gemini/cmd"
 	hooks_cmd "github.com/grovetools/hooks/cmd"
+	nav_cmd "github.com/grovetools/nav/cmd"
 	nb_cmd "github.com/grovetools/nb/cmd"
 	tend_cmd "github.com/grovetools/tend/cmd"
-	// Note: nav/cmd/gmux is `package main` and can't be imported.
-	// Nav keymaps would need to be refactored to a separate package to be included.
 )
 
 // getTUIInfos returns all TUI keymap info from across the ecosystem.
 // Add new TUIs here when they implement KeymapInfo().
 func getTUIInfos() []keymap.TUIInfo {
 	return []keymap.TUIInfo{
-		flow_status.KeymapInfo(),
-		nb_cmd.BrowserKeymapInfo(),
+		// cx
 		cx_rules.KeymapInfo(),
-		tend_cmd.RunnerKeymapInfo(),
+		cx_view.KeymapInfo(),
+		// flow
+		flow_status.KeymapInfo(),
+		// grove-gemini
+		gemini_cmd.QueryTuiKeymapInfo(),
+		gemini_cmd.DashboardKeymapInfo(),
+		gemini_cmd.CacheKeymapInfo(),
+		// hooks
 		hooks_cmd.BrowseKeymapInfo(),
-		// TODO: Add nav sessionize once its keymap is refactored to a library package
+		// nav
+		nav_cmd.SessionizeKeymapInfo(),
+		// nb
+		nb_cmd.BrowserKeymapInfo(),
+		// tend
+		tend_cmd.RunnerKeymapInfo(),
 	}
 }
 

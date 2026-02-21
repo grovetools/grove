@@ -25,11 +25,15 @@ type keysModel struct {
 	bindings  []keys.KeyBinding
 	conflicts []keys.Conflict
 	analysis  keys.AnalysisReport
+	matrix    keys.MatrixReport
 
 	domains   []keys.KeyDomain
 	activeTab int
 
-	viewMode int // 0 = By Domain/Section, 1 = By Canonical Action
+	viewMode int // 0 = By Domain/Section, 1 = By Canonical Action, 2 = Matrix
+
+	// Matrix view state
+	matrixScrollX int // Horizontal scroll offset for matrix
 
 	searchInput  textinput.Model
 	searchActive bool
@@ -49,22 +53,25 @@ func runKeysTUI() error {
 	bindings, _ := keys.Aggregate(cfg)
 	conflicts := keys.DetectConflicts(bindings)
 	analysis := keys.Analyze(bindings)
+	matrix := keys.BuildMatrix(bindings)
 
 	ti := textinput.New()
 	ti.Placeholder = "Search bindings or actions..."
 	ti.Prompt = " / "
 
 	m := keysModel{
-		cfg:         cfg,
-		baseKeys:    keymap.Load(cfg, ""),
-		bindings:    bindings,
-		conflicts:   conflicts,
-		analysis:    analysis,
-		domains:     keys.AllDomains(),
-		activeTab:   0,
-		viewMode:    0,
-		searchInput: ti,
-		vp:          viewport.New(80, 20),
+		cfg:           cfg,
+		baseKeys:      keymap.Load(cfg, ""),
+		bindings:      bindings,
+		conflicts:     conflicts,
+		analysis:      analysis,
+		matrix:        matrix,
+		domains:       keys.AllDomains(),
+		activeTab:     0,
+		viewMode:      0,
+		matrixScrollX: 0,
+		searchInput:   ti,
+		vp:            viewport.New(80, 20),
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
@@ -130,10 +137,27 @@ func (m keysModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Toggle view mode with 'v'
 		if msg.String() == "v" {
-			m.viewMode = (m.viewMode + 1) % 2
+			m.viewMode = (m.viewMode + 1) % 3
+			m.matrixScrollX = 0 // Reset horizontal scroll when switching views
 			m.vp.GotoTop()
 			m.updateViewport()
 			return m, nil
+		}
+
+		// Horizontal scroll for matrix view with h/l
+		if m.viewMode == 2 {
+			if msg.String() == "l" || msg.String() == "right" {
+				m.matrixScrollX++
+				m.updateViewport()
+				return m, nil
+			}
+			if msg.String() == "h" || msg.String() == "left" {
+				if m.matrixScrollX > 0 {
+					m.matrixScrollX--
+				}
+				m.updateViewport()
+				return m, nil
+			}
 		}
 
 		// Edit configuration with 'e' when on TMUX tab
@@ -169,9 +193,12 @@ func (m *keysModel) updateViewport() {
 	t := theme.DefaultTheme
 	searchQuery := strings.ToLower(m.searchInput.Value())
 
-	if m.viewMode == 1 {
+	switch m.viewMode {
+	case 1:
 		m.renderCanonicalView(&b, searchQuery, t)
-	} else {
+	case 2:
+		m.renderMatrixView(&b, searchQuery, t)
+	default:
 		m.renderDomainView(&b, searchQuery, t)
 	}
 
@@ -233,6 +260,116 @@ func (m *keysModel) renderCanonicalView(b *strings.Builder, searchQuery string, 
 			}
 			b.WriteString("\n")
 		}
+	}
+}
+
+func (m *keysModel) renderMatrixView(b *strings.Builder, searchQuery string, t *theme.Theme) {
+	b.WriteString("\n" + t.Header.Render(" KEY × TUI MATRIX ") + "\n\n")
+
+	if len(m.matrix.Rows) == 0 {
+		b.WriteString("  " + t.Muted.Render("No keybindings found.") + "\n")
+		return
+	}
+
+	// Column widths
+	keyColWidth := 12
+	tuiColWidth := 16
+
+	// Visible TUIs based on scroll position
+	visibleTUIs := m.matrix.TUINames
+	startTUI := m.matrixScrollX
+	if startTUI >= len(visibleTUIs) {
+		startTUI = 0
+		m.matrixScrollX = 0
+	}
+
+	// Calculate how many TUIs we can show
+	availableWidth := m.width - keyColWidth - 15 // Reserve space for key column and status
+	maxTUIs := availableWidth / tuiColWidth
+	if maxTUIs < 1 {
+		maxTUIs = 1
+	}
+	endTUI := startTUI + maxTUIs
+	if endTUI > len(visibleTUIs) {
+		endTUI = len(visibleTUIs)
+	}
+	visibleTUIs = visibleTUIs[startTUI:endTUI]
+
+	// Header row
+	header := fmt.Sprintf("  %-*s", keyColWidth, "KEY")
+	for _, tui := range visibleTUIs {
+		shortName := strings.Split(tui, " ")[0]
+		if len(shortName) > tuiColWidth-2 {
+			shortName = shortName[:tuiColWidth-3] + "…"
+		}
+		header += fmt.Sprintf("%-*s", tuiColWidth, shortName)
+	}
+	header += "STATUS"
+	b.WriteString(t.Bold.Render(header) + "\n")
+
+	// Separator
+	sep := "  " + strings.Repeat("─", keyColWidth)
+	for range visibleTUIs {
+		sep += strings.Repeat("─", tuiColWidth)
+	}
+	sep += strings.Repeat("─", 12)
+	b.WriteString(t.Muted.Render(sep) + "\n")
+
+	// Data rows
+	for _, row := range m.matrix.Rows {
+		// Filter by search
+		if searchQuery != "" {
+			match := strings.Contains(strings.ToLower(row.Key), searchQuery)
+			for _, action := range row.TUIs {
+				if strings.Contains(strings.ToLower(action), searchQuery) {
+					match = true
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+		}
+
+		// Key column
+		keyStr := row.Key
+		if len(keyStr) > keyColWidth-2 {
+			keyStr = keyStr[:keyColWidth-3] + "…"
+		}
+		line := fmt.Sprintf("  %s", t.Highlight.Render(fmt.Sprintf("%-*s", keyColWidth, keyStr)))
+
+		// TUI columns
+		for _, tui := range visibleTUIs {
+			action := "-"
+			if a, ok := row.TUIs[tui]; ok {
+				action = a
+				if len(action) > tuiColWidth-2 {
+					action = action[:tuiColWidth-3] + "…"
+				}
+			}
+			line += fmt.Sprintf("%-*s", tuiColWidth, action)
+		}
+
+		// Status column
+		var status string
+		if !row.Consistent {
+			status = t.Warning.Render("⚠ CONFLICT")
+		} else if len(row.TUIs) == 1 {
+			status = t.Muted.Render("TUI-only")
+		} else {
+			status = t.Success.Render("✓")
+		}
+		line += status
+
+		b.WriteString(line + "\n")
+	}
+
+	// Scroll indicator
+	if len(m.matrix.TUINames) > maxTUIs {
+		scrollInfo := fmt.Sprintf("\n  %s Showing TUIs %d-%d of %d (h/l to scroll)",
+			t.Muted.Render("◀▶"),
+			startTUI+1, endTUI, len(m.matrix.TUINames))
+		b.WriteString(scrollInfo + "\n")
 	}
 }
 
@@ -345,14 +482,23 @@ func (m keysModel) View() string {
 	if m.searchActive || m.searchInput.Value() != "" {
 		s.WriteString(m.searchInput.View() + "\n")
 	} else {
-		viewLabel := "Domain View"
-		if m.viewMode == 1 {
-			viewLabel = "Canonical Action View"
+		var viewLabel string
+		switch m.viewMode {
+		case 1:
+			viewLabel = "Canonical"
+		case 2:
+			viewLabel = "Matrix"
+		default:
+			viewLabel = "Domain"
 		}
-		helpText := fmt.Sprintf(" / to search • ]/[ to switch domains • v to toggle view (%s) • q to quit", viewLabel)
-		// Add edit hint when on TMUX tab
-		if m.domains[m.activeTab] == keys.DomainTmux {
-			helpText = " / to search • ]/[ to switch domains • e to edit • v to toggle view • q to quit"
+
+		var helpText string
+		if m.viewMode == 2 {
+			helpText = fmt.Sprintf(" / to search • h/l to scroll TUIs • v to toggle view (%s) • q to quit", viewLabel)
+		} else if m.domains[m.activeTab] == keys.DomainTmux {
+			helpText = fmt.Sprintf(" / to search • ]/[ to switch domains • e to edit • v to toggle view (%s) • q to quit", viewLabel)
+		} else {
+			helpText = fmt.Sprintf(" / to search • ]/[ to switch domains • v to toggle view (%s) • q to quit", viewLabel)
 		}
 		s.WriteString(t.Muted.Render(helpText + "\n"))
 	}

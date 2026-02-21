@@ -38,6 +38,64 @@ var TUIRegistry = []TUIRegistryEntry{
 		},
 	},
 	{
+		Name:        "cx-view",
+		Package:     "cx",
+		Description: "Context viewer with tree, stats, and list pages",
+		Sections: []SectionEntry{
+			{
+				Name: "Navigation",
+				Bindings: []BindingEntry{
+					{Name: "up", Keys: []string{"k", "up"}, Description: "up", Enabled: true},
+					{Name: "down", Keys: []string{"j", "down"}, Description: "down", Enabled: true},
+					{Name: "go to top", Keys: []string{"g"}, Description: "go to top", Enabled: true},
+					{Name: "go to bottom", Keys: []string{"G"}, Description: "go to bottom", Enabled: true},
+					{Name: "half page up", Keys: []string{"ctrl+u"}, Description: "half page up", Enabled: true},
+					{Name: "half page down", Keys: []string{"ctrl+d"}, Description: "half page down", Enabled: true},
+				},
+			},
+			{
+				Name: "Pages",
+				Bindings: []BindingEntry{
+					{Name: "next page", Keys: []string{"tab"}, Description: "next page", Enabled: true},
+					{Name: "prev page", Keys: []string{"shift+tab"}, Description: "prev page", Enabled: true},
+				},
+			},
+			{
+				Name: "Rules",
+				Bindings: []BindingEntry{
+					{Name: "edit rules", Keys: []string{"e"}, Description: "edit rules", Enabled: true},
+					{Name: "select rule set", Keys: []string{"s"}, Description: "select rule set", Enabled: true},
+					{Name: "exclude file", Keys: []string{"x"}, Description: "exclude file", Enabled: true},
+					{Name: "exclude dir", Keys: []string{"X"}, Description: "exclude dir", Enabled: true},
+					{Name: "refresh", Keys: []string{"r"}, Description: "refresh", Enabled: true},
+				},
+			},
+			{
+				Name: "Display",
+				Bindings: []BindingEntry{
+					{Name: "toggle sort", Keys: []string{"t"}, Description: "toggle sort", Enabled: true},
+				},
+			},
+			{
+				Name: "Fold",
+				Bindings: []BindingEntry{
+					{Name: "open fold", Keys: []string{"zo"}, Description: "open fold", Enabled: true},
+					{Name: "close fold", Keys: []string{"zc"}, Description: "close fold", Enabled: true},
+					{Name: "toggle fold", Keys: []string{"za"}, Description: "toggle fold", Enabled: true},
+					{Name: "open all", Keys: []string{"zR"}, Description: "open all", Enabled: true},
+					{Name: "close all", Keys: []string{"zM"}, Description: "close all", Enabled: true},
+				},
+			},
+			{
+				Name: "System",
+				Bindings: []BindingEntry{
+					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true},
+					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true},
+				},
+			},
+		},
+	},
+	{
 		Name:        "flow-status",
 		Package:     "flow",
 		Description: "Flow plan status browser and job manager",
@@ -102,6 +160,178 @@ var TUIRegistry = []TUIRegistryEntry{
 		},
 	},
 	{
+		Name:        "gemini-cache",
+		Package:     "grove-gemini",
+		Description: "Response cache browser and manager",
+		Sections: []SectionEntry{
+			{
+				Name: "Navigation",
+				Bindings: []BindingEntry{
+					{Name: "up", Keys: []string{"k", "up"}, Description: "up", Enabled: true},
+					{Name: "down", Keys: []string{"j", "down"}, Description: "down", Enabled: true},
+					{Name: "left", Keys: []string{"h", "left"}, Description: "left", Enabled: true},
+					{Name: "right", Keys: []string{"l", "right"}, Description: "right", Enabled: true},
+					{Name: "page up", Keys: []string{"ctrl+u", "pgup"}, Description: "page up", Enabled: true},
+					{Name: "page down", Keys: []string{"ctrl+d", "pgdown"}, Description: "page down", Enabled: true},
+					{Name: "top", Keys: []string{"gg"}, Description: "top", Enabled: true},
+					{Name: "bottom", Keys: []string{"G"}, Description: "bottom", Enabled: true},
+				},
+			},
+			{
+				Name: "Actions",
+				Bindings: []BindingEntry{
+					{Name: "confirm", Keys: []string{"enter", "y"}, Description: "confirm", Enabled: true},
+					{Name: "cancel", Keys: []string{"n", "ctrl+g"}, Description: "cancel", Enabled: true},
+					{Name: "back", Keys: []string{"esc"}, Description: "back", Enabled: true},
+					{Name: "edit", Keys: []string{"e"}, Description: "edit", Enabled: true},
+					{Name: "delete", Keys: []string{"dd"}, Description: "delete", Enabled: true},
+					{Name: "yank", Keys: []string{"yy"}, Description: "yank", Enabled: true},
+				},
+			},
+			{
+				Name: "Search",
+				Bindings: []BindingEntry{
+					{Name: "search", Keys: []string{"/"}, Description: "search", Enabled: true},
+					{Name: "next match", Keys: []string{"n"}, Description: "next match", Enabled: true},
+					{Name: "prev match", Keys: []string{"N"}, Description: "prev match", Enabled: true},
+					{Name: "clear search", Keys: []string{"ctrl+l"}, Description: "clear search", Enabled: true},
+				},
+			},
+			{
+				Name: "Selection",
+				Bindings: []BindingEntry{
+					{Name: "select", Keys: []string{"space", "x"}, Description: "select", Enabled: true},
+					{Name: "all", Keys: []string{"a"}, Description: "all", Enabled: true},
+					{Name: "none", Keys: []string{"A"}, Description: "none", Enabled: true},
+				},
+			},
+			{
+				Name: "View",
+				Bindings: []BindingEntry{
+					{Name: "switch view", Keys: []string{"tab"}, Description: "switch view", Enabled: true},
+					{Name: "next tab", Keys: []string{"]"}, Description: "next tab", Enabled: true},
+					{Name: "prev tab", Keys: []string{"["}, Description: "prev tab", Enabled: true},
+					{Name: "preview", Keys: []string{"v"}, Description: "preview", Enabled: true},
+				},
+			},
+			{
+				Name: "Fold",
+				Bindings: []BindingEntry{
+					{Name: "open fold", Keys: []string{"zo"}, Description: "open fold", Enabled: true},
+					{Name: "close fold", Keys: []string{"zc"}, Description: "close fold", Enabled: true},
+					{Name: "toggle fold", Keys: []string{"za"}, Description: "toggle fold", Enabled: true},
+					{Name: "open all", Keys: []string{"zR"}, Description: "open all", Enabled: true},
+					{Name: "close all", Keys: []string{"zM"}, Description: "close all", Enabled: true},
+				},
+			},
+			{
+				Name: "System",
+				Bindings: []BindingEntry{
+					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true},
+					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true},
+				},
+			},
+			{
+				Name: "Cache Actions",
+				Bindings: []BindingEntry{
+					{Name: "inspect", Keys: []string{"i", "enter"}, Description: "inspect", Enabled: true},
+					{Name: "analytics", Keys: []string{"a"}, Description: "analytics", Enabled: true},
+					{Name: "delete from API", Keys: []string{"d"}, Description: "delete from API", Enabled: true},
+					{Name: "wipe local", Keys: []string{"w"}, Description: "wipe local", Enabled: true},
+					{Name: "refresh", Keys: []string{"r"}, Description: "refresh", Enabled: true},
+				},
+			},
+		},
+	},
+	{
+		Name:        "gemini-dashboard",
+		Package:     "grove-gemini",
+		Description: "BigQuery billing dashboard viewer",
+		Sections: []SectionEntry{
+			{
+				Name: "Navigation",
+				Bindings: []BindingEntry{
+					{Name: "up", Keys: []string{"k", "up"}, Description: "up", Enabled: true},
+					{Name: "down", Keys: []string{"j", "down"}, Description: "down", Enabled: true},
+					{Name: "page up", Keys: []string{"ctrl+u", "pgup"}, Description: "page up", Enabled: true},
+					{Name: "page down", Keys: []string{"ctrl+d", "pgdown"}, Description: "page down", Enabled: true},
+					{Name: "top", Keys: []string{"gg"}, Description: "top", Enabled: true},
+					{Name: "bottom", Keys: []string{"G"}, Description: "bottom", Enabled: true},
+				},
+			},
+			{
+				Name: "Time Frame",
+				Bindings: []BindingEntry{
+					{Name: "daily view", Keys: []string{"d"}, Description: "daily view", Enabled: true},
+					{Name: "weekly view", Keys: []string{"w"}, Description: "weekly view", Enabled: true},
+					{Name: "monthly view", Keys: []string{"m"}, Description: "monthly view", Enabled: true},
+					{Name: "90-day view", Keys: []string{"3"}, Description: "90-day view", Enabled: true},
+					{Name: "yearly view", Keys: []string{"y"}, Description: "yearly view", Enabled: true},
+				},
+			},
+			{
+				Name: "Period Navigation",
+				Bindings: []BindingEntry{
+					{Name: "previous period", Keys: []string{"left", "h"}, Description: "previous period", Enabled: true},
+					{Name: "next period", Keys: []string{"right", "l"}, Description: "next period", Enabled: true},
+				},
+			},
+			{
+				Name: "System",
+				Bindings: []BindingEntry{
+					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true},
+					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true},
+				},
+			},
+		},
+	},
+	{
+		Name:        "gemini-query",
+		Package:     "grove-gemini",
+		Description: "Query usage analytics and logs viewer",
+		Sections: []SectionEntry{
+			{
+				Name: "Navigation",
+				Bindings: []BindingEntry{
+					{Name: "up", Keys: []string{"k", "up"}, Description: "up", Enabled: true},
+					{Name: "down", Keys: []string{"j", "down"}, Description: "down", Enabled: true},
+					{Name: "page up", Keys: []string{"ctrl+u", "pgup"}, Description: "page up", Enabled: true},
+					{Name: "page down", Keys: []string{"ctrl+d", "pgdown"}, Description: "page down", Enabled: true},
+					{Name: "top", Keys: []string{"gg"}, Description: "top", Enabled: true},
+					{Name: "bottom", Keys: []string{"G"}, Description: "bottom", Enabled: true},
+				},
+			},
+			{
+				Name: "Time Frame",
+				Bindings: []BindingEntry{
+					{Name: "daily view", Keys: []string{"d"}, Description: "daily view", Enabled: true},
+					{Name: "weekly view", Keys: []string{"w"}, Description: "weekly view", Enabled: true},
+					{Name: "monthly view", Keys: []string{"m"}, Description: "monthly view", Enabled: true},
+				},
+			},
+			{
+				Name: "Period Navigation",
+				Bindings: []BindingEntry{
+					{Name: "previous period", Keys: []string{"left", "h"}, Description: "previous period", Enabled: true},
+					{Name: "next period", Keys: []string{"right", "l"}, Description: "next period", Enabled: true},
+				},
+			},
+			{
+				Name: "Display",
+				Bindings: []BindingEntry{
+					{Name: "toggle metric", Keys: []string{"t"}, Description: "toggle metric", Enabled: true},
+				},
+			},
+			{
+				Name: "System",
+				Bindings: []BindingEntry{
+					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true},
+					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true},
+				},
+			},
+		},
+	},
+	{
 		Name:        "hooks-browser",
 		Package:     "hooks",
 		Description: "Hook session browser and manager",
@@ -149,6 +379,68 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "mark complete", Keys: []string{"c"}, Description: "mark complete", Enabled: true},
 					{Name: "kill session", Keys: []string{"ctrl+k"}, Description: "kill session", Enabled: true},
+				},
+			},
+			{
+				Name: "System",
+				Bindings: []BindingEntry{
+					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true},
+					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true},
+				},
+			},
+		},
+	},
+	{
+		Name:        "nav-sessionize",
+		Package:     "nav",
+		Description: "Tmux session switcher and workspace browser",
+		Sections: []SectionEntry{
+			{
+				Name: "Navigation",
+				Bindings: []BindingEntry{
+					{Name: "up", Keys: []string{"k", "up"}, Description: "up", Enabled: true},
+					{Name: "down", Keys: []string{"j", "down"}, Description: "down", Enabled: true},
+					{Name: "page up", Keys: []string{"ctrl+u", "pgup"}, Description: "page up", Enabled: true},
+					{Name: "page down", Keys: []string{"ctrl+d", "pgdown"}, Description: "page down", Enabled: true},
+					{Name: "top", Keys: []string{"gg"}, Description: "top", Enabled: true},
+					{Name: "bottom", Keys: []string{"G"}, Description: "bottom", Enabled: true},
+					{Name: "search", Keys: []string{"/"}, Description: "search", Enabled: true},
+					{Name: "select session", Keys: []string{"enter"}, Description: "select session", Enabled: true},
+				},
+			},
+			{
+				Name: "Session",
+				Bindings: []BindingEntry{
+					{Name: "refresh project list", Keys: []string{"ctrl+r"}, Description: "refresh project list", Enabled: true},
+					{Name: "edit key mapping", Keys: []string{"ctrl+e"}, Description: "edit key mapping", Enabled: true},
+					{Name: "clear key mapping", Keys: []string{"ctrl+x"}, Description: "clear key mapping", Enabled: true},
+					{Name: "copy path to clipboard", Keys: []string{"ctrl+y"}, Description: "copy path to clipboard", Enabled: true},
+					{Name: "close session", Keys: []string{"X"}, Description: "close session", Enabled: true},
+				},
+			},
+			{
+				Name: "Focus",
+				Bindings: []BindingEntry{
+					{Name: "focus on project", Keys: []string{"@"}, Description: "focus on project", Enabled: true},
+					{Name: "clear focus", Keys: []string{"ctrl+g"}, Description: "clear focus", Enabled: true},
+					{Name: "toggle worktrees", Keys: []string{"tab"}, Description: "toggle worktrees", Enabled: true},
+					{Name: "filter dirty", Keys: []string{"D"}, Description: "filter dirty", Enabled: true},
+					{Name: "toggle context", Keys: []string{"C"}, Description: "toggle context", Enabled: true},
+				},
+			},
+			{
+				Name: "Columns",
+				Bindings: []BindingEntry{
+					{Name: "toggle cx column", Keys: []string{"c"}, Description: "toggle cx column", Enabled: true},
+					{Name: "toggle git status", Keys: []string{"s"}, Description: "toggle git status", Enabled: true},
+					{Name: "toggle branch names", Keys: []string{"b"}, Description: "toggle branch names", Enabled: true},
+					{Name: "toggle note counts", Keys: []string{"n"}, Description: "toggle note counts", Enabled: true},
+					{Name: "toggle flow plans", Keys: []string{"f"}, Description: "toggle flow plans", Enabled: true},
+					{Name: "toggle on-hold", Keys: []string{"H"}, Description: "toggle on-hold", Enabled: true},
+					{Name: "toggle full paths", Keys: []string{"p"}, Description: "toggle full paths", Enabled: true},
+					{Name: "toggle release", Keys: []string{"r"}, Description: "toggle release", Enabled: true},
+					{Name: "toggle tool/version", Keys: []string{"y"}, Description: "toggle tool/version", Enabled: true},
+					{Name: "toggle remote", Keys: []string{"l"}, Description: "toggle remote", Enabled: true},
 				},
 			},
 			{

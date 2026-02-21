@@ -104,6 +104,20 @@ var SchemaFields = []FieldMeta{
 		RefType:     "TUISchemaConfig",
 		Children: []FieldMeta{
 			{
+				Path:        []string{"tui", "nvim_embed"},
+				Type:        FieldObject,
+				Description: "Embedded Neovim configuration",
+				RefType:     "NvimEmbedConfig",
+				Children: []FieldMeta{
+					{
+						Path:        []string{"tui", "nvim_embed", "user_config"},
+						Type:        FieldBool,
+						Description: "If true",
+						Required:    true,
+					},
+				},
+			},
+			{
 				Path:        []string{"tui", "preset"},
 				Type:        FieldSelect,
 				Description: "Keybinding preset: vim (default) emacs or arrows",
@@ -130,24 +144,6 @@ var SchemaFields = []FieldMeta{
 				Description: "Custom keybinding overrides",
 				RefType:     "KeybindingsSchemaConfig",
 				Children: []FieldMeta{
-					{
-						Path:        []string{"tui", "keybindings", "search"},
-						Type:        FieldString,
-						Description: "Search keybindings (search",
-						RefType:     "KeybindingSectionSchemaConfig",
-					},
-					{
-						Path:        []string{"tui", "keybindings", "selection"},
-						Type:        FieldString,
-						Description: "Selection keybindings (select",
-						RefType:     "KeybindingSectionSchemaConfig",
-					},
-					{
-						Path:        []string{"tui", "keybindings", "system"},
-						Type:        FieldString,
-						Description: "System keybindings (quit",
-						RefType:     "KeybindingSectionSchemaConfig",
-					},
 					{
 						Path:        []string{"tui", "keybindings", "view"},
 						Type:        FieldString,
@@ -177,19 +173,23 @@ var SchemaFields = []FieldMeta{
 						Type:        FieldMap,
 						Description: "Per-TUI keybinding overrides (e.g.",
 					},
-				},
-			},
-			{
-				Path:        []string{"tui", "nvim_embed"},
-				Type:        FieldObject,
-				Description: "Embedded Neovim configuration",
-				RefType:     "NvimEmbedConfig",
-				Children: []FieldMeta{
 					{
-						Path:        []string{"tui", "nvim_embed", "user_config"},
-						Type:        FieldBool,
-						Description: "If true",
-						Required:    true,
+						Path:        []string{"tui", "keybindings", "search"},
+						Type:        FieldString,
+						Description: "Search keybindings (search",
+						RefType:     "KeybindingSectionSchemaConfig",
+					},
+					{
+						Path:        []string{"tui", "keybindings", "selection"},
+						Type:        FieldString,
+						Description: "Selection keybindings (select",
+						RefType:     "KeybindingSectionSchemaConfig",
+					},
+					{
+						Path:        []string{"tui", "keybindings", "system"},
+						Type:        FieldString,
+						Description: "System keybindings (quit",
+						RefType:     "KeybindingSectionSchemaConfig",
 					},
 				},
 			},
@@ -203,6 +203,16 @@ var SchemaFields = []FieldMeta{
 		Priority:    60,
 		RefType:     "LoggingSchemaConfig",
 		Children: []FieldMeta{
+			{
+				Path:        []string{"logging", "show_current_project"},
+				Type:        FieldBool,
+				Description: "Always show logs from current project regardless of filters",
+			},
+			{
+				Path:        []string{"logging", "groups"},
+				Type:        FieldMap,
+				Description: "Named collections of component loggers for filtering",
+			},
 			{
 				Path:        []string{"logging", "level"},
 				Type:        FieldString,
@@ -220,16 +230,6 @@ var SchemaFields = []FieldMeta{
 				Type:        FieldBool,
 				Description: "Include file/line/function in output",
 				Required:    true,
-			},
-			{
-				Path:        []string{"logging", "show_current_project"},
-				Type:        FieldBool,
-				Description: "Always show logs from current project regardless of filters",
-			},
-			{
-				Path:        []string{"logging", "groups"},
-				Type:        FieldMap,
-				Description: "Named collections of component loggers for filtering",
 			},
 		},
 	},
