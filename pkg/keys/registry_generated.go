@@ -25,7 +25,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "load to .grove/rules", Keys: []string{"l"}, Description: "load to .grove/rules", Enabled: true},
 					{Name: "save", Keys: []string{"s"}, Description: "save", Enabled: true},
 					{Name: "edit", Keys: []string{"e"}, Description: "edit", Enabled: true},
-					{Name: "delete", Keys: []string{"d"}, Description: "delete", Enabled: true},
+					{Name: "delete", Keys: []string{"dd"}, Description: "delete", Enabled: true},
 				},
 			},
 			{
@@ -67,7 +67,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "select rule set", Keys: []string{"s"}, Description: "select rule set", Enabled: true},
 					{Name: "exclude file", Keys: []string{"x"}, Description: "exclude file", Enabled: true},
 					{Name: "exclude dir", Keys: []string{"X"}, Description: "exclude dir", Enabled: true},
-					{Name: "refresh", Keys: []string{"r"}, Description: "refresh", Enabled: true},
+					{Name: "refresh", Keys: []string{"ctrl+r"}, Description: "refresh", Enabled: true},
 				},
 			},
 			{
@@ -143,8 +143,8 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "Selection",
 				Bindings: []BindingEntry{
 					{Name: "toggle selection", Keys: []string{" "}, Description: "toggle selection", Enabled: true},
-					{Name: "select all", Keys: []string{"a"}, Description: "select all", Enabled: true},
-					{Name: "select none", Keys: []string{"n"}, Description: "select none", Enabled: true},
+					{Name: "all", Keys: []string{"ctrl+a"}, Description: "all", Enabled: true},
+					{Name: "none", Keys: []string{"-"}, Description: "none", Enabled: true},
 				},
 			},
 			{
@@ -256,9 +256,9 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Selection",
 				Bindings: []BindingEntry{
-					{Name: "toggle", Keys: []string{"v"}, Description: "toggle", Enabled: true},
+					{Name: "select", Keys: []string{" "}, Description: "select", Enabled: true},
 					{Name: "all", Keys: []string{"ctrl+a"}, Description: "all", Enabled: true},
-					{Name: "none", Keys: []string{"ctrl+d"}, Description: "none", Enabled: true},
+					{Name: "none", Keys: []string{"-"}, Description: "none", Enabled: true},
 				},
 			},
 			{
@@ -291,8 +291,8 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "add from recipe", Keys: []string{"P"}, Description: "add from recipe", Enabled: true},
 					{Name: "add XML plan job", Keys: []string{"x"}, Description: "add XML plan job", Enabled: true},
 					{Name: "implement selected", Keys: []string{"i"}, Description: "implement selected", Enabled: true},
-					{Name: "rename job", Keys: []string{"ctrl+r"}, Description: "rename job", Enabled: true},
-					{Name: "resume job", Keys: []string{"R"}, Description: "resume job", Enabled: true},
+					{Name: "rename job", Keys: []string{"R"}, Description: "rename job", Enabled: true},
+					{Name: "resume job", Keys: []string{"ctrl+R"}, Description: "resume job", Enabled: true},
 					{Name: "edit dependencies", Keys: []string{"D"}, Description: "edit dependencies", Enabled: true},
 					{Name: "archive selected", Keys: []string{"X"}, Description: "archive selected", Enabled: true},
 					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true},
@@ -311,8 +311,8 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "up", Keys: []string{"k", "up"}, Description: "up", Enabled: true},
 					{Name: "down", Keys: []string{"j", "down"}, Description: "down", Enabled: true},
-					{Name: "left", Keys: []string{"h", "left"}, Description: "left", Enabled: true},
-					{Name: "right", Keys: []string{"l", "right"}, Description: "right", Enabled: true},
+					{Name: "left", Keys: []string{"left"}, Description: "left", Enabled: true},
+					{Name: "right", Keys: []string{"right"}, Description: "right", Enabled: true},
 					{Name: "page up", Keys: []string{"ctrl+u", "pgup"}, Description: "page up", Enabled: true},
 					{Name: "page down", Keys: []string{"ctrl+d", "pgdown"}, Description: "page down", Enabled: true},
 					{Name: "top", Keys: []string{"gg"}, Description: "top", Enabled: true},
@@ -323,11 +323,14 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "Actions",
 				Bindings: []BindingEntry{
 					{Name: "confirm", Keys: []string{"enter", "y"}, Description: "confirm", Enabled: true},
-					{Name: "cancel", Keys: []string{"n", "ctrl+g"}, Description: "cancel", Enabled: true},
+					{Name: "cancel", Keys: []string{"ctrl+g"}, Description: "cancel", Enabled: true},
 					{Name: "back", Keys: []string{"esc"}, Description: "back", Enabled: true},
 					{Name: "edit", Keys: []string{"e"}, Description: "edit", Enabled: true},
 					{Name: "delete", Keys: []string{"dd"}, Description: "delete", Enabled: true},
 					{Name: "yank", Keys: []string{"yy"}, Description: "yank", Enabled: true},
+					{Name: "rename", Keys: []string{"R"}, Description: "rename", Enabled: true},
+					{Name: "refresh", Keys: []string{"ctrl+r"}, Description: "refresh", Enabled: true},
+					{Name: "copy path", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true},
 				},
 			},
 			{
@@ -342,9 +345,9 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Selection",
 				Bindings: []BindingEntry{
-					{Name: "select", Keys: []string{"space", "x"}, Description: "select", Enabled: true},
+					{Name: "select", Keys: []string{" "}, Description: "select", Enabled: true},
 					{Name: "all", Keys: []string{"ctrl+a"}, Description: "all", Enabled: true},
-					{Name: "none", Keys: []string{"ctrl+d"}, Description: "none", Enabled: true},
+					{Name: "none", Keys: []string{"-"}, Description: "none", Enabled: true},
 				},
 			},
 			{
@@ -380,7 +383,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "analytics", Keys: []string{"a"}, Description: "analytics", Enabled: true},
 					{Name: "delete from API", Keys: []string{"d"}, Description: "delete from API", Enabled: true},
 					{Name: "wipe local", Keys: []string{"w"}, Description: "wipe local", Enabled: true},
-					{Name: "refresh", Keys: []string{"r"}, Description: "refresh", Enabled: true},
+					{Name: "refresh", Keys: []string{"ctrl+r"}, Description: "refresh", Enabled: true},
 				},
 			},
 		},
@@ -533,8 +536,8 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Selection",
 				Bindings: []BindingEntry{
-					{Name: "select", Keys: []string{"space", "x"}, Description: "select", Enabled: true},
-					{Name: "select all", Keys: []string{"ctrl+a"}, Description: "select all", Enabled: true},
+					{Name: "select", Keys: []string{" "}, Description: "select", Enabled: true},
+					{Name: "all", Keys: []string{"ctrl+a"}, Description: "all", Enabled: true},
 				},
 			},
 			{
@@ -550,10 +553,10 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "action", Keys: []string{"e"}, Description: "action", Enabled: true},
 					{Name: "action", Keys: []string{"o"}, Description: "action", Enabled: true},
-					{Name: "copy id", Keys: []string{"ctrl+y"}, Description: "copy id", Enabled: true},
+					{Name: "copy path", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true},
 					{Name: "open dir", Keys: []string{"ctrl+o"}, Description: "open dir", Enabled: true},
 					{Name: "export json", Keys: []string{"ctrl+j"}, Description: "export json", Enabled: true},
-					{Name: "archive selected", Keys: []string{"ctrl+x"}, Description: "archive selected", Enabled: true},
+					{Name: "archive selected", Keys: []string{"X"}, Description: "archive selected", Enabled: true},
 				},
 			},
 			{
@@ -673,7 +676,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "refresh project list", Keys: []string{"ctrl+r"}, Description: "refresh project list", Enabled: true},
 					{Name: "edit key mapping", Keys: []string{"ctrl+e"}, Description: "edit key mapping", Enabled: true},
 					{Name: "clear key mapping", Keys: []string{"ctrl+x"}, Description: "clear key mapping", Enabled: true},
-					{Name: "copy path to clipboard", Keys: []string{"ctrl+y"}, Description: "copy path to clipboard", Enabled: true},
+					{Name: "copy path", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true},
 					{Name: "close session", Keys: []string{"X"}, Description: "close session", Enabled: true},
 				},
 			},
@@ -729,7 +732,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "switch", Keys: []string{"enter"}, Description: "switch", Enabled: true},
 					{Name: "filter", Keys: []string{"/"}, Description: "filter", Enabled: true},
-					{Name: "rename", Keys: []string{"r"}, Description: "rename", Enabled: true},
+					{Name: "rename", Keys: []string{"R"}, Description: "rename", Enabled: true},
 					{Name: "close", Keys: []string{"X"}, Description: "close", Enabled: true},
 				},
 			},
@@ -759,8 +762,8 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "up", Keys: []string{"k", "up"}, Description: "up", Enabled: true},
 					{Name: "down", Keys: []string{"j", "down"}, Description: "down", Enabled: true},
-					{Name: "left", Keys: []string{"h", "left"}, Description: "left", Enabled: true},
-					{Name: "right", Keys: []string{"l", "right"}, Description: "right", Enabled: true},
+					{Name: "left", Keys: []string{"left"}, Description: "left", Enabled: true},
+					{Name: "right", Keys: []string{"right"}, Description: "right", Enabled: true},
 					{Name: "page up", Keys: []string{"ctrl+u", "pgup"}, Description: "page up", Enabled: true},
 					{Name: "page down", Keys: []string{"ctrl+d", "pgdown"}, Description: "page down", Enabled: true},
 					{Name: "top", Keys: []string{"gg"}, Description: "top", Enabled: true},
@@ -770,9 +773,9 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Selection",
 				Bindings: []BindingEntry{
-					{Name: "select", Keys: []string{"space", "x"}, Description: "select", Enabled: true},
+					{Name: "select", Keys: []string{" "}, Description: "select", Enabled: true},
 					{Name: "all", Keys: []string{"ctrl+a"}, Description: "all", Enabled: true},
-					{Name: "none", Keys: []string{"ctrl+d"}, Description: "none", Enabled: true},
+					{Name: "none", Keys: []string{"-"}, Description: "none", Enabled: true},
 				},
 			},
 			{
@@ -830,7 +833,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "inbox note (quick capture)", Keys: []string{"i"}, Description: "inbox note (quick capture)", Enabled: true},
 					{Name: "global note", Keys: []string{"I"}, Description: "global note", Enabled: true},
 					{Name: "promote note to plan", Keys: []string{"P"}, Description: "promote note to plan", Enabled: true},
-					{Name: "rename note", Keys: []string{"r"}, Description: "rename note", Enabled: true},
+					{Name: "rename note", Keys: []string{"R"}, Description: "rename note", Enabled: true},
 				},
 			},
 			{

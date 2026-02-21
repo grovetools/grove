@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/grove/pkg/keys"
@@ -104,6 +106,31 @@ type keysModel struct {
 	vp     viewport.Model
 	width  int
 	height int
+
+	stream <-chan daemon.StateUpdate
+}
+
+// configReloadMsg is sent when the config file changes via daemon streaming.
+type configReloadMsg struct {
+	File string
+}
+
+// listenForConfig listens for config reload events from the daemon stream.
+func listenForConfig(sub <-chan daemon.StateUpdate) tea.Cmd {
+	return func() tea.Msg {
+		if sub == nil {
+			return nil
+		}
+		for {
+			update, ok := <-sub
+			if !ok {
+				return nil // Stream closed
+			}
+			if update.UpdateType == "config_reload" {
+				return configReloadMsg{File: update.ConfigFile}
+			}
+		}
+	}
 }
 
 // runKeysTUI launches the interactive keybindings browser.
@@ -122,6 +149,14 @@ func runKeysTUI() error {
 	ti.Placeholder = "Search bindings or actions..."
 	ti.Prompt = " / "
 
+	// Connect to daemon for config reload events
+	client := daemon.New()
+	var stream <-chan daemon.StateUpdate
+	if client.IsRunning() {
+		// Use a detached context for the stream since it lives for the app lifecycle
+		stream, _ = client.StreamState(context.Background())
+	}
+
 	m := keysModel{
 		cfg:           cfg,
 		keys:          newKeysTUIKeyMap(),
@@ -135,6 +170,7 @@ func runKeysTUI() error {
 		matrixScrollX: 0,
 		searchInput:   ti,
 		vp:            viewport.New(80, 20),
+		stream:        stream,
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
@@ -143,6 +179,9 @@ func runKeysTUI() error {
 }
 
 func (m keysModel) Init() tea.Cmd {
+	if m.stream != nil {
+		return listenForConfig(m.stream)
+	}
 	return nil
 }
 
@@ -150,6 +189,19 @@ func (m keysModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case configReloadMsg:
+		// Reload configuration and refresh data
+		if newCfg, err := config.LoadDefault(); err == nil {
+			m.cfg = newCfg
+			m.bindings, _ = keys.Aggregate(m.cfg)
+			m.conflicts = keys.DetectConflicts(m.bindings)
+			m.analysis = keys.Analyze(m.bindings)
+			m.matrix = keys.BuildMatrix(m.bindings)
+			m.updateViewport()
+		}
+		// Re-subscribe to the next event
+		return m, listenForConfig(m.stream)
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -236,9 +288,12 @@ func (m keysModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			cmd := exec.Command(editor, configPath)
 			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
-				// Re-generate bindings after editor closes
-				if err == nil {
+				// If daemon is running, ConfigWatcher handles regeneration automatically.
+				// Otherwise, fall back to manual regeneration.
+				if err == nil && m.stream == nil {
 					_ = exec.Command("grove", "keys", "generate", "tmux").Run()
+					// Emit manual reload message since daemon isn't running
+					return configReloadMsg{File: "grove.toml"}
 				}
 				return nil
 			})

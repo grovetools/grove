@@ -74,12 +74,83 @@ Use --json for machine-readable output.`
 		fmt.Fprintln(w, t.Muted.Render(strings.Join(sep, "\t")))
 
 		// Track statistics
+		reservedOKCount := 0
+		reservedViolationCount := 0
+		freeCount := 0
 		consistentCount := 0
 		conflictCount := 0
-		tuiSpecificCount := 0
 
 		for _, row := range matrix.Rows {
-			if conflictsOnly && row.Consistent {
+			// Determine key status
+			expectedAction, isReserved := keys.ReservedKeys[row.Key]
+			isFree := keys.IsFreeKey(row.Key)
+
+			var status string
+			var skipRow bool
+
+			if isReserved {
+				// Check if all usages match the expected action
+				allMatch := true
+				for _, action := range row.TUIs {
+					normAction := keys.NormalizeAction(action)
+					normExpected := keys.NormalizeAction(expectedAction)
+					if normAction != normExpected {
+						allMatch = false
+						break
+					}
+				}
+				if allMatch {
+					status = t.Success.Render("✓ RESERVED")
+					reservedOKCount++
+					if conflictsOnly {
+						skipRow = true
+					}
+				} else {
+					status = t.Error.Render("⚠ RESERVED VIOLATION")
+					reservedViolationCount++
+				}
+			} else if isFree {
+				if !row.Consistent && len(row.TUIs) > 1 {
+					// Free key with different meanings - that's OK, just note it
+					status = t.Muted.Render("FREE (varies)")
+					freeCount++
+					if conflictsOnly {
+						skipRow = true
+					}
+				} else if len(row.TUIs) == 1 {
+					status = t.Muted.Render("FREE")
+					freeCount++
+					if conflictsOnly {
+						skipRow = true
+					}
+				} else {
+					status = t.Success.Render("✓ FREE")
+					freeCount++
+					if conflictsOnly {
+						skipRow = true
+					}
+				}
+			} else {
+				// Not reserved, not in free list - check consistency
+				if !row.Consistent {
+					status = t.Warning.Render("⚠ CONFLICT")
+					conflictCount++
+				} else if len(row.TUIs) == 1 {
+					status = t.Muted.Render("TUI SPECIFIC")
+					freeCount++
+					if conflictsOnly {
+						skipRow = true
+					}
+				} else {
+					status = t.Success.Render("✓ CONSISTENT")
+					consistentCount++
+					if conflictsOnly {
+						skipRow = true
+					}
+				}
+			}
+
+			if skipRow {
 				continue
 			}
 
@@ -91,18 +162,6 @@ Use --json for machine-readable output.`
 				}
 				rowCells = append(rowCells, val)
 			}
-
-			var status string
-			if !row.Consistent {
-				status = t.Warning.Render("⚠ CONFLICT")
-				conflictCount++
-			} else if len(row.TUIs) == 1 {
-				status = t.Muted.Render("TUI SPECIFIC")
-				tuiSpecificCount++
-			} else {
-				status = t.Success.Render("✓ CONSISTENT")
-				consistentCount++
-			}
 			rowCells = append(rowCells, status)
 
 			fmt.Fprintln(w, strings.Join(rowCells, "\t"))
@@ -112,11 +171,12 @@ Use --json for machine-readable output.`
 
 		// Print summary
 		fmt.Println()
-		fmt.Printf("%s  Consistent: %d  │  Conflicts: %d  │  TUI-specific: %d\n",
+		fmt.Printf("%s  Reserved OK: %d  │  Reserved Violations: %d  │  Free: %d  │  Conflicts: %d\n",
 			t.Muted.Render("Summary:"),
-			consistentCount,
-			conflictCount,
-			tuiSpecificCount)
+			reservedOKCount,
+			reservedViolationCount,
+			freeCount,
+			conflictCount)
 
 		return nil
 	}

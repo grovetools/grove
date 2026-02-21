@@ -104,6 +104,20 @@ var SchemaFields = []FieldMeta{
 		RefType:     "TUISchemaConfig",
 		Children: []FieldMeta{
 			{
+				Path:        []string{"tui", "preset"},
+				Type:        FieldSelect,
+				Description: "Keybinding preset: vim (default) emacs or arrows",
+				Options:     []string{"vim", "emacs", "arrows"},
+				Important:   true,
+			},
+			{
+				Path:        []string{"tui", "theme"},
+				Type:        FieldSelect,
+				Description: "Color theme for terminal interfaces",
+				Options:     []string{"kanagawa", "gruvbox", "terminal"},
+				Important:   true,
+			},
+			{
 				Path:        []string{"tui", "icons"},
 				Type:        FieldSelect,
 				Description: "Icon set to use: nerd or ascii",
@@ -116,6 +130,18 @@ var SchemaFields = []FieldMeta{
 				Description: "Custom keybinding overrides",
 				RefType:     "KeybindingsSchemaConfig",
 				Children: []FieldMeta{
+					{
+						Path:        []string{"tui", "keybindings", "system"},
+						Type:        FieldString,
+						Description: "System keybindings (quit",
+						RefType:     "KeybindingSectionSchemaConfig",
+					},
+					{
+						Path:        []string{"tui", "keybindings", "view"},
+						Type:        FieldString,
+						Description: "View keybindings (switch_view",
+						RefType:     "KeybindingSectionSchemaConfig",
+					},
 					{
 						Path:        []string{"tui", "keybindings", "actions"},
 						Type:        FieldString,
@@ -151,18 +177,6 @@ var SchemaFields = []FieldMeta{
 						Description: "Selection keybindings (select",
 						RefType:     "KeybindingSectionSchemaConfig",
 					},
-					{
-						Path:        []string{"tui", "keybindings", "system"},
-						Type:        FieldString,
-						Description: "System keybindings (quit",
-						RefType:     "KeybindingSectionSchemaConfig",
-					},
-					{
-						Path:        []string{"tui", "keybindings", "view"},
-						Type:        FieldString,
-						Description: "View keybindings (switch_view",
-						RefType:     "KeybindingSectionSchemaConfig",
-					},
 				},
 			},
 			{
@@ -179,20 +193,6 @@ var SchemaFields = []FieldMeta{
 					},
 				},
 			},
-			{
-				Path:        []string{"tui", "preset"},
-				Type:        FieldSelect,
-				Description: "Keybinding preset: vim (default) emacs or arrows",
-				Options:     []string{"vim", "emacs", "arrows"},
-				Important:   true,
-			},
-			{
-				Path:        []string{"tui", "theme"},
-				Type:        FieldSelect,
-				Description: "Color theme for terminal interfaces",
-				Options:     []string{"kanagawa", "gruvbox", "terminal"},
-				Important:   true,
-			},
 		},
 	},
 	{
@@ -203,18 +203,6 @@ var SchemaFields = []FieldMeta{
 		Priority:    60,
 		RefType:     "LoggingSchemaConfig",
 		Children: []FieldMeta{
-			{
-				Path:        []string{"logging", "log_startup"},
-				Type:        FieldBool,
-				Description: "Log 'Grove binary started' on first init",
-				Required:    true,
-			},
-			{
-				Path:        []string{"logging", "report_caller"},
-				Type:        FieldBool,
-				Description: "Include file/line/function in output",
-				Required:    true,
-			},
 			{
 				Path:        []string{"logging", "show_current_project"},
 				Type:        FieldBool,
@@ -229,6 +217,18 @@ var SchemaFields = []FieldMeta{
 				Path:        []string{"logging", "level"},
 				Type:        FieldString,
 				Description: "Minimum log level (debug",
+				Required:    true,
+			},
+			{
+				Path:        []string{"logging", "log_startup"},
+				Type:        FieldBool,
+				Description: "Log 'Grove binary started' on first init",
+				Required:    true,
+			},
+			{
+				Path:        []string{"logging", "report_caller"},
+				Type:        FieldBool,
+				Description: "Include file/line/function in output",
 				Required:    true,
 			},
 		},

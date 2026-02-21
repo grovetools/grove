@@ -96,6 +96,23 @@ Use --json for machine-readable output suitable for tooling.`
 			fmt.Println("\n" + t.Success.Render("✓ No semantic conflicts detected"))
 		}
 
+		// Display reserved key violations
+		if len(report.ReservedKeyViolations) > 0 {
+			fmt.Println("\n" + t.Header.Render(" RESERVED KEY VIOLATIONS "))
+			fmt.Println(t.Muted.Render(strings.Repeat("─", 50)))
+			fmt.Println(t.Warning.Render("These TUIs use reserved keys for non-standard purposes:"))
+			fmt.Println()
+			for _, v := range report.ReservedKeyViolations {
+				fmt.Printf("  %s [%s] in %s\n",
+					t.Error.Render("⚠"),
+					t.Highlight.Render(v.Key),
+					t.Bold.Render(v.TUI))
+				fmt.Printf("      Expected: %s\n", t.Success.Render(v.ExpectedAction))
+				fmt.Printf("      Actual:   %s\n", t.Error.Render(v.ActualAction))
+				fmt.Println()
+			}
+		}
+
 		return nil
 	}
 
