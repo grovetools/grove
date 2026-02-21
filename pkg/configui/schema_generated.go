@@ -117,6 +117,24 @@ var SchemaFields = []FieldMeta{
 				RefType:     "KeybindingsSchemaConfig",
 				Children: []FieldMeta{
 					{
+						Path:        []string{"tui", "keybindings", "actions"},
+						Type:        FieldString,
+						Description: "Action keybindings (confirm",
+						RefType:     "KeybindingSectionSchemaConfig",
+					},
+					{
+						Path:        []string{"tui", "keybindings", "fold"},
+						Type:        FieldString,
+						Description: "Fold keybindings (open",
+						RefType:     "KeybindingSectionSchemaConfig",
+					},
+					{
+						Path:        []string{"tui", "keybindings", "navigation"},
+						Type:        FieldString,
+						Description: "Navigation keybindings (up",
+						RefType:     "KeybindingSectionSchemaConfig",
+					},
+					{
 						Path:        []string{"tui", "keybindings", "overrides"},
 						Type:        FieldMap,
 						Description: "Per-TUI keybinding overrides (e.g.",
@@ -143,24 +161,6 @@ var SchemaFields = []FieldMeta{
 						Path:        []string{"tui", "keybindings", "view"},
 						Type:        FieldString,
 						Description: "View keybindings (switch_view",
-						RefType:     "KeybindingSectionSchemaConfig",
-					},
-					{
-						Path:        []string{"tui", "keybindings", "actions"},
-						Type:        FieldString,
-						Description: "Action keybindings (confirm",
-						RefType:     "KeybindingSectionSchemaConfig",
-					},
-					{
-						Path:        []string{"tui", "keybindings", "fold"},
-						Type:        FieldString,
-						Description: "Fold keybindings (open",
-						RefType:     "KeybindingSectionSchemaConfig",
-					},
-					{
-						Path:        []string{"tui", "keybindings", "navigation"},
-						Type:        FieldString,
-						Description: "Navigation keybindings (up",
 						RefType:     "KeybindingSectionSchemaConfig",
 					},
 				},
@@ -204,6 +204,12 @@ var SchemaFields = []FieldMeta{
 		RefType:     "LoggingSchemaConfig",
 		Children: []FieldMeta{
 			{
+				Path:        []string{"logging", "log_startup"},
+				Type:        FieldBool,
+				Description: "Log 'Grove binary started' on first init",
+				Required:    true,
+			},
+			{
 				Path:        []string{"logging", "report_caller"},
 				Type:        FieldBool,
 				Description: "Include file/line/function in output",
@@ -223,12 +229,6 @@ var SchemaFields = []FieldMeta{
 				Path:        []string{"logging", "level"},
 				Type:        FieldString,
 				Description: "Minimum log level (debug",
-				Required:    true,
-			},
-			{
-				Path:        []string{"logging", "log_startup"},
-				Type:        FieldBool,
-				Description: "Log 'Grove binary started' on first init",
 				Required:    true,
 			},
 		},

@@ -257,8 +257,8 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "Selection",
 				Bindings: []BindingEntry{
 					{Name: "toggle", Keys: []string{"v"}, Description: "toggle", Enabled: true},
-					{Name: "all", Keys: []string{"a"}, Description: "all", Enabled: true},
-					{Name: "none", Keys: []string{"A"}, Description: "none", Enabled: true},
+					{Name: "all", Keys: []string{"ctrl+a"}, Description: "all", Enabled: true},
+					{Name: "none", Keys: []string{"ctrl+d"}, Description: "none", Enabled: true},
 				},
 			},
 			{
@@ -343,8 +343,8 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "Selection",
 				Bindings: []BindingEntry{
 					{Name: "select", Keys: []string{"space", "x"}, Description: "select", Enabled: true},
-					{Name: "all", Keys: []string{"a"}, Description: "all", Enabled: true},
-					{Name: "none", Keys: []string{"A"}, Description: "none", Enabled: true},
+					{Name: "all", Keys: []string{"ctrl+a"}, Description: "all", Enabled: true},
+					{Name: "none", Keys: []string{"ctrl+d"}, Description: "none", Enabled: true},
 				},
 			},
 			{
@@ -771,8 +771,8 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "Selection",
 				Bindings: []BindingEntry{
 					{Name: "select", Keys: []string{"space", "x"}, Description: "select", Enabled: true},
-					{Name: "all", Keys: []string{"a"}, Description: "all", Enabled: true},
-					{Name: "none", Keys: []string{"A"}, Description: "none", Enabled: true},
+					{Name: "all", Keys: []string{"ctrl+a"}, Description: "all", Enabled: true},
+					{Name: "none", Keys: []string{"ctrl+d"}, Description: "none", Enabled: true},
 				},
 			},
 			{
