@@ -55,9 +55,12 @@ func (k keysTUIKeyMap) Sections() []keymap.Section {
 	}
 }
 
-func newKeysTUIKeyMap() keysTUIKeyMap {
-	return keysTUIKeyMap{
-		Base: keymap.NewBase(),
+// newKeysTUIKeyMap creates a new keysTUIKeyMap with user configuration applied.
+// Base bindings (navigation, actions, search, selection) come from keymap.Load().
+// Only TUI-specific bindings are defined here.
+func newKeysTUIKeyMap(cfg *config.Config) keysTUIKeyMap {
+	km := keysTUIKeyMap{
+		Base: keymap.Load(cfg, "grove.keys"),
 		EditConfig: key.NewBinding(
 			key.WithKeys("e"),
 			key.WithHelp("e", "edit config"),
@@ -75,6 +78,11 @@ func newKeysTUIKeyMap() keysTUIKeyMap {
 			key.WithHelp("l", "scroll TUIs right"),
 		),
 	}
+
+	// Apply TUI-specific overrides from config
+	keymap.ApplyTUIOverrides(cfg, "grove", "keys", &km)
+
+	return km
 }
 
 // keysModel holds the state for the keys TUI browser.
@@ -152,7 +160,7 @@ func runKeysTUI() error {
 		stream, _ = client.StreamState(context.Background())
 	}
 
-	km := newKeysTUIKeyMap()
+	km := newKeysTUIKeyMap(cfg)
 	helpModel := help.New(km)
 	helpModel.Title = "Keybindings Browser Help"
 

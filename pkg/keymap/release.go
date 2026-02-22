@@ -3,6 +3,7 @@ package keymap
 
 import (
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
 )
@@ -33,10 +34,12 @@ type ReleaseKeyMap struct {
 	Back              key.Binding
 }
 
-// NewReleaseKeyMap creates a new ReleaseKeyMap with default bindings.
-func NewReleaseKeyMap() ReleaseKeyMap {
-	return ReleaseKeyMap{
-		Base: keymap.NewBase(),
+// NewReleaseKeyMap creates a new ReleaseKeyMap with user configuration applied.
+// Base bindings (navigation, actions, search, selection) come from keymap.Load().
+// Only TUI-specific bindings are defined here.
+func NewReleaseKeyMap(cfg *config.Config) ReleaseKeyMap {
+	km := ReleaseKeyMap{
+		Base: keymap.Load(cfg, "grove.release"),
 		Toggle: key.NewBinding(
 			key.WithKeys(" ", "x"),
 			key.WithHelp("space/x", "toggle selection"),
@@ -122,6 +125,11 @@ func NewReleaseKeyMap() ReleaseKeyMap {
 			key.WithHelp("esc", "back"),
 		),
 	}
+
+	// Apply TUI-specific overrides from config
+	keymap.ApplyTUIOverrides(cfg, "grove", "release", &km)
+
+	return km
 }
 
 // ShortHelp returns key bindings for the short help view.
@@ -179,13 +187,13 @@ func (k ReleaseKeyMap) Sections() []keymap.Section {
 	}
 }
 
-// KeymapInfo returns the keymap metadata for the release TUI.
+// ReleaseKeymapInfo returns the keymap metadata for the release TUI.
 // Used by the grove keys registry generator to aggregate all TUI keybindings.
 func ReleaseKeymapInfo() keymap.TUIInfo {
 	return keymap.MakeTUIInfo(
 		"grove-release",
 		"grove",
 		"Release management with changelog generation",
-		NewReleaseKeyMap(),
+		NewReleaseKeyMap(nil),
 	)
 }

@@ -3,6 +3,7 @@ package keymap
 
 import (
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/tui/keymap"
 )
 
@@ -14,10 +15,12 @@ type SetupKeyMap struct {
 	Back    key.Binding
 }
 
-// NewSetupKeyMap creates a new SetupKeyMap with default bindings.
-func NewSetupKeyMap() SetupKeyMap {
-	return SetupKeyMap{
-		Base: keymap.NewBase(),
+// NewSetupKeyMap creates a new SetupKeyMap with user configuration applied.
+// Base bindings (navigation, actions, search, selection) come from keymap.Load().
+// Only TUI-specific bindings are defined here.
+func NewSetupKeyMap(cfg *config.Config) SetupKeyMap {
+	km := SetupKeyMap{
+		Base: keymap.Load(cfg, "grove.setup"),
 		Select: key.NewBinding(
 			key.WithKeys(" "),
 			key.WithHelp("space", "toggle selection"),
@@ -31,6 +34,11 @@ func NewSetupKeyMap() SetupKeyMap {
 			key.WithHelp("esc", "go back"),
 		),
 	}
+
+	// Apply TUI-specific overrides from config
+	keymap.ApplyTUIOverrides(cfg, "grove", "setup", &km)
+
+	return km
 }
 
 // ShortHelp returns keybindings to be shown in the mini help view.
@@ -53,6 +61,6 @@ func SetupKeymapInfo() keymap.TUIInfo {
 		"grove-wizard",
 		"grove",
 		"Initial setup wizard",
-		NewSetupKeyMap(),
+		NewSetupKeyMap(nil),
 	)
 }

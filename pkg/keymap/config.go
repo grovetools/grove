@@ -3,6 +3,7 @@ package keymap
 
 import (
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/tui/keymap"
 )
 
@@ -26,10 +27,12 @@ type ConfigKeyMap struct {
 	SortMode       key.Binding // Cycle sort mode
 }
 
-// NewConfigKeyMap creates a new ConfigKeyMap with default bindings.
-func NewConfigKeyMap() ConfigKeyMap {
-	return ConfigKeyMap{
-		Base: keymap.NewBase(),
+// NewConfigKeyMap creates a new ConfigKeyMap with user configuration applied.
+// Base bindings (navigation, actions, search, selection) come from keymap.Load().
+// Only TUI-specific bindings are defined here.
+func NewConfigKeyMap(cfg *config.Config) ConfigKeyMap {
+	km := ConfigKeyMap{
+		Base: keymap.Load(cfg, "grove.config"),
 		Edit: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "edit value"),
@@ -91,6 +94,11 @@ func NewConfigKeyMap() ConfigKeyMap {
 			key.WithHelp("s", "cycle sort"),
 		),
 	}
+
+	// Apply TUI-specific overrides from config
+	keymap.ApplyTUIOverrides(cfg, "grove", "config", &km)
+
+	return km
 }
 
 // ShortHelp returns keybindings to be shown in the mini help view.
@@ -123,6 +131,6 @@ func ConfigKeymapInfo() keymap.TUIInfo {
 		"grove-config",
 		"grove",
 		"Interactive configuration editor",
-		NewConfigKeyMap(),
+		NewConfigKeyMap(nil),
 	)
 }

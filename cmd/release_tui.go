@@ -32,7 +32,10 @@ var tuiLog = logging.NewUnifiedLogger("grove-meta.release-tui")
 
 
 // releaseKeys is the singleton instance of the release TUI keymap.
-var releaseKeys = grovekeymap.NewReleaseKeyMap()
+var releaseKeys = func() grovekeymap.ReleaseKeyMap {
+	cfg, _ := config.LoadDefault()
+	return grovekeymap.NewReleaseKeyMap(cfg)
+}()
 
 // TUI views
 const (

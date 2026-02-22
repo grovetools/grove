@@ -3,6 +3,7 @@ package keymap
 
 import (
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/tui/keymap"
 )
 
@@ -15,10 +16,12 @@ type OnboardKeyMap struct {
 	No      key.Binding
 }
 
-// NewOnboardKeyMap creates a new OnboardKeyMap with default bindings.
-func NewOnboardKeyMap() OnboardKeyMap {
-	return OnboardKeyMap{
-		Base: keymap.NewBase(),
+// NewOnboardKeyMap creates a new OnboardKeyMap with user configuration applied.
+// Base bindings (navigation, actions, search, selection) come from keymap.Load().
+// Only TUI-specific bindings are defined here.
+func NewOnboardKeyMap(cfg *config.Config) OnboardKeyMap {
+	km := OnboardKeyMap{
+		Base: keymap.Load(cfg, "grove.onboard"),
 		Confirm: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "confirm"),
@@ -36,6 +39,11 @@ func NewOnboardKeyMap() OnboardKeyMap {
 			key.WithHelp("n", "no"),
 		),
 	}
+
+	// Apply TUI-specific overrides from config
+	keymap.ApplyTUIOverrides(cfg, "grove", "onboard", &km)
+
+	return km
 }
 
 // ShortHelp returns keybindings to be shown in the mini help view.
@@ -59,6 +67,6 @@ func OnboardKeymapInfo() keymap.TUIInfo {
 		"grove-onboard",
 		"grove",
 		"Initial system onboarding wizard",
-		NewOnboardKeyMap(),
+		NewOnboardKeyMap(nil),
 	)
 }

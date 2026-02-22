@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/cli"
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/tui/theme"
 	grovekeymap "github.com/grovetools/grove/pkg/keymap"
@@ -37,7 +38,10 @@ const (
 )
 
 // onboardKeys is the singleton instance of the onboard wizard TUI keymap.
-var onboardKeys = grovekeymap.NewOnboardKeyMap()
+var onboardKeys = func() grovekeymap.OnboardKeyMap {
+	cfg, _ := config.LoadDefault()
+	return grovekeymap.NewOnboardKeyMap(cfg)
+}()
 
 // Toggle key for checkboxes
 var toggleKey = key.NewBinding(

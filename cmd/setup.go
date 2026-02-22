@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/cli"
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/tui/components/help"
@@ -90,7 +91,10 @@ type agentArgItem struct {
 }
 
 // setupKeys is the singleton instance of the setup wizard TUI keymap.
-var setupKeys = grovekeymap.NewSetupKeyMap()
+var setupKeys = func() grovekeymap.SetupKeyMap {
+	cfg, _ := config.LoadDefault()
+	return grovekeymap.NewSetupKeyMap(cfg)
+}()
 
 // componentDelegate renders component items with checkboxes
 type componentDelegate struct{}

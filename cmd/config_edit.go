@@ -103,7 +103,10 @@ Supports both YAML (with comment preservation) and TOML formats.`
 // --- Model & State ---
 
 // configKeys is the singleton instance of the config editor TUI keymap.
-var configKeys = grovekeymap.NewConfigKeyMap()
+var configKeys = func() grovekeymap.ConfigKeyMap {
+	cfg, _ := config.LoadDefault()
+	return grovekeymap.NewConfigKeyMap(cfg)
+}()
 
 // isOverrideSource returns true if the source is an override file (not the main config).
 func isOverrideSource(source config.ConfigSource) bool {

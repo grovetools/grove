@@ -12,7 +12,7 @@ func KeysKeymapInfo() keymap.TUIInfo {
 		"grove-keys",
 		"grove",
 		"Keybinding browser and analyzer",
-		newKeysTUIKeyMap(),
+		newKeysTUIKeyMap(nil),
 	)
 }
 
