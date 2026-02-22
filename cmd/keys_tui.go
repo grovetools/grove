@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/daemon"
+	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/grove/pkg/keys"
@@ -45,18 +46,11 @@ func (k keysTUIKeyMap) FullHelp() [][]key.Binding {
 // Sections returns grouped sections of key bindings for the full help view.
 func (k keysTUIKeyMap) Sections() []keymap.Section {
 	return []keymap.Section{
-		{
-			Name:     "Navigation",
-			Bindings: []key.Binding{k.Up, k.Down, k.PageUp, k.PageDown, k.NextTab, k.PrevTab},
-		},
-		{
-			Name:     "Actions",
-			Bindings: []key.Binding{k.Search, k.ToggleView, k.EditConfig},
-		},
-		{
-			Name:     "Matrix View",
-			Bindings: []key.Binding{k.ScrollTUILeft, k.ScrollTUIRight},
-		},
+		keymap.NavigationSection(k.Up, k.Down, k.PageUp, k.PageDown, k.NextTab, k.PrevTab),
+		keymap.ActionsSection(k.Search, k.ToggleView, k.EditConfig),
+		keymap.NewSectionWithIcon("Matrix View", theme.IconViewDashboard,
+			k.ScrollTUILeft, k.ScrollTUIRight,
+		),
 		k.Base.SystemSection(),
 	}
 }
@@ -104,6 +98,7 @@ type keysModel struct {
 	searchActive bool
 
 	vp     viewport.Model
+	help   help.Model
 	width  int
 	height int
 
@@ -157,9 +152,13 @@ func runKeysTUI() error {
 		stream, _ = client.StreamState(context.Background())
 	}
 
+	km := newKeysTUIKeyMap()
+	helpModel := help.New(km)
+	helpModel.Title = "Keybindings Browser Help"
+
 	m := keysModel{
 		cfg:           cfg,
-		keys:          newKeysTUIKeyMap(),
+		keys:          km,
 		bindings:      bindings,
 		conflicts:     conflicts,
 		analysis:      analysis,
@@ -170,6 +169,7 @@ func runKeysTUI() error {
 		matrixScrollX: 0,
 		searchInput:   ti,
 		vp:            viewport.New(80, 20),
+		help:          helpModel,
 		stream:        stream,
 	}
 
@@ -207,10 +207,22 @@ func (m keysModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.vp.Width = msg.Width
 		m.vp.Height = msg.Height - 6 // Reserve room for tabs, search, and footer
+		m.help.SetSize(msg.Width, msg.Height)
 		m.updateViewport()
 		return m, nil
 
 	case tea.KeyMsg:
+		// Handle help view first
+		if m.help.ShowAll {
+			if key.Matches(msg, m.keys.Help) || key.Matches(msg, m.keys.Back) || key.Matches(msg, m.keys.Quit) {
+				m.help.Toggle()
+				return m, nil
+			}
+			// Let help handle scrolling
+			m.help, cmd = m.help.Update(msg)
+			return m, cmd
+		}
+
 		if m.searchActive {
 			if key.Matches(msg, m.keys.Confirm) || key.Matches(msg, m.keys.Back) {
 				m.searchActive = false
@@ -225,6 +237,11 @@ func (m keysModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if key.Matches(msg, m.keys.Quit) {
 			return m, tea.Quit
+		}
+
+		if key.Matches(msg, m.keys.Help) {
+			m.help.Toggle()
+			return m, nil
 		}
 
 		if key.Matches(msg, m.keys.Search) {
@@ -597,6 +614,11 @@ func (m *keysModel) renderDomainView(b *strings.Builder, searchQuery string, t *
 }
 
 func (m keysModel) View() string {
+	// Show help overlay if active
+	if m.help.ShowAll {
+		return m.help.View()
+	}
+
 	t := theme.DefaultTheme
 	var s strings.Builder
 

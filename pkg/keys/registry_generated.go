@@ -1066,8 +1066,8 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Focus",
 				Bindings: []BindingEntry{
-					{Name: "focus on project", Keys: []string{"@"}, Description: "focus on project", Enabled: true},
-					{Name: "clear focus", Keys: []string{"ctrl+g"}, Description: "clear focus", Enabled: true},
+					{Name: "focus ecosystem", Keys: []string{"@"}, Description: "focus ecosystem", Enabled: true},
+					{Name: "clear ecosystem focus", Keys: []string{"ctrl+g"}, Description: "clear ecosystem focus", Enabled: true},
 					{Name: "toggle worktrees", Keys: []string{"tab"}, Description: "toggle worktrees", Enabled: true},
 					{Name: "filter dirty", Keys: []string{"D"}, Description: "filter dirty", Enabled: true},
 					{Name: "toggle context", Keys: []string{"C"}, Description: "toggle context", Enabled: true},

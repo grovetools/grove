@@ -4,6 +4,7 @@ package keymap
 import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/grovetools/core/tui/keymap"
+	"github.com/grovetools/core/tui/theme"
 )
 
 // ReleaseKeyMap defines key bindings for the release TUI.
@@ -160,30 +161,20 @@ func (k ReleaseKeyMap) Sections() []keymap.Section {
 
 	return []keymap.Section{
 		nav,
-		{
-			Name:     "Selection",
-			Bindings: []key.Binding{k.Toggle, k.SelectAll, k.DeselectAll},
-		},
-		{
-			Name:     "Version Bumps",
-			Bindings: []key.Binding{k.SelectMajor, k.SelectMinor, k.SelectPatch, k.ApplySuggestion},
-		},
-		{
-			Name:     "Changelog",
-			Bindings: []key.Binding{k.ViewChangelog, k.EditChangelog, k.EditRepoChangelog, k.GenerateChangelog, k.GenerateAll, k.WriteChangelog},
-		},
-		{
-			Name:     "LLM Rules",
-			Bindings: []key.Binding{k.EditRules, k.ResetRules},
-		},
-		{
-			Name:     "Settings",
-			Bindings: []key.Binding{k.ToggleDryRun, k.TogglePush, k.ToggleSyncDeps},
-		},
-		{
-			Name:     "Actions",
-			Bindings: []key.Binding{k.Approve, k.Back},
-		},
+		keymap.SelectionSection(k.Toggle, k.SelectAll, k.DeselectAll),
+		keymap.NewSectionWithIcon("Version Bumps", theme.IconArrowUpBold,
+			k.SelectMajor, k.SelectMinor, k.SelectPatch, k.ApplySuggestion,
+		),
+		keymap.NewSectionWithIcon("Changelog", theme.IconDiff,
+			k.ViewChangelog, k.EditChangelog, k.EditRepoChangelog, k.GenerateChangelog, k.GenerateAll, k.WriteChangelog,
+		),
+		keymap.NewSectionWithIcon("LLM Rules", theme.IconRobot,
+			k.EditRules, k.ResetRules,
+		),
+		keymap.NewSection(keymap.SectionSettings,
+			k.ToggleDryRun, k.TogglePush, k.ToggleSyncDeps,
+		),
+		keymap.ActionsSection(k.Approve, k.Back),
 		k.Base.SystemSection(),
 	}
 }
