@@ -15,12 +15,15 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/pkg/paths"
-	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
+	grovekeymap "github.com/grovetools/grove/pkg/keymap"
 	"github.com/grovetools/grove/pkg/sdk"
 	"github.com/grovetools/grove/pkg/shell"
 	"github.com/spf13/cobra"
 )
+
+// Type alias for the extracted keymap
+type onboardKeyMap = grovekeymap.OnboardKeyMap
 
 // onboardStep represents the current step in the onboarding wizard
 type onboardStep int
@@ -33,34 +36,8 @@ const (
 	onboardStepDone
 )
 
-// onboardKeyMap defines key bindings for the onboard wizard
-type onboardKeyMap struct {
-	keymap.Base
-	Confirm key.Binding
-	Skip    key.Binding
-	Yes     key.Binding
-	No      key.Binding
-}
-
-var onboardKeys = onboardKeyMap{
-	Base: keymap.NewBase(),
-	Confirm: key.NewBinding(
-		key.WithKeys("enter"),
-		key.WithHelp("enter", "confirm"),
-	),
-	Skip: key.NewBinding(
-		key.WithKeys("s"),
-		key.WithHelp("s", "skip"),
-	),
-	Yes: key.NewBinding(
-		key.WithKeys("y"),
-		key.WithHelp("y", "yes"),
-	),
-	No: key.NewBinding(
-		key.WithKeys("n"),
-		key.WithHelp("n", "no"),
-	),
-}
+// onboardKeys is the singleton instance of the onboard wizard TUI keymap.
+var onboardKeys = grovekeymap.NewOnboardKeyMap()
 
 // Toggle key for checkboxes
 var toggleKey = key.NewBinding(

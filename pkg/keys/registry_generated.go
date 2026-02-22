@@ -7,6 +7,83 @@ package keys
 // This is populated at build time by the keys-registry-generator tool.
 var TUIRegistry = []TUIRegistryEntry{
 	{
+		Name:        "core-logs",
+		Package:     "core",
+		Description: "Aggregated log viewer with filtering and search",
+		Sections: []SectionEntry{
+			{
+				Name: "Navigation",
+				Bindings: []BindingEntry{
+					{Name: "up", Keys: []string{"k", "up"}, Description: "up", Enabled: true},
+					{Name: "down", Keys: []string{"j", "down"}, Description: "down", Enabled: true},
+					{Name: "left", Keys: []string{"left"}, Description: "left", Enabled: true},
+					{Name: "right", Keys: []string{"right"}, Description: "right", Enabled: true},
+					{Name: "page up", Keys: []string{"ctrl+u", "pgup"}, Description: "page up", Enabled: true},
+					{Name: "page down", Keys: []string{"ctrl+d", "pgdown"}, Description: "page down", Enabled: true},
+					{Name: "top", Keys: []string{"gg"}, Description: "top", Enabled: true},
+					{Name: "bottom", Keys: []string{"G"}, Description: "bottom", Enabled: true},
+				},
+			},
+			{
+				Name: "Actions",
+				Bindings: []BindingEntry{
+					{Name: "confirm", Keys: []string{"enter", "y"}, Description: "confirm", Enabled: true},
+					{Name: "cancel", Keys: []string{"ctrl+g"}, Description: "cancel", Enabled: true},
+					{Name: "back", Keys: []string{"esc"}, Description: "back", Enabled: true},
+					{Name: "edit", Keys: []string{"e"}, Description: "edit", Enabled: true},
+					{Name: "delete", Keys: []string{"dd"}, Description: "delete", Enabled: true},
+					{Name: "yank", Keys: []string{"yy"}, Description: "yank", Enabled: true},
+					{Name: "rename", Keys: []string{"R"}, Description: "rename", Enabled: true},
+					{Name: "refresh", Keys: []string{"ctrl+r"}, Description: "refresh", Enabled: true},
+					{Name: "copy path", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true},
+				},
+			},
+			{
+				Name: "Search",
+				Bindings: []BindingEntry{
+					{Name: "search", Keys: []string{"/"}, Description: "search", Enabled: true},
+					{Name: "next match", Keys: []string{"n"}, Description: "next match", Enabled: true},
+					{Name: "prev match", Keys: []string{"N"}, Description: "prev match", Enabled: true},
+					{Name: "clear search", Keys: []string{"ctrl+l"}, Description: "clear search", Enabled: true},
+				},
+			},
+			{
+				Name: "Selection",
+				Bindings: []BindingEntry{
+					{Name: "select", Keys: []string{" "}, Description: "select", Enabled: true},
+					{Name: "all", Keys: []string{"ctrl+a"}, Description: "all", Enabled: true},
+					{Name: "none", Keys: []string{"-"}, Description: "none", Enabled: true},
+				},
+			},
+			{
+				Name: "View",
+				Bindings: []BindingEntry{
+					{Name: "switch view", Keys: []string{"tab"}, Description: "switch view", Enabled: true},
+					{Name: "next tab", Keys: []string{"]"}, Description: "next tab", Enabled: true},
+					{Name: "prev tab", Keys: []string{"["}, Description: "prev tab", Enabled: true},
+					{Name: "preview", Keys: []string{"v"}, Description: "preview", Enabled: true},
+				},
+			},
+			{
+				Name: "Fold",
+				Bindings: []BindingEntry{
+					{Name: "open fold", Keys: []string{"zo"}, Description: "open fold", Enabled: true},
+					{Name: "close fold", Keys: []string{"zc"}, Description: "close fold", Enabled: true},
+					{Name: "toggle fold", Keys: []string{"za"}, Description: "toggle fold", Enabled: true},
+					{Name: "open all", Keys: []string{"zR"}, Description: "open all", Enabled: true},
+					{Name: "close all", Keys: []string{"zM"}, Description: "close all", Enabled: true},
+				},
+			},
+			{
+				Name: "System",
+				Bindings: []BindingEntry{
+					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true},
+					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true},
+				},
+			},
+		},
+	},
+	{
 		Name:        "cx-rules",
 		Package:     "cx",
 		Description: "Context rules picker and manager",
@@ -478,6 +555,83 @@ var TUIRegistry = []TUIRegistryEntry{
 		},
 	},
 	{
+		Name:        "grove-config",
+		Package:     "grove",
+		Description: "Interactive configuration editor",
+		Sections: []SectionEntry{
+			{
+				Name: "Navigation",
+				Bindings: []BindingEntry{
+					{Name: "up", Keys: []string{"k", "up"}, Description: "up", Enabled: true},
+					{Name: "down", Keys: []string{"j", "down"}, Description: "down", Enabled: true},
+					{Name: "left", Keys: []string{"left"}, Description: "left", Enabled: true},
+					{Name: "right", Keys: []string{"right"}, Description: "right", Enabled: true},
+					{Name: "page up", Keys: []string{"ctrl+u", "pgup"}, Description: "page up", Enabled: true},
+					{Name: "page down", Keys: []string{"ctrl+d", "pgdown"}, Description: "page down", Enabled: true},
+					{Name: "top", Keys: []string{"gg"}, Description: "top", Enabled: true},
+					{Name: "bottom", Keys: []string{"G"}, Description: "bottom", Enabled: true},
+				},
+			},
+			{
+				Name: "Actions",
+				Bindings: []BindingEntry{
+					{Name: "confirm", Keys: []string{"enter", "y"}, Description: "confirm", Enabled: true},
+					{Name: "cancel", Keys: []string{"ctrl+g"}, Description: "cancel", Enabled: true},
+					{Name: "back", Keys: []string{"esc"}, Description: "back", Enabled: true},
+					{Name: "edit", Keys: []string{"e"}, Description: "edit", Enabled: true},
+					{Name: "delete", Keys: []string{"dd"}, Description: "delete", Enabled: true},
+					{Name: "yank", Keys: []string{"yy"}, Description: "yank", Enabled: true},
+					{Name: "rename", Keys: []string{"R"}, Description: "rename", Enabled: true},
+					{Name: "refresh", Keys: []string{"ctrl+r"}, Description: "refresh", Enabled: true},
+					{Name: "copy path", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true},
+				},
+			},
+			{
+				Name: "Search",
+				Bindings: []BindingEntry{
+					{Name: "search", Keys: []string{"/"}, Description: "search", Enabled: true},
+					{Name: "next match", Keys: []string{"n"}, Description: "next match", Enabled: true},
+					{Name: "prev match", Keys: []string{"N"}, Description: "prev match", Enabled: true},
+					{Name: "clear search", Keys: []string{"ctrl+l"}, Description: "clear search", Enabled: true},
+				},
+			},
+			{
+				Name: "Selection",
+				Bindings: []BindingEntry{
+					{Name: "select", Keys: []string{" "}, Description: "select", Enabled: true},
+					{Name: "all", Keys: []string{"ctrl+a"}, Description: "all", Enabled: true},
+					{Name: "none", Keys: []string{"-"}, Description: "none", Enabled: true},
+				},
+			},
+			{
+				Name: "View",
+				Bindings: []BindingEntry{
+					{Name: "switch view", Keys: []string{"tab"}, Description: "switch view", Enabled: true},
+					{Name: "next tab", Keys: []string{"]"}, Description: "next tab", Enabled: true},
+					{Name: "prev tab", Keys: []string{"["}, Description: "prev tab", Enabled: true},
+					{Name: "preview", Keys: []string{"v"}, Description: "preview", Enabled: true},
+				},
+			},
+			{
+				Name: "Fold",
+				Bindings: []BindingEntry{
+					{Name: "open fold", Keys: []string{"zo"}, Description: "open fold", Enabled: true},
+					{Name: "close fold", Keys: []string{"zc"}, Description: "close fold", Enabled: true},
+					{Name: "toggle fold", Keys: []string{"za"}, Description: "toggle fold", Enabled: true},
+					{Name: "open all", Keys: []string{"zR"}, Description: "open all", Enabled: true},
+					{Name: "close all", Keys: []string{"zM"}, Description: "close all", Enabled: true},
+				},
+			},
+			{
+				Name: "System",
+				Bindings: []BindingEntry{
+					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true},
+					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true},
+				},
+			},
+		},
+	},
+	{
 		Name:        "grove-keys",
 		Package:     "grove",
 		Description: "Keybinding browser and analyzer",
@@ -506,6 +660,232 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "scroll TUIs left", Keys: []string{"h"}, Description: "scroll TUIs left", Enabled: true},
 					{Name: "scroll TUIs right", Keys: []string{"l"}, Description: "scroll TUIs right", Enabled: true},
+				},
+			},
+			{
+				Name: "System",
+				Bindings: []BindingEntry{
+					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true},
+					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true},
+				},
+			},
+		},
+	},
+	{
+		Name:        "grove-onboard",
+		Package:     "grove",
+		Description: "Initial system onboarding wizard",
+		Sections: []SectionEntry{
+			{
+				Name: "Navigation",
+				Bindings: []BindingEntry{
+					{Name: "up", Keys: []string{"k", "up"}, Description: "up", Enabled: true},
+					{Name: "down", Keys: []string{"j", "down"}, Description: "down", Enabled: true},
+					{Name: "left", Keys: []string{"left"}, Description: "left", Enabled: true},
+					{Name: "right", Keys: []string{"right"}, Description: "right", Enabled: true},
+					{Name: "page up", Keys: []string{"ctrl+u", "pgup"}, Description: "page up", Enabled: true},
+					{Name: "page down", Keys: []string{"ctrl+d", "pgdown"}, Description: "page down", Enabled: true},
+					{Name: "top", Keys: []string{"gg"}, Description: "top", Enabled: true},
+					{Name: "bottom", Keys: []string{"G"}, Description: "bottom", Enabled: true},
+				},
+			},
+			{
+				Name: "Actions",
+				Bindings: []BindingEntry{
+					{Name: "confirm", Keys: []string{"enter", "y"}, Description: "confirm", Enabled: true},
+					{Name: "cancel", Keys: []string{"ctrl+g"}, Description: "cancel", Enabled: true},
+					{Name: "back", Keys: []string{"esc"}, Description: "back", Enabled: true},
+					{Name: "edit", Keys: []string{"e"}, Description: "edit", Enabled: true},
+					{Name: "delete", Keys: []string{"dd"}, Description: "delete", Enabled: true},
+					{Name: "yank", Keys: []string{"yy"}, Description: "yank", Enabled: true},
+					{Name: "rename", Keys: []string{"R"}, Description: "rename", Enabled: true},
+					{Name: "refresh", Keys: []string{"ctrl+r"}, Description: "refresh", Enabled: true},
+					{Name: "copy path", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true},
+				},
+			},
+			{
+				Name: "Search",
+				Bindings: []BindingEntry{
+					{Name: "search", Keys: []string{"/"}, Description: "search", Enabled: true},
+					{Name: "next match", Keys: []string{"n"}, Description: "next match", Enabled: true},
+					{Name: "prev match", Keys: []string{"N"}, Description: "prev match", Enabled: true},
+					{Name: "clear search", Keys: []string{"ctrl+l"}, Description: "clear search", Enabled: true},
+				},
+			},
+			{
+				Name: "Selection",
+				Bindings: []BindingEntry{
+					{Name: "select", Keys: []string{" "}, Description: "select", Enabled: true},
+					{Name: "all", Keys: []string{"ctrl+a"}, Description: "all", Enabled: true},
+					{Name: "none", Keys: []string{"-"}, Description: "none", Enabled: true},
+				},
+			},
+			{
+				Name: "View",
+				Bindings: []BindingEntry{
+					{Name: "switch view", Keys: []string{"tab"}, Description: "switch view", Enabled: true},
+					{Name: "next tab", Keys: []string{"]"}, Description: "next tab", Enabled: true},
+					{Name: "prev tab", Keys: []string{"["}, Description: "prev tab", Enabled: true},
+					{Name: "preview", Keys: []string{"v"}, Description: "preview", Enabled: true},
+				},
+			},
+			{
+				Name: "Fold",
+				Bindings: []BindingEntry{
+					{Name: "open fold", Keys: []string{"zo"}, Description: "open fold", Enabled: true},
+					{Name: "close fold", Keys: []string{"zc"}, Description: "close fold", Enabled: true},
+					{Name: "toggle fold", Keys: []string{"za"}, Description: "toggle fold", Enabled: true},
+					{Name: "open all", Keys: []string{"zR"}, Description: "open all", Enabled: true},
+					{Name: "close all", Keys: []string{"zM"}, Description: "close all", Enabled: true},
+				},
+			},
+			{
+				Name: "System",
+				Bindings: []BindingEntry{
+					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true},
+					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true},
+				},
+			},
+		},
+	},
+	{
+		Name:        "grove-release",
+		Package:     "grove",
+		Description: "Release management with changelog generation",
+		Sections: []SectionEntry{
+			{
+				Name: "Navigation",
+				Bindings: []BindingEntry{
+					{Name: "up", Keys: []string{"k", "up"}, Description: "up", Enabled: true},
+					{Name: "down", Keys: []string{"j", "down"}, Description: "down", Enabled: true},
+					{Name: "switch view", Keys: []string{"tab"}, Description: "switch view", Enabled: true},
+				},
+			},
+			{
+				Name: "Selection",
+				Bindings: []BindingEntry{
+					{Name: "toggle selection", Keys: []string{" ", "x"}, Description: "toggle selection", Enabled: true},
+					{Name: "select all", Keys: []string{"ctrl+a"}, Description: "select all", Enabled: true},
+					{Name: "deselect all", Keys: []string{"ctrl+d"}, Description: "deselect all", Enabled: true},
+				},
+			},
+			{
+				Name: "Version Bumps",
+				Bindings: []BindingEntry{
+					{Name: "set major", Keys: []string{"m"}, Description: "set major", Enabled: true},
+					{Name: "set minor", Keys: []string{"n"}, Description: "set minor", Enabled: true},
+					{Name: "set patch", Keys: []string{"p"}, Description: "set patch", Enabled: true},
+					{Name: "apply suggestion", Keys: []string{"s"}, Description: "apply suggestion", Enabled: true},
+				},
+			},
+			{
+				Name: "Changelog",
+				Bindings: []BindingEntry{
+					{Name: "view changelog", Keys: []string{"v"}, Description: "view changelog", Enabled: true},
+					{Name: "edit staged changelog", Keys: []string{"e"}, Description: "edit staged changelog", Enabled: true},
+					{Name: "edit repo CHANGELOG.md", Keys: []string{"E"}, Description: "edit repo CHANGELOG.md", Enabled: true},
+					{Name: "generate changelog (LLM)", Keys: []string{"g"}, Description: "generate changelog (LLM)", Enabled: true},
+					{Name: "generate all changelogs", Keys: []string{"G"}, Description: "generate all changelogs", Enabled: true},
+					{Name: "write changelog to repo", Keys: []string{"w"}, Description: "write changelog to repo", Enabled: true},
+				},
+			},
+			{
+				Name: "LLM Rules",
+				Bindings: []BindingEntry{
+					{Name: "edit LLM rules", Keys: []string{"r"}, Description: "edit LLM rules", Enabled: true},
+					{Name: "reset all rules to *", Keys: []string{"R"}, Description: "reset all rules to *", Enabled: true},
+				},
+			},
+			{
+				Name: "Settings",
+				Bindings: []BindingEntry{
+					{Name: "toggle dry-run mode", Keys: []string{"d"}, Description: "toggle dry-run mode", Enabled: true},
+					{Name: "toggle push to remote", Keys: []string{"P"}, Description: "toggle push to remote", Enabled: true},
+					{Name: "toggle sync dependencies", Keys: []string{"S"}, Description: "toggle sync dependencies", Enabled: true},
+				},
+			},
+			{
+				Name: "Actions",
+				Bindings: []BindingEntry{
+					{Name: "approve", Keys: []string{"a"}, Description: "approve", Enabled: true},
+					{Name: "back", Keys: []string{"esc"}, Description: "back", Enabled: true},
+				},
+			},
+			{
+				Name: "System",
+				Bindings: []BindingEntry{
+					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true},
+					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true},
+				},
+			},
+		},
+	},
+	{
+		Name:        "grove-wizard",
+		Package:     "grove",
+		Description: "Initial setup wizard",
+		Sections: []SectionEntry{
+			{
+				Name: "Navigation",
+				Bindings: []BindingEntry{
+					{Name: "up", Keys: []string{"k", "up"}, Description: "up", Enabled: true},
+					{Name: "down", Keys: []string{"j", "down"}, Description: "down", Enabled: true},
+					{Name: "left", Keys: []string{"left"}, Description: "left", Enabled: true},
+					{Name: "right", Keys: []string{"right"}, Description: "right", Enabled: true},
+					{Name: "page up", Keys: []string{"ctrl+u", "pgup"}, Description: "page up", Enabled: true},
+					{Name: "page down", Keys: []string{"ctrl+d", "pgdown"}, Description: "page down", Enabled: true},
+					{Name: "top", Keys: []string{"gg"}, Description: "top", Enabled: true},
+					{Name: "bottom", Keys: []string{"G"}, Description: "bottom", Enabled: true},
+				},
+			},
+			{
+				Name: "Actions",
+				Bindings: []BindingEntry{
+					{Name: "confirm", Keys: []string{"enter", "y"}, Description: "confirm", Enabled: true},
+					{Name: "cancel", Keys: []string{"ctrl+g"}, Description: "cancel", Enabled: true},
+					{Name: "back", Keys: []string{"esc"}, Description: "back", Enabled: true},
+					{Name: "edit", Keys: []string{"e"}, Description: "edit", Enabled: true},
+					{Name: "delete", Keys: []string{"dd"}, Description: "delete", Enabled: true},
+					{Name: "yank", Keys: []string{"yy"}, Description: "yank", Enabled: true},
+					{Name: "rename", Keys: []string{"R"}, Description: "rename", Enabled: true},
+					{Name: "refresh", Keys: []string{"ctrl+r"}, Description: "refresh", Enabled: true},
+					{Name: "copy path", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true},
+				},
+			},
+			{
+				Name: "Search",
+				Bindings: []BindingEntry{
+					{Name: "search", Keys: []string{"/"}, Description: "search", Enabled: true},
+					{Name: "next match", Keys: []string{"n"}, Description: "next match", Enabled: true},
+					{Name: "prev match", Keys: []string{"N"}, Description: "prev match", Enabled: true},
+					{Name: "clear search", Keys: []string{"ctrl+l"}, Description: "clear search", Enabled: true},
+				},
+			},
+			{
+				Name: "Selection",
+				Bindings: []BindingEntry{
+					{Name: "select", Keys: []string{" "}, Description: "select", Enabled: true},
+					{Name: "all", Keys: []string{"ctrl+a"}, Description: "all", Enabled: true},
+					{Name: "none", Keys: []string{"-"}, Description: "none", Enabled: true},
+				},
+			},
+			{
+				Name: "View",
+				Bindings: []BindingEntry{
+					{Name: "switch view", Keys: []string{"tab"}, Description: "switch view", Enabled: true},
+					{Name: "next tab", Keys: []string{"]"}, Description: "next tab", Enabled: true},
+					{Name: "prev tab", Keys: []string{"["}, Description: "prev tab", Enabled: true},
+					{Name: "preview", Keys: []string{"v"}, Description: "preview", Enabled: true},
+				},
+			},
+			{
+				Name: "Fold",
+				Bindings: []BindingEntry{
+					{Name: "open fold", Keys: []string{"zo"}, Description: "open fold", Enabled: true},
+					{Name: "close fold", Keys: []string{"zc"}, Description: "close fold", Enabled: true},
+					{Name: "toggle fold", Keys: []string{"za"}, Description: "toggle fold", Enabled: true},
+					{Name: "open all", Keys: []string{"zR"}, Description: "open all", Enabled: true},
+					{Name: "close all", Keys: []string{"zM"}, Description: "close all", Enabled: true},
 				},
 			},
 			{

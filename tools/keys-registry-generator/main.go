@@ -19,6 +19,7 @@ import (
 	"github.com/grovetools/core/tui/keymap"
 
 	// TUI keymap imports - add new TUIs here
+	core_cmd "github.com/grovetools/core/cmd"
 	cx_rules "github.com/grovetools/cx/cmd/rules"
 	cx_view "github.com/grovetools/cx/cmd/view"
 	flow_cmd "github.com/grovetools/flow/cmd"
@@ -35,6 +36,8 @@ import (
 // Add new TUIs here when they implement KeymapInfo().
 func getTUIInfos() []keymap.TUIInfo {
 	return []keymap.TUIInfo{
+		// core
+		core_cmd.LogsKeymapInfo(),
 		// cx
 		cx_rules.KeymapInfo(),
 		cx_view.KeymapInfo(),
@@ -46,6 +49,10 @@ func getTUIInfos() []keymap.TUIInfo {
 		flow_cmd.PlanFinishKeymapInfo(),
 		// grove
 		grove_cmd.KeysKeymapInfo(),
+		grove_cmd.ReleaseKeymapInfo(),
+		grove_cmd.ConfigKeymapInfo(),
+		grove_cmd.SetupKeymapInfo(),
+		grove_cmd.OnboardKeymapInfo(),
 		// grove-gemini
 		gemini_cmd.QueryTuiKeymapInfo(),
 		gemini_cmd.DashboardKeymapInfo(),

@@ -17,14 +17,17 @@ import (
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/tui/components/help"
-	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
+	grovekeymap "github.com/grovetools/grove/pkg/keymap"
 	"github.com/grovetools/grove/pkg/setup"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
+
+// Type alias for the extracted keymap
+type setupKeyMap = grovekeymap.SetupKeyMap
 
 // Command flags
 var (
@@ -86,40 +89,8 @@ type agentArgItem struct {
 	selected bool
 }
 
-// setupKeyMap defines key bindings for the setup wizard
-type setupKeyMap struct {
-	keymap.Base
-	Select  key.Binding
-	Confirm key.Binding
-	Back    key.Binding
-}
-
-var setupKeys = setupKeyMap{
-	Base: keymap.NewBase(),
-	Select: key.NewBinding(
-		key.WithKeys(" "),
-		key.WithHelp("space", "toggle selection"),
-	),
-	Confirm: key.NewBinding(
-		key.WithKeys("enter"),
-		key.WithHelp("enter", "confirm"),
-	),
-	Back: key.NewBinding(
-		key.WithKeys("esc"),
-		key.WithHelp("esc", "go back"),
-	),
-}
-
-func (k setupKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Select, k.Confirm, k.Base.Quit}
-}
-
-func (k setupKeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
-		{k.Base.Up, k.Base.Down, k.Select},
-		{k.Confirm, k.Back, k.Base.Quit},
-	}
-}
+// setupKeys is the singleton instance of the setup wizard TUI keymap.
+var setupKeys = grovekeymap.NewSetupKeyMap()
 
 // componentDelegate renders component items with checkboxes
 type componentDelegate struct{}
