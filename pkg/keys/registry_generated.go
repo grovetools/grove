@@ -295,6 +295,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "resume job", Keys: []string{"ctrl+R"}, Description: "resume job", Enabled: true},
 					{Name: "edit dependencies", Keys: []string{"D"}, Description: "edit dependencies", Enabled: true},
 					{Name: "archive selected", Keys: []string{"X"}, Description: "archive selected", Enabled: true},
+					{Name: "copy path", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true},
 					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true},
 					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true},
 				},
@@ -583,8 +584,8 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Navigation",
 				Bindings: []BindingEntry{
-					{Name: "up", Keys: []string{"up", "k"}, Description: "up", Enabled: true},
-					{Name: "down", Keys: []string{"down", "j"}, Description: "down", Enabled: true},
+					{Name: "up", Keys: []string{"k", "up"}, Description: "up", Enabled: true},
+					{Name: "down", Keys: []string{"j", "down"}, Description: "down", Enabled: true},
 					{Name: "jump to row", Keys: []string{"1-9"}, Description: "jump to row", Enabled: true},
 				},
 			},
@@ -593,6 +594,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "filter", Keys: []string{"/"}, Description: "filter", Enabled: true},
 					{Name: "switch to session", Keys: []string{"o", "enter"}, Description: "switch to session", Enabled: true},
+					{Name: "copy path", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true},
 				},
 			},
 			{
@@ -612,10 +614,10 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Navigation",
 				Bindings: []BindingEntry{
-					{Name: "up", Keys: []string{"up", "k"}, Description: "up", Enabled: true},
-					{Name: "down", Keys: []string{"down", "j"}, Description: "down", Enabled: true},
+					{Name: "up", Keys: []string{"k", "up"}, Description: "up", Enabled: true},
+					{Name: "down", Keys: []string{"j", "down"}, Description: "down", Enabled: true},
 					{Name: "jump to row", Keys: []string{"1-9"}, Description: "jump to row", Enabled: true},
-					{Name: "switch to session", Keys: []string{"enter"}, Description: "switch to session", Enabled: true},
+					{Name: "switch to session", Keys: []string{"o", "enter"}, Description: "switch to session", Enabled: true},
 				},
 			},
 			{
@@ -626,6 +628,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "quick toggle", Keys: []string{" "}, Description: "quick toggle", Enabled: true},
 					{Name: "clear mapping", Keys: []string{"d", "delete"}, Description: "clear mapping", Enabled: true},
 					{Name: "save & exit", Keys: []string{"s", "ctrl+s"}, Description: "save & exit", Enabled: true},
+					{Name: "copy path", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true},
 				},
 			},
 			{
@@ -843,6 +846,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "copy selected", Keys: []string{"y", "c"}, Description: "copy selected", Enabled: true},
 					{Name: "paste from clipboard", Keys: []string{"p"}, Description: "paste from clipboard", Enabled: true},
 					{Name: "archive selected", Keys: []string{"X"}, Description: "archive selected", Enabled: true},
+					{Name: "copy path", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true},
 				},
 			},
 			{

@@ -24,11 +24,6 @@ var SchemaFields = []FieldMeta{
 		RefType:     "NotebooksConfig",
 		Children: []FieldMeta{
 			{
-				Path:        []string{"notebooks", "definitions"},
-				Type:        FieldMap,
-				Description: "Map of notebook name to notebook configuration",
-			},
-			{
 				Path:        []string{"notebooks", "rules"},
 				Type:        FieldObject,
 				Description: "Rules for notebook usage (default notebook",
@@ -57,6 +52,11 @@ var SchemaFields = []FieldMeta{
 						},
 					},
 				},
+			},
+			{
+				Path:        []string{"notebooks", "definitions"},
+				Type:        FieldMap,
+				Description: "Map of notebook name to notebook configuration",
 			},
 		},
 	},
@@ -104,20 +104,6 @@ var SchemaFields = []FieldMeta{
 		RefType:     "TUISchemaConfig",
 		Children: []FieldMeta{
 			{
-				Path:        []string{"tui", "preset"},
-				Type:        FieldSelect,
-				Description: "Keybinding preset: vim (default) emacs or arrows",
-				Options:     []string{"vim", "emacs", "arrows"},
-				Important:   true,
-			},
-			{
-				Path:        []string{"tui", "theme"},
-				Type:        FieldSelect,
-				Description: "Color theme for terminal interfaces",
-				Options:     []string{"kanagawa", "gruvbox", "terminal"},
-				Important:   true,
-			},
-			{
 				Path:        []string{"tui", "icons"},
 				Type:        FieldSelect,
 				Description: "Icon set to use: nerd or ascii",
@@ -130,24 +116,6 @@ var SchemaFields = []FieldMeta{
 				Description: "Custom keybinding overrides",
 				RefType:     "KeybindingsSchemaConfig",
 				Children: []FieldMeta{
-					{
-						Path:        []string{"tui", "keybindings", "system"},
-						Type:        FieldString,
-						Description: "System keybindings (quit",
-						RefType:     "KeybindingSectionSchemaConfig",
-					},
-					{
-						Path:        []string{"tui", "keybindings", "view"},
-						Type:        FieldString,
-						Description: "View keybindings (switch_view",
-						RefType:     "KeybindingSectionSchemaConfig",
-					},
-					{
-						Path:        []string{"tui", "keybindings", "actions"},
-						Type:        FieldString,
-						Description: "Action keybindings (confirm",
-						RefType:     "KeybindingSectionSchemaConfig",
-					},
 					{
 						Path:        []string{"tui", "keybindings", "fold"},
 						Type:        FieldString,
@@ -177,6 +145,24 @@ var SchemaFields = []FieldMeta{
 						Description: "Selection keybindings (select",
 						RefType:     "KeybindingSectionSchemaConfig",
 					},
+					{
+						Path:        []string{"tui", "keybindings", "system"},
+						Type:        FieldString,
+						Description: "System keybindings (quit",
+						RefType:     "KeybindingSectionSchemaConfig",
+					},
+					{
+						Path:        []string{"tui", "keybindings", "view"},
+						Type:        FieldString,
+						Description: "View keybindings (switch_view",
+						RefType:     "KeybindingSectionSchemaConfig",
+					},
+					{
+						Path:        []string{"tui", "keybindings", "actions"},
+						Type:        FieldString,
+						Description: "Action keybindings (confirm",
+						RefType:     "KeybindingSectionSchemaConfig",
+					},
 				},
 			},
 			{
@@ -193,6 +179,20 @@ var SchemaFields = []FieldMeta{
 					},
 				},
 			},
+			{
+				Path:        []string{"tui", "preset"},
+				Type:        FieldSelect,
+				Description: "Keybinding preset: vim (default) emacs or arrows",
+				Options:     []string{"vim", "emacs", "arrows"},
+				Important:   true,
+			},
+			{
+				Path:        []string{"tui", "theme"},
+				Type:        FieldSelect,
+				Description: "Color theme for terminal interfaces",
+				Options:     []string{"kanagawa", "gruvbox", "terminal"},
+				Important:   true,
+			},
 		},
 	},
 	{
@@ -203,11 +203,6 @@ var SchemaFields = []FieldMeta{
 		Priority:    60,
 		RefType:     "LoggingSchemaConfig",
 		Children: []FieldMeta{
-			{
-				Path:        []string{"logging", "show_current_project"},
-				Type:        FieldBool,
-				Description: "Always show logs from current project regardless of filters",
-			},
 			{
 				Path:        []string{"logging", "groups"},
 				Type:        FieldMap,
@@ -230,6 +225,11 @@ var SchemaFields = []FieldMeta{
 				Type:        FieldBool,
 				Description: "Include file/line/function in output",
 				Required:    true,
+			},
+			{
+				Path:        []string{"logging", "show_current_project"},
+				Type:        FieldBool,
+				Description: "Always show logs from current project regardless of filters",
 			},
 		},
 	},
