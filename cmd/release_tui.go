@@ -242,14 +242,12 @@ func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Handle help popup first - only respond to close keys when help is shown
 	if m.help.ShowAll {
-		switch msg.String() {
-		case "?", "q", "esc", "ctrl+c":
+		if key.Matches(msg, m.keys.Base.Help) || key.Matches(msg, m.keys.Base.Quit) || key.Matches(msg, m.keys.Back) {
 			m.help.Toggle()
 			return m, nil
-		default:
-			// Ignore ALL other keys when help is shown, including 'A'
-			return m, nil
 		}
+		// Ignore ALL other keys when help is shown, including 'A'
+		return m, nil
 	}
 	
 	switch {
@@ -792,28 +790,32 @@ func (m releaseTuiModel) updateChangelog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m releaseTuiModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	const numSettings = 3 // dry-run, push, sync-deps
-	
-	switch {
-	case key.Matches(msg, m.keys.Tab), key.Matches(msg, m.keys.Back):
+
+	// Handle keybindings using key.Matches for proper config override support
+	if key.Matches(msg, m.keys.Tab) || key.Matches(msg, m.keys.Back) {
 		m.currentView = viewTable
 		return m, nil
+	}
 
-	case key.Matches(msg, m.keys.Base.Quit):
+	if key.Matches(msg, m.keys.Base.Quit) {
 		return m, tea.Quit
+	}
 
-	case key.Matches(msg, m.keys.Base.Up) || msg.String() == "k":
+	if key.Matches(msg, m.keys.Base.Up) {
 		if m.settingsIndex > 0 {
 			m.settingsIndex--
 		}
 		return m, nil
+	}
 
-	case key.Matches(msg, m.keys.Base.Down) || msg.String() == "j":
+	if key.Matches(msg, m.keys.Base.Down) {
 		if m.settingsIndex < numSettings-1 {
 			m.settingsIndex++
 		}
 		return m, nil
+	}
 
-	case msg.String() == " " || msg.String() == "enter" || msg.String() == "x":
+	if key.Matches(msg, m.keys.Toggle) || key.Matches(msg, m.keys.Base.Confirm) {
 		// Toggle the selected setting
 		switch m.settingsIndex {
 		case 0: // Dry-run
@@ -826,7 +828,7 @@ func (m releaseTuiModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 				return clearProgressMsg{}
 			})
-			
+
 		case 1: // Push
 			m.push = !m.push
 			if m.push {
@@ -838,8 +840,9 @@ func (m releaseTuiModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return clearProgressMsg{}
 			})
 		}
-		
-	case key.Matches(msg, m.keys.ToggleDryRun):
+	}
+
+	if key.Matches(msg, m.keys.ToggleDryRun) {
 		m.settingsIndex = 0 // Jump to dry-run setting
 		m.dryRun = !m.dryRun
 		if m.dryRun {
@@ -850,8 +853,9 @@ func (m releaseTuiModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 			return clearProgressMsg{}
 		})
-		
-	case key.Matches(msg, m.keys.TogglePush):
+	}
+
+	if key.Matches(msg, m.keys.TogglePush) {
 		m.settingsIndex = 1 // Jump to push setting
 		m.push = !m.push
 		if m.push {
@@ -862,7 +866,6 @@ func (m releaseTuiModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 			return clearProgressMsg{}
 		})
-		
 	}
 
 	return m, nil

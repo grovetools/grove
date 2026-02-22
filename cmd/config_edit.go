@@ -7,7 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/cli"
@@ -393,24 +394,70 @@ func (m configModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m configModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c", "q":
+	// Handle keybindings using key.Matches for proper config override support
+	if key.Matches(msg, m.keys.Base.Quit) {
 		return m, tea.Quit
+	}
 
-	case "?":
+	if key.Matches(msg, m.keys.Base.Help) {
 		m.help.Toggle()
 		return m, nil
+	}
 
 	// Tab switching
-	case "tab":
+	if key.Matches(msg, m.keys.NextPage) {
 		m.nextPage()
 		return m, nil
+	}
 
-	case "shift+tab":
+	if key.Matches(msg, m.keys.PrevPage) {
 		m.prevPage()
 		return m, nil
+	}
 
-	// Direct page jumps
+	// Toggle preview mode
+	if key.Matches(msg, m.keys.Preview) {
+		configShowPreview = !configShowPreview
+		m.saveUIState()
+		return m, nil
+	}
+
+	// Toggle view mode (configured/all)
+	if key.Matches(msg, m.keys.ViewMode) {
+		configViewMode = configui.CycleViewMode(configViewMode)
+		m.saveUIState()
+		m.refreshAllPages()
+		return m, nil
+	}
+
+	// Cycle maturity filter
+	if key.Matches(msg, m.keys.MaturityFilter) {
+		configMaturityFilter = configui.CycleMaturityFilter(configMaturityFilter)
+		m.saveUIState()
+		m.refreshAllPages()
+		return m, nil
+	}
+
+	// Cycle sort mode
+	if key.Matches(msg, m.keys.SortMode) {
+		configSortMode = configui.CycleSortMode(configSortMode)
+		m.saveUIState()
+		m.refreshAllPages()
+		return m, nil
+	}
+
+	// Show config sources - but don't intercept if z-chord is pending
+	if key.Matches(msg, m.keys.Sources) {
+		if m.pages[m.activePage].IsZChordPending() {
+			// Let it fall through to page delegation
+		} else {
+			m.state = viewSources
+			return m, nil
+		}
+	}
+
+	// Direct page jumps (these are fixed keys, not configurable)
+	switch msg.String() {
 	case "1":
 		if m.activePage != 0 {
 			m.pages[m.activePage].Blur()
@@ -435,53 +482,18 @@ func (m configModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case "p":
-		// Toggle preview mode and persist
-		configShowPreview = !configShowPreview
-		m.saveUIState()
-		return m, nil
-
-	case "v":
-		// Toggle view mode (configured/all) and persist
-		configViewMode = configui.CycleViewMode(configViewMode)
-		m.saveUIState()
-		m.refreshAllPages()
-		return m, nil
-
-	case "m":
-		// Cycle maturity filter forward and persist
-		configMaturityFilter = configui.CycleMaturityFilter(configMaturityFilter)
-		m.saveUIState()
-		m.refreshAllPages()
-		return m, nil
-
 	case "M":
-		// Cycle maturity filter backward and persist
+		// Cycle maturity filter backward (shift variant)
 		configMaturityFilter = configui.CycleMaturityFilterReverse(configMaturityFilter)
 		m.saveUIState()
 		m.refreshAllPages()
 		return m, nil
 
-	case "s":
-		// Cycle sort mode forward and persist
-		configSortMode = configui.CycleSortMode(configSortMode)
-		m.saveUIState()
-		m.refreshAllPages()
-		return m, nil
-
 	case "S":
-		// Cycle sort mode backward and persist
+		// Cycle sort mode backward (shift variant)
 		configSortMode = configui.CycleSortModeReverse(configSortMode)
 		m.saveUIState()
 		m.refreshAllPages()
-		return m, nil
-
-	case "c":
-		// Don't intercept 'c' if a z-chord is pending (zc = close fold)
-		if m.pages[m.activePage].IsZChordPending() {
-			break // Let it fall through to page delegation
-		}
-		m.state = viewSources
 		return m, nil
 	}
 
@@ -492,11 +504,12 @@ func (m configModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m configModel) updateInfo(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "q":
+	// Handle keybindings using key.Matches for proper config override support
+	if key.Matches(msg, m.keys.Cancel) || key.Matches(msg, m.keys.Base.Quit) {
 		m.state = viewList
 		return m, nil
-	case "enter":
+	}
+	if key.Matches(msg, m.keys.Edit) {
 		// Start editing from info view
 		if m.editNode != nil {
 			m.startEditFromNode(m.editNode)
@@ -507,8 +520,8 @@ func (m configModel) updateInfo(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m configModel) updateSources(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "q", "c":
+	// Handle keybindings using key.Matches for proper config override support
+	if key.Matches(msg, m.keys.Cancel) || key.Matches(msg, m.keys.Base.Quit) || key.Matches(msg, m.keys.Sources) {
 		m.state = viewList
 		return m, nil
 	}

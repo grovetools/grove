@@ -24,6 +24,11 @@ var SchemaFields = []FieldMeta{
 		RefType:     "NotebooksConfig",
 		Children: []FieldMeta{
 			{
+				Path:        []string{"notebooks", "definitions"},
+				Type:        FieldMap,
+				Description: "Map of notebook name to notebook configuration",
+			},
+			{
 				Path:        []string{"notebooks", "rules"},
 				Type:        FieldObject,
 				Description: "Rules for notebook usage (default notebook",
@@ -52,11 +57,6 @@ var SchemaFields = []FieldMeta{
 						},
 					},
 				},
-			},
-			{
-				Path:        []string{"notebooks", "definitions"},
-				Type:        FieldMap,
-				Description: "Map of notebook name to notebook configuration",
 			},
 		},
 	},
@@ -104,11 +104,24 @@ var SchemaFields = []FieldMeta{
 		RefType:     "TUISchemaConfig",
 		Children: []FieldMeta{
 			{
+				Path:        []string{"tui", "icons"},
+				Type:        FieldSelect,
+				Description: "Icon set to use: nerd or ascii",
+				Options:     []string{"nerd", "ascii"},
+				Important:   true,
+			},
+			{
 				Path:        []string{"tui", "keybindings"},
 				Type:        FieldObject,
 				Description: "Custom keybinding overrides",
 				RefType:     "KeybindingsSchemaConfig",
 				Children: []FieldMeta{
+					{
+						Path:        []string{"tui", "keybindings", "navigation"},
+						Type:        FieldString,
+						Description: "Navigation keybindings (up",
+						RefType:     "KeybindingSectionSchemaConfig",
+					},
 					{
 						Path:        []string{"tui", "keybindings", "overrides"},
 						Type:        FieldMap,
@@ -150,12 +163,6 @@ var SchemaFields = []FieldMeta{
 						Description: "Fold keybindings (open",
 						RefType:     "KeybindingSectionSchemaConfig",
 					},
-					{
-						Path:        []string{"tui", "keybindings", "navigation"},
-						Type:        FieldString,
-						Description: "Navigation keybindings (up",
-						RefType:     "KeybindingSectionSchemaConfig",
-					},
 				},
 			},
 			{
@@ -186,13 +193,6 @@ var SchemaFields = []FieldMeta{
 				Options:     []string{"kanagawa", "gruvbox", "terminal"},
 				Important:   true,
 			},
-			{
-				Path:        []string{"tui", "icons"},
-				Type:        FieldSelect,
-				Description: "Icon set to use: nerd or ascii",
-				Options:     []string{"nerd", "ascii"},
-				Important:   true,
-			},
 		},
 	},
 	{
@@ -203,12 +203,6 @@ var SchemaFields = []FieldMeta{
 		Priority:    60,
 		RefType:     "LoggingSchemaConfig",
 		Children: []FieldMeta{
-			{
-				Path:        []string{"logging", "level"},
-				Type:        FieldString,
-				Description: "Minimum log level (debug",
-				Required:    true,
-			},
 			{
 				Path:        []string{"logging", "log_startup"},
 				Type:        FieldBool,
@@ -230,6 +224,12 @@ var SchemaFields = []FieldMeta{
 				Path:        []string{"logging", "groups"},
 				Type:        FieldMap,
 				Description: "Named collections of component loggers for filtering",
+			},
+			{
+				Path:        []string{"logging", "level"},
+				Type:        FieldString,
+				Description: "Minimum log level (debug",
+				Required:    true,
 			},
 		},
 	},
