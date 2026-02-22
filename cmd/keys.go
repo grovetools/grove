@@ -29,6 +29,7 @@ When run without arguments, opens an interactive TUI browser.`
 	cmd.AddCommand(newKeysMatrixCmd())
 	cmd.AddCommand(newKeysPopupsCmd())
 	cmd.AddCommand(newKeysDumpCmd())
+	cmd.AddCommand(newKeysValidateCmd())
 
 	return cmd
 }

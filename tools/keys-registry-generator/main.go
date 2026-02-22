@@ -91,7 +91,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "{{ .Name }}",
 				Bindings: []BindingEntry{
 {{- range .Bindings }}
-					{Name: "{{ .Name }}", Keys: []string{ {{- range $i, $k := .Keys }}{{ if $i }}, {{ end }}"{{ $k }}"{{ end -}} }, Description: "{{ .Description }}", Enabled: {{ .Enabled }}},
+					{Name: "{{ .Name }}", Keys: []string{ {{- range $i, $k := .Keys }}{{ if $i }}, {{ end }}"{{ $k }}"{{ end -}} }, Description: "{{ .Description }}", Enabled: {{ .Enabled }}, ConfigKey: "{{ .ConfigKey }}"},
 {{- end }}
 				},
 			},
@@ -121,6 +121,7 @@ type BindingEntry struct {
 	Keys        []string
 	Description string
 	Enabled     bool
+	ConfigKey   string
 }
 
 // GetTUIByName returns the TUI registry entry for the given name.
@@ -158,6 +159,7 @@ func AllBindings() []FlatBinding {
 					Keys:        binding.Keys,
 					Description: binding.Description,
 					Enabled:     binding.Enabled,
+					ConfigKey:   binding.ConfigKey,
 				})
 			}
 		}
@@ -174,6 +176,7 @@ type FlatBinding struct {
 	Keys        []string
 	Description string
 	Enabled     bool
+	ConfigKey   string
 }
 `
 
@@ -183,6 +186,7 @@ type bindingData struct {
 	Keys        []string
 	Description string
 	Enabled     bool
+	ConfigKey   string
 }
 
 type sectionData struct {
@@ -239,6 +243,7 @@ func main() {
 					Keys:        binding.Keys,
 					Description: escapeString(binding.Description),
 					Enabled:     binding.Enabled,
+					ConfigKey:   binding.ConfigKey,
 				})
 			}
 			td.Sections = append(td.Sections, sd)
