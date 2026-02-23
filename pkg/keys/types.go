@@ -67,6 +67,7 @@ type KeysExtension struct {
 		Popups map[string]TmuxPopupConfig `yaml:"popups" toml:"popups"`
 	} `yaml:"tmux" toml:"tmux"`
 	Nav struct {
+		Prefix        string   `yaml:"prefix,omitempty" toml:"prefix,omitempty" jsonschema:"description=Prefix key for nav bindings. Options: '<prefix>' (default, native tmux prefix), '<prefix> X' (sub-table under prefix), 'C-g' (dedicated root key), or '' (direct root with modifiers)."`
 		AvailableKeys []string `yaml:"available_keys" toml:"available_keys"`
 	} `yaml:"nav" toml:"nav"`
 	Nvim map[string]interface{} `yaml:"nvim" toml:"nvim"`

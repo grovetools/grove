@@ -12,6 +12,7 @@ import (
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/paths"
+	"github.com/grovetools/core/pkg/tmux/keygen"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/grove/pkg/keys"
 	"github.com/spf13/cobra"
@@ -101,43 +102,15 @@ size = { width = "100%", height = "98%" }`))
 	lines = append(lines, "set -g popup-border-lines none")
 	lines = append(lines, "")
 
-	prefix := keysExt.Tmux.Prefix
-
-	// Determine binding mode:
-	// - "<prefix>" = direct prefix table (C-b p → action)
-	// - "<prefix> X" = sub-table under prefix (C-b X p → action)
-	// - "C-g" etc = sub-table under root key (C-g p → action)
-	// - "" = direct root table with modifiers (M-p → action)
-	directPrefixTable := prefix == "<prefix>"
-	useSubTable := prefix != "" && !directPrefixTable
-
-	if useSubTable {
-		escapedPrefix := escapeTmuxKey(prefix)
-		lines = append(lines, "# --- Prefix Entry Point ---")
-		if strings.HasPrefix(prefix, "<prefix> ") {
-			nativeKey := strings.TrimPrefix(prefix, "<prefix> ")
-			lines = append(lines, fmt.Sprintf("bind-key %s switch-client -T grove-popups", escapeTmuxKey(nativeKey)))
-		} else {
-			lines = append(lines, fmt.Sprintf("bind-key -n %s switch-client -T grove-popups", escapedPrefix))
-		}
-
-		lines = append(lines, "")
-		lines = append(lines, "# --- Built-in Table Commands ---")
-		lines = append(lines, "bind-key -T grove-popups Escape switch-client -T root")
-		lines = append(lines, "bind-key -T grove-popups C-c switch-client -T root")
-		lines = append(lines, "bind-key -T grove-popups q switch-client -T root")
-
-		if !strings.HasPrefix(prefix, "<prefix> ") {
-			lines = append(lines, fmt.Sprintf("bind-key -T grove-popups %s send-keys %s", escapedPrefix, escapedPrefix))
-		}
-
-		lines = append(lines, "bind-key -T grove-popups ? display-popup -w 100% -h 98% -E \"grove keys popups list | less -R\"")
-		lines = append(lines, "")
-	} else if directPrefixTable {
-		lines = append(lines, "# --- Direct Prefix Table Mode ---")
-		lines = append(lines, "# Bindings are added directly to tmux prefix table (e.g., C-b p)")
-		lines = append(lines, "")
+	// Create keygen config for prefix handling
+	keygenCfg := keygen.Config{
+		Prefix:    keysExt.Tmux.Prefix,
+		TableName: "grove-popups",
 	}
+
+	// Generate entry point and escape hatches using keygen package
+	lines = append(lines, keygenCfg.GenerateEntryPoint()...)
+	lines = append(lines, keygenCfg.GenerateEscapeHatches("grove keys popups list | less -R")...)
 
 	// Sort actions for consistent output
 	var actions []string
@@ -167,38 +140,20 @@ size = { width = "100%", height = "98%" }`))
 
 		for _, k := range keySlice {
 			// Safety Check: Prevent binding single characters to the root table
-			if prefix == "" && len(k) == 1 && !strings.Contains(k, "-") {
+			if keygenCfg.Mode() == keygen.ModeDirectRoot && len(k) == 1 && !strings.Contains(k, "-") {
 				fmt.Println(t.Error.Render(fmt.Sprintf("Warning: Refusing to bind single letter '%s' for '%s' in root key table. Please set a prefix or use modifier keys.", k, action)))
 				continue
 			}
 
-			var bindCmd string
-			escapedCmd := escapeTmuxCommand(cmdStr)
+			escapedCmd := keygen.EscapeCommand(cmdStr)
 
-			// Determine bind target:
-			// - directPrefixTable: no flags (binds to tmux prefix table)
-			// - useSubTable: -T grove-popups
-			// - otherwise: -n (root table)
-			var bindTarget string
-			if directPrefixTable {
-				bindTarget = "" // No -n or -T, binds to prefix table
-			} else if useSubTable {
-				bindTarget = "-T grove-popups"
-			} else {
-				bindTarget = "-n"
-			}
-
-			// Format bind target (handle empty case for direct prefix table)
-			bindTargetStr := ""
-			if bindTarget != "" {
-				bindTargetStr = bindTarget + " "
-			}
-
+			// Build the action part based on style
+			var actionPart string
 			switch style {
 			case "run-shell":
-				bindCmd = fmt.Sprintf("bind-key %s%s run-shell \"%s\"", bindTargetStr, k, escapedCmd)
+				actionPart = fmt.Sprintf("run-shell \"%s\"", escapedCmd)
 			case "window":
-				bindCmd = fmt.Sprintf("bind-key %s%s new-window \"%s\"", bindTargetStr, k, escapedCmd)
+				actionPart = fmt.Sprintf("new-window \"%s\"", escapedCmd)
 			case "popup":
 				fallthrough
 			default:
@@ -229,8 +184,10 @@ size = { width = "100%", height = "98%" }`))
 					eFlag = "-E "
 				}
 
-				bindCmd = fmt.Sprintf("bind-key %s%s display-popup -w %s -h %s -x %s -y %s %s\"%s\"", bindTargetStr, k, w, h, x, y, eFlag, escapedCmd)
+				actionPart = fmt.Sprintf("display-popup -w %s -h %s -x %s -y %s %s\"%s\"", w, h, x, y, eFlag, escapedCmd)
 			}
+
+			bindCmd := keygenCfg.FormatBindKey(k, actionPart)
 			lines = append(lines, bindCmd)
 		}
 	}
@@ -312,19 +269,3 @@ func parseInterfaceToStringSlice(val interface{}) []string {
 	}
 }
 
-// escapeTmuxCommand escapes a command for embedding in tmux double-quoted strings.
-// This escapes double quotes and dollar signs so shell expansion happens at runtime.
-func escapeTmuxCommand(cmd string) string {
-	// Escape backslashes first, then quotes, then dollar signs
-	result := strings.ReplaceAll(cmd, "\\", "\\\\")
-	result = strings.ReplaceAll(result, "\"", "\\\"")
-	result = strings.ReplaceAll(result, "$", "\\$")
-	return result
-}
-
-// escapeTmuxKey escapes a key name for tmux bind-key commands.
-// Backslash needs to be doubled in tmux config files.
-func escapeTmuxKey(key string) string {
-	// Replace any backslash with double backslash for tmux config
-	return strings.ReplaceAll(key, "\\", "\\\\")
-}
