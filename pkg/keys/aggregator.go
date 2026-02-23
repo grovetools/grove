@@ -2,6 +2,7 @@ package keys
 
 import (
 	"encoding/json"
+	"fmt"
 	"os/exec"
 	"strings"
 
@@ -24,7 +25,15 @@ func Aggregate(cfg *config.Config) ([]KeyBinding, error) {
 
 	// 2. Tmux Popup Bindings
 	for action, popupCfg := range keysExt.Tmux.Popups {
-		keys := parseStringOrSlice(popupCfg.Key)
+		rawKeys := parseStringOrSlice(popupCfg.Key)
+		var popupKeys []string
+		for _, k := range rawKeys {
+			if keysExt.Tmux.Prefix != "" {
+				popupKeys = append(popupKeys, fmt.Sprintf("%s %s", keysExt.Tmux.Prefix, k))
+			} else {
+				popupKeys = append(popupKeys, k)
+			}
+		}
 
 		desc := popupCfg.Command
 		if desc == "" {
@@ -38,7 +47,7 @@ func Aggregate(cfg *config.Config) ([]KeyBinding, error) {
 			Domain:      DomainTmux,
 			Section:     "Popups",
 			Action:      action,
-			Keys:        keys,
+			Keys:        popupKeys,
 			Description: desc,
 			Source:      "grove.toml [keys.tmux.popups]",
 		})

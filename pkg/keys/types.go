@@ -63,6 +63,7 @@ type TmuxPopupConfig struct {
 // This captures tmux popup bindings, nav pane keys, and nvim defaults.
 type KeysExtension struct {
 	Tmux struct {
+		Prefix string                     `yaml:"prefix,omitempty" toml:"prefix,omitempty" jsonschema:"description=Root prefix key for popups (e.g. C-g). If set, creates a tmux key table."`
 		Popups map[string]TmuxPopupConfig `yaml:"popups" toml:"popups"`
 	} `yaml:"tmux" toml:"tmux"`
 	Nav struct {

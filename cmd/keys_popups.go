@@ -66,6 +66,9 @@ func runKeysPopupsList() error {
 	}
 
 	fmt.Println(t.Header.Render(" Tmux Popup Bindings "))
+	if keysExt.Tmux.Prefix != "" {
+		fmt.Printf("  %s %s\n", t.Muted.Render("Active Prefix:"), t.Highlight.Render(keysExt.Tmux.Prefix))
+	}
 	fmt.Println()
 
 	// Sort for consistent output

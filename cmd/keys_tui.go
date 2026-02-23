@@ -545,6 +545,16 @@ func (m *keysModel) renderMatrixView(b *strings.Builder, searchQuery string, t *
 func (m *keysModel) renderDomainView(b *strings.Builder, searchQuery string, t *theme.Theme) {
 	domain := m.domains[m.activeTab]
 
+	if domain == keys.DomainTmux {
+		var keysExt keys.KeysExtension
+		if m.cfg != nil {
+			_ = m.cfg.UnmarshalExtension("keys", &keysExt)
+		}
+		if keysExt.Tmux.Prefix != "" {
+			b.WriteString("\n  " + t.Muted.Render(fmt.Sprintf("Active Prefix: %s (Table: grove-popups)", keysExt.Tmux.Prefix)) + "\n")
+		}
+	}
+
 	// Group by section
 	sections := make(map[string][]keys.KeyBinding)
 	var orderedSections []string
