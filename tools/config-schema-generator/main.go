@@ -155,7 +155,15 @@ func processSchema(source SchemaSource) ([]FieldInfo, error) {
 		requiredSet[r] = true
 	}
 
-	for name, prop := range schema.Properties {
+	// Sort property names for deterministic output
+	var propNames []string
+	for name := range schema.Properties {
+		propNames = append(propNames, name)
+	}
+	sort.Strings(propNames)
+
+	for _, name := range propNames {
+		prop := schema.Properties[name]
 		field := extractField(name, prop, []string{name}, source.Namespace, &schema, requiredSet[name])
 		if field.Priority == 0 {
 			field.Priority = 1000 // Default priority for unspecified fields
@@ -210,15 +218,26 @@ func extractField(name string, prop *JSONSchema, path []string, namespace string
 				for _, r := range resolved.Required {
 					requiredSet[r] = true
 				}
-				for childName, childProp := range resolved.Properties {
+				// Sort property names for deterministic output
+				var childNames []string
+				for childName := range resolved.Properties {
+					childNames = append(childNames, childName)
+				}
+				sort.Strings(childNames)
+
+				for _, childName := range childNames {
+					childProp := resolved.Properties[childName]
 					childPath := append([]string{}, path...)
 					childPath = append(childPath, childName)
 					child := extractField(childName, childProp, childPath, namespace, root, requiredSet[childName])
 					field.Children = append(field.Children, child)
 				}
-				// Sort children by priority
+				// Sort children by priority, then by name for stability
 				sort.Slice(field.Children, func(i, j int) bool {
-					return field.Children[i].Priority < field.Children[j].Priority
+					if field.Children[i].Priority != field.Children[j].Priority {
+						return field.Children[i].Priority < field.Children[j].Priority
+					}
+					return field.Children[i].Path[len(field.Children[i].Path)-1] < field.Children[j].Path[len(field.Children[j].Path)-1]
 				})
 				return field
 			}
@@ -256,15 +275,26 @@ func extractField(name string, prop *JSONSchema, path []string, namespace string
 			for _, r := range prop.Required {
 				requiredSet[r] = true
 			}
-			for childName, childProp := range prop.Properties {
+			// Sort property names for deterministic output
+			var childNames []string
+			for childName := range prop.Properties {
+				childNames = append(childNames, childName)
+			}
+			sort.Strings(childNames)
+
+			for _, childName := range childNames {
+				childProp := prop.Properties[childName]
 				childPath := append([]string{}, path...)
 				childPath = append(childPath, childName)
 				child := extractField(childName, childProp, childPath, namespace, root, requiredSet[childName])
 				field.Children = append(field.Children, child)
 			}
-			// Sort children by priority
+			// Sort children by priority, then by name for stability
 			sort.Slice(field.Children, func(i, j int) bool {
-				return field.Children[i].Priority < field.Children[j].Priority
+				if field.Children[i].Priority != field.Children[j].Priority {
+					return field.Children[i].Priority < field.Children[j].Priority
+				}
+				return field.Children[i].Path[len(field.Children[i].Path)-1] < field.Children[j].Path[len(field.Children[j].Path)-1]
 			})
 		} else {
 			field.Type = "object"
