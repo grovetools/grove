@@ -992,10 +992,21 @@ var TUIRegistry = []TUIRegistryEntry{
 		Description: "Session hotkey manager",
 		Sections: []SectionEntry{
 			{
+				Name: "Groups",
+				Bindings: []BindingEntry{
+					{Name: "next group", Keys: []string{"tab"}, Description: "next group", Enabled: true, ConfigKey: "next_group"},
+					{Name: "prev group", Keys: []string{"shift+tab"}, Description: "prev group", Enabled: true, ConfigKey: "prev_group"},
+				},
+			},
+			{
 				Name: "Navigation",
 				Bindings: []BindingEntry{
 					{Name: "up", Keys: []string{"k", "up"}, Description: "up", Enabled: true, ConfigKey: "up"},
 					{Name: "down", Keys: []string{"j", "down"}, Description: "down", Enabled: true, ConfigKey: "down"},
+					{Name: "page up", Keys: []string{"ctrl+u", "pgup"}, Description: "page up", Enabled: true, ConfigKey: "page_up"},
+					{Name: "page down", Keys: []string{"ctrl+d", "pgdown"}, Description: "page down", Enabled: true, ConfigKey: "page_down"},
+					{Name: "top", Keys: []string{"gg"}, Description: "top", Enabled: true, ConfigKey: "top"},
+					{Name: "bottom", Keys: []string{"G"}, Description: "bottom", Enabled: true, ConfigKey: "bottom"},
 					{Name: "jump to row", Keys: []string{"1-9"}, Description: "jump to row", Enabled: true, ConfigKey: "jump_to_row"},
 					{Name: "switch to session", Keys: []string{"o", "enter"}, Description: "switch to session", Enabled: true, ConfigKey: "open"},
 				},
@@ -1007,8 +1018,15 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "set key mode", Keys: []string{"h"}, Description: "set key mode", Enabled: true, ConfigKey: "set_key"},
 					{Name: "quick toggle", Keys: []string{" "}, Description: "quick toggle", Enabled: true, ConfigKey: "toggle"},
 					{Name: "clear mapping", Keys: []string{"d", "delete"}, Description: "clear mapping", Enabled: true, ConfigKey: "delete"},
-					{Name: "save & exit", Keys: []string{"s", "ctrl+s"}, Description: "save & exit", Enabled: true, ConfigKey: "save"},
 					{Name: "copy path", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true, ConfigKey: "copy_path"},
+				},
+			},
+			{
+				Name: "Group Operations",
+				Bindings: []BindingEntry{
+					{Name: "load group into default", Keys: []string{"L"}, Description: "load group into default", Enabled: true, ConfigKey: "load_default"},
+					{Name: "clear group", Keys: []string{"C"}, Description: "clear group", Enabled: true, ConfigKey: "unload_default"},
+					{Name: "save to group", Keys: []string{"S"}, Description: "save to group", Enabled: true, ConfigKey: "save_to_group"},
 				},
 			},
 			{
