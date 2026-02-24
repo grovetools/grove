@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/keybind"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/grove/pkg/keys"
 	"github.com/spf13/cobra"
@@ -111,31 +113,80 @@ func newKeysPopupsAddCmd() *cobra.Command {
 	var keyBinding string
 	var command string
 	var style string
+	var force bool
 
 	cmd := &cobra.Command{
 		Use:   "add <name>",
 		Short: "Add a new popup binding",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runKeysPopupsAdd(args[0], keyBinding, command, style)
+			return runKeysPopupsAdd(args[0], keyBinding, command, style, force)
 		},
 	}
 
 	cmd.Flags().StringVarP(&keyBinding, "key", "k", "", "Key binding (e.g., 'C-p', 'M-f')")
 	cmd.Flags().StringVar(&command, "command", "", "Command to run")
 	cmd.Flags().StringVarP(&style, "style", "s", "popup", "Style: popup, run-shell, or window")
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Force binding despite cross-layer conflicts")
 	_ = cmd.MarkFlagRequired("key")
 	_ = cmd.MarkFlagRequired("command")
 
 	return cmd
 }
 
-func runKeysPopupsAdd(name, keyBinding, command, style string) error {
+func runKeysPopupsAdd(name, keyBinding, command, style string, force bool) error {
+	ctx := context.Background()
 	t := theme.DefaultTheme
 
 	// Validate style
 	if style != "popup" && style != "run-shell" && style != "window" {
 		return fmt.Errorf("invalid style %q: must be popup, run-shell, or window", style)
+	}
+
+	// Load config to check for existing prefix and build keybind stack
+	cfg, _ := config.LoadDefault()
+
+	var keysExt keys.KeysExtension
+	if cfg != nil {
+		_ = cfg.UnmarshalExtension("keys", &keysExt)
+	}
+
+	// Determine target layer based on whether a prefix is configured
+	targetLayer := keybind.LayerTmuxRoot
+	if keysExt.Tmux.Prefix != "" {
+		targetLayer = keybind.LayerTmuxCustomTable
+	}
+
+	// Build stack and check for conflicts
+	collectors := buildKeybindCollectors(ctx, cfg)
+	stack, err := keybind.BuildStack(ctx, collectors...)
+	if err != nil {
+		// Log warning but proceed with checking what we have
+		fmt.Println(t.Warning.Render("  Warning: Some collectors failed, conflict check may be incomplete"))
+	}
+
+	// Check for conflicts
+	conflict := checkPopupConflict(stack, keyBinding, targetLayer)
+	if conflict != nil && !force {
+		fmt.Printf("%s Conflict detected for key %s:\n", t.Error.Render(theme.IconError), t.Highlight.Render(keybind.Normalize(keyBinding, "")))
+		fmt.Println()
+		printKeybindConflict(*conflict, t)
+
+		// Suggest alternatives
+		suggestions := stack.SuggestAlternatives(keyBinding, 3, keybind.LayerShell, keybind.LayerTmuxRoot)
+		if len(suggestions) > 0 {
+			fmt.Println(t.Bold.Render("  Suggested alternatives:"))
+			for _, s := range suggestions {
+				fmt.Printf("    %s %s\n", t.Muted.Render("•"), t.Highlight.Render(s))
+			}
+			fmt.Println()
+		}
+
+		return fmt.Errorf("operation aborted due to conflict (use --force to override)")
+	}
+
+	if force && conflict != nil {
+		fmt.Printf("%s Forcing conflict override for %s...\n", t.Warning.Render("⚠"), t.Highlight.Render(keybind.Normalize(keyBinding, "")))
 	}
 
 	// Update config
@@ -186,24 +237,27 @@ func newKeysPopupsSetCmd() *cobra.Command {
 	var keyBinding string
 	var command string
 	var style string
+	var force bool
 
 	cmd := &cobra.Command{
 		Use:   "set <name>",
 		Short: "Modify an existing popup binding",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runKeysPopupsSet(args[0], keyBinding, command, style)
+			return runKeysPopupsSet(args[0], keyBinding, command, style, force)
 		},
 	}
 
 	cmd.Flags().StringVarP(&keyBinding, "key", "k", "", "Key binding (e.g., 'C-p', 'M-f')")
 	cmd.Flags().StringVar(&command, "command", "", "Command to run")
 	cmd.Flags().StringVarP(&style, "style", "s", "", "Style: popup, run-shell, or window")
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Force binding despite cross-layer conflicts")
 
 	return cmd
 }
 
-func runKeysPopupsSet(name, keyBinding, command, style string) error {
+func runKeysPopupsSet(name, keyBinding, command, style string, force bool) error {
+	ctx := context.Background()
 	t := theme.DefaultTheme
 
 	if keyBinding == "" && command == "" && style == "" {
@@ -213,6 +267,54 @@ func runKeysPopupsSet(name, keyBinding, command, style string) error {
 	// Validate style if provided
 	if style != "" && style != "popup" && style != "run-shell" && style != "window" {
 		return fmt.Errorf("invalid style %q: must be popup, run-shell, or window", style)
+	}
+
+	// Only check for conflicts if key is being changed
+	if keyBinding != "" {
+		// Load config to check for existing prefix and build keybind stack
+		cfg, _ := config.LoadDefault()
+
+		var keysExt keys.KeysExtension
+		if cfg != nil {
+			_ = cfg.UnmarshalExtension("keys", &keysExt)
+		}
+
+		// Determine target layer based on whether a prefix is configured
+		targetLayer := keybind.LayerTmuxRoot
+		if keysExt.Tmux.Prefix != "" {
+			targetLayer = keybind.LayerTmuxCustomTable
+		}
+
+		// Build stack and check for conflicts
+		collectors := buildKeybindCollectors(ctx, cfg)
+		stack, err := keybind.BuildStack(ctx, collectors...)
+		if err != nil {
+			fmt.Println(t.Warning.Render("  Warning: Some collectors failed, conflict check may be incomplete"))
+		}
+
+		// Check for conflicts
+		conflict := checkPopupConflict(stack, keyBinding, targetLayer)
+		if conflict != nil && !force {
+			fmt.Printf("%s Conflict detected for key %s:\n", t.Error.Render(theme.IconError), t.Highlight.Render(keybind.Normalize(keyBinding, "")))
+			fmt.Println()
+			printKeybindConflict(*conflict, t)
+
+			// Suggest alternatives
+			suggestions := stack.SuggestAlternatives(keyBinding, 3, keybind.LayerShell, keybind.LayerTmuxRoot)
+			if len(suggestions) > 0 {
+				fmt.Println(t.Bold.Render("  Suggested alternatives:"))
+				for _, s := range suggestions {
+					fmt.Printf("    %s %s\n", t.Muted.Render("•"), t.Highlight.Render(s))
+				}
+				fmt.Println()
+			}
+
+			return fmt.Errorf("operation aborted due to conflict (use --force to override)")
+		}
+
+		if force && conflict != nil {
+			fmt.Printf("%s Forcing conflict override for %s...\n", t.Warning.Render("⚠"), t.Highlight.Render(keybind.Normalize(keyBinding, "")))
+		}
 	}
 
 	// Update config (merge mode)

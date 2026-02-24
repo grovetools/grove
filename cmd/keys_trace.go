@@ -76,7 +76,7 @@ func runKeysTrace(args []string) error {
 	// Load config and build stack
 	cfg, _ := config.LoadDefault()
 
-	collectors := buildCollectors(ctx, cfg)
+	collectors := buildKeybindCollectors(ctx, cfg)
 	stack, err := keybind.BuildStack(ctx, collectors...)
 	if err != nil {
 		fmt.Println(t.Warning.Render("  Warning: Some collectors failed"))
@@ -132,37 +132,4 @@ func runKeysTrace(args []string) error {
 	fmt.Printf("  %s %s\n", t.Bold.Render("Result:"), trace.FinalResult)
 
 	return nil
-}
-
-// buildCollectors creates the appropriate collectors based on the environment.
-func buildCollectors(ctx context.Context, cfg *config.Config) []keybind.Collector {
-	var collectors []keybind.Collector
-
-	// L0: macOS collector
-	if macos := keybind.NewMacOSCollector(); macos != nil {
-		collectors = append(collectors, macos)
-	}
-
-	// L2: Shell collector
-	shell := keybind.DetectShell()
-	switch shell {
-	case "fish":
-		collectors = append(collectors, keybind.NewFishCollector())
-	case "zsh":
-		collectors = append(collectors, keybind.NewZshCollector())
-	case "bash":
-		collectors = append(collectors, keybind.NewBashCollector())
-	}
-
-	// L3-L5: Tmux collectors
-	if keybind.IsTmuxAvailable() {
-		collectors = append(collectors, keybind.NewTmuxRootCollector())
-		collectors = append(collectors, keybind.NewTmuxPrefixCollector())
-		collectors = append(collectors, keybind.NewTmuxCustomCollector())
-	}
-
-	// L5: Grove collector
-	collectors = append(collectors, keybind.NewGroveCollectorWithConfig(cfg))
-
-	return collectors
 }

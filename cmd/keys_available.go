@@ -53,7 +53,7 @@ func runKeysAvailable(layersFlag string, inTable string) error {
 
 	// Load config and build stack
 	cfg, _ := config.LoadDefault()
-	collectors := buildCollectors(ctx, cfg)
+	collectors := buildKeybindCollectors(ctx, cfg)
 	stack, err := keybind.BuildStack(ctx, collectors...)
 	if err != nil {
 		fmt.Println(t.Warning.Render("Warning: Some collectors failed"))

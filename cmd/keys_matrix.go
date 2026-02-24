@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/keybind"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/grove/pkg/keys"
 	"github.com/spf13/cobra"
@@ -17,6 +19,7 @@ import (
 func newKeysMatrixCmd() *cobra.Command {
 	var jsonOutput bool
 	var conflictsOnly bool
+	var showLayers bool
 
 	cmd := cli.NewStandardCommand("matrix", "View a matrix of all keys across TUIs")
 	cmd.Long = `Display a spreadsheet-style matrix showing what each key does in each TUI.
@@ -25,12 +28,16 @@ This provides a quick overview of key usage across the Grove ecosystem,
 highlighting conflicts where the same key means different things.
 
 Use --conflicts to show only rows with semantic conflicts.
+Use --layers to include shell (L2) and tmux (L3) binding columns.
 Use --json for machine-readable output.`
 
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output matrix in JSON format")
 	cmd.Flags().BoolVar(&conflictsOnly, "conflicts", false, "Show only conflicting rows")
+	cmd.Flags().BoolVar(&showLayers, "layers", false, "Include shell (L2) and tmux root (L3) columns")
 
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+
 		cfg, err := config.LoadDefault()
 		if err != nil {
 			cfg = &config.Config{}
@@ -43,6 +50,13 @@ Use --json for machine-readable output.`
 
 		matrix := keys.BuildMatrix(bindings)
 
+		// Build keybind stack if showing layers
+		var stack *keybind.Stack
+		if showLayers {
+			collectors := buildKeybindCollectors(ctx, cfg)
+			stack, _ = keybind.BuildStack(ctx, collectors...)
+		}
+
 		if jsonOutput {
 			out, _ := json.MarshalIndent(matrix, "", "  ")
 			fmt.Println(string(out))
@@ -54,6 +68,9 @@ Use --json for machine-readable output.`
 
 		// Print Header
 		header := []string{"KEY"}
+		if showLayers {
+			header = append(header, "SHELL(L2)", "TMUX(L3)")
+		}
 		for _, tui := range matrix.TUINames {
 			// Extract short name from source (e.g., "flow-status (github.com/...)" -> "flow-status")
 			cleanName := strings.Split(tui, " ")[0]
@@ -81,6 +98,40 @@ Use --json for machine-readable output.`
 		conflictCount := 0
 
 		for _, row := range matrix.Rows {
+			// Lookup L2/L3 bindings if showing layers
+			var shellBind, tmuxBind *keybind.Binding
+			var shellCell, tmuxCell string
+			var isShadowed bool
+
+			if showLayers && stack != nil {
+				shellBind = stack.FindBindingInLayer(row.Key, keybind.LayerShell)
+				tmuxBind = stack.FindBindingInLayer(row.Key, keybind.LayerTmuxRoot)
+
+				shellCell = "-"
+				if shellBind != nil {
+					// Truncate action name if too long
+					action := shellBind.Action
+					if len(action) > 12 {
+						action = action[:9] + "..."
+					}
+					shellCell = action
+				}
+
+				tmuxCell = "-"
+				if tmuxBind != nil {
+					action := tmuxBind.Action
+					if len(action) > 12 {
+						action = action[:9] + "..."
+					}
+					tmuxCell = action
+				}
+
+				// Check if TUI bindings are shadowed by L2/L3
+				if (shellBind != nil || tmuxBind != nil) && len(row.TUIs) > 0 {
+					isShadowed = true
+				}
+			}
+
 			// Determine key status
 			expectedAction, isReserved := keys.ReservedKeys[row.Key]
 			isFree := keys.IsFreeKey(row.Key)
@@ -150,11 +201,21 @@ Use --json for machine-readable output.`
 				}
 			}
 
+			// Override status if shadowed by lower layers
+			if showLayers && isShadowed && status != t.Error.Render("⚠ RESERVED VIOLATION") {
+				status = t.Warning.Render("⚠ SHADOWED")
+				// Don't skip shadowed rows even with --conflicts
+				skipRow = false
+			}
+
 			if skipRow {
 				continue
 			}
 
 			rowCells := []string{t.Highlight.Render(row.Key)}
+			if showLayers {
+				rowCells = append(rowCells, shellCell, tmuxCell)
+			}
 			for _, tui := range matrix.TUINames {
 				val := "-"
 				if action, ok := row.TUIs[tui]; ok {

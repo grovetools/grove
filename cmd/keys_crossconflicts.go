@@ -46,7 +46,7 @@ func runKeysCrossConflicts() error {
 
 	// Load config and build stack
 	cfg, _ := config.LoadDefault()
-	collectors := buildCollectors(ctx, cfg)
+	collectors := buildKeybindCollectors(ctx, cfg)
 	stack, err := keybind.BuildStack(ctx, collectors...)
 	if err != nil {
 		fmt.Println(t.Warning.Render("  Warning: Some collectors failed"))
@@ -80,7 +80,7 @@ func runKeysCrossConflicts() error {
 		fmt.Println(t.Error.Render(fmt.Sprintf("  %s Errors (%d)", theme.IconError, len(errors))))
 		fmt.Println()
 		for _, c := range errors {
-			printConflict(c, t)
+			printKeybindConflict(c, t)
 		}
 	}
 
@@ -89,7 +89,7 @@ func runKeysCrossConflicts() error {
 		fmt.Println(t.Warning.Render(fmt.Sprintf("  ⚠ Warnings (%d)", len(warnings))))
 		fmt.Println()
 		for _, c := range warnings {
-			printConflict(c, t)
+			printKeybindConflict(c, t)
 		}
 	}
 
@@ -98,7 +98,7 @@ func runKeysCrossConflicts() error {
 		fmt.Println(t.Muted.Render(fmt.Sprintf("  ℹ Info (%d)", len(infos))))
 		fmt.Println()
 		for _, c := range infos {
-			printConflict(c, t)
+			printKeybindConflict(c, t)
 		}
 	}
 
@@ -111,41 +111,4 @@ func runKeysCrossConflicts() error {
 	}
 
 	return nil
-}
-
-func printConflict(c keybind.Conflict, t *theme.Theme) {
-	// Key and severity indicator
-	var severityIcon string
-	switch c.Severity {
-	case keybind.SeverityError:
-		severityIcon = t.Error.Render(theme.IconError)
-	case keybind.SeverityWarning:
-		severityIcon = t.Warning.Render("⚠")
-	default:
-		severityIcon = t.Muted.Render("ℹ")
-	}
-
-	fmt.Printf("  %s %s\n", t.Highlight.Render(c.Key), severityIcon)
-
-	// Show bindings at each layer
-	for _, b := range c.Bindings {
-		layerInfo := fmt.Sprintf("%s (%s)", b.Layer.ShortName(), b.Source)
-		provenanceInfo := ""
-		if b.Provenance != keybind.ProvenanceDetected {
-			provenanceInfo = fmt.Sprintf(" [%s]", b.Provenance.String())
-		}
-		fmt.Printf("      %-20s %s%s\n",
-			t.Muted.Render(layerInfo+":"),
-			b.Action,
-			t.Muted.Render(provenanceInfo))
-	}
-
-	// Description
-	if c.Description != "" {
-		fmt.Printf("      %s %s\n",
-			t.Muted.Render("→"),
-			t.Muted.Render(c.Description))
-	}
-
-	fmt.Println()
 }
