@@ -31,5 +31,10 @@ When run without arguments, opens an interactive TUI browser.`
 	cmd.AddCommand(newKeysDumpCmd())
 	cmd.AddCommand(newKeysValidateCmd())
 
+	// Phase 1: Universal Key Binding Orchestrator commands
+	cmd.AddCommand(newKeysTraceCmd())
+	cmd.AddCommand(newKeysAvailableCmd())
+	cmd.AddCommand(newKeysCrossConflictsCmd())
+
 	return cmd
 }
