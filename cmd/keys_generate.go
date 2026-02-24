@@ -20,18 +20,80 @@ import (
 
 // newKeysGenerateCmd creates the 'grove keys generate' command.
 func newKeysGenerateCmd() *cobra.Command {
+	var all bool
+
 	cmd := cli.NewStandardCommand("generate", "Generate external configurations from grove.toml")
 
 	cmd.Long = `Generate configuration files for external tools based on [keys.*] config sections.
 
 Supported generators:
-  tmux    Generate ~/.config/grove/tmux/popups.conf for tmux popup bindings
+  tmux    Generate ~/.cache/grove/tmux/popups.conf for tmux popup bindings
+  shell   Generate shell keybinding configs (fish, bash, zsh)
+  nvim    Generate ~/.cache/grove/nvim/grove-keymaps.lua for Neovim bindings
 
-The generated files can be sourced from the respective tool's configuration.`
+The generated files can be sourced from the respective tool's configuration.
+
+Use --all to regenerate all configurations at once.`
+
+	cmd.Example = `  # Generate tmux config only
+  grove keys generate tmux
+
+  # Generate shell configs only
+  grove keys generate shell
+
+  # Generate nvim config only
+  grove keys generate nvim
+
+  # Generate all configs (tmux + shell + nvim)
+  grove keys generate --all`
+
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if all {
+			return runKeysGenerateAll()
+		}
+		return cmd.Help()
+	}
+
+	cmd.Flags().BoolVar(&all, "all", false, "Generate all configurations (tmux + shell)")
 
 	cmd.AddCommand(newKeysGenerateTmuxCmd())
+	cmd.AddCommand(newKeysGenerateShellCmd())
+	cmd.AddCommand(newKeysGenerateNvimCmd())
 
 	return cmd
+}
+
+// runKeysGenerateAll generates all configuration files.
+func runKeysGenerateAll() error {
+	t := theme.DefaultTheme
+
+	fmt.Println(t.Header.Render(theme.IconShell + " Generating all keybinding configurations..."))
+	fmt.Println()
+
+	// Generate tmux config
+	if err := runKeysGenerateTmux("", false); err != nil {
+		fmt.Printf("%s tmux: %v\n", t.Error.Render(theme.IconError), err)
+	}
+
+	fmt.Println()
+
+	// Generate shell configs
+	if err := runKeysGenerateShell("all", false); err != nil {
+		fmt.Printf("%s shell: %v\n", t.Error.Render(theme.IconError), err)
+	}
+
+	fmt.Println()
+
+	// Generate nvim config
+	if err := runKeysGenerateNvim("", false); err != nil {
+		fmt.Printf("%s nvim: %v\n", t.Error.Render(theme.IconError), err)
+	}
+
+	fmt.Println()
+	printShellSourceInstructions(t)
+	printNvimSourceInstructions(t)
+
+	return nil
 }
 
 // newKeysGenerateTmuxCmd creates the 'grove keys generate tmux' command.

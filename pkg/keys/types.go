@@ -66,6 +66,22 @@ type ShellKeysConfig struct {
 	Bindings map[string]string `yaml:"bindings,omitempty" toml:"bindings,omitempty" jsonschema:"description=Map of key to command (e.g. 'M-g': 'grove')."`
 }
 
+// NvimBindingConfig defines a single neovim keybinding.
+// Can be unmarshaled from a simple string (command only) or a full struct.
+type NvimBindingConfig struct {
+	Command string `yaml:"command" toml:"command" jsonschema:"description=Vim command or Lua code to execute"`
+	Mode    string `yaml:"mode,omitempty" toml:"mode,omitempty" jsonschema:"description=Vim mode (n, i, v, x, s, o, t, c), default: n"`
+	Desc    string `yaml:"desc,omitempty" toml:"desc,omitempty" jsonschema:"description=Description for which-key integration"`
+	Silent  bool   `yaml:"silent,omitempty" toml:"silent,omitempty" jsonschema:"description=Whether the binding should be silent (default: true)"`
+	NoRemap bool   `yaml:"noremap,omitempty" toml:"noremap,omitempty" jsonschema:"description=Whether to use noremap (default: true)"`
+}
+
+// NvimKeysConfig defines neovim-specific keybindings.
+type NvimKeysConfig struct {
+	Enabled  bool                          `yaml:"enabled,omitempty" toml:"enabled,omitempty" jsonschema:"description=Whether Grove manages Neovim keybindings."`
+	Bindings map[string]NvimBindingConfig  `yaml:"bindings,omitempty" toml:"bindings,omitempty" jsonschema:"description=Map of key to binding config."`
+}
+
 // TmuxKeysConfig defines tmux-specific keybindings.
 type TmuxKeysConfig struct {
 	Prefix   string                     `yaml:"prefix,omitempty" toml:"prefix,omitempty" jsonschema:"description=Root prefix key for popups (e.g. C-g). If set, creates a tmux key table."`
@@ -82,10 +98,10 @@ type NavKeysConfig struct {
 // KeysExtension represents the [keys] block in grove.toml/grove.yml.
 // This captures tmux popup bindings, nav pane keys, shell bindings, and nvim defaults.
 type KeysExtension struct {
-	Tmux  TmuxKeysConfig         `yaml:"tmux" toml:"tmux"`
-	Nav   NavKeysConfig          `yaml:"nav" toml:"nav"`
-	Shell ShellKeysConfig        `yaml:"shell,omitempty" toml:"shell,omitempty"`
-	Nvim  map[string]interface{} `yaml:"nvim" toml:"nvim"`
+	Tmux  TmuxKeysConfig  `yaml:"tmux" toml:"tmux"`
+	Nav   NavKeysConfig   `yaml:"nav" toml:"nav"`
+	Shell ShellKeysConfig `yaml:"shell,omitempty" toml:"shell,omitempty"`
+	Nvim  NvimKeysConfig  `yaml:"nvim,omitempty" toml:"nvim,omitempty"`
 }
 
 // TmuxCommandMap maps config action names to actual command invocations.
