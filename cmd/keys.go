@@ -36,5 +36,8 @@ When run without arguments, opens an interactive TUI browser.`
 	cmd.AddCommand(newKeysAvailableCmd())
 	cmd.AddCommand(newKeysCrossConflictsCmd())
 
+	// Phase 3: Sync & Import Detection
+	cmd.AddCommand(newKeysSyncCmd())
+
 	return cmd
 }

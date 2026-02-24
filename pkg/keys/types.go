@@ -59,18 +59,33 @@ type TmuxPopupConfig struct {
 	ExitOnComplete bool           `yaml:"exit_on_complete,omitempty" toml:"exit_on_complete,omitempty"`
 }
 
+// ShellKeysConfig defines shell-specific keybindings.
+// This supports importing external shell bindings into Grove management.
+type ShellKeysConfig struct {
+	Enabled  bool              `yaml:"enabled,omitempty" toml:"enabled,omitempty" jsonschema:"description=Whether Grove manages shell keybindings."`
+	Bindings map[string]string `yaml:"bindings,omitempty" toml:"bindings,omitempty" jsonschema:"description=Map of key to command (e.g. 'M-g': 'grove')."`
+}
+
+// TmuxKeysConfig defines tmux-specific keybindings.
+type TmuxKeysConfig struct {
+	Prefix   string                     `yaml:"prefix,omitempty" toml:"prefix,omitempty" jsonschema:"description=Root prefix key for popups (e.g. C-g). If set, creates a tmux key table."`
+	Popups   map[string]TmuxPopupConfig `yaml:"popups" toml:"popups"`
+	Bindings map[string]string          `yaml:"bindings,omitempty" toml:"bindings,omitempty" jsonschema:"description=Generic tmux bindings not tied to popups (e.g. 'M-z': 'resize-pane -Z')."`
+}
+
+// NavKeysConfig defines nav-specific keybindings.
+type NavKeysConfig struct {
+	Prefix        string   `yaml:"prefix,omitempty" toml:"prefix,omitempty" jsonschema:"description=Prefix key for nav bindings. Options: '<prefix>' (default, native tmux prefix), '<prefix> X' (sub-table under prefix), 'C-g' (dedicated root key), or '' (direct root with modifiers)."`
+	AvailableKeys []string `yaml:"available_keys" toml:"available_keys"`
+}
+
 // KeysExtension represents the [keys] block in grove.toml/grove.yml.
-// This captures tmux popup bindings, nav pane keys, and nvim defaults.
+// This captures tmux popup bindings, nav pane keys, shell bindings, and nvim defaults.
 type KeysExtension struct {
-	Tmux struct {
-		Prefix string                     `yaml:"prefix,omitempty" toml:"prefix,omitempty" jsonschema:"description=Root prefix key for popups (e.g. C-g). If set, creates a tmux key table."`
-		Popups map[string]TmuxPopupConfig `yaml:"popups" toml:"popups"`
-	} `yaml:"tmux" toml:"tmux"`
-	Nav struct {
-		Prefix        string   `yaml:"prefix,omitempty" toml:"prefix,omitempty" jsonschema:"description=Prefix key for nav bindings. Options: '<prefix>' (default, native tmux prefix), '<prefix> X' (sub-table under prefix), 'C-g' (dedicated root key), or '' (direct root with modifiers)."`
-		AvailableKeys []string `yaml:"available_keys" toml:"available_keys"`
-	} `yaml:"nav" toml:"nav"`
-	Nvim map[string]interface{} `yaml:"nvim" toml:"nvim"`
+	Tmux  TmuxKeysConfig         `yaml:"tmux" toml:"tmux"`
+	Nav   NavKeysConfig          `yaml:"nav" toml:"nav"`
+	Shell ShellKeysConfig        `yaml:"shell,omitempty" toml:"shell,omitempty"`
+	Nvim  map[string]interface{} `yaml:"nvim" toml:"nvim"`
 }
 
 // TmuxCommandMap maps config action names to actual command invocations.
