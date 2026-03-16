@@ -367,11 +367,12 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "add job", Keys: []string{"A"}, Description: "add job", Enabled: true, ConfigKey: "add_job"},
 					{Name: "add from recipe", Keys: []string{"P"}, Description: "add from recipe", Enabled: true, ConfigKey: "add_from_recipe"},
 					{Name: "add XML plan job", Keys: []string{"x"}, Description: "add XML plan job", Enabled: true, ConfigKey: "add_xml_plan"},
-					{Name: "implement selected", Keys: []string{"i"}, Description: "implement selected", Enabled: true, ConfigKey: "implement"},
+					{Name: "new implementation", Keys: []string{"n"}, Description: "new implementation", Enabled: true, ConfigKey: "implement"},
 					{Name: "rename job", Keys: []string{"R"}, Description: "rename job", Enabled: true, ConfigKey: "rename"},
 					{Name: "resume job", Keys: []string{"ctrl+R"}, Description: "resume job", Enabled: true, ConfigKey: "resume"},
 					{Name: "edit dependencies", Keys: []string{"D"}, Description: "edit dependencies", Enabled: true, ConfigKey: "edit_deps"},
 					{Name: "archive selected", Keys: []string{"X"}, Description: "archive selected", Enabled: true, ConfigKey: "archive"},
+					{Name: "input to agent", Keys: []string{"i"}, Description: "input to agent", Enabled: true, ConfigKey: "send_input"},
 					{Name: "copy path", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true, ConfigKey: "copy_path"},
 					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true, ConfigKey: "help"},
 					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true, ConfigKey: "quit"},
@@ -967,6 +968,8 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "up", Keys: []string{"k", "up"}, Description: "up", Enabled: true, ConfigKey: "up"},
 					{Name: "down", Keys: []string{"j", "down"}, Description: "down", Enabled: true, ConfigKey: "down"},
 					{Name: "jump to row", Keys: []string{"g"}, Description: "jump to row", Enabled: true, ConfigKey: "jump_to_row"},
+					{Name: "focus group", Keys: []string{","}, Description: "focus group", Enabled: true, ConfigKey: "go_to_sessionize"},
+					{Name: "focus ecosystem", Keys: []string{"."}, Description: "focus ecosystem", Enabled: true, ConfigKey: "focus_current"},
 				},
 			},
 			{
@@ -1016,6 +1019,16 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "bottom", Keys: []string{"G"}, Description: "bottom", Enabled: true, ConfigKey: "bottom"},
 					{Name: "jump to row", Keys: []string{"g"}, Description: "jump to row", Enabled: true, ConfigKey: "jump_to_row"},
 					{Name: "switch to session", Keys: []string{"o", "enter"}, Description: "switch to session", Enabled: true, ConfigKey: "open"},
+					{Name: "focus group", Keys: []string{","}, Description: "focus group", Enabled: true, ConfigKey: "go_to_sessionize"},
+					{Name: "focus ecosystem", Keys: []string{"."}, Description: "focus ecosystem", Enabled: true, ConfigKey: "focus_current"},
+				},
+			},
+			{
+				Name: "Selection",
+				Bindings: []BindingEntry{
+					{Name: "select", Keys: []string{" "}, Description: "select", Enabled: true, ConfigKey: "select"},
+					{Name: "all", Keys: []string{"ctrl+a"}, Description: "all", Enabled: true, ConfigKey: "select_all"},
+					{Name: "none", Keys: []string{"-"}, Description: "none", Enabled: true, ConfigKey: "select_none"},
 				},
 			},
 			{
@@ -1023,7 +1036,6 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "map CWD", Keys: []string{"e"}, Description: "map CWD", Enabled: true, ConfigKey: "edit"},
 					{Name: "set key mode", Keys: []string{"h"}, Description: "set key mode", Enabled: true, ConfigKey: "set_key"},
-					{Name: "quick toggle", Keys: []string{" "}, Description: "quick toggle", Enabled: true, ConfigKey: "toggle"},
 					{Name: "clear mapping", Keys: []string{"d", "delete"}, Description: "clear mapping", Enabled: true, ConfigKey: "delete"},
 					{Name: "copy path", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true, ConfigKey: "copy_path"},
 				},
@@ -1035,6 +1047,13 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "toggle lock", Keys: []string{"l"}, Description: "toggle lock", Enabled: true, ConfigKey: "lock"},
 					{Name: "move row (in move mode)", Keys: []string{"j/k"}, Description: "move row (in move mode)", Enabled: true, ConfigKey: "move_row_(in_move_mode)"},
 					{Name: "confirm move", Keys: []string{"enter"}, Description: "confirm move", Enabled: true, ConfigKey: "confirm_move"},
+				},
+			},
+			{
+				Name: "History",
+				Bindings: []BindingEntry{
+					{Name: "undo", Keys: []string{"u"}, Description: "undo", Enabled: true, ConfigKey: "undo"},
+					{Name: "redo", Keys: []string{"ctrl+r"}, Description: "redo", Enabled: true, ConfigKey: "redo"},
 				},
 			},
 			{
@@ -1068,12 +1087,22 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "bottom", Keys: []string{"G"}, Description: "bottom", Enabled: true, ConfigKey: "bottom"},
 					{Name: "search", Keys: []string{"/"}, Description: "search", Enabled: true, ConfigKey: "search"},
 					{Name: "select session", Keys: []string{"enter"}, Description: "select session", Enabled: true, ConfigKey: "select_session"},
+					{Name: "jump back", Keys: []string{"ctrl+o"}, Description: "jump back", Enabled: true, ConfigKey: "jump_back"},
+					{Name: "jump forward", Keys: []string{"ctrl+i", "ctrl+]"}, Description: "jump forward", Enabled: true, ConfigKey: "jump_forward"},
+				},
+			},
+			{
+				Name: "Selection",
+				Bindings: []BindingEntry{
+					{Name: "select", Keys: []string{" "}, Description: "select", Enabled: true, ConfigKey: "select"},
+					{Name: "all", Keys: []string{"ctrl+a"}, Description: "all", Enabled: true, ConfigKey: "select_all"},
+					{Name: "none", Keys: []string{"-"}, Description: "none", Enabled: true, ConfigKey: "select_none"},
 				},
 			},
 			{
 				Name: "Session",
 				Bindings: []BindingEntry{
-					{Name: "refresh project list", Keys: []string{"ctrl+r"}, Description: "refresh project list", Enabled: true, ConfigKey: "refresh_projects"},
+					{Name: "refresh project list", Keys: []string{"R"}, Description: "refresh project list", Enabled: true, ConfigKey: "refresh_projects"},
 					{Name: "edit key mapping", Keys: []string{"e"}, Description: "edit key mapping", Enabled: true, ConfigKey: "edit_key"},
 					{Name: "clear key mapping", Keys: []string{"x", "ctrl+x"}, Description: "clear key mapping", Enabled: true, ConfigKey: "clear_key"},
 					{Name: "copy path", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true, ConfigKey: "copy_path"},
@@ -1084,7 +1113,11 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "Focus",
 				Bindings: []BindingEntry{
 					{Name: "focus ecosystem", Keys: []string{"@"}, Description: "focus ecosystem", Enabled: true, ConfigKey: "focus_ecosystem"},
-					{Name: "focus current ecosystem", Keys: []string{"."}, Description: "focus current ecosystem", Enabled: true, ConfigKey: "focus_current"},
+					{Name: "open ecosystem", Keys: []string{"o"}, Description: "open ecosystem", Enabled: true, ConfigKey: "open_ecosystem"},
+					{Name: "focus cursor ecosystem", Keys: []string{"."}, Description: "focus cursor ecosystem", Enabled: true, ConfigKey: "focus_ecosystem_cursor"},
+					{Name: "focus cwd ecosystem", Keys: []string{">"}, Description: "focus cwd ecosystem", Enabled: true, ConfigKey: "focus_ecosystem_cwd"},
+					{Name: "go to cursor mapping", Keys: []string{","}, Description: "go to cursor mapping", Enabled: true, ConfigKey: "go_to_mapping_cursor"},
+					{Name: "go to cwd mapping", Keys: []string{"<"}, Description: "go to cwd mapping", Enabled: true, ConfigKey: "go_to_mapping_cwd"},
 					{Name: "clear ecosystem focus", Keys: []string{"0"}, Description: "clear ecosystem focus", Enabled: true, ConfigKey: "clear_focus"},
 					{Name: "toggle worktrees", Keys: []string{"w"}, Description: "toggle worktrees", Enabled: true, ConfigKey: "toggle_worktrees"},
 					{Name: "filter dirty", Keys: []string{"D"}, Description: "filter dirty", Enabled: true, ConfigKey: "filter_dirty"},
@@ -1100,7 +1133,13 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "manage groups", Keys: []string{"E"}, Description: "manage groups", Enabled: true, ConfigKey: "manage_groups"},
 					{Name: "new group", Keys: []string{"N"}, Description: "new group", Enabled: true, ConfigKey: "new_group"},
 					{Name: "map to group", Keys: []string{"M"}, Description: "map to group", Enabled: true, ConfigKey: "map_to_group"},
-					{Name: "go to mapping", Keys: []string{","}, Description: "go to mapping", Enabled: true, ConfigKey: "go_to_mapping"},
+				},
+			},
+			{
+				Name: "History",
+				Bindings: []BindingEntry{
+					{Name: "undo data change", Keys: []string{"u"}, Description: "undo data change", Enabled: true, ConfigKey: "undo"},
+					{Name: "redo data change", Keys: []string{"ctrl+r"}, Description: "redo data change", Enabled: true, ConfigKey: "redo"},
 				},
 			},
 			{
