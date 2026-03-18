@@ -1,14 +1,17 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/mattn/go-isatty"
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/spf13/cobra"
 )
@@ -157,6 +160,15 @@ clean:
 	}
 
 	fmt.Printf("\n%s Ecosystem created!\n", theme.IconSuccess)
+
+	// Notify daemon to re-scan workspaces
+	client := daemon.New()
+	if client.IsRunning() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = client.Refresh(ctx)
+		cancel()
+	}
+	client.Close()
 
 	// Check discoverability and prompt to add to groves if needed
 	if err := checkAndPromptDiscoverability(targetDir); err != nil {

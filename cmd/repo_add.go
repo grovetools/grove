@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/grove/pkg/repository"
 	"github.com/spf13/cobra"
@@ -123,5 +126,18 @@ func runRepoAdd(cmd *cobra.Command, args []string) error {
 	logger.Infof("Creating new local Grove repository: %s (alias: %s)", repoName, repoAddAlias)
 
 	_, err := creator.CreateLocal(opts)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Notify daemon to re-scan workspaces
+	client := daemon.New()
+	defer client.Close()
+	if client.IsRunning() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = client.Refresh(ctx)
+		cancel()
+	}
+
+	return nil
 }

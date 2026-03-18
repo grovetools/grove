@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/grovetools/core/pkg/daemon"
 	"github.com/spf13/cobra"
 )
 
@@ -115,6 +118,15 @@ func runEcosystemImport(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
+
+	// Notify daemon to re-scan workspaces
+	client := daemon.New()
+	if client.IsRunning() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = client.Refresh(ctx)
+		cancel()
+	}
+	client.Close()
 
 	fmt.Printf("\nImported %s into ecosystem\n", targetPath)
 	return nil
