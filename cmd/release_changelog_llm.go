@@ -13,7 +13,6 @@ import (
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/logging"
-	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/util/delegation"
 	grovecontext "github.com/grovetools/cx/pkg/context"
 )
@@ -100,12 +99,8 @@ func getLastTag(repoPath string) (string, error) {
 // skipPrompt will skip the interactive prompt (useful for TUI mode)
 func promptForRulesEdit(repoPath string, skipPrompt bool) error {
 	mgr := grovecontext.NewManager(repoPath)
-	node, _ := workspace.GetProjectByPath(repoPath)
 
-	rulesPath := filepath.Join(repoPath, ".grove", "rules")
-	if rp, err := mgr.Locator().GetContextRulesFile(node); err == nil {
-		rulesPath = rp
-	}
+	rulesPath := mgr.ResolveRulesPath()
 
 	// In TUI mode, just ensure the rules file exists but don't prompt
 	if skipPrompt {
@@ -217,13 +212,8 @@ func promptForRulesEdit(repoPath string, skipPrompt bool) error {
 
 // createAndEditRules creates a new rules file and opens it in editor
 func createAndEditRules(repoPath string) error {
-	rulesPath := filepath.Join(repoPath, ".grove", "rules")
 	mgr := grovecontext.NewManager(repoPath)
-	if node, err := workspace.GetProjectByPath(repoPath); err == nil {
-		if rp, err := mgr.Locator().GetContextRulesFile(node); err == nil {
-			rulesPath = rp
-		}
-	}
+	rulesPath := mgr.ResolveRulesPath()
 
 	// Create parent directory if it doesn't exist
 	groveDir := filepath.Dir(rulesPath)
