@@ -16,6 +16,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/workspace"
+	grovecontext "github.com/grovetools/cx/pkg/context"
 	tablecomponent "github.com/grovetools/core/tui/components/table"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/theme"
@@ -105,15 +107,24 @@ func initialReleaseModel(plan *release.ReleasePlan) releaseTuiModel {
 
 	// Look for cx rules path (check first repo with .grove/rules or .cx/docs.rules)
 	cxRulesPath := ""
+	mgr := grovecontext.NewManager(plan.RootDir)
 	for _, repoName := range repoNames {
-		rulesPath := filepath.Join(plan.RootDir, repoName, ".grove", "rules")
+		repoPath := filepath.Join(plan.RootDir, repoName)
+		node, _ := workspace.GetProjectByPath(repoPath)
+
+		rulesPath := filepath.Join(repoPath, ".grove", "rules")
+		if rp, err := mgr.Locator().GetContextRulesFile(node); err == nil {
+			rulesPath = rp
+		}
+
 		if _, err := os.Stat(rulesPath); err == nil {
-			cxRulesPath = ".grove/rules"
+			cxRulesPath = "active rules"
 			break
 		}
-		cxPath := filepath.Join(plan.RootDir, repoName, ".cx", "docs.rules")
-		if _, err := os.Stat(cxPath); err == nil {
-			cxRulesPath = ".cx/docs.rules"
+
+		// Look for preset "docs"
+		if _, err := mgr.FindRulesetFile(repoPath, "docs"); err == nil {
+			cxRulesPath = "docs preset"
 			break
 		}
 	}
@@ -591,9 +602,15 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if repo.Selected {
 					repoPath := filepath.Join(m.plan.RootDir, repoName)
 					rulesPath := filepath.Join(repoPath, ".grove", "rules")
-					
-					// Create .grove directory if it doesn't exist
-					groveDir := filepath.Join(repoPath, ".grove")
+					mgr := grovecontext.NewManager(repoPath)
+					if node, err := workspace.GetProjectByPath(repoPath); err == nil {
+						if rp, err := mgr.Locator().GetContextRulesFile(node); err == nil {
+							rulesPath = rp
+						}
+					}
+
+					// Create parent directory if it doesn't exist
+					groveDir := filepath.Dir(rulesPath)
 					if err := os.MkdirAll(groveDir, 0755); err != nil {
 						continue
 					}
@@ -623,10 +640,16 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			repoName := m.repoNames[m.selectedIndex]
 			repoPath := filepath.Join(m.plan.RootDir, repoName)
 			rulesPath := filepath.Join(repoPath, ".grove", "rules")
+			mgr := grovecontext.NewManager(repoPath)
+			if node, err := workspace.GetProjectByPath(repoPath); err == nil {
+				if rp, err := mgr.Locator().GetContextRulesFile(node); err == nil {
+					rulesPath = rp
+				}
+			}
 
 			// Create rules file if it doesn't exist
 			if _, err := os.Stat(rulesPath); os.IsNotExist(err) {
-				groveDir := filepath.Join(repoPath, ".grove")
+				groveDir := filepath.Dir(rulesPath)
 				os.MkdirAll(groveDir, 0755)
 				content := `# Grove rules file for LLM context
 # Add file paths or patterns here, one per line
