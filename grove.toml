@@ -11,4 +11,4 @@ enabled = true
 format = "json"
 
 [context]
-default_rules_path = ".cx/dev-no-tests.rules"
+default_rules = "dev-no-tests"

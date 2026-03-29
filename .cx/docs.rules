@@ -1,5 +1,0 @@
-*.go
-
-@a:grovetools:hooks/README.md
-@a:grovetools:nav/README.md
-@a:grovetools:grove/README.md
