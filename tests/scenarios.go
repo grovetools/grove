@@ -48,6 +48,20 @@ func AllScenarios() []*harness.Scenario {
 		DevLinkAndUseWorkflow(),
 		DevPointWorkflow(),
 		DevListWorkflow(),
+
+		// Keys/Keybind orchestrator scenarios
+		KeysTraceScenario(),
+		KeysAvailableScenario(),
+		KeysConflictsScenario(),
+		KeysMatrixScenario(),
+		KeysGenerateScenario(),
+		KeysSyncScenario(),
+		KeysPopupsScenario(),
+		KeysCheckScenario(),
+		KeysDumpScenario(),
+		KeysValidateScenario(),
+		KeysHelpScenario(),
+		KeysIntegrationScenario(),
 	}
 }
 
