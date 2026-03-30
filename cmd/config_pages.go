@@ -450,6 +450,8 @@ func (p *LayerPage) renderEmptyState() string {
 	switch p.layer {
 	case config.SourceEcosystem:
 		msg = "No ecosystem configuration.\n\nYou're not currently in an ecosystem.\nNavigate to an ecosystem directory to\nconfigure ecosystem-level settings."
+	case config.SourceProjectNotebook:
+		msg = "No notebook configuration.\n\nNo grove.toml found in the notebook\ndirectory for this project."
 	case config.SourceProject:
 		msg = "No project configuration.\n\nYou're not currently in a project.\nNavigate to a project directory to\nconfigure project-level settings."
 	default:
@@ -574,6 +576,10 @@ func layerPageTitle(layer config.ConfigSource, layered *config.LayeredConfig) st
 	case config.SourceEcosystem:
 		if layered != nil && layered.FilePaths != nil {
 			contextPath = layered.FilePaths[config.SourceEcosystem]
+		}
+	case config.SourceProjectNotebook:
+		if layered != nil && layered.FilePaths != nil {
+			contextPath = layered.FilePaths[config.SourceProjectNotebook]
 		}
 	case config.SourceProject:
 		if layered != nil && layered.FilePaths != nil {

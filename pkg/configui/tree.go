@@ -37,8 +37,9 @@ type LayeredValue struct {
 	Global         interface{}
 	GlobalOverride interface{}
 	EnvOverlay     interface{}
-	Ecosystem      interface{}
-	Project        interface{}
+	Ecosystem       interface{}
+	ProjectNotebook interface{}
+	Project         interface{}
 	Override       interface{} // From grove.override.toml
 }
 
@@ -113,6 +114,9 @@ func buildNode(field FieldMeta, layered *config.LayeredConfig, parent *ConfigNod
 	}
 	if layered.Ecosystem != nil {
 		node.LayerValues.Ecosystem = getConfigValueInterface(layered.Ecosystem, path)
+	}
+	if layered.ProjectNotebook != nil {
+		node.LayerValues.ProjectNotebook = getConfigValueInterface(layered.ProjectNotebook, path)
 	}
 	if layered.Project != nil {
 		node.LayerValues.Project = getConfigValueInterface(layered.Project, path)
@@ -421,13 +425,16 @@ func getFieldName(field reflect.StructField) string {
 }
 
 // determineActiveSource returns the highest-priority layer that has a value.
-// Priority order (highest to lowest): Override > Project > Ecosystem > EnvOverlay > GlobalOverride > Global > Default
+// Priority order (highest to lowest): Override > Project > ProjectNotebook > Ecosystem > EnvOverlay > GlobalOverride > Global > Default
 func determineActiveSource(lv LayeredValue) config.ConfigSource {
 	if lv.Override != nil && !isEmptyValue(lv.Override) {
 		return config.SourceOverride
 	}
 	if lv.Project != nil && !isEmptyValue(lv.Project) {
 		return config.SourceProject
+	}
+	if lv.ProjectNotebook != nil && !isEmptyValue(lv.ProjectNotebook) {
+		return config.SourceProjectNotebook
 	}
 	if lv.Ecosystem != nil && !isEmptyValue(lv.Ecosystem) {
 		return config.SourceEcosystem
@@ -633,7 +640,11 @@ func getNestedMapValueInterface(v interface{}, path []string) interface{} {
 func FilterSchema(schema []FieldMeta, layer config.ConfigSource) []FieldMeta {
 	var filtered []FieldMeta
 	for _, f := range schema {
-		if f.Layer == layer {
+		// Notebook layer uses the same fields as project layer
+		fieldLayer := f.Layer
+		if layer == config.SourceProjectNotebook && fieldLayer == config.SourceProject {
+			filtered = append(filtered, f)
+		} else if f.Layer == layer {
 			filtered = append(filtered, f)
 		}
 	}

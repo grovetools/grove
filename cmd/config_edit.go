@@ -260,6 +260,7 @@ func runConfigEdit(cmd *cobra.Command, args []string) error {
 	pages := []*LayerPage{
 		NewLayerPage("Global", config.SourceGlobal, layered, width, height),
 		NewLayerPage("Ecosystem", config.SourceEcosystem, layered, width, height),
+		NewLayerPage("Notebook", config.SourceProjectNotebook, layered, width, height),
 		NewLayerPage("Project", config.SourceProject, layered, width, height),
 	}
 

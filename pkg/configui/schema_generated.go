@@ -264,6 +264,13 @@ var SchemaFields = []FieldMeta{
 				Layer:       config.SourceProject,
 				Priority:    81,
 			},
+			{
+				Path:        []string{"context", "default_rules"},
+				Type:        FieldString,
+				Description: "Name of the default rules preset to use",
+				Layer:       config.SourceProject,
+				Priority:    82,
+			},
 		},
 	},
 	{
