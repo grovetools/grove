@@ -43,10 +43,8 @@ func AllScenarios() []*harness.Scenario {
 		EcosystemInitPreservesConfigScenario(),
 		EcosystemInitEditsCorrectFileScenario(),
 
-		// Notebook TOML / Relaxed Discovery scenarios
-		RelaxedDiscoveryScenario(),
-		NotebookConfigScenario(),
-		FullFeatureFlowScenario(),
+		// Notebook TOML / grove init scenarios (discovery tests are in core)
+		GroveInitNotebookScenario(),
 
 		// Dev Commands scenarios
 		DevCwdWorkflow(),
