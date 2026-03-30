@@ -279,34 +279,6 @@ func checkBinaryAliasConflict(alias string) error {
 	return nil
 }
 
-// getEcosystemRoot finds the grove-ecosystem root directory
-func getEcosystemRoot() (string, error) {
-	// Start from current directory and walk up
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-
-	for {
-		// Check if grove config exists in this directory (supports .yml, .yaml, .toml)
-		if _, err := config.FindConfigFile(dir); err == nil {
-			// Also check if it's the ecosystem root by looking for go.work
-			if _, err := os.Stat(filepath.Join(dir, "go.work")); err == nil {
-				return dir, nil
-			}
-		}
-
-		// Move up one directory
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			// Reached the root
-			break
-		}
-		dir = parent
-	}
-
-	return "", fmt.Errorf("grove-ecosystem root not found")
-}
 
 // extractMakefileList extracts a space-separated list of items from Makefile lines
 // starting from the given index. It handles multi-line lists with backslashes.
