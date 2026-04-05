@@ -9,6 +9,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/grovetools/core v0.6.3
+	github.com/grovetools/cx v0.6.0
 	github.com/grovetools/tend v0.6.0
 	github.com/invopop/jsonschema v0.13.0
 	github.com/mattn/go-isatty v0.0.20
@@ -36,7 +37,6 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
-	github.com/grovetools/cx v0.6.0 // indirect
 	github.com/hpcloud/tail v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kr/pty v1.1.1 // indirect

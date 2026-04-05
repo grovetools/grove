@@ -347,6 +347,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "view frontmatter", Keys: []string{"f"}, Description: "view frontmatter", Enabled: true, ConfigKey: "view_frontmatter"},
 					{Name: "view briefing", Keys: []string{"b"}, Description: "view briefing", Enabled: true, ConfigKey: "view_briefing"},
 					{Name: "preview markdown", Keys: []string{"m", "p"}, Description: "preview markdown", Enabled: true, ConfigKey: "view_edit"},
+					{Name: "skills", Keys: []string{"F"}, Description: "skills", Enabled: true, ConfigKey: "view_skill_pane"},
 					{Name: "preview", Keys: []string{"v"}, Description: "preview", Enabled: true, ConfigKey: "toggle_preview"},
 					{Name: "toggle detail pane", Keys: []string{"v"}, Description: "toggle detail pane", Enabled: true, ConfigKey: "cycle_detail_pane"},
 					{Name: "close detail pane", Keys: []string{"esc"}, Description: "close detail pane", Enabled: true, ConfigKey: "close_detail_pane"},
