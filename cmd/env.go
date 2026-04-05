@@ -216,14 +216,15 @@ func newEnvUpCmd() *cobra.Command {
 
 			// Write state
 			stateFile := &env.EnvStateFile{
-				Provider:    resolved.Provider,
-				Command:     resolved.Command,
-				Environment: profile,
-				ManagedBy:   "user",
-				Ports:       ports,
-				Services:    services,
-				EnvVars:     resp.EnvVars,
-				State:       resp.State,
+				Provider:     resolved.Provider,
+				Command:      resolved.Command,
+				Environment:  profile,
+				ManagedBy:    "user",
+				Ports:        ports,
+				Services:     services,
+				EnvVars:      resp.EnvVars,
+				CleanupPaths: resp.CleanupPaths,
+				State:        resp.State,
 			}
 			if err := writeEnvState(stateFile); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not write state: %v\n", err)
@@ -298,6 +299,14 @@ func newEnvDownCmd() *cobra.Command {
 
 			if err := prov.Down(context.Background(), req); err != nil {
 				return fmt.Errorf("environment teardown failed: %w", err)
+			}
+
+			// Clean up service-specific files (e.g. ClickHouse lock files)
+			for _, p := range stateFile.CleanupPaths {
+				target := filepath.Join(".", p)
+				if err := os.RemoveAll(target); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not remove %s: %v\n", p, err)
+				}
 			}
 
 			// Clean up state files
