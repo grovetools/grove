@@ -161,7 +161,7 @@ func newEnvUpCmd() *cobra.Command {
 			}
 
 			cwd, _ := os.Getwd()
-			stateDir := envStateDir()
+			stateDir, _ := filepath.Abs(envStateDir())
 			if err := os.MkdirAll(stateDir, 0755); err != nil {
 				return fmt.Errorf("failed to create state directory: %w", err)
 			}
@@ -272,10 +272,11 @@ func newEnvDownCmd() *cobra.Command {
 				return err
 			}
 
+			absStateDir, _ := filepath.Abs(envStateDir())
 			req := env.EnvRequest{
 				Provider:  stateFile.Provider,
-				StateDir:  envStateDir(),
-				PlanDir:   envStateDir(),
+				StateDir:  absStateDir,
+				PlanDir:   absStateDir,
 				Config:    make(map[string]interface{}),
 				ManagedBy: stateFile.ManagedBy,
 				Force:     force,
