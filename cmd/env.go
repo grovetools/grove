@@ -224,6 +224,7 @@ func newEnvUpCmd() *cobra.Command {
 				Services:     services,
 				EnvVars:      resp.EnvVars,
 				CleanupPaths: resp.CleanupPaths,
+				Volumes:      resp.Volumes,
 				State:        resp.State,
 			}
 			if err := writeEnvState(stateFile); err != nil {
@@ -259,6 +260,7 @@ func newEnvUpCmd() *cobra.Command {
 func newEnvDownCmd() *cobra.Command {
 	var jsonOutput bool
 	var force bool
+	var clean bool
 
 	cmd := &cobra.Command{
 		Use:   "down",
@@ -281,6 +283,7 @@ func newEnvDownCmd() *cobra.Command {
 				Config:    make(map[string]interface{}),
 				ManagedBy: stateFile.ManagedBy,
 				Force:     force,
+				Clean:     clean,
 			}
 
 			if node := getWorkspaceNode(); node != nil {
@@ -301,11 +304,13 @@ func newEnvDownCmd() *cobra.Command {
 				return fmt.Errorf("environment teardown failed: %w", err)
 			}
 
-			// Clean up service-specific files (e.g. ClickHouse lock files)
-			for _, p := range stateFile.CleanupPaths {
-				target := filepath.Join(".", p)
-				if err := os.RemoveAll(target); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: could not remove %s: %v\n", p, err)
+			// Clean up volumes based on persistence and --clean flag
+			for _, vol := range stateFile.EffectiveVolumes() {
+				if clean || !vol.Persist {
+					target := filepath.Join(".", vol.Path)
+					if err := os.RemoveAll(target); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: could not remove %s: %v\n", vol.Path, err)
+					}
 				}
 			}
 
@@ -328,6 +333,7 @@ func newEnvDownCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&force, "force", false, "Force teardown even if managed by a plan")
+	cmd.Flags().BoolVar(&clean, "clean", false, "Remove all volumes including persistent ones")
 	return cmd
 }
 
@@ -465,12 +471,14 @@ func newEnvRestartCmd() *cobra.Command {
 
 			// Write state and env vars
 			sf := &env.EnvStateFile{
-				Provider:    resolved.Provider,
-				Command:     resolved.Command,
-				Environment: profile,
-				ManagedBy:   "user",
-				EnvVars:     resp.EnvVars,
-				State:       resp.State,
+				Provider:     resolved.Provider,
+				Command:      resolved.Command,
+				Environment:  profile,
+				ManagedBy:    "user",
+				EnvVars:      resp.EnvVars,
+				CleanupPaths: resp.CleanupPaths,
+				Volumes:      resp.Volumes,
+				State:        resp.State,
 			}
 			writeEnvState(sf)
 			writeEnvLocal(resp.EnvVars)
