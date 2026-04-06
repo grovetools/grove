@@ -179,6 +179,37 @@ func newEnvUpCmd() *cobra.Command {
 				req.Workspace = node
 			}
 
+			// Phase 4: Prepare shared_backend_config if shared_env is configured
+			if sharedEnv, ok := resolved.Config["shared_env"].(string); ok && sharedEnv != "" {
+				sharedRef, _ := resolved.Config["shared_ref"].(string)
+				if sharedRef == "" {
+					sharedRef = "main"
+				}
+				stateBackend, _ := resolved.Config["state_backend"].(string)
+				stateBucket, _ := resolved.Config["state_bucket"].(string)
+
+				if stateBackend == "gcs" && stateBucket != "" {
+					// Determine ecosystem name from workspace
+					ecosystem := ""
+					if req.Workspace != nil && req.Workspace.ParentEcosystemPath != "" {
+						ecosystem = filepath.Base(req.Workspace.ParentEcosystemPath)
+					}
+					if ecosystem == "" && req.Workspace != nil && req.Workspace.RootEcosystemPath != "" {
+						ecosystem = filepath.Base(req.Workspace.RootEcosystemPath)
+					}
+					prefix := sharedEnv + "/" + sharedRef
+					if ecosystem != "" {
+						prefix = ecosystem + "/" + sharedEnv + "/" + sharedRef
+					}
+
+					req.Config["shared_backend_config"] = map[string]interface{}{
+						"state_backend": stateBackend,
+						"state_bucket":  stateBucket,
+						"state_prefix":  prefix,
+					}
+				}
+			}
+
 			// Resolve provider
 			var client env.DaemonEnvClient
 			if resolved.Provider == "native" || resolved.Provider == "docker" || resolved.Provider == "terraform" {
@@ -276,11 +307,20 @@ func newEnvDownCmd() *cobra.Command {
 			}
 
 			absStateDir, _ := filepath.Abs(envStateDir())
+
+			// Re-resolve config from stored profile so terraform down has backend/vars info
+			downConfig := make(map[string]interface{})
+			if stateFile.Environment != "" || stateFile.Provider == "terraform" {
+				if resolved, _, err := resolveEnvConfig(stateFile.Environment); err == nil && resolved.Config != nil {
+					downConfig = resolved.Config
+				}
+			}
+
 			req := env.EnvRequest{
 				Provider:  stateFile.Provider,
 				StateDir:  absStateDir,
 				PlanDir:   absStateDir,
-				Config:    make(map[string]interface{}),
+				Config:    downConfig,
 				ManagedBy: stateFile.ManagedBy,
 				Force:     force,
 				Clean:     clean,
