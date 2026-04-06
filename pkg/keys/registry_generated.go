@@ -374,6 +374,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "edit dependencies", Keys: []string{"D"}, Description: "edit dependencies", Enabled: true, ConfigKey: "edit_deps"},
 					{Name: "archive selected", Keys: []string{"X"}, Description: "archive selected", Enabled: true, ConfigKey: "archive"},
 					{Name: "input to agent", Keys: []string{"i"}, Description: "input to agent", Enabled: true, ConfigKey: "send_input"},
+					{Name: "toggle claw", Keys: []string{"C"}, Description: "toggle claw", Enabled: true, ConfigKey: "toggle_claw"},
 					{Name: "copy path", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true, ConfigKey: "copy_path"},
 					{Name: "help", Keys: []string{"?"}, Description: "help", Enabled: true, ConfigKey: "help"},
 					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true, ConfigKey: "quit"},
