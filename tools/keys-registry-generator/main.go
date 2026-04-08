@@ -21,9 +21,9 @@ import (
 	// TUI keymap imports - add new TUIs here
 	core_cmd "github.com/grovetools/core/cmd"
 	cx_rules "github.com/grovetools/cx/cmd/rules"
-	cx_view "github.com/grovetools/cx/cmd/view"
+	cx_view "github.com/grovetools/cx/pkg/tui/view"
 	flow_cmd "github.com/grovetools/flow/cmd"
-	flow_status "github.com/grovetools/flow/cmd/status_tui"
+	flow_status "github.com/grovetools/flow/pkg/tui/status"
 	gemini_cmd "github.com/grovetools/grove-gemini/cmd"
 	grove_cmd "github.com/grovetools/grove/cmd"
 	hooks_cmd "github.com/grovetools/hooks/cmd"

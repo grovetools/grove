@@ -133,8 +133,8 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Pages",
 				Bindings: []BindingEntry{
-					{Name: "next page", Keys: []string{"tab"}, Description: "next page", Enabled: true, ConfigKey: "next_page"},
-					{Name: "prev page", Keys: []string{"shift+tab"}, Description: "prev page", Enabled: true, ConfigKey: "prev_page"},
+					{Name: "next page", Keys: []string{"]"}, Description: "next page", Enabled: true, ConfigKey: "next_page"},
+					{Name: "prev page", Keys: []string{"["}, Description: "prev page", Enabled: true, ConfigKey: "prev_page"},
 				},
 			},
 			{
@@ -265,7 +265,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "System",
 				Bindings: []BindingEntry{
 					{Name: "show help", Keys: []string{"?"}, Description: "show help", Enabled: true, ConfigKey: "help"},
-					{Name: "back to plan list", Keys: []string{"q"}, Description: "back to plan list", Enabled: true, ConfigKey: "back"},
+					{Name: "cancel", Keys: []string{"q"}, Description: "cancel", Enabled: true, ConfigKey: "back"},
 					{Name: "quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true, ConfigKey: "quit"},
 				},
 			},
@@ -930,13 +930,14 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "toggle view", Keys: []string{"t"}, Description: "toggle view", Enabled: true, ConfigKey: "toggle_view"},
 					{Name: "toggle filter view", Keys: []string{"f"}, Description: "toggle filter view", Enabled: true, ConfigKey: "toggle_filter"},
 					{Name: "search", Keys: []string{"/"}, Description: "search", Enabled: true, ConfigKey: "search_filter"},
+					{Name: "local/global scope", Keys: []string{"alt+s"}, Description: "local/global scope", Enabled: true, ConfigKey: "scope_toggle"},
 				},
 			},
 			{
 				Name: "Actions",
 				Bindings: []BindingEntry{
-					{Name: "action", Keys: []string{"e"}, Description: "action", Enabled: true, ConfigKey: "open"},
-					{Name: "action", Keys: []string{"o"}, Description: "action", Enabled: true, ConfigKey: "open"},
+					{Name: "edit prompt", Keys: []string{"e"}, Description: "edit prompt", Enabled: true, ConfigKey: "edit"},
+					{Name: "open agent session", Keys: []string{"o"}, Description: "open agent session", Enabled: true, ConfigKey: "open"},
 					{Name: "copy path", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true, ConfigKey: "copy_path"},
 					{Name: "open dir", Keys: []string{"ctrl+o"}, Description: "open dir", Enabled: true, ConfigKey: "open_dir"},
 					{Name: "export json", Keys: []string{"ctrl+j"}, Description: "export json", Enabled: true, ConfigKey: "export_json"},
