@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"strings"
 
+	"github.com/grovetools/core/config"
 	"github.com/spf13/cobra"
 )
 
@@ -56,21 +56,19 @@ func findGroveConfig() (string, error) {
 }
 
 // validateEcosystemRoot checks that we're in an ecosystem root
-// (a directory with grove.yml containing a 'workspaces' key)
+// (a directory with a grove config containing a non-empty `workspaces` field).
 func validateEcosystemRoot() error {
 	configFile, err := findGroveConfig()
 	if err != nil {
-		return fmt.Errorf("not in a Grove ecosystem (grove.yml not found)")
+		return fmt.Errorf("not in a Grove ecosystem (grove.toml/grove.yml not found)")
 	}
 
-	content, err := os.ReadFile(configFile)
+	cfg, err := config.Load(configFile)
 	if err != nil {
-		return fmt.Errorf("failed to read %s: %w", configFile, err)
+		return fmt.Errorf("failed to parse %s: %w", configFile, err)
 	}
-
-	// Check for workspaces key (simple check - not full YAML parsing)
-	if !strings.Contains(string(content), "workspaces:") {
-		return fmt.Errorf("not in an ecosystem root (%s has no 'workspaces' key)\n\nThis directory is a project, not an ecosystem.\nTo create an ecosystem, run: grove ecosystem init", configFile)
+	if len(cfg.Workspaces) == 0 {
+		return fmt.Errorf("not in an ecosystem root (%s has no 'workspaces' field)\n\nThis directory is a project, not an ecosystem.\nTo create an ecosystem, run: grove ecosystem init", configFile)
 	}
 
 	return nil
