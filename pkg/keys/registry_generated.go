@@ -681,7 +681,6 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "Actions",
 				Bindings: []BindingEntry{
 					{Name: "search", Keys: []string{"/"}, Description: "search", Enabled: true, ConfigKey: "search"},
-					{Name: "toggle view", Keys: []string{"v"}, Description: "toggle view", Enabled: true, ConfigKey: "toggle_view"},
 					{Name: "edit config", Keys: []string{"e"}, Description: "edit config", Enabled: true, ConfigKey: "edit_config"},
 				},
 			},

@@ -3,6 +3,7 @@ package cmd
 import (
 	"github.com/grovetools/core/tui/keymap"
 	grovekeymap "github.com/grovetools/grove/pkg/keymap"
+	keystui "github.com/grovetools/grove/pkg/tui/keys"
 )
 
 // KeysKeymapInfo returns the keymap metadata for the grove keys TUI.
@@ -12,7 +13,7 @@ func KeysKeymapInfo() keymap.TUIInfo {
 		"grove-keys",
 		"grove",
 		"Keybinding browser and analyzer",
-		newKeysTUIKeyMap(nil),
+		keystui.NewKeyMap(nil),
 	)
 }
 
