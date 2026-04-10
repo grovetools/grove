@@ -112,7 +112,8 @@ func (p *DomainPage) View() string {
 			tabs = append(tabs, t.Muted.Render(fmt.Sprintf(" %s ", name)))
 		}
 	}
-	tabBar := " " + strings.Join(tabs, " \u2502 ") + "\n"
+	hint := t.Muted.Render("  \u2190/\u2192 switch domain")
+	tabBar := " " + strings.Join(tabs, " \u2502 ") + hint + "\n"
 
 	return tabBar + p.vp.View()
 }
