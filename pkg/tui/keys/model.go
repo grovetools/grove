@@ -315,15 +315,12 @@ func (m Model) View() string {
 	}
 
 	t := theme.DefaultTheme
-	var s strings.Builder
 
-	// Pager at top (tab bar + title row + active page body).
-	s.WriteString(m.pager.View())
-	s.WriteString("\n")
+	// Build footer: search bar or hint line + conflict summary.
+	var footerParts []string
 
-	// Footer: search bar or hint line.
 	if m.searchActive || m.searchInput.Value() != "" {
-		s.WriteString("  " + m.searchInput.View() + "\n")
+		footerParts = append(footerParts, m.searchInput.View())
 	} else {
 		var helpParts []string
 		helpParts = append(helpParts, "/ search")
@@ -336,16 +333,18 @@ func (m Model) View() string {
 			helpParts = append(helpParts, "e edit config")
 		}
 
-		s.WriteString("  " + t.Muted.Render(strings.Join(helpParts, " "+theme.IconBullet+" ")) + "\n")
+		footerParts = append(footerParts, t.Muted.Render(strings.Join(helpParts, " "+theme.IconBullet+" ")))
 	}
 
-	// Footer: conflict summary.
+	// Conflict summary.
 	totalConflicts := len(m.conflicts)
 	if totalConflicts > 0 {
-		s.WriteString("  " + t.Error.Render(fmt.Sprintf("%d conflict(s) detected", totalConflicts)))
+		footerParts = append(footerParts, t.Error.Render(fmt.Sprintf("%d conflict(s) detected", totalConflicts)))
 	} else {
-		s.WriteString("  " + t.Success.Render("No conflicts"))
+		footerParts = append(footerParts, t.Success.Render("No conflicts"))
 	}
 
-	return s.String()
+	m.pager.SetFooter(strings.Join(footerParts, "\n"))
+
+	return m.pager.View()
 }

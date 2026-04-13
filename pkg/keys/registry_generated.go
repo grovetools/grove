@@ -352,7 +352,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "switch view", Keys: []string{"tab"}, Description: "switch view", Enabled: true, ConfigKey: "switch_view"},
 					{Name: "toggle columns", Keys: []string{"T"}, Description: "toggle columns", Enabled: true, ConfigKey: "toggle_columns"},
-					{Name: "view logs", Keys: []string{"l"}, Description: "view logs", Enabled: true, ConfigKey: "view_logs"},
+					{Name: "view logs", Keys: []string{"L"}, Description: "view logs", Enabled: true, ConfigKey: "view_logs"},
 					{Name: "view frontmatter", Keys: []string{"f"}, Description: "view frontmatter", Enabled: true, ConfigKey: "view_frontmatter"},
 					{Name: "view briefing", Keys: []string{"b"}, Description: "view briefing", Enabled: true, ConfigKey: "view_briefing"},
 					{Name: "preview markdown", Keys: []string{"m"}, Description: "preview markdown", Enabled: true, ConfigKey: "view_edit"},
@@ -362,6 +362,8 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "toggle detail pane", Keys: []string{"v"}, Description: "toggle detail pane", Enabled: true, ConfigKey: "cycle_detail_pane"},
 					{Name: "close detail pane", Keys: []string{"esc"}, Description: "close detail pane", Enabled: true, ConfigKey: "close_detail_pane"},
 					{Name: "switch focus", Keys: []string{"tab", "shift+tab"}, Description: "switch focus", Enabled: true, ConfigKey: "switch_focus"},
+					{Name: "focus left", Keys: []string{"h", "left"}, Description: "focus left", Enabled: true, ConfigKey: "focus_left"},
+					{Name: "focus right", Keys: []string{"l", "right"}, Description: "focus right", Enabled: true, ConfigKey: "focus_right"},
 					{Name: "toggle layout", Keys: []string{"V"}, Description: "toggle layout", Enabled: true, ConfigKey: "toggle_layout"},
 					{Name: "fullscreen logs", Keys: []string{"z"}, Description: "fullscreen logs", Enabled: true, ConfigKey: "toggle_fullscreen"},
 				},

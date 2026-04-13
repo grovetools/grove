@@ -31,26 +31,19 @@ func (m Model) View() string {
 }
 
 func (m Model) renderListView() string {
-	var b strings.Builder
-
-	// Pager renders the tab bar + active page content
-	b.WriteString(m.pager.View())
-	b.WriteString("\n")
-
-	// Status message
+	// Build footer: optional status message + help line.
+	var footerParts []string
 	if m.statusMsg != "" {
 		if strings.HasPrefix(m.statusMsg, "Error") {
-			b.WriteString(theme.DefaultTheme.Error.Render(m.statusMsg))
+			footerParts = append(footerParts, theme.DefaultTheme.Error.Render(m.statusMsg))
 		} else {
-			b.WriteString(theme.DefaultTheme.Success.Render(m.statusMsg))
+			footerParts = append(footerParts, theme.DefaultTheme.Success.Render(m.statusMsg))
 		}
-		b.WriteString("\n")
 	}
+	footerParts = append(footerParts, m.help.View())
+	m.pager.SetFooter(strings.Join(footerParts, "\n"))
 
-	// Help
-	b.WriteString(m.help.View())
-
-	return b.String()
+	return m.pager.View()
 }
 
 func (m Model) renderEditView() string {
