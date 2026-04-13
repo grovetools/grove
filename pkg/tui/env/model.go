@@ -77,6 +77,7 @@ func New(cfg Config) Model {
 
 	p := pager.NewWith([]pager.Page{svcPage, varsPage, actPage}, keys, pager.Config{
 		OuterPadding: [4]int{1, 2, 0, 2},
+		FooterHeight: 1, // help hint line
 	})
 
 	m := Model{
@@ -262,10 +263,19 @@ func (m Model) View() string {
 		feedback = "\n" + th.Muted.Render("  "+m.actionMsg)
 	}
 
+	// Build footer: action hints + optional feedback.
+	var footerParts []string
+	sep := " " + theme.IconBullet + " "
+	footerParts = append(footerParts, th.Muted.Render(
+		"u env up"+sep+"d env down"+sep+"r restart",
+	))
+	m.pager.SetFooter(strings.Join(footerParts, "\n"))
+
 	// Pager body (tabs)
 	body := m.pager.View()
 
-	return header + feedback + "\n" + body
+	out := header + feedback + "\n" + body
+	return lipgloss.NewStyle().MaxWidth(m.width).Render(out)
 }
 
 func (m Model) renderHeader() string {
