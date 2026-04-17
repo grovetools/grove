@@ -214,7 +214,7 @@ func newEnvUpCmd() *cobra.Command {
 			// Resolve provider
 			var client env.DaemonEnvClient
 			if resolved.Provider == "native" || resolved.Provider == "docker" || resolved.Provider == "terraform" {
-				client = daemon.NewWithAutoStart(cwd)
+				client = daemon.NewWithAutoStart()
 			}
 			prov := env.ResolveProvider(resolved.Provider, client, resolved.Command)
 
@@ -333,7 +333,7 @@ func newEnvDownCmd() *cobra.Command {
 
 			var client env.DaemonEnvClient
 			if stateFile.Provider == "native" || stateFile.Provider == "docker" || stateFile.Provider == "terraform" {
-				client = daemon.NewWithAutoStart(absStateDir)
+				client = daemon.NewWithAutoStart()
 			}
 			prov := env.ResolveProvider(stateFile.Provider, client, stateFile.Command)
 
@@ -457,7 +457,7 @@ func newEnvRestartCmd() *cobra.Command {
 
 				var client env.DaemonEnvClient
 				if stateFile.Provider == "native" || stateFile.Provider == "docker" || stateFile.Provider == "terraform" {
-					client = daemon.NewWithAutoStart(envStateDir())
+					client = daemon.NewWithAutoStart()
 				}
 				prov := env.ResolveProvider(stateFile.Provider, client, stateFile.Command)
 				if err := prov.Down(context.Background(), req); err != nil {
@@ -497,7 +497,7 @@ func newEnvRestartCmd() *cobra.Command {
 
 			var client env.DaemonEnvClient
 			if resolved.Provider == "native" || resolved.Provider == "docker" || resolved.Provider == "terraform" {
-				client = daemon.NewWithAutoStart(stateDir)
+				client = daemon.NewWithAutoStart()
 			}
 			prov := env.ResolveProvider(resolved.Provider, client, resolved.Command)
 
