@@ -779,33 +779,168 @@ func profileTags(name, sticky, running string, isConfigDefault bool) string {
 }
 
 func newEnvShowCmd() *cobra.Command {
-	return &cobra.Command{
+	var provenance bool
+	var jsonOutput bool
+	cmd := &cobra.Command{
 		Use:   "show <name>",
 		Short: "Show resolved configuration for a named environment profile",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.LoadDefault()
-			if err != nil {
-				return err
-			}
+		Long: `Show resolved configuration for a named environment profile.
 
+With --provenance, annotate every merged key with the layer that produced
+it (global, ecosystem, project-notebook, project, override, …) and list any
+keys dropped by a '_delete = true' overlay.`,
+		Example: `  # Plain resolved config (YAML)
+  grove env show hybrid-api
+
+  # Annotate every key with its source layer
+  grove env show hybrid-api --provenance
+
+  # Machine-readable provenance for a filter or agent
+  grove env show hybrid-api --provenance --json | jq '.provenance | to_entries | .[] | select(.key | startswith("config.services"))'
+
+  # Inspect which keys the profile overlay dropped
+  grove env show hybrid-api --provenance --json | jq '.deleted'`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
 			profileName := args[0]
 			if profileName == "default" {
 				profileName = ""
 			}
 
-			resolved, err := config.ResolveEnvironment(cfg, profileName)
+			if !provenance {
+				cfg, err := config.LoadDefault()
+				if err != nil {
+					return err
+				}
+				resolved, err := config.ResolveEnvironment(cfg, profileName)
+				if err != nil {
+					return err
+				}
+				if jsonOutput {
+					return json.NewEncoder(os.Stdout).Encode(resolved)
+				}
+				data, err := yaml.Marshal(resolved)
+				if err != nil {
+					return err
+				}
+				fmt.Print(string(data))
+				return nil
+			}
+
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			layered, err := config.LoadLayered(cwd)
 			if err != nil {
 				return err
 			}
 
-			data, err := yaml.Marshal(resolved)
+			resolved, prov, deleted, err := config.ResolveEnvironmentWithProvenance(layered, profileName)
 			if err != nil {
 				return err
 			}
-			fmt.Print(string(data))
+
+			if jsonOutput {
+				out := struct {
+					Config     *config.EnvironmentConfig `json:"config"`
+					Provenance map[string]string         `json:"provenance"`
+					Deleted    map[string]string         `json:"deleted,omitempty"`
+				}{
+					Config:     resolved,
+					Provenance: prov,
+					Deleted:    deleted,
+				}
+				return json.NewEncoder(os.Stdout).Encode(out)
+			}
+
+			annotated, err := annotateEnvYAML(resolved, prov, deleted)
+			if err != nil {
+				return err
+			}
+			fmt.Print(annotated)
 			return nil
 		},
+	}
+	cmd.Flags().BoolVar(&provenance, "provenance", false, "Annotate each key with its source layer and list '_delete'-dropped keys")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Emit JSON instead of YAML")
+	return cmd
+}
+
+// annotateEnvYAML marshals an EnvironmentConfig to YAML and attaches the
+// provenance label to each scalar leaf as a line comment. Subtrees that
+// descend from the same layer get a single label on their parent key line.
+// Deleted keys are emitted as a trailing comment block since they have no
+// node in the output tree.
+func annotateEnvYAML(envCfg *config.EnvironmentConfig, prov, deleted map[string]string) (string, error) {
+	data, err := yaml.Marshal(envCfg)
+	if err != nil {
+		return "", err
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return "", err
+	}
+	annotateYAMLNode(&root, "", prov)
+
+	var buf strings.Builder
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(&root); err != nil {
+		return "", err
+	}
+	enc.Close()
+
+	if len(deleted) > 0 {
+		buf.WriteString("\n# Deleted keys (dropped via _delete = true):\n")
+		keys := make([]string, 0, len(deleted))
+		for k := range deleted {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			buf.WriteString(fmt.Sprintf("#   %s  (by %s)\n", k, deleted[k]))
+		}
+	}
+	return buf.String(), nil
+}
+
+// annotateYAMLNode walks a parsed YAML tree and attaches provenance labels to
+// scalar leaves. When every descendant of a mapping/sequence node shares a
+// single provenance (recorded against the parent path), the label is attached
+// to the key line instead of every leaf.
+func annotateYAMLNode(node *yaml.Node, path string, prov map[string]string) {
+	if node == nil {
+		return
+	}
+	switch node.Kind {
+	case yaml.DocumentNode:
+		for _, c := range node.Content {
+			annotateYAMLNode(c, path, prov)
+		}
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			keyNode := node.Content[i]
+			valNode := node.Content[i+1]
+			childPath := keyNode.Value
+			if path != "" {
+				childPath = path + "." + keyNode.Value
+			}
+			switch valNode.Kind {
+			case yaml.ScalarNode:
+				if src, ok := prov[childPath]; ok {
+					valNode.LineComment = src
+				}
+			case yaml.MappingNode, yaml.SequenceNode:
+				if src, ok := prov[childPath]; ok {
+					keyNode.LineComment = src
+				}
+				annotateYAMLNode(valNode, childPath, prov)
+			}
+		}
+	case yaml.SequenceNode:
+		// Sequences are replaced wholesale by deepMergeMaps; their provenance
+		// is recorded at the parent key path (handled above).
 	}
 }
 
