@@ -229,6 +229,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Intercept quit/back at the top so the panel reliably closes when
+		// embedded in a host. Without this, q/Esc fall through to the pager
+		// (which doesn't handle them), leaving the user stuck.
+		km := keymap.Load(m.cfg, "grove.env")
+		if key.Matches(msg, km.Quit) || key.Matches(msg, km.Back) {
+			return m, func() tea.Msg { return embed.CloseRequestMsg{} }
+		}
 		// Global action keys work regardless of active tab
 		switch {
 		case key.Matches(msg, actionKeys.Up):

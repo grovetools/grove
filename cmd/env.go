@@ -382,56 +382,146 @@ func newEnvStatusCmd() *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:   "status",
+		Use:   "status [worktree]",
 		Short: "Show the current environment status",
+		Long: `Show the status of the environment for the current worktree, or — if a
+worktree name is given — the status the daemon is tracking for that worktree.
+
+Output labels:
+  [Active (Running)]  — the profile currently running in this worktree
+  [Sticky Default]    — the profile set via 'grove env default' (.grove/state.yml)
+  [Config Default]    — the '[environment]' block from grove.toml`,
+		Args: cobra.MaximumNArgs(1),
+		Example: `  grove env status
+  grove env status my-feature
+  grove env status --json | jq '{status, state}'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			stateFile, err := readEnvState()
-			if err != nil {
-				if os.IsNotExist(err) {
-					if jsonOutput {
-						json.NewEncoder(os.Stdout).Encode(map[string]string{"status": "stopped"})
-					} else {
-						fmt.Println("No environment running")
-					}
-					return nil
-				}
-				return err
+			if len(args) == 1 {
+				return runEnvStatusForWorktree(args[0], jsonOutput)
 			}
-
-			if jsonOutput {
-				json.NewEncoder(os.Stdout).Encode(stateFile)
-				return nil
-			}
-
-			fmt.Printf("Provider:    %s\n", stateFile.Provider)
-			if stateFile.Environment != "" {
-				fmt.Printf("Profile:     %s\n", stateFile.Environment)
-			}
-			fmt.Printf("Managed by:  %s\n", stateFile.ManagedBy)
-
-			if len(stateFile.Services) > 0 {
-				fmt.Println("\nServices:")
-				for _, svc := range stateFile.Services {
-					portStr := ""
-					if svc.Port > 0 {
-						portStr = fmt.Sprintf(" (port %d)", svc.Port)
-					}
-					fmt.Printf("  %-20s %s%s\n", svc.Name, svc.Status, portStr)
-				}
-			}
-
-			if len(stateFile.Ports) > 0 {
-				fmt.Println("\nPorts:")
-				for name, port := range stateFile.Ports {
-					fmt.Printf("  %-20s %d\n", name, port)
-				}
-			}
-
-			return nil
+			return runEnvStatusLocal(jsonOutput)
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	return cmd
+}
+
+// runEnvStatusLocal prints the status of the environment running in the
+// current worktree by reading .grove/env/state.json. It also surfaces the
+// sticky default and config default so the caller can distinguish those
+// from "currently running".
+func runEnvStatusLocal(jsonOutput bool) error {
+	stateFile, err := readEnvState()
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	sticky, _ := state.GetString("environment")
+	cfg, _ := config.LoadDefault()
+	configDefault := ""
+	if cfg != nil && cfg.Environment != nil {
+		configDefault = "default"
+	}
+
+	if stateFile == nil {
+		if jsonOutput {
+			payload := map[string]interface{}{
+				"status":         "stopped",
+				"sticky_default": sticky,
+				"config_default": configDefault,
+			}
+			json.NewEncoder(os.Stdout).Encode(payload)
+			return nil
+		}
+		fmt.Println("No environment running")
+		if sticky != "" {
+			fmt.Printf("Sticky Default:  %s\n", sticky)
+		}
+		if configDefault != "" {
+			fmt.Printf("Config Default:  %s\n", configDefault)
+		}
+		return nil
+	}
+
+	if jsonOutput {
+		payload := map[string]interface{}{
+			"status":         "running",
+			"state":          stateFile,
+			"sticky_default": sticky,
+			"config_default": configDefault,
+		}
+		json.NewEncoder(os.Stdout).Encode(payload)
+		return nil
+	}
+
+	fmt.Printf("Provider:        %s\n", stateFile.Provider)
+	activeProfile := stateFile.Environment
+	if activeProfile == "" {
+		activeProfile = "default"
+	}
+	fmt.Printf("Active Profile:  %s [Active (Running)]\n", activeProfile)
+	if sticky != "" {
+		fmt.Printf("Sticky Default:  %s\n", sticky)
+	}
+	if configDefault != "" {
+		fmt.Printf("Config Default:  %s\n", configDefault)
+	}
+	fmt.Printf("Managed by:      %s\n", stateFile.ManagedBy)
+
+	if len(stateFile.Services) > 0 {
+		fmt.Println("\nServices:")
+		for _, svc := range stateFile.Services {
+			portStr := ""
+			if svc.Port > 0 {
+				portStr = fmt.Sprintf(" (port %d)", svc.Port)
+			}
+			fmt.Printf("  %-20s %s%s\n", svc.Name, svc.Status, portStr)
+		}
+	}
+
+	if len(stateFile.Ports) > 0 {
+		fmt.Println("\nPorts:")
+		for name, port := range stateFile.Ports {
+			fmt.Printf("  %-20s %d\n", name, port)
+		}
+	}
+
+	return nil
+}
+
+// runEnvStatusForWorktree queries the daemon for the environment status of a
+// specific worktree (e.g. a sibling worktree managed by a plan), rather than
+// the local worktree's on-disk state.
+func runEnvStatusForWorktree(worktree string, jsonOutput bool) error {
+	client := daemon.New()
+	resp, err := client.EnvStatus(context.Background(), worktree)
+	if err != nil {
+		return fmt.Errorf("failed to query daemon for worktree %q: %w", worktree, err)
+	}
+
+	if jsonOutput {
+		json.NewEncoder(os.Stdout).Encode(resp)
+		return nil
+	}
+
+	if resp == nil || resp.Status == "stopped" || resp.Status == "" {
+		fmt.Printf("No environment running for worktree %q\n", worktree)
+		return nil
+	}
+
+	fmt.Printf("Worktree:        %s\n", worktree)
+	if prov, ok := resp.State["provider"]; ok && prov != "" {
+		fmt.Printf("Provider:        %s\n", prov)
+	}
+	if envProfile, ok := resp.State["environment"]; ok && envProfile != "" {
+		fmt.Printf("Active Profile:  %s [Active (Running)]\n", envProfile)
+	}
+	if mb, ok := resp.State["managed_by"]; ok && mb != "" {
+		fmt.Printf("Managed by:      %s\n", mb)
+	}
+	fmt.Printf("Status:          %s\n", resp.Status)
+
+	return nil
 }
 
 func newEnvRestartCmd() *cobra.Command {
@@ -615,25 +705,38 @@ func newEnvListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List available environment profiles",
+		Long: `List configured environment profiles. Tags next to each name indicate:
+
+  [Config Default]    — the '[environment]' block from grove.toml
+  [Sticky Default]    — the profile set via 'grove env default'
+  [Active (Running)]  — the profile currently running in this worktree`,
+		Example: `  grove env list
+  grove env default hybrid-api    # promote 'hybrid-api' to sticky default`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.LoadDefault()
 			if err != nil {
 				return err
 			}
 
-			active, _ := state.GetString("environment")
+			sticky, _ := state.GetString("environment")
+
+			// Determine currently running profile by reading local state.
+			// Treat an empty Environment field as "default" for tagging.
+			running := ""
+			if sf, err := readEnvState(); err == nil && sf != nil {
+				running = sf.Environment
+				if running == "" {
+					running = "default"
+				}
+			}
 
 			// Print default environment
 			if cfg.Environment != nil {
-				marker := "  "
-				if active == "" {
-					marker = "* "
-				}
 				provider := cfg.Environment.Provider
 				if provider == "" {
 					provider = "(no provider)"
 				}
-				fmt.Printf("%sdefault (%s)\n", marker, provider)
+				fmt.Printf("  default (%s)%s\n", provider, profileTags("default", sticky, running, true))
 			}
 
 			// Print named environments sorted
@@ -644,20 +747,35 @@ func newEnvListCmd() *cobra.Command {
 			sort.Strings(names)
 
 			for _, name := range names {
-				marker := "  "
-				if name == active {
-					marker = "* "
-				}
 				provider := cfg.Environments[name].Provider
 				if provider == "" {
 					provider = "(inherits)"
 				}
-				fmt.Printf("%s%s (%s)\n", marker, name, provider)
+				fmt.Printf("  %s (%s)%s\n", name, provider, profileTags(name, sticky, running, false))
 			}
 
 			return nil
 		},
 	}
+}
+
+// profileTags renders the trailing "[Config Default] [Sticky Default] [Active (Running)]"
+// annotations for a profile name given the current sticky default and running profile.
+func profileTags(name, sticky, running string, isConfigDefault bool) string {
+	var tags []string
+	if isConfigDefault {
+		tags = append(tags, "[Config Default]")
+	}
+	if name != "" && name == sticky {
+		tags = append(tags, "[Sticky Default]")
+	}
+	if name != "" && name == running {
+		tags = append(tags, "[Active (Running)]")
+	}
+	if len(tags) == 0 {
+		return ""
+	}
+	return "  " + strings.Join(tags, " ")
 }
 
 func newEnvShowCmd() *cobra.Command {
