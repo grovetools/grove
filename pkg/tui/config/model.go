@@ -109,6 +109,13 @@ type Model struct {
 	help      help.Model
 	width     int
 	height    int
+
+	// workspacePath is the host's active workspace (set via
+	// embed.SetWorkspaceMsg). Used as the LoadLayered root for
+	// reloadConfig so edits re-resolve against the current workspace
+	// rather than the host process's launch directory. Empty falls
+	// back to os.Getwd() — the standalone `grove config` CLI path.
+	workspacePath string
 }
 
 // New creates a new config TUI Model.
@@ -215,6 +222,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case embed.SetWorkspaceMsg:
 		// Reload config for the new workspace
 		if msg.Node != nil {
+			m.workspacePath = msg.Node.Path
 			layered, err := config.LoadLayered(msg.Node.Path)
 			if err == nil {
 				m.layered = layered
@@ -658,9 +666,14 @@ func (m *Model) refreshAllPages() {
 }
 
 // reloadConfig reloads the layered config and refreshes all pages.
+// Prefers the host-tracked workspace path (set via embed.SetWorkspaceMsg)
+// and falls back to os.Getwd() for standalone CLI use.
 func (m *Model) reloadConfig() error {
-	cwd, _ := os.Getwd()
-	layered, err := config.LoadLayered(cwd)
+	root := m.workspacePath
+	if root == "" {
+		root, _ = os.Getwd()
+	}
+	layered, err := config.LoadLayered(root)
 	if err != nil {
 		return err
 	}

@@ -306,8 +306,11 @@ func (m Model) renderSourcesView() string {
 
 	title := theme.DefaultTheme.Bold.Render("Configuration Sources")
 
-	cwd, _ := os.Getwd()
-	cwdLine := theme.DefaultTheme.Muted.Render("Working directory: ") + theme.DefaultTheme.Path.Render(setup.AbbreviatePath(cwd))
+	root := m.workspacePath
+	if root == "" {
+		root, _ = os.Getwd()
+	}
+	cwdLine := theme.DefaultTheme.Muted.Render("Working directory: ") + theme.DefaultTheme.Path.Render(setup.AbbreviatePath(root))
 
 	separator := theme.DefaultTheme.Muted.Render(strings.Repeat("─", 70))
 
