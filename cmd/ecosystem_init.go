@@ -162,7 +162,7 @@ clean:
 	fmt.Printf("\n%s Ecosystem created!\n", theme.IconSuccess)
 
 	// Notify daemon to re-scan workspaces
-	client := daemon.New()
+	client := daemon.New(targetDir)
 	if client.IsRunning() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = client.Refresh(ctx)

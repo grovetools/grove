@@ -120,7 +120,7 @@ func runEcosystemImport(cmd *cobra.Command, args []string) error {
 	}
 
 	// Notify daemon to re-scan workspaces
-	client := daemon.New()
+	client := daemon.New(targetPath)
 	if client.IsRunning() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = client.Refresh(ctx)
