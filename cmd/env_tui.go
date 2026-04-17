@@ -27,7 +27,7 @@ func runEnvTUI() error {
 	}
 
 	focus := getWorkspaceNode()
-	client := daemon.New()
+	client := daemon.NewWithAutoStart()
 
 	m := envtui.New(envtui.Config{
 		DaemonClient: client,

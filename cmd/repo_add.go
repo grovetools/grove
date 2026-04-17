@@ -131,7 +131,8 @@ func runRepoAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	// Notify daemon to re-scan workspaces
-	client := daemon.New()
+	cwd, _ := os.Getwd()
+	client := daemon.NewWithAutoStart(cwd)
 	defer client.Close()
 	if client.IsRunning() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

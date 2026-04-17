@@ -21,7 +21,7 @@ func runKeysTUI() error {
 	bindings, _ := keys.Aggregate(cfg)
 
 	// Connect to daemon for config reload events.
-	client := daemon.New()
+	client := daemon.NewWithAutoStart()
 	var stream <-chan daemon.StateUpdate
 	if client.IsRunning() {
 		stream, _ = client.StreamState(context.Background())
