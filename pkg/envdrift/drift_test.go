@@ -1,4 +1,4 @@
-package cmd
+package envdrift
 
 import (
 	"context"
@@ -27,8 +27,6 @@ func TestHelperDrift(t *testing.T) {
 	mode := os.Getenv("DRIFT_HELPER_MODE")
 	switch mode {
 	case "plan_no_drift":
-		// Terraform emits a sequence of JSON events; we only care about
-		// version + a no-op planned_change. Exit 0 = no drift.
 		fmt.Fprintln(os.Stdout, `{"@level":"info","type":"version","terraform":"1.5.0"}`)
 		fmt.Fprintln(os.Stdout, `{"type":"planned_change","change":{"resource":{"addr":"google_storage_bucket.state"},"action":"no-op"}}`)
 		os.Exit(0)
@@ -37,13 +35,11 @@ func TestHelperDrift(t *testing.T) {
 		fmt.Fprintln(os.Stdout, `{"type":"planned_change","change":{"resource":{"addr":"google_cloud_run_service.web"},"action":"update"}}`)
 		fmt.Fprintln(os.Stdout, `{"type":"planned_change","change":{"resource":{"addr":"google_sql_database.old"},"action":"delete"}}`)
 		fmt.Fprintln(os.Stdout, `{"type":"planned_change","change":{"resource":{"addr":"google_artifact_registry.repo"},"action":"replace"}}`)
-		// Terraform returns 2 when drift is detected.
 		os.Exit(2)
 	case "plan_error":
 		fmt.Fprintln(os.Stderr, "Error: Failed to load backend config")
 		os.Exit(1)
 	case "plan_malformed":
-		// Mix valid JSON with garbage lines to verify the parser tolerates it.
 		fmt.Fprintln(os.Stdout, "garbage line without json")
 		fmt.Fprintln(os.Stdout, `{"malformed":`)
 		fmt.Fprintln(os.Stdout, `{"type":"planned_change","change":{"resource":{"addr":"a.b"},"action":"create"}}`)
@@ -54,12 +50,6 @@ func TestHelperDrift(t *testing.T) {
 	}
 }
 
-// newDriftHelperArgs installs a fake `terraform` binary on PATH that
-// re-invokes this test binary under TestHelperDrift. runTerraformPlan calls
-// `exec.CommandContext("terraform", ...)` which resolves the binary against
-// the *parent's* PATH (not cmd.Env), so we use t.Setenv to front-load the
-// tempdir. The returned env slice carries the helper-mode flags that the
-// child process reads to decide what output to emit.
 func newDriftHelperArgs(t *testing.T, mode string) (scriptPath string, env []string) {
 	t.Helper()
 	tmpDir := t.TempDir()
@@ -70,8 +60,6 @@ func newDriftHelperArgs(t *testing.T, mode string) (scriptPath string, env []str
 		t.Fatalf("failed to create terraform shim: %v", err)
 	}
 
-	// Prepend tmpDir to the parent's PATH so exec.LookPath("terraform") hits
-	// our shim before any real terraform binary on the system.
 	t.Setenv("PATH", tmpDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	env = append(os.Environ(),
@@ -107,7 +95,6 @@ func TestRunTerraformPlan_Drift(t *testing.T) {
 	if !summary.HasDrift {
 		t.Fatal("expected HasDrift=true")
 	}
-	// create, replace (adds 1), so add=2; update=1; delete, replace (adds 1 destroy), destroy=2
 	if summary.Add != 2 {
 		t.Errorf("expected add=2 (create + replace), got %d", summary.Add)
 	}
@@ -120,7 +107,6 @@ func TestRunTerraformPlan_Drift(t *testing.T) {
 	if len(summary.Resources) != 4 {
 		t.Fatalf("expected 4 resources, got %d: %+v", len(summary.Resources), summary.Resources)
 	}
-	// Resources are sorted by address.
 	expectedAddrs := []string{
 		"google_artifact_registry.repo",
 		"google_cloud_run_service.web",
@@ -178,8 +164,6 @@ func TestParsePlanJSONStream_IgnoresNonPlannedChange(t *testing.T) {
 }
 
 func TestParsePlanJSONStream_StripsActionValues(t *testing.T) {
-	// Ensure we don't accidentally carry over the (potentially secret)
-	// attribute payloads Terraform emits under change.before / change.after.
 	line := `{"type":"planned_change","change":{"resource":{"addr":"x.y"},"action":"update","before":{"api_key":"supersecret"},"after":{"api_key":"newsecret"}}}`
 	summary, err := parsePlanJSONStream(strings.NewReader(line))
 	if err != nil {
@@ -188,7 +172,6 @@ func TestParsePlanJSONStream_StripsActionValues(t *testing.T) {
 	if len(summary.Resources) != 1 {
 		t.Fatalf("expected 1 resource, got %d", len(summary.Resources))
 	}
-	// Marshal and confirm the rendered JSON has no trace of the secret.
 	buf, err := json.Marshal(summary)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -219,7 +202,6 @@ func TestReadImageVarsFromState_ExtractsImageKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Write a state file with a mix of image and non-image entries.
 	stateFile := &coreenv.EnvStateFile{
 		Provider: "terraform",
 		State: map[string]string{
@@ -279,21 +261,21 @@ func TestReadImageVarsFromState_NoImageKeys(t *testing.T) {
 	}
 }
 
-func TestEmitDriftSummary_JSON(t *testing.T) {
-	summary := &driftSummary{
-		Profile:  "terraform",
-		Provider: "terraform",
-		HasDrift: true,
-		Add:      1,
-		Change:   0,
-		Destroy:  0,
-		Resources: []driftResource{{Address: "foo.bar", Action: "create"}},
+func TestEmitSummary_JSON(t *testing.T) {
+	summary := &DriftSummary{
+		Profile:   "terraform",
+		Provider:  "terraform",
+		HasDrift:  true,
+		Add:       1,
+		Change:    0,
+		Destroy:   0,
+		Resources: []DriftResource{{Address: "foo.bar", Action: "create"}},
 	}
 	var buf strings.Builder
-	if err := emitDriftSummary(&buf, summary, true); err != nil {
+	if err := EmitSummary(&buf, summary, true); err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	var round driftSummary
+	var round DriftSummary
 	if err := json.Unmarshal([]byte(buf.String()), &round); err != nil {
 		t.Fatalf("summary was not valid JSON: %v\nOutput: %s", err, buf.String())
 	}
@@ -302,10 +284,10 @@ func TestEmitDriftSummary_JSON(t *testing.T) {
 	}
 }
 
-func TestEmitDriftSummary_HumanNoDrift(t *testing.T) {
-	summary := &driftSummary{Profile: "terraform", Provider: "terraform"}
+func TestEmitSummary_HumanNoDrift(t *testing.T) {
+	summary := &DriftSummary{Profile: "terraform", Provider: "terraform"}
 	var buf strings.Builder
-	if err := emitDriftSummary(&buf, summary, false); err != nil {
+	if err := EmitSummary(&buf, summary, false); err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
 	if !strings.Contains(buf.String(), "No drift detected") {
@@ -314,16 +296,14 @@ func TestEmitDriftSummary_HumanNoDrift(t *testing.T) {
 }
 
 func TestDisplayProfile_EmptyBecomesDefault(t *testing.T) {
-	if got := displayProfile(""); got != "default" {
+	if got := DisplayProfile(""); got != "default" {
 		t.Errorf("expected 'default', got %q", got)
 	}
-	if got := displayProfile("hybrid-api"); got != "hybrid-api" {
+	if got := DisplayProfile("hybrid-api"); got != "hybrid-api" {
 		t.Errorf("expected passthrough, got %q", got)
 	}
 }
 
-// Sanity-check that runTerraformPlan surfaces ExitError details when the
-// mock fails mid-execution — guards against accidentally swallowing errors.
 func TestRunTerraformPlan_PropagatesExitError(t *testing.T) {
 	_, env := newDriftHelperArgs(t, "plan_error")
 	_, err := runTerraformPlan(context.Background(), t.TempDir(), env, []string{"plan"})

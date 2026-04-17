@@ -9,6 +9,7 @@ package env
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -19,10 +20,12 @@ import (
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/env"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/tui/components/pager"
 	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/grove/pkg/envdrift"
 )
 
 // Config holds construction parameters for the env panel.
@@ -43,6 +46,7 @@ type Model struct {
 	hosted       bool
 	focused      bool
 	cfg          *config.Config
+	layered      *config.LayeredConfig // raw layers for provenance resolution
 
 	// env state
 	envState    *env.EnvStateFile
@@ -51,6 +55,21 @@ type Model struct {
 	statusErr   error
 	loading     bool
 	actionMsg   string // transient feedback message
+
+	// overview / drift state
+	stickyDefault    string
+	configDefault    string
+	profileProviders map[string]string
+	selectedProfile  string
+	driftingProfile  string
+	driftResults     map[string]*envdrift.DriftSummary
+	driftErrors      map[string]error
+
+	// resolved config & provenance for the selected profile
+	configResolved   *config.EnvironmentConfig
+	configProvenance map[string]string
+	configDeleted    map[string]string
+	configErr        error
 
 	width  int
 	height int
@@ -71,27 +90,34 @@ func New(cfg Config) Model {
 	}
 	keys := pager.KeyMapFromBase(base)
 
+	overview := newOverviewPage()
 	svcPage := &servicesPage{}
 	varsPage := &variablesPage{}
+	configPg := newConfigPage()
 	actPage := &actionsPage{}
 
-	p := pager.NewWith([]pager.Page{svcPage, varsPage, actPage}, keys, pager.Config{
+	p := pager.NewWith([]pager.Page{overview, svcPage, varsPage, configPg, actPage}, keys, pager.Config{
 		OuterPadding: [4]int{1, 2, 0, 2},
 		FooterHeight: 1, // help hint line
 	})
 
 	m := Model{
-		pager:        p,
-		stream:       newStreamLifecycle(),
-		daemonClient: cfg.DaemonClient,
-		workspace:    cfg.InitialFocus,
-		hosted:       cfg.Hosted,
-		cfg:          cfg.Cfg,
-		loading:      true,
+		pager:            p,
+		stream:           newStreamLifecycle(),
+		daemonClient:     cfg.DaemonClient,
+		workspace:        cfg.InitialFocus,
+		hosted:           cfg.Hosted,
+		cfg:              cfg.Cfg,
+		loading:          true,
+		driftResults:     make(map[string]*envdrift.DriftSummary),
+		driftErrors:      make(map[string]error),
+		profileProviders: make(map[string]string),
 	}
 
-	// Discover available env profiles from config
 	m.envProfiles = discoverProfiles(cfg.Cfg)
+	m.loadOverviewContext()
+	m.resolveSelectedConfig()
+	m.updatePages()
 
 	return m
 }
@@ -137,6 +163,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusErr = nil
 		m.loading = true
 		m.actionMsg = ""
+		m.selectedProfile = ""
+		m.driftResults = make(map[string]*envdrift.DriftSummary)
+		m.driftErrors = make(map[string]error)
+		m.driftingProfile = ""
 		// Reload config for the new workspace
 		if msg.Node != nil {
 			if loadedCfg, err := config.LoadFrom(msg.Node.Path); err == nil {
@@ -144,6 +174,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.envProfiles = discoverProfiles(loadedCfg)
 			}
 		}
+		m.loadOverviewContext()
+		m.resolveSelectedConfig()
 		m.updatePages()
 		if m.workspace != nil {
 			return m, fetchEnvStatusCmd(m.daemonClient, m.workspace.Name)
@@ -206,6 +238,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.response != nil && msg.response.Status != "" {
 				m.envState = responseToState(msg.response)
 			}
+		}
+		m.updatePages()
+		return m, nil
+
+	case profileSelectedMsg:
+		if msg.profile != m.selectedProfile {
+			m.selectedProfile = msg.profile
+			m.resolveSelectedConfig()
+			m.updatePages()
+		}
+		return m, nil
+
+	case driftCheckFinishedMsg:
+		if m.driftingProfile == msg.profile {
+			m.driftingProfile = ""
+		}
+		if msg.err != nil {
+			m.driftErrors[msg.profile] = msg.err
+			delete(m.driftResults, msg.profile)
+		} else {
+			m.driftResults[msg.profile] = msg.summary
+			delete(m.driftErrors, msg.profile)
 		}
 		m.updatePages()
 		return m, nil
@@ -346,8 +400,36 @@ func (m Model) renderHeader() string {
 // updatePages pushes current state into each page.
 func (m *Model) updatePages() {
 	pages := m.pager.Pages()
+	activeLocal := ""
+	if m.envState != nil {
+		activeLocal = m.envState.Environment
+		if activeLocal == "" && m.envResponse != nil && m.envResponse.Status == "running" {
+			activeLocal = "default"
+		}
+	}
 	for _, p := range pages {
 		switch page := p.(type) {
+		case *overviewPage:
+			page.profiles = m.envProfiles
+			page.configDefault = m.configDefault
+			page.stickyDefault = m.stickyDefault
+			page.activeLocal = activeLocal
+			page.providers = m.profileProviders
+			page.state = m.envState
+			page.driftingProfile = m.driftingProfile
+			page.driftResults = m.driftResults
+			page.driftErrors = m.driftErrors
+			// Align the page's cursor with the model's idea of the
+			// selected profile so Overview + Config stay coherent after
+			// workspace swaps.
+			if m.selectedProfile != "" {
+				for i, name := range m.envProfiles {
+					if name == m.selectedProfile {
+						page.cursor = i
+						break
+					}
+				}
+			}
 		case *servicesPage:
 			page.state = m.envState
 			page.response = m.envResponse
@@ -357,6 +439,12 @@ func (m *Model) updatePages() {
 			page.state = m.envState
 			page.response = m.envResponse
 			page.loading = m.loading
+		case *configPage:
+			page.profile = displaySelectedProfile(m.selectedProfile, m.envProfiles)
+			page.resolved = m.configResolved
+			page.provenance = m.configProvenance
+			page.deleted = m.configDeleted
+			page.err = m.configErr
 		case *actionsPage:
 			page.state = m.envState
 			page.profiles = m.envProfiles
@@ -364,6 +452,91 @@ func (m *Model) updatePages() {
 			page.loading = m.loading
 		}
 	}
+}
+
+// loadOverviewContext refreshes the sticky-default, config-default, and
+// per-profile provider map used by the Overview page. It must be called
+// whenever m.cfg or the workspace root changes. Also attempts to load the
+// LayeredConfig so the Config page has provenance data.
+func (m *Model) loadOverviewContext() {
+	m.stickyDefault, _ = state.GetString("environment")
+	m.configDefault = ""
+	m.profileProviders = make(map[string]string)
+	if m.cfg != nil {
+		if m.cfg.Environment != nil {
+			m.configDefault = "default"
+			m.profileProviders["default"] = m.cfg.Environment.Provider
+		}
+		for name, ec := range m.cfg.Environments {
+			if ec != nil {
+				m.profileProviders[name] = ec.Provider
+			}
+		}
+	}
+
+	// Layered config is best-effort; if it fails the Config page simply
+	// renders an error and the rest of the TUI still works.
+	cwd, err := os.Getwd()
+	if err == nil {
+		if layered, err := config.LoadLayered(cwd); err == nil {
+			m.layered = layered
+		} else {
+			m.layered = nil
+		}
+	}
+
+	// Default the selected profile to whichever makes sense given what we
+	// know. Preference order: sticky default → config default → first
+	// discovered profile.
+	if m.selectedProfile == "" {
+		switch {
+		case m.stickyDefault != "":
+			m.selectedProfile = m.stickyDefault
+		case m.configDefault != "":
+			m.selectedProfile = m.configDefault
+		case len(m.envProfiles) > 0:
+			m.selectedProfile = m.envProfiles[0]
+		}
+	}
+}
+
+// resolveSelectedConfig re-runs ResolveEnvironmentWithProvenance for the
+// currently selected profile so the Config page can render a tree of the
+// merged config annotated with per-key layer labels. Safe to call with a
+// missing or nil LayeredConfig — the page simply shows an error.
+func (m *Model) resolveSelectedConfig() {
+	m.configResolved = nil
+	m.configProvenance = nil
+	m.configDeleted = nil
+	m.configErr = nil
+
+	if m.layered == nil {
+		return
+	}
+	profile := m.selectedProfile
+	if profile == "default" {
+		profile = ""
+	}
+	resolved, prov, deleted, err := config.ResolveEnvironmentWithProvenance(m.layered, profile)
+	if err != nil {
+		m.configErr = err
+		return
+	}
+	m.configResolved = resolved
+	m.configProvenance = prov
+	m.configDeleted = deleted
+}
+
+// displaySelectedProfile normalizes the empty-sentinel profile name for the
+// Config page header. Returns "" when there's no meaningful selection yet.
+func displaySelectedProfile(selected string, profiles []string) string {
+	if selected != "" {
+		return selected
+	}
+	if len(profiles) > 0 {
+		return profiles[0]
+	}
+	return ""
 }
 
 func (m Model) envCommands() map[string]string {

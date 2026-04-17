@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/env"
+	"github.com/grovetools/grove/pkg/envdrift"
 )
 
 // streamLifecycle owns the SSE stream channel + cancel func + waitgroup
@@ -96,6 +97,21 @@ func (s *streamLifecycle) readDaemonStreamCmd(ch <-chan daemon.StateUpdate) tea.
 			return nil
 		}
 		return daemonStateUpdateMsg{update: u}
+	}
+}
+
+// runDriftCmd executes the shared drift engine in a goroutine and delivers
+// the result back to the model as a driftCheckFinishedMsg. The drift engine
+// does its own terraform init + plan, which takes 10–30s, so callers should
+// already be showing a spinner before dispatching this command.
+func runDriftCmd(ctx context.Context, profile string) tea.Cmd {
+	return func() tea.Msg {
+		summary, err := envdrift.RunEnvDrift(ctx, profile)
+		return driftCheckFinishedMsg{
+			profile: profile,
+			summary: summary,
+			err:     err,
+		}
 	}
 }
 
