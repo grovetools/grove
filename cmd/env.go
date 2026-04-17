@@ -41,6 +41,7 @@ func newEnvCmd() *cobra.Command {
 	cmd.AddCommand(newEnvRestartCmd())
 	cmd.AddCommand(newEnvVarsCmd())
 	cmd.AddCommand(newEnvTUICmd())
+	cmd.AddCommand(newEnvDriftCmd())
 
 	return cmd
 }
