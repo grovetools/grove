@@ -150,9 +150,9 @@ func (p *deploymentsPage) View() string {
 		}
 		profileCell := th.Info.Render(padRight(profile, 18))
 
-		stateCell := padRight(worktreeStateSummary(w), 18)
+		stateCell := padRight(FormatWorktreeStateSummary(w), 18)
 
-		endpoint := firstEndpoint(w)
+		endpoint := FirstEndpoint(w)
 		endpointCell := padRight(endpoint, 32)
 
 		drift := formatDriftCell(w, w.Workspace.Name == p.driftingWT)
@@ -213,10 +213,13 @@ func (p *deploymentsPage) isYou(state WorktreeState) bool {
 		p.youPath == state.Workspace.Path
 }
 
-// firstEndpoint takes the first endpoint from state.json, truncating when
+// FirstEndpoint takes the first endpoint from state.json, truncating when
 // too many are present ("api.dev, web.dev, …"). Empty state → "(local only)"
 // matching the mockup's inactive-row convention.
-func firstEndpoint(w WorktreeState) string {
+//
+// Exported so the CLI (`grove env ecosystem`) can render the same endpoint
+// cell as the TUI.
+func FirstEndpoint(w WorktreeState) string {
 	if w.EnvState == nil || len(w.EnvState.Endpoints) == 0 {
 		return "(local only)"
 	}

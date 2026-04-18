@@ -130,3 +130,36 @@ func readStateFile(stateDir string) *coreenv.EnvStateFile {
 	}
 	return &sf
 }
+
+// DetectLocalOrphans returns every .grove/env/state.json path under the
+// ecosystem's .grove-worktrees/ directory that isn't owned by a known
+// worktree. We intentionally ignore deeper sub-project worktrees: a
+// sub-project state.json isn't an ecosystem-level orphan, it's the
+// sub-project's concern.
+//
+// Exported so the CLI (`grove env ecosystem`) can reuse the same heuristic
+// as the TUI's Orphans page without importing rendering code.
+func DetectLocalOrphans(ecosystemRoot string, worktrees []WorktreeState) []string {
+	pattern := filepath.Join(ecosystemRoot, ".grove-worktrees", "*", ".grove", "env", "state.json")
+	matches, err := filepath.Glob(pattern)
+	if err != nil || len(matches) == 0 {
+		return nil
+	}
+	known := make(map[string]struct{}, len(worktrees))
+	for _, w := range worktrees {
+		if w.Workspace != nil {
+			known[filepath.Clean(w.Workspace.Path)] = struct{}{}
+		}
+	}
+	var orphans []string
+	for _, m := range matches {
+		// m == <root>/.grove-worktrees/<wt-name>/.grove/env/state.json
+		// → worktree path = <root>/.grove-worktrees/<wt-name>
+		wtDir := filepath.Dir(filepath.Dir(filepath.Dir(m)))
+		if _, ok := known[filepath.Clean(wtDir)]; ok {
+			continue
+		}
+		orphans = append(orphans, m)
+	}
+	return orphans
+}

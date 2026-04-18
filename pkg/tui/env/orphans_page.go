@@ -2,7 +2,6 @@ package env
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -45,7 +44,7 @@ func (p *orphansPage) setContext(ecosystem *workspace.WorkspaceNode, worktrees [
 		return
 	}
 	p.ecosystemPath = ecosystem.Path
-	p.localOrphans = detectLocalOrphans(ecosystem.Path, worktrees)
+	p.localOrphans = DetectLocalOrphans(ecosystem.Path, worktrees)
 }
 
 func (p *orphansPage) View() string {
@@ -78,32 +77,3 @@ func (p *orphansPage) View() string {
 	return b.String()
 }
 
-// detectLocalOrphans returns every .grove/env/state.json path under the
-// ecosystem's .grove-worktrees/ directory that isn't owned by a known
-// worktree. We intentionally ignore deeper sub-project worktrees: a
-// sub-project state.json isn't an ecosystem-level orphan, it's the
-// sub-project's concern.
-func detectLocalOrphans(ecosystemRoot string, worktrees []WorktreeState) []string {
-	pattern := filepath.Join(ecosystemRoot, ".grove-worktrees", "*", ".grove", "env", "state.json")
-	matches, err := filepath.Glob(pattern)
-	if err != nil || len(matches) == 0 {
-		return nil
-	}
-	known := make(map[string]struct{}, len(worktrees))
-	for _, w := range worktrees {
-		if w.Workspace != nil {
-			known[filepath.Clean(w.Workspace.Path)] = struct{}{}
-		}
-	}
-	var orphans []string
-	for _, m := range matches {
-		// m == <root>/.grove-worktrees/<wt-name>/.grove/env/state.json
-		// → worktree path = <root>/.grove-worktrees/<wt-name>
-		wtDir := filepath.Dir(filepath.Dir(filepath.Dir(m)))
-		if _, ok := known[filepath.Clean(wtDir)]; ok {
-			continue
-		}
-		orphans = append(orphans, m)
-	}
-	return orphans
-}

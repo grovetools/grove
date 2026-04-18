@@ -478,16 +478,12 @@ func (p profileItem) Provider() string {
 }
 
 // renderBreadcrumb returns the scope line shown between the header and
-// the pager body. On page 1 it explains that the cursor drives the scope;
-// on pages 2-6 it shows `<glyph> <profile> › <page-name>` so the user
-// always knows what selection they're acting on.
+// the pager body. Visible on every page (including Overview) so users
+// always see which profile the rest of the panel is scoped to — the
+// mockup treats the band as a constant context line, not a page-specific
+// instruction.
 func (m Model) renderBreadcrumb() string {
 	th := theme.DefaultTheme
-	if m.pager.ActiveIndex() == 0 {
-		return "  " + th.Muted.Render(
-			"Pick a profile below · the selection scopes pages 2-6",
-		)
-	}
 	profile := displaySelectedProfile(m.selectedProfile, m.envProfiles)
 	if profile == "" {
 		profile = "(none)"

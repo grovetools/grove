@@ -30,7 +30,7 @@ func newWorktreeItem(state WorktreeState, deployedProfile string) worktreeItem {
 		if state.EnvState.Provider != "" {
 			it.provider = state.EnvState.Provider
 		}
-		it.state = worktreeStateSummary(state)
+		it.state = FormatWorktreeStateSummary(state)
 	}
 	it.glyph, it.glyphKey = worktreeGlyph(state)
 	if it.state == "" {
@@ -39,12 +39,16 @@ func newWorktreeItem(state WorktreeState, deployedProfile string) worktreeItem {
 	return it
 }
 
-// worktreeStateSummary produces the short "● running" / "☁ applied" /
+// FormatWorktreeStateSummary produces the short "● running" / "☁ applied" /
 // "◯ inactive" label shown in the worktree picker subtitle and the
 // Deployments state column. state.json's presence is the strongest signal
 // for "local running"; terraform-backed profiles with persisted state but
 // no local services still count as "☁ applied".
-func worktreeStateSummary(state WorktreeState) string {
+//
+// Exported so the CLI (`grove env ecosystem`) can render the same terminology
+// as the TUI's Deployments matrix — keeps "running"/"applied"/"inactive"
+// from drifting between the two surfaces.
+func FormatWorktreeStateSummary(state WorktreeState) string {
 	if state.EnvState == nil {
 		return "inactive"
 	}

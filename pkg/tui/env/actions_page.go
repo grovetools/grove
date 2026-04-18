@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/tui/components/pager"
 	"github.com/grovetools/core/tui/theme"
 )
@@ -86,20 +85,17 @@ func (p *actionsPage) View() string {
 
 // renderAction formats one row: `<key>  <label>   <hint>`, dimmed when
 // disabled so the user can still see the binding but knows it's inert for
-// this profile.
+// this profile. Uses theme.Muted for disabled styling so the row reads the
+// same as the ecosystem-mode Actions page.
 func (p *actionsPage) renderAction(b *strings.Builder, keyStr, labelStr, hint string, disabled bool) {
 	th := theme.DefaultTheme
 	keyChip := th.Info.Render(padRight(keyStr, 2))
-	labelCol := padRight(labelStr, 28)
-	hintCol := hint
+	labelCol := th.Bold.Render(padRight(labelStr, 28))
+	hintCol := th.Muted.Render(hint)
 	if disabled {
-		dim := lipgloss.NewStyle().Foreground(th.Muted.GetForeground())
-		keyChip = dim.Render(padRight(keyStr, 2))
-		labelCol = dim.Render(labelCol)
-		hintCol = dim.Render(hintCol)
-	} else {
-		labelCol = th.Bold.Render(labelCol)
-		hintCol = th.Muted.Render(hintCol)
+		keyChip = th.Muted.Render(padRight(keyStr, 2))
+		labelCol = th.Muted.Render(padRight(labelStr, 28))
+		hintCol = th.Muted.Render(hint)
 	}
 	b.WriteString(fmt.Sprintf("  %s  %s  %s\n", keyChip, labelCol, hintCol))
 }

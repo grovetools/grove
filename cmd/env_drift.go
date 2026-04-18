@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/grovetools/grove/pkg/envdrift"
 	"github.com/spf13/cobra"
@@ -26,15 +27,17 @@ the URIs built on the last successful 'grove env up' are read from
 .grove/env/state.json and passed in as tfvars so an image rebuild does
 not masquerade as cloud drift.
 
-Results are cached in .grove/env/drift.json. A second invocation within
-24 hours returns the cached summary without re-running Terraform; pass
---force to bypass the cache.
+Results are cached in .grove/env/drift.json for 24 hours. A second
+invocation inside that TTL returns the cached summary without re-running
+Terraform and announces the cache hit on stderr ('Loaded cached drift
+summary from Nm ago'). Pass --force to bypass the cache and run a fresh
+terraform plan.
 
 Exit codes match Terraform semantics:
   0 = Succeeded, no drift detected
   1 = Error occurred
   2 = Succeeded, drift detected`,
-		Example: `  # Check drift for a specific profile
+		Example: `  # Check drift for a specific profile (uses cache if <24h old)
   grove env drift terraform
 
   # Machine-readable summary for a CI script
@@ -65,6 +68,12 @@ Exit codes match Terraform semantics:
 				cached, checkedAt, err := envdrift.LoadCache(stateDir)
 				if err == nil && cached != nil && !envdrift.IsStale(checkedAt) {
 					summary = cached
+					// Announce cache hits on stderr so --json stays a clean
+					// machine-readable stream on stdout.
+					age := time.Since(checkedAt).Round(time.Minute)
+					fmt.Fprintf(os.Stderr,
+						"Loaded cached drift summary from %s ago (use --force to re-run)\n",
+						age)
 				}
 			}
 

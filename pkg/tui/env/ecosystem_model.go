@@ -789,7 +789,7 @@ func (m *EcosystemModel) sharedArtifacts(name string) []ArtifactGroup {
 func firstEndpointByName(states []WorktreeState, name string) string {
 	for _, w := range states {
 		if w.Workspace != nil && w.Workspace.Name == name {
-			return firstEndpoint(w)
+			return FirstEndpoint(w)
 		}
 	}
 	return ""
