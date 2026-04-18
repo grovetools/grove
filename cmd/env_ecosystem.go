@@ -150,10 +150,15 @@ func resolveEcosystemRoot() (*workspace.WorkspaceNode, error) {
 // runEnvEcosystem so the text writer and JSON marshaler share one
 // construction path — the JSON schema is the source of truth.
 func buildEcosystemPayload(root *workspace.WorkspaceNode, cfg *config.Config, states []envtui.WorktreeState) ecosystemJSON {
+	orphanStates := envtui.DetectLocalOrphans(root.Path, states)
+	orphans := make([]string, 0, len(orphanStates))
+	for _, o := range orphanStates {
+		orphans = append(orphans, o.OrphanStatePath)
+	}
 	payload := ecosystemJSON{
 		Ecosystem: root.Name,
 		Worktrees: make([]worktreeJSON, 0, len(states)),
-		Orphans:   envtui.DetectLocalOrphans(root.Path, states),
+		Orphans:   orphans,
 	}
 
 	for _, s := range states {

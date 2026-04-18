@@ -1,6 +1,7 @@
 package env
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -90,6 +91,15 @@ func (o *OverlayModel) Update(msg tea.Msg) (*OverlayModel, tea.Cmd) {
 	case "esc", "P":
 		return o, func() tea.Msg { return overlayClosedMsg{} }
 	}
+	// Numeric hotkeys (1..9) select the matching row directly so users can
+	// commit without j/k navigation, matching the hint rendered per row.
+	if s := km.String(); len(s) == 1 && s >= "1" && s <= "9" {
+		idx := int(s[0] - '1')
+		if idx >= 0 && idx < len(o.items) {
+			key := o.items[idx].Key()
+			return o, func() tea.Msg { return overlaySelectedMsg{key: key} }
+		}
+	}
 	return o, nil
 }
 
@@ -121,7 +131,7 @@ func (o *OverlayModel) View() string {
 
 	lines := []string{titleLine, ""}
 	for i, it := range o.items {
-		lines = append(lines, o.renderRow(it, i == o.cursor, inner, rowStyle, focusStyle))
+		lines = append(lines, o.renderRow(it, i, i == o.cursor, inner, rowStyle, focusStyle))
 	}
 
 	body := strings.Join(lines, "\n")
@@ -135,38 +145,60 @@ func (o *OverlayModel) View() string {
 	return box
 }
 
-// renderRow renders one item row: "  <glyph>  <label> · <subtitle>   <provider>".
-// Provider is right-aligned inside the row's inner width. The whole row is
-// wrapped in a Width()-forced style so the focus background fills edge-to-edge.
-func (o *OverlayModel) renderRow(it OverlayItem, focused bool, inner int, base, focus lipgloss.Style) string {
+// renderRow renders one item row:
+// "  <glyph>  <label> · <subtitle>    <provider>  [N]"
+// The `[N]` numeric hint (1..N) lets users keybind-jump to a row without
+// using the arrow keys. Rendered for every item uniformly so P, W, and
+// row-action overlays all share the same affordance.
+func (o *OverlayModel) renderRow(it OverlayItem, index int, focused bool, inner int, base, focus lipgloss.Style) string {
 	th := theme.DefaultTheme
 	glyph := it.GlyphStyle().Render(it.Glyph())
 	label := it.Label()
 	sub := it.Subtitle()
 	provider := it.Provider()
+	hint := fmt.Sprintf("[%d]", index+1)
 
 	// Left side: "<glyph>  <label>[ · <subtitle>]"
 	labelStyle := th.Normal
 	if focused {
 		labelStyle = th.Bold
 	}
-	left := glyph + "  " + labelStyle.Render(label)
+	glyphCell := glyph
+	if it.Glyph() == "" {
+		// Preserve the glyph column width even on items (rowActionItem)
+		// that don't have a glyph, so labels still line up.
+		glyphCell = " "
+	}
+	left := glyphCell + "  " + labelStyle.Render(label)
 	if sub != "" {
 		left += "  " + th.Muted.Render("· "+sub)
 	}
 
-	// Right side: provider name, muted.
-	right := th.Muted.Render(provider)
+	// Right side: provider (muted) + numeric hint (muted). The hint is
+	// always present; provider is dropped when it's empty.
+	rightParts := []string{}
+	if provider != "" {
+		rightParts = append(rightParts, th.Muted.Render(provider))
+	}
+	rightParts = append(rightParts, th.Muted.Render(hint))
+	right := strings.Join(rightParts, "  ")
 
 	// Compute gap in cells between left and right so provider sits flush
 	// with the right edge of the row. ansi.StringWidth ignores escape
-	// codes, so we measure against it.Glyph() / the raw label directly
-	// rather than the rendered segments.
-	gap := inner - ansi.StringWidth(it.Glyph()) - 2 - ansi.StringWidth(label)
-	if sub != "" {
-		gap -= 2 + ansi.StringWidth("· "+sub)
+	// codes, so we measure against raw strings rather than rendered text.
+	leftW := ansi.StringWidth(it.Glyph())
+	if it.Glyph() == "" {
+		leftW = 1
 	}
-	gap -= ansi.StringWidth(provider)
+	leftW += 2 + ansi.StringWidth(label)
+	if sub != "" {
+		leftW += 2 + ansi.StringWidth("· "+sub)
+	}
+	rightW := ansi.StringWidth(hint)
+	if provider != "" {
+		rightW += 2 + ansi.StringWidth(provider)
+	}
+	gap := inner - leftW - rightW
 	if gap < 1 {
 		gap = 1
 	}

@@ -81,6 +81,18 @@ func (p *profilesPage) View() string {
 			padRight(truncate(desc, 44), 44),
 			th.Muted.Render(padRight(usage, 14)),
 		))
+
+		// "· reads <name>" sub-label when this profile consumes a shared
+		// profile via `shared_env`. Rendered as its own muted line under
+		// the row so the main columns stay aligned.
+		if ec != nil {
+			if shared, ok := ec.Config["shared_env"].(string); ok && shared != "" {
+				b.WriteString("  " +
+					padRight("", 14) + " " +
+					padRight("", 22) + " " +
+					th.Muted.Render("· reads "+shared) + "\n")
+			}
+		}
 	}
 
 	b.WriteString("\n  " + th.Muted.Render(
@@ -139,6 +151,13 @@ func collectProfileNames(cfg *config.Config) []string {
 // profileDescription picks a short human-readable description for a profile.
 // Users rarely annotate their profiles, so we fall back to a synthetic
 // "<provider> profile" string rather than leave the column blank.
+//
+// Names are differentiated by what's distinctive: a profile with a running
+// local service (`services` map present) reads as "local API + cloud
+// backing"; a pure-terraform profile reads as "all cloud"; docker and
+// native fall through to compact stack descriptors. The goal is to avoid
+// the collision the audit flagged where hybrid-api and terraform both
+// rendered as "terraform, reads outputs from kitchen-infra".
 func profileDescription(ec *config.EnvironmentConfig) string {
 	if ec == nil {
 		return "(no configuration)"
@@ -150,11 +169,22 @@ func profileDescription(ec *config.EnvironmentConfig) string {
 	}
 	switch ec.Provider {
 	case "terraform":
-		if shared, ok := ec.Config["shared_env"].(string); ok && shared != "" {
-			return "terraform, reads outputs from " + shared
+		_, hasShared := ec.Config["shared_env"].(string)
+		_, hasServices := ec.Config["services"].(map[string]interface{})
+		switch {
+		case hasShared && hasServices:
+			return "local services backed by shared cloud state"
+		case hasShared:
+			return "cloud deployment consuming shared infra"
+		case hasServices:
+			return "local services with dedicated TF state"
+		default:
+			return "terraform-managed cloud state"
 		}
-		return "terraform, manages its own state"
 	case "docker":
+		if c, ok := ec.Config["compose_file"].(string); ok && c != "" {
+			return "docker compose · " + c
+		}
 		return "docker compose stack"
 	case "native":
 		return "native local processes"

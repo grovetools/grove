@@ -80,12 +80,25 @@ func (p *sharedInfraPage) View() string {
 			b.WriteString("  " + th.Muted.Render(padRight("state_bucket", 14)) + "  " +
 				th.Info.Render(bucket) + "\n")
 		}
+		if len(p.sharedResolved.DisplayResources) > 0 {
+			b.WriteString("  " + th.Muted.Render(padRight("resources", 14)) + "  " +
+				strings.Join(p.sharedResolved.DisplayResources, ", ") + "\n")
+		}
 	}
 
 	if len(p.consumers) > 0 {
 		b.WriteString("  " + th.Muted.Render(padRight("consumed by", 14)) + "  " +
 			strings.Join(p.consumers, ", ") + "\n")
 	}
+
+	// Last activity surfaces the drift-cache age — the only timestamp we
+	// have out of the box for a shared profile. "—" when no cache exists
+	// yet so the row isn't silently missing.
+	activity := "—"
+	if p.drift != nil && !p.drift.CheckedAt.IsZero() {
+		activity = humanAge(time.Since(p.drift.CheckedAt)) + " ago (drift checked)"
+	}
+	b.WriteString("  " + th.Muted.Render(padRight("last activity", 14)) + "  " + activity + "\n")
 
 	// Drift panel.
 	b.WriteString("\n  " + th.Bold.Render("drift") + "\n")

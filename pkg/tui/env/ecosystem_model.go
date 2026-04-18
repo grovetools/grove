@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -343,7 +344,7 @@ func (m EcosystemModel) openRowOverlay(worktreeName string) EcosystemModel {
 			"(coming in v2)", 4),
 	}
 	m.overlay = NewOverlay(
-		fmt.Sprintf("Actions · %s", worktreeName),
+		m.rowOverlayTitle(worktreeName),
 		"Esc to cancel",
 		items,
 		"jump",
@@ -351,6 +352,29 @@ func (m EcosystemModel) openRowOverlay(worktreeName string) EcosystemModel {
 	m.overlayKind = overlayRowActions
 	m.overlayTarget = worktreeName
 	return m
+}
+
+// rowOverlayTitle returns a rich header string for the row-actions overlay:
+// `<glyph> <worktree> (you) · <profile> · <state>` — the mockup uses this
+// format so the user can confirm the row before committing to an action.
+func (m EcosystemModel) rowOverlayTitle(worktreeName string) string {
+	for _, w := range m.worktrees {
+		if w.Workspace == nil || w.Workspace.Name != worktreeName {
+			continue
+		}
+		glyph, _ := worktreeGlyph(w)
+		profile := "—"
+		if w.EnvState != nil && w.EnvState.Environment != "" {
+			profile = w.EnvState.Environment
+		}
+		you := ""
+		if wd, _ := os.Getwd(); wd != "" && strings.HasPrefix(wd, w.Workspace.Path) {
+			you = " (you)"
+		}
+		return fmt.Sprintf("Actions · %s %s%s · %s · %s",
+			glyph, worktreeName, you, profile, FormatWorktreeStateSummary(w))
+	}
+	return "Actions · " + worktreeName
 }
 
 // applyRowAction executes the commit message from the row-actions overlay.
@@ -393,6 +417,9 @@ func (m EcosystemModel) startDriftAll() (tea.Model, tea.Cmd) {
 	}
 	var queue []string
 	for _, w := range m.worktrees {
+		if w.Workspace == nil {
+			continue
+		}
 		if !m.isTerraformDeployable(w) {
 			continue
 		}
@@ -593,12 +620,19 @@ func (m EcosystemModel) View() string {
 }
 
 // renderStatusLine summarises ecosystem health in one row under the
-// header — mirrors the mockup's `4 worktrees · 2 deployed · 1 drifting`.
+// header — mirrors the mockup's `4 worktrees · 2 deployed · 1 drifting ·
+// N orphan · shared infra clean · applied 3m ago`.
 func (m EcosystemModel) renderStatusLine() string {
-	total := len(m.worktrees)
+	total := 0
 	deployed := 0
 	drifting := 0
+	orphans := 0
 	for _, w := range m.worktrees {
+		if w.Workspace == nil {
+			orphans++
+			continue
+		}
+		total++
 		if w.EnvState != nil && (len(w.EnvState.Services) > 0 || len(w.EnvState.Endpoints) > 0) {
 			deployed++
 		}
@@ -607,11 +641,27 @@ func (m EcosystemModel) renderStatusLine() string {
 		}
 	}
 	shared := m.sharedProfileName()
-	if shared == "" {
-		shared = "no shared profile"
+	sharedSeg := "no shared profile"
+	if shared != "" {
+		sharedSeg = "shared: " + shared
+		if d := m.sharedDrift(); d != nil {
+			if d.HasDrift {
+				sharedSeg += fmt.Sprintf(" · %s (+%d ~%d -%d)",
+					"drifting", d.Add, d.Change, d.Destroy)
+			} else {
+				sharedSeg += " · clean"
+			}
+			if !d.CheckedAt.IsZero() {
+				sharedSeg += " · checked " + humanAge(time.Since(d.CheckedAt)) + " ago"
+			}
+		}
 	}
-	return fmt.Sprintf("%d worktree(s) · %d deployed · %d drifting · shared: %s",
-		total, deployed, drifting, shared)
+	base := fmt.Sprintf("%d worktree(s) · %d deployed · %d drifting",
+		total, deployed, drifting)
+	if orphans > 0 {
+		base += fmt.Sprintf(" · %d orphan", orphans)
+	}
+	return base + " · " + sharedSeg
 }
 
 // sharedProfileName returns the single shared profile in this ecosystem, or
@@ -780,7 +830,7 @@ func (m *EcosystemModel) sharedArtifacts(name string) []ArtifactGroup {
 		all[n] = ec
 	}
 	return deriveArtifacts(name, resolved.Provider, resolved, nil,
-		m.workspace.Path, false, all)
+		m.workspace.Path, false, config.IsSharedProfile(m.cfg, name), all)
 }
 
 // firstEndpointByName is the Deployments-agnostic lookup used by the row

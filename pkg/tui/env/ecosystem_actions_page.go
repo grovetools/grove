@@ -61,15 +61,15 @@ func (p *ecosystemActionsPage) View() string {
 }
 
 // renderAction mirrors the worktree-mode actionsPage layout so the two
-// pages look uniform — same key chip, label column, hint column, dim
-// styling when disabled.
+// pages look uniform — same key chip (6-cell pad), label column, hint
+// column, dim styling when disabled.
 func (p *ecosystemActionsPage) renderAction(b *strings.Builder, keyStr, labelStr, hint string, disabled bool) {
 	th := theme.DefaultTheme
-	keyChip := th.Info.Render(padRight(keyStr, 2))
+	keyChip := th.Info.Render(padRight(keyStr, 6))
 	labelCol := th.Bold.Render(padRight(labelStr, 28))
 	hintCol := th.Muted.Render(hint)
 	if disabled {
-		keyChip = th.Muted.Render(padRight(keyStr, 2))
+		keyChip = th.Muted.Render(padRight(keyStr, 6))
 		labelCol = th.Muted.Render(padRight(labelStr, 28))
 		hintCol = th.Muted.Render(hint)
 	}

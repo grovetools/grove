@@ -8,6 +8,8 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	envconfig "github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/env"
 	"github.com/grovetools/core/tui/components/pager"
 	"github.com/grovetools/core/tui/theme"
@@ -23,6 +25,9 @@ type overviewPage struct {
 	stickyDefault string            // from .grove/state.yml "environment"
 	activeLocal   string            // profile currently running in this worktree
 	providers     map[string]string // profile -> provider ("terraform", "docker", …)
+	// resolved is the per-profile config keyed by name. Used to derive the
+	// per-row subline (description / synthesised summary).
+	resolved map[string]*envconfig.EnvironmentConfig
 
 	state *env.EnvStateFile
 
@@ -43,6 +48,11 @@ type profileSelectedMsg struct {
 	profile string
 }
 
+// jumpToSummaryMsg is emitted when Enter is pressed on an overview row. The
+// parent flips the pager to Summary (page 2) so the user sees the detail for
+// the profile they just highlighted.
+type jumpToSummaryMsg struct{}
+
 // driftCheckFinishedMsg carries the result of an async drift run back into
 // the model. summary is populated on success (including the no-drift case);
 // err is populated when the drift engine itself failed.
@@ -56,10 +66,12 @@ var overviewKeys = struct {
 	Up    key.Binding
 	Down  key.Binding
 	Drift key.Binding
+	Enter key.Binding
 }{
 	Up:    key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
 	Down:  key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
 	Drift: key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "drift check")),
+	Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("↵", "jump to Summary")),
 }
 
 func newOverviewPage() *overviewPage {
@@ -94,6 +106,15 @@ func (p *overviewPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 			}
 			p.cursor = (p.cursor + 1) % len(p.profiles)
 			return p, p.emitSelected()
+		case key.Matches(msg, overviewKeys.Enter):
+			if len(p.profiles) == 0 {
+				return p, nil
+			}
+			// Fire both: emit selection (in case the cursor moved without
+			// publishing yet) and the jump message in one tick.
+			sel := p.emitSelected()
+			jump := func() tea.Msg { return jumpToSummaryMsg{} }
+			return p, tea.Batch(sel, jump)
 		case key.Matches(msg, overviewKeys.Drift):
 			profile := p.currentProfile()
 			if profile == "" || p.driftingProfile != "" {
@@ -149,6 +170,10 @@ func (p *overviewPage) View() string {
 	b.WriteString(th.Muted.Render("  "+strings.Repeat("─", maxInt(p.width-6, 20))) + "\n")
 
 	for i, profile := range p.profiles {
+		provider := p.providers[profile]
+		glyph, glyphStyle := p.rowGlyph(profile, provider)
+
+		// Tags: [Sticky Default] / [Config Default] / [Active (Local)]
 		var tags []string
 		if p.configDefault != "" && profile == p.configDefault {
 			tags = append(tags, "[Config Default]")
@@ -158,9 +183,6 @@ func (p *overviewPage) View() string {
 		}
 		if p.activeLocal != "" && profile == p.activeLocal {
 			tags = append(tags, "[Active (Local)]")
-		}
-		if prov := p.providers[profile]; prov == "terraform" {
-			tags = append(tags, theme.IconEarth+" Cloud")
 		}
 
 		cursor := "  "
@@ -173,26 +195,30 @@ func (p *overviewPage) View() string {
 			nameStyle = th.Success
 		}
 
-		line := fmt.Sprintf("  %s%s", cursor, nameStyle.Render(profile))
-		if prov := p.providers[profile]; prov != "" {
-			line += th.Muted.Render(fmt.Sprintf("  (%s)", prov))
+		// Row: glyph  name  (provider)  · <state string>  <tags>
+		line := fmt.Sprintf("  %s%s %s", cursor, glyphStyle.Render(glyph), nameStyle.Render(profile))
+		if provider != "" {
+			line += th.Muted.Render(fmt.Sprintf("  (%s)", provider))
 		}
+		line += "  " + p.rowStateString(profile, provider)
 		if len(tags) > 0 {
 			line += "  " + th.Muted.Render(strings.Join(tags, " "))
 		}
 
+		// Drift / spinner / error suffix preserved as a right-side addendum.
 		if profile == p.driftingProfile {
 			line += "  " + p.spinner.View() + th.Muted.Render(" checking drift…")
-		} else if sum, ok := p.driftResults[profile]; ok && sum != nil {
-			if sum.HasDrift {
-				line += "  " + th.Warning.Render(fmt.Sprintf("Δ +%d ~%d -%d", sum.Add, sum.Change, sum.Destroy))
-			} else {
-				line += "  " + th.Success.Render("✓ in sync")
-			}
 		} else if err, ok := p.driftErrors[profile]; ok && err != nil {
 			line += "  " + th.Error.Render(truncate(err.Error(), maxInt(p.width-40, 20)))
 		}
 		b.WriteString(line + "\n")
+
+		// Subline with an overview-shaped one-liner (description / derived
+		// summary). Indented under the glyph column so rows read as stacked
+		// pairs rather than a wall of text.
+		if sub := p.rowSubline(profile, provider); sub != "" {
+			b.WriteString("      " + th.Muted.Render(sub) + "\n")
+		}
 	}
 
 	// Expand drift detail for the currently highlighted profile so the user
@@ -210,8 +236,87 @@ func (p *overviewPage) View() string {
 		}
 	}
 
-	b.WriteString("\n" + th.Muted.Render("  D run drift · j/k navigate"))
+	// Legend + key-hint footer matching the mockup. Legend lives above the
+	// key hints so the glyphs it explains sit visually next to the rows.
+	legend := fmt.Sprintf("%s local+cloud  %s cloud state  %s drifting  %s inactive",
+		th.Success.Render("⚡"),
+		th.Info.Render("☁"),
+		th.Warning.Render("⚠"),
+		th.Muted.Render("◯"),
+	)
+	b.WriteString("\n  " + th.Muted.Render(legend) + "\n")
+	b.WriteString("  " + th.Muted.Render("↵ jump to Summary · D run drift · j/k navigate"))
 	return b.String()
+}
+
+// rowGlyph maps a profile to its single-cell state glyph. Rule matches the
+// worktree-mode audit design: ⚡ for the active local (plus cloud) profile,
+// ⚠ when the drift cache reports drift, ☁ for cloud-state only, ◯ otherwise.
+func (p *overviewPage) rowGlyph(profile, provider string) (string, lipgloss.Style) {
+	th := theme.DefaultTheme
+	if profile != "" && profile == p.activeLocal {
+		return "⚡", th.Success
+	}
+	if provider == "terraform" {
+		if sum, ok := p.driftResults[profile]; ok && sum != nil && sum.HasDrift {
+			return "⚠", th.Warning
+		}
+		if sum, ok := p.driftResults[profile]; ok && sum != nil {
+			return "☁", th.Info
+		}
+	}
+	return "◯", th.Muted
+}
+
+// rowStateString mirrors the glyph with a short word-form the mockup uses
+// so users can skim either column.
+func (p *overviewPage) rowStateString(profile, provider string) string {
+	th := theme.DefaultTheme
+	if profile != "" && profile == p.activeLocal {
+		return th.Success.Render("● running") + "  " + th.Info.Render("· ☁ applied")
+	}
+	if provider == "terraform" {
+		if sum, ok := p.driftResults[profile]; ok && sum != nil && sum.HasDrift {
+			return th.Warning.Render(fmt.Sprintf("drifting (+%d ~%d -%d)",
+				sum.Add, sum.Change, sum.Destroy))
+		}
+		if _, ok := p.driftResults[profile]; ok {
+			return th.Info.Render("☁ applied")
+		}
+	}
+	return th.Muted.Render("inactive")
+}
+
+// rowSubline returns a short semantic descriptor for a profile. Prefers an
+// explicit `description` key in the profile config; otherwise derives a
+// terse phrase from the provider so the user gets at least one extra signal
+// beyond the state word.
+func (p *overviewPage) rowSubline(profile, provider string) string {
+	ec := p.resolved[profile]
+	if ec != nil {
+		if d, ok := ec.Config["description"].(string); ok && d != "" {
+			return d
+		}
+	}
+	switch provider {
+	case "docker":
+		if ec != nil {
+			if c, ok := ec.Config["compose_file"].(string); ok && c != "" {
+				return "compose stack · " + c
+			}
+		}
+		return "compose stack"
+	case "native":
+		return "native processes"
+	case "terraform":
+		if ec != nil {
+			if s, ok := ec.Config["shared_env"].(string); ok && s != "" {
+				return "terraform · reads " + s
+			}
+		}
+		return "terraform"
+	}
+	return ""
 }
 
 func (p *overviewPage) Focus() tea.Cmd            { return nil }

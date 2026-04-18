@@ -43,6 +43,7 @@ func deriveArtifacts(
 	state *env.EnvStateFile,
 	workspaceRoot string,
 	isRunning bool,
+	isShared bool,
 	allProfiles map[string]*config.EnvironmentConfig,
 ) []ArtifactGroup {
 	var groups []ArtifactGroup
@@ -79,13 +80,18 @@ func deriveArtifacts(
 	}
 
 	// ---- runtime group -------------------------------------------------
-	runtimeGroup := runtimeRows(workspaceRoot, profileName, provider, state, isRunning)
-	if len(runtimeGroup) > 0 {
-		label := "runtime (active)"
-		if !isRunning {
-			label = "runtime (on up)"
+	// Shared-infra profiles never "up" locally — they apply at the
+	// ecosystem root and are consumed by other profiles — so the
+	// "runtime (on up)" preview would be misleading. Suppress it.
+	if !isShared {
+		runtimeGroup := runtimeRows(workspaceRoot, profileName, provider, state, isRunning)
+		if len(runtimeGroup) > 0 {
+			label := "runtime (active)"
+			if !isRunning {
+				label = "runtime (on up)"
+			}
+			groups = append(groups, ArtifactGroup{Group: label, Rows: runtimeGroup})
 		}
-		groups = append(groups, ArtifactGroup{Group: label, Rows: runtimeGroup})
 	}
 
 	return groups

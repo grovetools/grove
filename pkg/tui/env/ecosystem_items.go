@@ -1,8 +1,6 @@
 package env
 
 import (
-	"fmt"
-
 	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/tui/theme"
 )
@@ -102,17 +100,16 @@ func (w worktreeItem) Provider() string {
 // rowActionItem is the OverlayItem shape used by the Enter-on-a-row overlay
 // on the Deployments page. Unlike worktreeItem, it represents a single
 // action the user can take against a worktree (jump, drift, open endpoint,
-// diff), not the worktree itself — and so its Provider() slot shows the
-// numeric shortcut ("1".."4") instead of a provider name.
+// diff), not the worktree itself. The numeric hotkey is rendered by the
+// overlay component itself based on row index, so Provider() returns "".
 type rowActionItem struct {
 	key   string
 	label string
 	desc  string
-	num   int
 }
 
-func newRowActionItem(key, label, desc string, num int) rowActionItem {
-	return rowActionItem{key: key, label: label, desc: desc, num: num}
+func newRowActionItem(key, label, desc string, _ int) rowActionItem {
+	return rowActionItem{key: key, label: label, desc: desc}
 }
 
 func (r rowActionItem) Key() string                { return r.key }
@@ -120,7 +117,7 @@ func (r rowActionItem) Glyph() string              { return "" }
 func (r rowActionItem) GlyphStyle() lipgloss.Style { return theme.DefaultTheme.Muted }
 func (r rowActionItem) Label() string              { return r.label }
 func (r rowActionItem) Subtitle() string           { return r.desc }
-func (r rowActionItem) Provider() string           { return fmt.Sprintf("%d", r.num) }
+func (r rowActionItem) Provider() string           { return "" }
 
 // worktreeGlyph picks the single-cell glyph + color key for a worktree row,
 // matching the mockup's conventions:

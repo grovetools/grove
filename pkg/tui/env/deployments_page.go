@@ -3,6 +3,7 @@ package env
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -95,7 +96,11 @@ func (p *deploymentsPage) currentName() string {
 	if p.cursor < 0 || p.cursor >= len(p.worktrees) {
 		return ""
 	}
-	return p.worktrees[p.cursor].Workspace.Name
+	w := p.worktrees[p.cursor]
+	if w.Workspace == nil {
+		return "" // orphans have no actionable row overlay yet
+	}
+	return w.Workspace.Name
 }
 
 func (p *deploymentsPage) View() string {
@@ -118,7 +123,14 @@ func (p *deploymentsPage) View() string {
 	b.WriteString("  " + th.Muted.Render(strings.Repeat("─", maxInt(p.width-4, 40))) + "\n")
 
 	for i, w := range p.worktrees {
+		isOrphan := w.Workspace == nil
+
 		glyph, glyphKey := worktreeGlyph(w)
+		if isOrphan {
+			// Orphans override the glyph to the warning triangle no matter
+			// what their leftover state.json says.
+			glyph, glyphKey = "⚠", "drift"
+		}
 		glyphStyle := th.Muted
 		switch glyphKey {
 		case "running":
@@ -129,19 +141,33 @@ func (p *deploymentsPage) View() string {
 			glyphStyle = th.Warning
 		}
 
-		you := ""
-		if p.isYou(w) {
-			you = " " + th.Highlight.Render("[you]")
+		// Name / branch cell.
+		var rawName string
+		var subline string
+		switch {
+		case isOrphan:
+			rawName = orphanDisplayName(w.OrphanStatePath)
+			subline = th.Error.Render("— deleted worktree —") + "  " +
+				th.Muted.Render(w.OrphanStatePath)
+		default:
+			you := ""
+			if p.isYou(w) {
+				you = " " + th.Highlight.Render("[you]")
+			}
+			rawName = w.Workspace.Name + you
+			subline = th.Muted.Render(deploymentSubline(w))
 		}
-
-		nameCell := padRight(w.Workspace.Name+you, 26)
+		nameCell := padRight(rawName, 26)
 		if i == p.cursor {
 			nameCell = th.Bold.Render(nameCell)
 		} else {
 			nameCell = th.Normal.Render(nameCell)
 		}
 
-		profile := p.profiles[w.Workspace.Name]
+		profile := ""
+		if w.Workspace != nil {
+			profile = p.profiles[w.Workspace.Name]
+		}
 		if profile == "" && w.EnvState != nil {
 			profile = w.EnvState.Environment
 		}
@@ -150,14 +176,30 @@ func (p *deploymentsPage) View() string {
 		}
 		profileCell := th.Info.Render(padRight(profile, 18))
 
-		stateCell := padRight(FormatWorktreeStateSummary(w), 18)
+		stateText := FormatWorktreeStateSummary(w)
+		if isOrphan {
+			stateText = "stale"
+		}
+		stateCell := padRight(stateText, 18)
 
-		endpoint := FirstEndpoint(w)
-		endpointCell := padRight(endpoint, 32)
+		// First endpoint occupies the row cell; any extras stack in the
+		// subline so the row stays wide enough to read comfortably.
+		endpoints := endpointList(w)
+		firstEp := "(local only)"
+		var stackedEps []string
+		if len(endpoints) > 0 {
+			firstEp = endpoints[0]
+			stackedEps = endpoints[1:]
+		}
+		endpointCell := padRight(firstEp, 32)
 
-		drift := formatDriftCell(w, w.Workspace.Name == p.driftingWT)
-		driftCell := padRight(drift.text, 14)
-		driftCell = drift.style.Render(driftCell)
+		var driftCell string
+		if isOrphan {
+			driftCell = th.Error.Render(padRight("orphan", 14))
+		} else {
+			drift := formatDriftCell(w, w.Workspace != nil && w.Workspace.Name == p.driftingWT)
+			driftCell = drift.style.Render(padRight(drift.text, 14))
+		}
 
 		cursor := "  "
 		if i == p.cursor {
@@ -174,6 +216,17 @@ func (p *deploymentsPage) View() string {
 			driftCell,
 		)
 		b.WriteString(line + "\n")
+
+		// Subline — always emit (empty for orphans covered above) so rows
+		// read as pairs of lines rather than shifting layout.
+		if subline != "" {
+			b.WriteString("      " + subline + "\n")
+		}
+		// Extra endpoints stacked vertically under the row, indented past
+		// the glyph column so they line up with the first endpoint cell.
+		for _, ep := range stackedEps {
+			b.WriteString("      " + th.Info.Render("· "+ep) + "\n")
+		}
 	}
 
 	// Serial drift progress. Counter reads "drift-checking N/M: <name>".
@@ -256,6 +309,51 @@ func formatDriftCell(w WorktreeState, running bool) driftCell {
 	label := fmt.Sprintf("+%d ~%d -%d · %s",
 		w.Drift.Add, w.Drift.Change, w.Drift.Destroy, age)
 	return driftCell{text: label, style: th.Warning}
+}
+
+// endpointList returns the raw endpoint slice for a worktree so the page
+// can render the first in the main cell and stack extras as sub-lines.
+// Returns nil when state.json is absent or endpoints are empty.
+func endpointList(w WorktreeState) []string {
+	if w.EnvState == nil || len(w.EnvState.Endpoints) == 0 {
+		return nil
+	}
+	return w.EnvState.Endpoints
+}
+
+// orphanDisplayName derives a compact label from an orphan state.json path
+// by taking the worktree directory name segment, e.g.
+// `/…/.grove-worktrees/phase5-tui-test/.grove/env/state.json` → `phase5-tui-test`.
+func orphanDisplayName(statePath string) string {
+	// path = <root>/.grove-worktrees/<wt-name>/.grove/env/state.json
+	wtDir := filepath.Base(filepath.Dir(filepath.Dir(filepath.Dir(statePath))))
+	if wtDir == "" || wtDir == "." {
+		return statePath
+	}
+	return wtDir
+}
+
+// deploymentSubline produces the per-row descriptor rendered under each
+// row in the Deployments matrix. Matches the Overview subline logic so a
+// given profile reads consistently across both pages.
+func deploymentSubline(w WorktreeState) string {
+	if w.EnvState == nil {
+		return ""
+	}
+	var parts []string
+	if n := len(w.EnvState.Services); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d svc", n))
+	}
+	if n := len(w.EnvState.EnvVars); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d vars", n))
+	}
+	if w.EnvState.Provider != "" {
+		parts = append(parts, w.EnvState.Provider)
+	}
+	if w.EnvState.ManagedBy != "" {
+		parts = append(parts, "via "+w.EnvState.ManagedBy)
+	}
+	return strings.Join(parts, " · ")
 }
 
 // humanAge formats a duration in the compact "Nm"/"Nh"/"Nd" style the

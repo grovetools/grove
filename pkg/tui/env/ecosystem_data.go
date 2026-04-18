@@ -18,11 +18,17 @@ import (
 // on the Deployments / Shared Infra / Orphans pages (5e will consume this).
 // Any field can be nil / zero — missing state.json, missing drift cache, and
 // permission errors are all treated as "no data yet" rather than hard errors.
+//
+// Orphan entries — state.json files that no longer map to a discovered
+// worktree — have Workspace == nil and OrphanStatePath set to the absolute
+// path of the state.json. The Deployments page renders these inline so the
+// main matrix always reflects every state.json on disk.
 type WorktreeState struct {
-	Workspace      *workspace.WorkspaceNode
-	EnvState       *coreenv.EnvStateFile
-	Drift          *envdrift.DriftSummary
-	DriftCheckedAt time.Time
+	Workspace       *workspace.WorkspaceNode
+	EnvState        *coreenv.EnvStateFile
+	Drift           *envdrift.DriftSummary
+	DriftCheckedAt  time.Time
+	OrphanStatePath string
 }
 
 // EnumerateWorktreeStates walks every discovered workspace under root and
@@ -82,6 +88,11 @@ func EnumerateWorktreeStates(root *workspace.WorkspaceNode) ([]WorktreeState, er
 	sort.Slice(states, func(i, j int) bool {
 		return states[i].Workspace.Name < states[j].Workspace.Name
 	})
+	// Append any orphan state.json files under this ecosystem's
+	// .grove-worktrees/ directory so the Deployments matrix sees them
+	// inline rather than hiding them on a separate tab.
+	orphans := DetectLocalOrphans(root.Path, states)
+	states = append(states, orphans...)
 	return states, nil
 }
 
@@ -138,16 +149,17 @@ func readStateFile(stateDir string) *coreenv.EnvStateFile {
 	return &sf
 }
 
-// DetectLocalOrphans returns every .grove/env/state.json path under the
-// ecosystem's .grove-worktrees/ directory that isn't owned by a known
-// worktree. We intentionally ignore deeper sub-project worktrees: a
-// sub-project state.json isn't an ecosystem-level orphan, it's the
-// sub-project's concern.
+// DetectLocalOrphans returns a WorktreeState for every .grove/env/state.json
+// under the ecosystem's .grove-worktrees/ directory that isn't owned by a
+// known worktree. Each returned state has Workspace == nil and
+// OrphanStatePath set to the state.json path, so the Deployments page can
+// render an inline orphan row. EnvState + Drift are parsed best-effort from
+// disk, matching how real worktree states are loaded.
 //
 // Exported so the CLI (`grove env ecosystem`) can reuse the same heuristic
 // as the TUI's Orphans page without importing rendering code.
-func DetectLocalOrphans(ecosystemRoot string, worktrees []WorktreeState) []string {
-	orphans := []string{}
+func DetectLocalOrphans(ecosystemRoot string, worktrees []WorktreeState) []WorktreeState {
+	orphans := []WorktreeState{}
 	pattern := filepath.Join(ecosystemRoot, ".grove-worktrees", "*", ".grove", "env", "state.json")
 	matches, err := filepath.Glob(pattern)
 	if err != nil || len(matches) == 0 {
@@ -159,6 +171,7 @@ func DetectLocalOrphans(ecosystemRoot string, worktrees []WorktreeState) []strin
 			known[filepath.Clean(w.Workspace.Path)] = struct{}{}
 		}
 	}
+	sort.Strings(matches)
 	for _, m := range matches {
 		// m == <root>/.grove-worktrees/<wt-name>/.grove/env/state.json
 		// → worktree path = <root>/.grove-worktrees/<wt-name>
@@ -166,7 +179,15 @@ func DetectLocalOrphans(ecosystemRoot string, worktrees []WorktreeState) []strin
 		if _, ok := known[filepath.Clean(wtDir)]; ok {
 			continue
 		}
-		orphans = append(orphans, m)
+		orphan := WorktreeState{OrphanStatePath: m}
+		if ef := readStateFile(filepath.Dir(m)); ef != nil {
+			orphan.EnvState = ef
+		}
+		if drift, checkedAt, err := envdrift.LoadCache(filepath.Dir(m)); err == nil && drift != nil {
+			orphan.Drift = drift
+			orphan.DriftCheckedAt = checkedAt
+		}
+		orphans = append(orphans, orphan)
 	}
 	return orphans
 }

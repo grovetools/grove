@@ -77,7 +77,7 @@ func (p *actionsPage) View() string {
 	// scope
 	b.WriteString("\n" + th.Bold.Render("  scope") + "\n")
 	b.WriteString(th.Muted.Render("  "+strings.Repeat("─", maxInt(p.width-6, 20))) + "\n")
-	p.renderAction(&b, "P", "Switch profile", "opens quick-switcher overlay (5c)", false)
+	p.renderAction(&b, "P", "Switch profile", "opens quick-switcher overlay", false)
 	p.renderAction(&b, "1", "Back to Overview", "", false)
 
 	return b.String()
@@ -86,14 +86,15 @@ func (p *actionsPage) View() string {
 // renderAction formats one row: `<key>  <label>   <hint>`, dimmed when
 // disabled so the user can still see the binding but knows it's inert for
 // this profile. Uses theme.Muted for disabled styling so the row reads the
-// same as the ecosystem-mode Actions page.
+// same as the ecosystem-mode Actions page. The key chip pads to 6 cells so
+// command names longer than two chars ("test", "format") render intact.
 func (p *actionsPage) renderAction(b *strings.Builder, keyStr, labelStr, hint string, disabled bool) {
 	th := theme.DefaultTheme
-	keyChip := th.Info.Render(padRight(keyStr, 2))
+	keyChip := th.Info.Render(padRight(keyStr, 6))
 	labelCol := th.Bold.Render(padRight(labelStr, 28))
 	hintCol := th.Muted.Render(hint)
 	if disabled {
-		keyChip = th.Muted.Render(padRight(keyStr, 2))
+		keyChip = th.Muted.Render(padRight(keyStr, 6))
 		labelCol = th.Muted.Render(padRight(labelStr, 28))
 		hintCol = th.Muted.Render(hint)
 	}

@@ -283,6 +283,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case jumpToSummaryMsg:
+		cmd := m.pager.SetActive(1)
+		return m, cmd
+
 	case driftCheckFinishedMsg:
 		if m.driftingProfile == msg.profile {
 			m.driftingProfile = ""
@@ -398,8 +402,9 @@ func (m Model) View() string {
 
 	// Scope breadcrumb band. Constant-height on all pages (including
 	// Overview) so switching tabs doesn't shift the pager body up/down —
-	// the mockup uses the same band on page 1 as an instruction line.
-	breadcrumb := m.renderBreadcrumb()
+	// the mockup uses the same band on page 1 as an instruction line and
+	// on pages 2-6 as the scoped-profile context line.
+	breadcrumb := m.renderBreadcrumb(m.pager.ActiveIndex())
 
 	// Pager body (tabs)
 	body := m.pager.View()
@@ -478,12 +483,22 @@ func (p profileItem) Provider() string {
 }
 
 // renderBreadcrumb returns the scope line shown between the header and
-// the pager body. Visible on every page (including Overview) so users
-// always see which profile the rest of the panel is scoped to — the
-// mockup treats the band as a constant context line, not a page-specific
-// instruction.
-func (m Model) renderBreadcrumb() string {
+// the pager body. The mockup specifies two distinct variants:
+//
+//   - On Overview (pageIndex 0) the band is a static instruction line that
+//     orients the user toward what keys do what.
+//   - On pages 2-6 it's the scope/context line — glyph, profile, page name,
+//     and a trailing hint about how to re-scope or jump back.
+//
+// Both are constant-height so toggling tabs doesn't reflow the pager body.
+func (m Model) renderBreadcrumb(pageIndex int) string {
 	th := theme.DefaultTheme
+	sep := "  " + theme.IconBullet + "  "
+	if pageIndex == 0 {
+		return "  " + th.Muted.Render(
+			"Pick a profile below"+sep+"j/k move"+sep+"↵ jump to Summary"+sep+"2-6 jump to page",
+		)
+	}
 	profile := displaySelectedProfile(m.selectedProfile, m.envProfiles)
 	if profile == "" {
 		profile = "(none)"
@@ -493,12 +508,14 @@ func (m Model) renderBreadcrumb() string {
 		page = active.Name()
 	}
 	glyph := scopeGlyph(m.profileProviders[profile])
-	return fmt.Sprintf("  %s %s %s %s",
+	left := fmt.Sprintf("  %s %s %s %s",
 		th.Highlight.Render(glyph),
 		th.Bold.Render(profile),
 		th.Muted.Render("›"),
 		th.Muted.Render(page),
 	)
+	right := th.Muted.Render("scope: P switch profile" + sep + "1 back to Overview")
+	return left + "  " + th.Muted.Render("···") + "  " + right
 }
 
 // scopeGlyph picks a single glyph keyed on the provider, matching the
@@ -608,6 +625,7 @@ func (m *Model) updatePages() {
 			page.stickyDefault = m.stickyDefault
 			page.activeLocal = activeLocal
 			page.providers = m.profileProviders
+			page.resolved = m.allResolvedConfigs()
 			page.state = m.envState
 			page.driftingProfile = m.driftingProfile
 			page.driftResults = m.driftResults
@@ -630,7 +648,9 @@ func (m *Model) updatePages() {
 			page.resolved = m.configResolved
 			page.artifacts = deriveArtifacts(
 				selected, provider, m.configResolved, m.envState,
-				workspaceRoot, isRunning, m.allResolvedConfigs(),
+				workspaceRoot, isRunning,
+				config.IsSharedProfile(m.cfg, selected),
+				m.allResolvedConfigs(),
 			)
 		case *configPage:
 			page.profile = selected

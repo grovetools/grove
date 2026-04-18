@@ -18,7 +18,7 @@ import (
 type orphansPage struct {
 	ecosystemPath string
 	worktrees     []WorktreeState
-	localOrphans  []string
+	localOrphans  []WorktreeState
 
 	width  int
 	height int
@@ -65,10 +65,10 @@ func (p *orphansPage) View() string {
 			".grove-worktrees/ is mapped to a discovered worktree.") + "\n")
 		return b.String()
 	}
-	for _, path := range p.localOrphans {
+	for _, orphan := range p.localOrphans {
 		b.WriteString(fmt.Sprintf("  %s %s\n",
 			th.Warning.Render("⚠"),
-			th.Info.Render(path),
+			th.Info.Render(orphan.OrphanStatePath),
 		))
 	}
 	b.WriteString("\n  " + th.Muted.Render(
