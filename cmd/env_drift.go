@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/grovetools/grove/pkg/envdrift"
 	"github.com/spf13/cobra"
@@ -10,6 +12,7 @@ import (
 
 func newEnvDriftCmd() *cobra.Command {
 	var jsonOutput bool
+	var force bool
 
 	cmd := &cobra.Command{
 		Use:   "drift [profile]",
@@ -23,6 +26,10 @@ the URIs built on the last successful 'grove env up' are read from
 .grove/env/state.json and passed in as tfvars so an image rebuild does
 not masquerade as cloud drift.
 
+Results are cached in .grove/env/drift.json. A second invocation within
+24 hours returns the cached summary without re-running Terraform; pass
+--force to bypass the cache.
+
 Exit codes match Terraform semantics:
   0 = Succeeded, no drift detected
   1 = Error occurred
@@ -32,6 +39,9 @@ Exit codes match Terraform semantics:
 
   # Machine-readable summary for a CI script
   grove env drift terraform --json | jq '{add, change, destroy}'
+
+  # Force a fresh terraform plan even if the cache is still fresh
+  grove env drift terraform --force
 
   # List the resources that are drifting
   grove env drift hybrid-api --json | jq '.resources[].address'`,
@@ -45,9 +55,24 @@ Exit codes match Terraform semantics:
 				}
 			}
 
-			summary, err := envdrift.RunEnvDrift(context.Background(), profile)
+			stateDir, err := filepath.Abs(filepath.Join(".", ".grove", "env"))
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to resolve state dir: %w", err)
+			}
+
+			var summary *envdrift.DriftSummary
+			if !force {
+				cached, checkedAt, err := envdrift.LoadCache(stateDir)
+				if err == nil && cached != nil && !envdrift.IsStale(checkedAt) {
+					summary = cached
+				}
+			}
+
+			if summary == nil {
+				summary, err = envdrift.RunEnvDrift(context.Background(), profile)
+				if err != nil {
+					return err
+				}
 			}
 
 			if err := envdrift.EmitSummary(os.Stdout, summary, jsonOutput); err != nil {
@@ -61,5 +86,6 @@ Exit codes match Terraform semantics:
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Emit JSON summary instead of human-readable output")
+	cmd.Flags().BoolVar(&force, "force", false, "Bypass cached drift summary and re-run terraform plan")
 	return cmd
 }

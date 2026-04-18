@@ -187,6 +187,12 @@ func RunEnvDrift(ctx context.Context, profile string) (*DriftSummary, error) {
 	}
 	summary.Profile = DisplayProfile(activeProfile)
 	summary.Provider = resolved.Provider
+
+	// Persist the result so the ecosystem-mode TUI and repeat CLI invocations
+	// can skip a full plan when the cache is still fresh. A failure here is
+	// non-fatal — the drift result itself is already valid.
+	_ = SaveCache(stateDir, summary)
+
 	return summary, nil
 }
 

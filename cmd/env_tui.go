@@ -19,7 +19,12 @@ func newEnvTUICmd() *cobra.Command {
 	}
 }
 
-// runEnvTUI launches the standalone env TUI panel.
+// runEnvTUI launches the env TUI panel. The panel has two modes: if the
+// current workspace is an ecosystem (root or worktree) we run the
+// ecosystem-scoped dashboard; otherwise we fall back to the single-worktree
+// panel that has been the default since Phase 4. Mode is picked once at
+// launch from cwd — the embed contract's SetWorkspaceMsg can later repoint
+// each model to a new workspace of the same kind.
 func runEnvTUI() error {
 	cfg, err := config.LoadDefault()
 	if err != nil {
@@ -29,12 +34,21 @@ func runEnvTUI() error {
 	focus := getWorkspaceNode()
 	client := daemon.NewWithAutoStart()
 
-	m := envtui.New(envtui.Config{
-		DaemonClient: client,
-		InitialFocus: focus,
-		Cfg:          cfg,
-	})
+	var model tea.Model
+	if focus != nil && focus.IsEcosystem() {
+		model = envtui.NewEcosystem(envtui.EcosystemConfig{
+			DaemonClient: client,
+			Root:         focus,
+			Cfg:          cfg,
+		})
+	} else {
+		model = envtui.New(envtui.Config{
+			DaemonClient: client,
+			InitialFocus: focus,
+			Cfg:          cfg,
+		})
+	}
 
-	_, err = embed.RunStandalone(m, tea.WithAltScreen())
+	_, err = embed.RunStandalone(model, tea.WithAltScreen())
 	return err
 }
