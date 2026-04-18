@@ -91,15 +91,22 @@ func New(cfg Config) Model {
 	keys := pager.KeyMapFromBase(base)
 
 	overview := newOverviewPage()
-	svcPage := &servicesPage{}
-	varsPage := &variablesPage{}
+	summaryPg := newSummaryPage()
 	configPg := newConfigPage()
-	actPage := &actionsPage{}
+	runtimePg := newRuntimePage()
+	driftPg := newDriftPage()
+	actPage := newActionsPage()
 
-	p := pager.NewWith([]pager.Page{overview, svcPage, varsPage, configPg, actPage}, keys, pager.Config{
-		OuterPadding: [4]int{1, 2, 0, 2},
-		FooterHeight: 1, // help hint line
-	})
+	// Phase 5b page order: Overview, Summary, Config, Runtime, Drift, Actions.
+	// Pages 2-6 all scope to m.selectedProfile (driven by Overview's cursor).
+	p := pager.NewWith(
+		[]pager.Page{overview, summaryPg, configPg, runtimePg, driftPg, actPage},
+		keys,
+		pager.Config{
+			OuterPadding: [4]int{1, 2, 0, 2},
+			FooterHeight: 1, // help hint line
+		},
+	)
 
 	m := Model{
 		pager:            p,
@@ -290,7 +297,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.Matches(msg, km.Quit) || key.Matches(msg, km.Back) {
 			return m, func() tea.Msg { return embed.CloseRequestMsg{} }
 		}
-		// Global action keys work regardless of active tab
+		// Global action keys work regardless of active tab. All lifecycle
+		// actions now scope to the Overview cursor (m.selectedProfile).
 		switch {
 		case key.Matches(msg, actionKeys.Up):
 			return m, m.envAction("up")
@@ -298,6 +306,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.envAction("down")
 		case key.Matches(msg, actionKeys.Restart):
 			return m, m.envAction("restart")
+		}
+		switch msg.String() {
+		case "P":
+			// TODO (Phase 5c): open profile switcher overlay here.
+			// Until then, pressing P is a no-op so the key is reserved
+			// and doesn't fall through to pager number handling.
+			return m, nil
 		}
 	}
 
@@ -328,15 +343,64 @@ func (m Model) View() string {
 	var footerParts []string
 	sep := " " + theme.IconBullet + " "
 	footerParts = append(footerParts, th.Muted.Render(
-		"u env up"+sep+"d env down"+sep+"r restart",
+		"u env up"+sep+"d env down"+sep+"r restart"+sep+"D drift"+sep+"P switch profile",
 	))
 	m.pager.SetFooter(strings.Join(footerParts, "\n"))
+
+	// Scope breadcrumb band. Constant-height on all pages (including
+	// Overview) so switching tabs doesn't shift the pager body up/down —
+	// the mockup uses the same band on page 1 as an instruction line.
+	breadcrumb := m.renderBreadcrumb()
 
 	// Pager body (tabs)
 	body := m.pager.View()
 
-	out := header + feedback + "\n" + body
+	out := header + feedback + "\n" + breadcrumb + "\n" + body
 	return lipgloss.NewStyle().MaxWidth(m.width).Render(out)
+}
+
+// renderBreadcrumb returns the scope line shown between the header and
+// the pager body. On page 1 it explains that the cursor drives the scope;
+// on pages 2-6 it shows `<glyph> <profile> › <page-name>` so the user
+// always knows what selection they're acting on.
+func (m Model) renderBreadcrumb() string {
+	th := theme.DefaultTheme
+	if m.pager.ActiveIndex() == 0 {
+		return "  " + th.Muted.Render(
+			"Pick a profile below · the selection scopes pages 2-6",
+		)
+	}
+	profile := displaySelectedProfile(m.selectedProfile, m.envProfiles)
+	if profile == "" {
+		profile = "(none)"
+	}
+	page := ""
+	if active := m.pager.Active(); active != nil {
+		page = active.Name()
+	}
+	glyph := scopeGlyph(m.profileProviders[profile])
+	return fmt.Sprintf("  %s %s %s %s",
+		th.Highlight.Render(glyph),
+		th.Bold.Render(profile),
+		th.Muted.Render("›"),
+		th.Muted.Render(page),
+	)
+}
+
+// scopeGlyph picks a single glyph keyed on the provider, matching the
+// symbol set used on the Overview page so the breadcrumb reads as a
+// continuation rather than a separate legend.
+func scopeGlyph(provider string) string {
+	switch provider {
+	case "terraform":
+		return theme.IconEarth
+	case "docker":
+		return theme.IconRunning
+	case "native":
+		return theme.IconBullet
+	default:
+		return theme.IconPending
+	}
 }
 
 func (m Model) renderHeader() string {
@@ -397,13 +461,31 @@ func (m Model) renderHeader() string {
 	)
 }
 
-// updatePages pushes current state into each page.
+// updatePages pushes current state into each page. Phase 5b: all detail
+// pages (2-6) scope to m.selectedProfile; only Overview reads live global
+// state directly. Runtime only shows data when the selected profile is
+// the one actually running locally.
 func (m *Model) updatePages() {
 	pages := m.pager.Pages()
 	activeLocal := ""
 	if m.envState != nil {
 		activeLocal = m.envState.Environment
 	}
+	selected := displaySelectedProfile(m.selectedProfile, m.envProfiles)
+	isRunning := selected != "" && selected == activeLocal
+
+	provider := ""
+	if m.configResolved != nil && m.configResolved.Provider != "" {
+		provider = m.configResolved.Provider
+	} else if p, ok := m.profileProviders[selected]; ok {
+		provider = p
+	}
+
+	workspaceRoot := ""
+	if m.workspace != nil {
+		workspaceRoot = m.workspace.Path
+	}
+
 	for _, p := range pages {
 		switch page := p.(type) {
 		case *overviewPage:
@@ -416,9 +498,9 @@ func (m *Model) updatePages() {
 			page.driftingProfile = m.driftingProfile
 			page.driftResults = m.driftResults
 			page.driftErrors = m.driftErrors
-			// Align the page's cursor with the model's idea of the
-			// selected profile so Overview + Config stay coherent after
-			// workspace swaps.
+			// Keep the cursor in sync with the model's scope so that
+			// arrow-key moves on Overview and page jumps via numbers
+			// both converge on the same selection.
 			if m.selectedProfile != "" {
 				for i, name := range m.envProfiles {
 					if name == m.selectedProfile {
@@ -427,28 +509,82 @@ func (m *Model) updatePages() {
 					}
 				}
 			}
-		case *servicesPage:
-			page.state = m.envState
-			page.response = m.envResponse
-			page.loading = m.loading
-			page.err = m.statusErr
-		case *variablesPage:
-			page.state = m.envState
-			page.response = m.envResponse
-			page.loading = m.loading
+		case *summaryPage:
+			page.profile = selected
+			page.provider = provider
+			page.isRunning = isRunning
+			page.resolved = m.configResolved
+			page.artifacts = deriveArtifacts(
+				selected, provider, m.configResolved, m.envState,
+				workspaceRoot, isRunning, m.allResolvedConfigs(),
+			)
 		case *configPage:
-			page.profile = displaySelectedProfile(m.selectedProfile, m.envProfiles)
+			page.profile = selected
 			page.resolved = m.configResolved
 			page.provenance = m.configProvenance
 			page.deleted = m.configDeleted
 			page.err = m.configErr
-		case *actionsPage:
-			page.state = m.envState
-			page.profiles = m.envProfiles
-			page.commands = m.envCommands()
+		case *runtimePage:
+			page.profile = selected
+			page.isRunning = isRunning
+			page.workspaceRoot = workspaceRoot
 			page.loading = m.loading
+			page.err = m.statusErr
+			if isRunning {
+				page.state = m.envState
+				page.response = m.envResponse
+			} else {
+				page.state = nil
+				page.response = nil
+			}
+		case *driftPage:
+			page.profile = selected
+			page.provider = provider
+			page.summary = m.driftResults[selected]
+			page.err = m.driftErrors[selected]
+			page.pending = m.driftingProfile == selected && selected != ""
+		case *actionsPage:
+			page.profile = selected
+			page.provider = provider
+			page.isRunning = isRunning
+			page.commands = m.commandsForProfile(selected)
 		}
 	}
+}
+
+// allResolvedConfigs flattens cfg.Environment + cfg.Environments into a
+// name->config map so deriveArtifacts can look up cross-profile
+// dependencies (e.g. a shared_env reference to a sibling profile).
+func (m *Model) allResolvedConfigs() map[string]*config.EnvironmentConfig {
+	out := make(map[string]*config.EnvironmentConfig)
+	if m.cfg == nil {
+		return out
+	}
+	if m.cfg.Environment != nil {
+		out["default"] = m.cfg.Environment
+	}
+	for name, ec := range m.cfg.Environments {
+		out[name] = ec
+	}
+	return out
+}
+
+// commandsForProfile returns the EnvironmentConfig.Commands for the given
+// profile name — prefers the named profile but falls back to the default
+// block when asked for "default".
+func (m *Model) commandsForProfile(profile string) map[string]string {
+	if m.cfg == nil || profile == "" {
+		return nil
+	}
+	if profile == "default" && m.cfg.Environment != nil {
+		return m.cfg.Environment.Commands
+	}
+	if m.cfg.Environments != nil {
+		if ec, ok := m.cfg.Environments[profile]; ok && ec != nil {
+			return ec.Commands
+		}
+	}
+	return nil
 }
 
 // loadOverviewContext refreshes the sticky-default, config-default, and
@@ -536,31 +672,19 @@ func displaySelectedProfile(selected string, profiles []string) string {
 	return ""
 }
 
-func (m Model) envCommands() map[string]string {
-	if m.cfg == nil {
-		return nil
-	}
-	// Check active profile first, then default
-	if m.envState != nil && m.envState.Environment != "" {
-		if m.cfg.Environments != nil {
-			if ec, ok := m.cfg.Environments[m.envState.Environment]; ok && ec.Commands != nil {
-				return ec.Commands
-			}
-		}
-	}
-	if m.cfg.Environment != nil && m.cfg.Environment.Commands != nil {
-		return m.cfg.Environment.Commands
-	}
-	return nil
-}
-
-// envAction dispatches an env up/down/restart command to the daemon.
+// envAction dispatches an env up/down/restart command to the daemon,
+// targeting the currently-selected profile rather than whatever the
+// daemon thinks is running. This is the core of the Phase 5b single-scope
+// model — the user's cursor determines what we act on, not the daemon's
+// global state.
 func (m *Model) envAction(action string) tea.Cmd {
 	if m.workspace == nil || m.daemonClient == nil {
 		return nil
 	}
+	profile := displaySelectedProfile(m.selectedProfile, m.envProfiles)
+
 	m.loading = true
-	m.actionMsg = fmt.Sprintf("%s in progress...", action)
+	m.actionMsg = fmt.Sprintf("%s %s in progress...", action, profile)
 	m.updatePages()
 
 	ws := m.workspace
@@ -569,6 +693,7 @@ func (m *Model) envAction(action string) tea.Cmd {
 		req := env.EnvRequest{
 			Action:    action,
 			Workspace: ws,
+			Profile:   profile,
 			StateDir:  ".grove/env/",
 		}
 		var resp *env.EnvResponse
