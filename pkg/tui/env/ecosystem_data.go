@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	coreenv "github.com/grovetools/core/pkg/env"
@@ -81,26 +82,38 @@ func EnumerateWorktreeStates(root *workspace.WorkspaceNode) ([]WorktreeState, er
 // We accept either a matching ParentEcosystemPath or RootEcosystemPath so
 // deep hierarchies (ecosystem-worktree → sub-project-worktree) all surface
 // under the same Deployments table.
+//
+// Path comparisons are case-insensitive because macOS's case-insensitive
+// filesystem lets workspace.GetProjects and workspace.GetProjectByPath
+// return different casings for the same directory — e.g. "/Users/.../Code"
+// vs "/users/.../code" — and a strict string match would drop every
+// worktree on the floor.
 func belongsToEcosystem(node, root *workspace.WorkspaceNode) bool {
 	if root.Path == "" {
 		return false
 	}
-	if node.Path == root.Path {
+	if pathsEqual(node.Path, root.Path) {
 		// The ecosystem worktree itself counts when it owns its own state.
 		return true
 	}
-	if node.ParentEcosystemPath != "" && node.ParentEcosystemPath == root.Path {
+	if node.ParentEcosystemPath != "" && pathsEqual(node.ParentEcosystemPath, root.Path) {
 		return true
 	}
-	if node.RootEcosystemPath != "" && node.RootEcosystemPath == root.Path {
+	if node.RootEcosystemPath != "" && pathsEqual(node.RootEcosystemPath, root.Path) {
 		return true
 	}
 	// When root itself is a worktree of a higher ecosystem, RootEcosystemPath
 	// is the top-level root — match by the shared root too.
-	if root.RootEcosystemPath != "" && node.RootEcosystemPath == root.RootEcosystemPath {
+	if root.RootEcosystemPath != "" && pathsEqual(node.RootEcosystemPath, root.RootEcosystemPath) {
 		return true
 	}
 	return false
+}
+
+// pathsEqual compares two filesystem paths for equality after normalising
+// case — macOS-safe, and a no-op for paths that already match literally.
+func pathsEqual(a, b string) bool {
+	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
 }
 
 // readStateFile loads .grove/env/state.json from a worktree. Missing or
