@@ -71,6 +71,11 @@ type Model struct {
 	configDeleted    map[string]string
 	configErr        error
 
+	// overlay, when non-nil, intercepts all keystrokes and renders on top
+	// of the base view. Used by the P quick-switcher (Phase 5c) and — in
+	// 5e — the W worktree picker.
+	overlay *OverlayModel
+
 	width  int
 	height int
 }
@@ -160,6 +165,27 @@ func (m Model) Init() tea.Cmd {
 
 // Update handles messages for the env panel.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Overlay intercept block — must run BEFORE the quit/back key check
+	// below so Esc inside the overlay closes only the overlay rather than
+	// propagating out and closing the whole embed host.
+	if m.overlay != nil {
+		switch typed := msg.(type) {
+		case overlaySelectedMsg:
+			m.selectedProfile = typed.key
+			m.overlay = nil
+			m.resolveSelectedConfig()
+			m.updatePages()
+			return m, nil
+		case overlayClosedMsg:
+			m.overlay = nil
+			return m, nil
+		case tea.KeyMsg:
+			var cmd tea.Cmd
+			m.overlay, cmd = m.overlay.Update(typed)
+			return m, cmd
+		}
+	}
+
 	switch msg := msg.(type) {
 
 	case embed.SetWorkspaceMsg:
@@ -309,9 +335,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "P":
-			// TODO (Phase 5c): open profile switcher overlay here.
-			// Until then, pressing P is a no-op so the key is reserved
-			// and doesn't fall through to pager number handling.
+			// Overview IS the profile picker — P is only meaningful on
+			// pages 2-6 where the user is already scoped to a profile
+			// and wants to re-scope without leaving the current page.
+			if m.pager.ActiveIndex() == 0 || len(m.envProfiles) == 0 {
+				return m, nil
+			}
+			items := make([]OverlayItem, 0, len(m.envProfiles))
+			activeLocal := ""
+			if m.envState != nil {
+				activeLocal = m.envState.Environment
+			}
+			for _, name := range m.envProfiles {
+				items = append(items, newProfileItem(
+					name,
+					m.profileProviders[name],
+					name == activeLocal,
+					name == m.stickyDefault,
+					name == m.configDefault,
+				))
+			}
+			m.overlay = NewOverlay(
+				"Switch profile · scoped to current page",
+				"Esc to cancel",
+				items,
+				displaySelectedProfile(m.selectedProfile, m.envProfiles),
+			)
 			return m, nil
 		}
 	}
@@ -356,7 +405,76 @@ func (m Model) View() string {
 	body := m.pager.View()
 
 	out := header + feedback + "\n" + breadcrumb + "\n" + body
-	return lipgloss.NewStyle().MaxWidth(m.width).Render(out)
+	base := lipgloss.NewStyle().MaxWidth(m.width).Render(out)
+
+	if m.overlay == nil {
+		return base
+	}
+	// Center the overlay over the base view. lipgloss v1.1 doesn't have
+	// PlaceOverlay; placeOverlay() is the minimal substitute we ship in
+	// overlay.go. Negative offsets get clamped inside placeOverlay.
+	overlayView := m.overlay.View()
+	x := (m.width - lipgloss.Width(overlayView)) / 2
+	y := (m.height - lipgloss.Height(overlayView)) / 2
+	return placeOverlay(x, y, overlayView, base)
+}
+
+// profileItem adapts a profile name + metadata into the OverlayItem
+// interface so the reusable overlay component can render it. Kept in
+// model.go (rather than overlay.go) because the overlay component itself
+// is deliberately profile-agnostic — Phase 5e will add a worktreeItem
+// next to this one.
+type profileItem struct {
+	name     string
+	provider string
+	running  bool
+	sticky   bool
+	dflt     bool
+}
+
+func newProfileItem(name, provider string, running, sticky, dflt bool) profileItem {
+	return profileItem{name: name, provider: provider, running: running, sticky: sticky, dflt: dflt}
+}
+
+func (p profileItem) Key() string   { return p.name }
+func (p profileItem) Label() string { return p.name }
+
+func (p profileItem) Glyph() string {
+	if p.running {
+		return theme.IconStatusRunning
+	}
+	return theme.IconBullet
+}
+
+func (p profileItem) GlyphStyle() lipgloss.Style {
+	th := theme.DefaultTheme
+	if p.running {
+		return th.Success
+	}
+	return th.Muted
+}
+
+func (p profileItem) Subtitle() string {
+	// Match the mockup: running rows get "● running"; inactive rows get
+	// a short state-tag summary if one of the default flags applies.
+	if p.running {
+		return "● running"
+	}
+	switch {
+	case p.sticky:
+		return "sticky default"
+	case p.dflt:
+		return "config default"
+	default:
+		return "inactive"
+	}
+}
+
+func (p profileItem) Provider() string {
+	if p.provider == "" {
+		return "—"
+	}
+	return p.provider
 }
 
 // renderBreadcrumb returns the scope line shown between the header and
