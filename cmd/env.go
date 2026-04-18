@@ -170,6 +170,7 @@ func newEnvUpCmd() *cobra.Command {
 
 			req := env.EnvRequest{
 				Provider:  resolved.Provider,
+				Profile:   profile,
 				StateDir:  stateDir,
 				PlanDir:   stateDir, // backward compat
 				Config:    resolved.Config,
@@ -179,6 +180,19 @@ func newEnvUpCmd() *cobra.Command {
 			// Attach workspace node
 			if node := getWorkspaceNode(); node != nil {
 				req.Workspace = node
+			}
+
+			// Forward display_endpoints into the provider config so the daemon
+			// can honor the filter when mapping terraform outputs.
+			if len(resolved.DisplayEndpoints) > 0 {
+				if req.Config == nil {
+					req.Config = make(map[string]interface{})
+				}
+				list := make([]interface{}, 0, len(resolved.DisplayEndpoints))
+				for _, name := range resolved.DisplayEndpoints {
+					list = append(list, name)
+				}
+				req.Config["display_endpoints"] = list
 			}
 
 			// Phase 4: Prepare shared_backend_config if shared_env is configured
@@ -256,6 +270,7 @@ func newEnvUpCmd() *cobra.Command {
 				Ports:        ports,
 				Services:     services,
 				EnvVars:      resp.EnvVars,
+				Endpoints:    resp.Endpoints,
 				CleanupPaths: resp.CleanupPaths,
 				Volumes:      resp.Volumes,
 				State:        resp.State,
@@ -577,6 +592,7 @@ func newEnvRestartCmd() *cobra.Command {
 
 			req := env.EnvRequest{
 				Provider:  resolved.Provider,
+				Profile:   profile,
 				StateDir:  stateDir,
 				PlanDir:   stateDir,
 				Config:    resolved.Config,
@@ -584,6 +600,17 @@ func newEnvRestartCmd() *cobra.Command {
 			}
 			if node := getWorkspaceNode(); node != nil {
 				req.Workspace = node
+			}
+
+			if len(resolved.DisplayEndpoints) > 0 {
+				if req.Config == nil {
+					req.Config = make(map[string]interface{})
+				}
+				list := make([]interface{}, 0, len(resolved.DisplayEndpoints))
+				for _, name := range resolved.DisplayEndpoints {
+					list = append(list, name)
+				}
+				req.Config["display_endpoints"] = list
 			}
 
 			var client env.DaemonEnvClient
@@ -608,6 +635,7 @@ func newEnvRestartCmd() *cobra.Command {
 				Environment:  profile,
 				ManagedBy:    "user",
 				EnvVars:      resp.EnvVars,
+				Endpoints:    resp.Endpoints,
 				CleanupPaths: resp.CleanupPaths,
 				Volumes:      resp.Volumes,
 				State:        resp.State,

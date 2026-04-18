@@ -403,9 +403,6 @@ func (m *Model) updatePages() {
 	activeLocal := ""
 	if m.envState != nil {
 		activeLocal = m.envState.Environment
-		if activeLocal == "" && m.envResponse != nil && m.envResponse.Status == "running" {
-			activeLocal = "default"
-		}
 	}
 	for _, p := range pages {
 		switch page := p.(type) {
