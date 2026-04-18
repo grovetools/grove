@@ -52,7 +52,14 @@ func EnumerateWorktreeStates(root *workspace.WorkspaceNode) ([]WorktreeState, er
 
 	states := make([]WorktreeState, 0, len(nodes))
 	for _, node := range nodes {
-		if node == nil || !node.IsWorktree() {
+		if node == nil {
+			continue
+		}
+		// Whitelist the two node kinds that represent a deployable ecosystem
+		// slice: the ecosystem root itself (so the main checkout shows up as
+		// its own row) and per-worktree ecosystem checkouts. Subprojects and
+		// their worktrees are not independent deployment targets.
+		if node.Kind != workspace.KindEcosystemRoot && node.Kind != workspace.KindEcosystemWorktree {
 			continue
 		}
 		if !belongsToEcosystem(node, root) {
@@ -140,10 +147,11 @@ func readStateFile(stateDir string) *coreenv.EnvStateFile {
 // Exported so the CLI (`grove env ecosystem`) can reuse the same heuristic
 // as the TUI's Orphans page without importing rendering code.
 func DetectLocalOrphans(ecosystemRoot string, worktrees []WorktreeState) []string {
+	orphans := []string{}
 	pattern := filepath.Join(ecosystemRoot, ".grove-worktrees", "*", ".grove", "env", "state.json")
 	matches, err := filepath.Glob(pattern)
 	if err != nil || len(matches) == 0 {
-		return nil
+		return orphans
 	}
 	known := make(map[string]struct{}, len(worktrees))
 	for _, w := range worktrees {
@@ -151,7 +159,6 @@ func DetectLocalOrphans(ecosystemRoot string, worktrees []WorktreeState) []strin
 			known[filepath.Clean(w.Workspace.Path)] = struct{}{}
 		}
 	}
-	var orphans []string
 	for _, m := range matches {
 		// m == <root>/.grove-worktrees/<wt-name>/.grove/env/state.json
 		// → worktree path = <root>/.grove-worktrees/<wt-name>

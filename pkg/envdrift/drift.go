@@ -59,7 +59,7 @@ type DriftSummary struct {
 // matching the CLI's behaviour. Callers invoking this from a TUI should already
 // have chdir'd to (or be running in) the target worktree.
 func RunEnvDrift(ctx context.Context, profile string) (*DriftSummary, error) {
-	resolved, activeProfile, err := resolveEnvConfig(profile)
+	resolved, activeProfile, cfg, err := resolveEnvConfig(profile)
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +148,18 @@ func RunEnvDrift(ctx context.Context, profile string) (*DriftSummary, error) {
 	if modulePath == "" {
 		modulePath = "./infra"
 	}
-	moduleAbs := filepath.Join(req.Workspace.Path, modulePath)
+	// Shared-infra profiles live at the ecosystem root; a per-worktree cwd
+	// doesn't own the TF module, so resolve the path relative to the root
+	// ecosystem checkout rather than the invoking worktree.
+	baseDir := req.Workspace.Path
+	if config.IsSharedProfile(cfg, activeProfile) {
+		if req.Workspace.RootEcosystemPath != "" {
+			baseDir = req.Workspace.RootEcosystemPath
+		} else if req.Workspace.ParentEcosystemPath != "" {
+			baseDir = req.Workspace.ParentEcosystemPath
+		}
+	}
+	moduleAbs := filepath.Join(baseDir, modulePath)
 
 	bc := envtf.ResolveBackend(req)
 	overridePath, err := envtf.WriteBackendOverride(moduleAbs, bc)
@@ -381,11 +392,13 @@ func readEnvState() (*coreenv.EnvStateFile, error) {
 }
 
 // resolveEnvConfig resolves the environment config for the active/specified
-// profile using cwd-based config + sticky-default state.
-func resolveEnvConfig(envProfile string) (*config.EnvironmentConfig, string, error) {
+// profile using cwd-based config + sticky-default state. Returns the raw
+// *config.Config alongside the resolved profile so callers can answer
+// cross-profile questions (e.g. IsSharedProfile) without a second load.
+func resolveEnvConfig(envProfile string) (*config.EnvironmentConfig, string, *config.Config, error) {
 	cfg, err := config.LoadDefault()
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 
 	profile := envProfile
@@ -395,10 +408,10 @@ func resolveEnvConfig(envProfile string) (*config.EnvironmentConfig, string, err
 
 	resolved, err := config.ResolveEnvironment(cfg, profile)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 
-	return resolved, profile, nil
+	return resolved, profile, cfg, nil
 }
 
 // currentWorkspace returns the workspace node for the current directory.

@@ -71,9 +71,14 @@ Exit codes match Terraform semantics:
 					// Announce cache hits on stderr so --json stays a clean
 					// machine-readable stream on stdout.
 					age := time.Since(checkedAt).Round(time.Minute)
-					fmt.Fprintf(os.Stderr,
-						"Loaded cached drift summary from %s ago (use --force to re-run)\n",
-						age)
+					if age == 0 {
+						fmt.Fprintln(os.Stderr,
+							"Loaded cached drift summary from just now (use --force to re-run)")
+					} else {
+						fmt.Fprintf(os.Stderr,
+							"Loaded cached drift summary from %s ago (use --force to re-run)\n",
+							age)
+					}
 				}
 			}
 

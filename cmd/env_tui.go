@@ -4,6 +4,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/daemon"
+	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/embed"
 	envtui "github.com/grovetools/grove/pkg/tui/env"
 	"github.com/spf13/cobra"
@@ -54,7 +55,7 @@ func runEnvTUI() error {
 	client := daemon.NewWithAutoStart()
 
 	var model tea.Model
-	if focus != nil && focus.IsEcosystem() {
+	if focus != nil && focus.Kind == workspace.KindEcosystemRoot {
 		model = envtui.NewEcosystem(envtui.EcosystemConfig{
 			DaemonClient: client,
 			Root:         focus,
