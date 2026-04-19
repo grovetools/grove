@@ -133,13 +133,59 @@ func resolveEnvConfig(envProfile string) (*config.EnvironmentConfig, string, err
 }
 
 // getWorkspaceNode returns the workspace node for the current directory.
+//
+// When called from inside a worktree (a directory under `.grove-worktrees/`),
+// the daemon keys its RunningEnv map by Workspace.Name and resolves relative
+// volume host_paths against Workspace.Path. Without this patch, an `env down`
+// call from `.grove-worktrees/<name>/` can send the ecosystem name/path to
+// the daemon, which looks up the wrong map entry and silently no-ops — the
+// same bug class fixed in flow/cmd/plan_init.go (commit b935ae4).
+//
+// Patch in two cases: (1) the returned node is already a worktree kind (its
+// Name should be the directory basename, which we normalize), and (2) the
+// returned node is the parent ecosystem because the cwd happens to sit in a
+// `.grove-worktrees/<name>/` subtree. In both cases, force Name and Path to
+// the concrete worktree directory.
 func getWorkspaceNode() *workspace.WorkspaceNode {
 	cwd, _ := os.Getwd()
 	node, err := workspace.GetProjectByPath(cwd)
-	if err != nil {
+	if err != nil || node == nil {
 		return nil
 	}
+	if wtRoot := worktreeRootFromPath(cwd); wtRoot != "" {
+		if node.Name != filepath.Base(wtRoot) || node.Path != wtRoot {
+			patched := *node
+			patched.Name = filepath.Base(wtRoot)
+			patched.Path = wtRoot
+			return &patched
+		}
+		return node
+	}
+	if node.IsWorktree() {
+		patched := *node
+		patched.Name = filepath.Base(node.Path)
+		return &patched
+	}
 	return node
+}
+
+// worktreeRootFromPath returns the absolute path to the nearest ancestor that
+// lives directly under a `.grove-worktrees` directory, or "" if there is none.
+func worktreeRootFromPath(cwd string) string {
+	cur, err := filepath.Abs(cwd)
+	if err != nil {
+		return ""
+	}
+	for {
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return ""
+		}
+		if filepath.Base(parent) == ".grove-worktrees" {
+			return cur
+		}
+		cur = parent
+	}
 }
 
 func newEnvUpCmd() *cobra.Command {
