@@ -1870,6 +1870,7 @@ Examples:
 	// Add subcommands
 	cmd.AddCommand(newStarshipCmd())
 	cmd.AddCommand(newGitHooksCmd())
+	cmd.AddCommand(newSetupProxyCmd())
 
 	return cmd
 }
