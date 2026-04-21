@@ -165,10 +165,14 @@ func DetectLocalOrphans(ecosystemRoot string, worktrees []WorktreeState) []Workt
 	if err != nil || len(matches) == 0 {
 		return orphans
 	}
+	// Lowercase both sides of the comparison: ecosystemRoot is normalized via
+	// pathutil.NormalizeForLookup (darwin lowercases), but w.Workspace.Path
+	// retains original casing. Without normalizing the `known` map, active
+	// worktrees get re-matched as orphans on case-insensitive filesystems.
 	known := make(map[string]struct{}, len(worktrees))
 	for _, w := range worktrees {
 		if w.Workspace != nil {
-			known[filepath.Clean(w.Workspace.Path)] = struct{}{}
+			known[strings.ToLower(filepath.Clean(w.Workspace.Path))] = struct{}{}
 		}
 	}
 	sort.Strings(matches)
@@ -176,7 +180,7 @@ func DetectLocalOrphans(ecosystemRoot string, worktrees []WorktreeState) []Workt
 		// m == <root>/.grove-worktrees/<wt-name>/.grove/env/state.json
 		// → worktree path = <root>/.grove-worktrees/<wt-name>
 		wtDir := filepath.Dir(filepath.Dir(filepath.Dir(m)))
-		if _, ok := known[filepath.Clean(wtDir)]; ok {
+		if _, ok := known[strings.ToLower(filepath.Clean(wtDir))]; ok {
 			continue
 		}
 		orphan := WorktreeState{OrphanStatePath: m}
