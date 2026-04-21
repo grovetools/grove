@@ -70,18 +70,6 @@ func readEnvState() (*env.EnvStateFile, error) {
 	return &stateFile, nil
 }
 
-// writeEnvState writes the state file to .grove/env/state.json.
-func writeEnvState(stateFile *env.EnvStateFile) error {
-	if err := os.MkdirAll(envStateDir(), 0755); err != nil {
-		return fmt.Errorf("failed to create .grove/env directory: %w", err)
-	}
-	data, err := json.MarshalIndent(stateFile, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(envStatePath(), data, 0644)
-}
-
 // writeEnvLocal writes env vars to .grove/env/.env.local and .env.local (symlink or copy).
 func writeEnvLocal(envVars map[string]string) error {
 	if len(envVars) == 0 {
@@ -289,44 +277,8 @@ func newEnvUpCmd() *cobra.Command {
 				return fmt.Errorf("environment startup failed: %w", err)
 			}
 
-			// Build service states from response
-			var services []env.ServiceState
-			if resp.State != nil {
-				for k, v := range resp.State {
-					services = append(services, env.ServiceState{Name: k, Status: v})
-				}
-			}
-
-			// Collect port info from env vars (convention: FOO_PORT=1234)
-			ports := make(map[string]int)
-			for k, v := range resp.EnvVars {
-				if strings.HasSuffix(k, "_PORT") {
-					var port int
-					if _, err := fmt.Sscanf(v, "%d", &port); err == nil {
-						ports[k] = port
-					}
-				}
-			}
-
-			// Write state
-			stateFile := &env.EnvStateFile{
-				Provider:     resolved.Provider,
-				Command:      resolved.Command,
-				Environment:  profile,
-				ManagedBy:    "user",
-				Ports:        ports,
-				Services:     services,
-				EnvVars:      resp.EnvVars,
-				Endpoints:    resp.Endpoints,
-				CleanupPaths: resp.CleanupPaths,
-				Volumes:      resp.Volumes,
-				State:        resp.State,
-			}
-			if err := writeEnvState(stateFile); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not write state: %v\n", err)
-			}
-
-			// Write .env.local
+			// state.json is now written by the daemon (Manager.Up). The client
+			// only writes .env.local for tooling that reads it directly.
 			if err := writeEnvLocal(resp.EnvVars); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not write .env.local: %v\n", err)
 			}
@@ -418,8 +370,8 @@ func newEnvDownCmd() *cobra.Command {
 				}
 			}
 
-			// Clean up state files
-			os.Remove(envStatePath())
+			// state.json is removed by the daemon on successful Down. The
+			// client only cleans up .env.local artifacts.
 			os.Remove(filepath.Join(envStateDir(), ".env.local"))
 			os.Remove(filepath.Join(".", ".env.local"))
 
@@ -617,8 +569,8 @@ func newEnvRestartCmd() *cobra.Command {
 					fmt.Fprintf(os.Stderr, "Warning: teardown failed: %v\n", err)
 				}
 
-				// Clean up state
-				os.Remove(envStatePath())
+				// state.json is removed by the daemon on successful Down. The
+				// client only cleans up .env.local artifacts.
 				os.Remove(filepath.Join(envStateDir(), ".env.local"))
 				os.Remove(filepath.Join(".", ".env.local"))
 			}
@@ -675,19 +627,8 @@ func newEnvRestartCmd() *cobra.Command {
 				return fmt.Errorf("environment startup failed: %w", err)
 			}
 
-			// Write state and env vars
-			sf := &env.EnvStateFile{
-				Provider:     resolved.Provider,
-				Command:      resolved.Command,
-				Environment:  profile,
-				ManagedBy:    "user",
-				EnvVars:      resp.EnvVars,
-				Endpoints:    resp.Endpoints,
-				CleanupPaths: resp.CleanupPaths,
-				Volumes:      resp.Volumes,
-				State:        resp.State,
-			}
-			writeEnvState(sf)
+			// state.json is now written by the daemon (Manager.Up). The client
+			// only writes .env.local for tooling that reads it directly.
 			writeEnvLocal(resp.EnvVars)
 
 			if jsonOutput {
