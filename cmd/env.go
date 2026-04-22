@@ -248,36 +248,9 @@ func newEnvUpCmd() *cobra.Command {
 				req.Config["display_endpoints"] = list
 			}
 
-			// Phase 4: Prepare shared_backend_config if shared_env is configured
-			if sharedEnv, ok := resolved.Config["shared_env"].(string); ok && sharedEnv != "" {
-				sharedRef, _ := resolved.Config["shared_ref"].(string)
-				if sharedRef == "" {
-					sharedRef = "main"
-				}
-				stateBackend, _ := resolved.Config["state_backend"].(string)
-				stateBucket, _ := resolved.Config["state_bucket"].(string)
-
-				if stateBackend == "gcs" && stateBucket != "" {
-					// Determine ecosystem name from workspace
-					ecosystem := ""
-					if req.Workspace != nil && req.Workspace.ParentEcosystemPath != "" {
-						ecosystem = filepath.Base(req.Workspace.ParentEcosystemPath)
-					}
-					if ecosystem == "" && req.Workspace != nil && req.Workspace.RootEcosystemPath != "" {
-						ecosystem = filepath.Base(req.Workspace.RootEcosystemPath)
-					}
-					prefix := sharedEnv + "/" + sharedRef
-					if ecosystem != "" {
-						prefix = ecosystem + "/" + sharedEnv + "/" + sharedRef
-					}
-
-					req.Config["shared_backend_config"] = map[string]interface{}{
-						"state_backend": stateBackend,
-						"state_bucket":  stateBucket,
-						"state_prefix":  prefix,
-					}
-				}
-			}
+			// Phase 4: Prepare shared_backend_config if shared_env is configured.
+			// Logic lives in core/pkg/env so flow/cmd/plan_init.go reuses it.
+			env.ApplySharedBackendConfig(&req)
 
 			// Resolve provider
 			var client env.DaemonEnvClient
