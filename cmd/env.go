@@ -179,6 +179,8 @@ func worktreeRootFromPath(cwd string) string {
 func newEnvUpCmd() *cobra.Command {
 	var envProfile string
 	var jsonOutput bool
+	var rebuildFlag string
+	var rebuildSet bool
 
 	cmd := &cobra.Command{
 		Use:   "up",
@@ -210,6 +212,22 @@ func newEnvUpCmd() *cobra.Command {
 				PlanDir:   stateDir, // backward compat
 				Config:    resolved.Config,
 				ManagedBy: "user",
+			}
+
+			// --rebuild plumbing:
+			//   (no flag)           → Rebuild = nil (respect fingerprint cache)
+			//   --rebuild           → Rebuild = ["all"]
+			//   --rebuild=api,web   → Rebuild = ["api", "web"]
+			if rebuildSet {
+				if rebuildFlag == "" {
+					req.Rebuild = []string{"all"}
+				} else {
+					parts := strings.Split(rebuildFlag, ",")
+					for i := range parts {
+						parts[i] = strings.TrimSpace(parts[i])
+					}
+					req.Rebuild = parts
+				}
 			}
 
 			// Attach workspace node
@@ -301,8 +319,32 @@ func newEnvUpCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&envProfile, "env", "", "Override the active environment profile")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
+	// --rebuild / --rebuild=svc,svc: force rebuild of all or selected images,
+	// bypassing the fingerprint cache. Declared as an optional-argument flag
+	// so `--rebuild` (no value) also works.
+	rebuildFlagObj := cmd.Flags().VarPF(&rebuildValue{v: &rebuildFlag, set: &rebuildSet}, "rebuild", "", "Force rebuild of images (all if no value, or comma-separated service names)")
+	rebuildFlagObj.NoOptDefVal = " "
 	return cmd
 }
+
+// rebuildValue implements pflag.Value so --rebuild can be used either as
+// a bare flag (force rebuild everything) or with a value (--rebuild=api,web).
+type rebuildValue struct {
+	v   *string
+	set *bool
+}
+
+func (r *rebuildValue) String() string { return *r.v }
+func (r *rebuildValue) Set(s string) error {
+	// NoOptDefVal passes " " when the flag is bare; normalize to empty.
+	if s == " " {
+		s = ""
+	}
+	*r.v = s
+	*r.set = true
+	return nil
+}
+func (r *rebuildValue) Type() string { return "string" }
 
 func newEnvDownCmd() *cobra.Command {
 	var jsonOutput bool
