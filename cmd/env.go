@@ -58,6 +58,87 @@ func envStatePath() string {
 	return filepath.Join(envStateDir(), "state.json")
 }
 
+// envLastProfilePath returns the path to the sidecar file that persists the
+// most recently used profile across `env down`. Consulted by `grove env cmd`
+// when no env is active so `env cmd <name>` resolves against the profile the
+// user just ran instead of silently falling back to the `default` provider.
+func envLastProfilePath() string {
+	return filepath.Join(envStateDir(), "last_profile")
+}
+
+// writeLastProfile persists the most recently used profile so `env cmd` can
+// fall back to it after `env down`. Errors are non-fatal — the sidecar only
+// improves UX; env up/down should not fail because of it.
+func writeLastProfile(profile string) {
+	if profile == "" {
+		profile = "default"
+	}
+	if err := os.MkdirAll(envStateDir(), 0755); err != nil {
+		return
+	}
+	_ = os.WriteFile(envLastProfilePath(), []byte(profile+"\n"), 0644)
+}
+
+// readLastProfile returns the persisted last-used profile or "" if none was
+// recorded.
+func readLastProfile() string {
+	data, err := os.ReadFile(envLastProfilePath())
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// resolveEnvCmdProfile picks the profile name `grove env cmd` should use.
+// Precedence:
+//  1. explicit --env flag
+//  2. active env's profile (state.json from a running env up)
+//  3. last-used profile sidecar (survives env down; prevents silent
+//     fall-through to the `default` provider after teardown)
+//  4. clear error listing available profiles
+//
+// Pre-sidecar, `grove env cmd load` after `env down` silently resolved to the
+// default profile. For profiles that expect ports only the previous profile
+// allocated (CLICKHOUSE_PORT from docker-local, for example), that emitted
+// cobra usage + "connection refused" instead of a useful error — which is
+// what triggered adding this helper.
+//
+// Returns (profile, optional note to print to stderr, error).
+func resolveEnvCmdProfile(envFlag string, cfg *config.Config) (string, string, error) {
+	if envFlag != "" {
+		return envFlag, "", nil
+	}
+	if sf, err := readEnvState(); err == nil && sf != nil {
+		return sf.Environment, "", nil
+	}
+	if last := readLastProfile(); last != "" {
+		note := fmt.Sprintf("grove: using last-active profile %q (no active env; pass --env to override)\n", last)
+		return last, note, nil
+	}
+	profiles := availableProfiles(cfg)
+	profilesStr := "(none configured)"
+	if len(profiles) > 0 {
+		profilesStr = strings.Join(profiles, ", ")
+	}
+	return "", "", fmt.Errorf("no active environment in this worktree and no last-used profile recorded.\n  hint: pass --env <profile> or run 'grove env up' first.\n  available profiles: %s", profilesStr)
+}
+
+// availableProfiles returns the names of configured profiles from grove.toml
+// (including the unnamed default), sorted for stable error-message output.
+func availableProfiles(cfg *config.Config) []string {
+	names := []string{}
+	if cfg != nil && cfg.Environment != nil {
+		names = append(names, "default")
+	}
+	if cfg != nil {
+		for k := range cfg.Environments {
+			names = append(names, k)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 // readEnvState reads and parses the state file from .grove/env/state.json.
 func readEnvState() (*env.EnvStateFile, error) {
 	data, err := os.ReadFile(envStatePath())
@@ -274,6 +355,9 @@ func newEnvUpCmd() *cobra.Command {
 			if err := writeEnvLocal(resp.EnvVars); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not write .env.local: %v\n", err)
 			}
+			// Sidecar: remember this profile so post-`env down` `env cmd`
+			// calls fall back to it rather than silently resolving default.
+			writeLastProfile(profile)
 
 			if jsonOutput {
 				json.NewEncoder(os.Stdout).Encode(resp)
@@ -371,6 +455,19 @@ func newEnvDownCmd() *cobra.Command {
 			if !jsonOutput {
 				fmt.Printf("Stopping %s environment...\n", stateFile.Provider)
 			}
+
+			// Snapshot the profile to a sidecar BEFORE teardown so
+			// `grove env cmd` can fall back to it later. state.json is
+			// removed by the daemon on a successful Down, which would
+			// otherwise lose this information.
+			snapshotProfile := stateFile.LastProfile
+			if snapshotProfile == "" {
+				snapshotProfile = stateFile.Environment
+			}
+			if snapshotProfile == "" {
+				snapshotProfile = "default"
+			}
+			writeLastProfile(snapshotProfile)
 
 			if err := prov.Down(context.Background(), req); err != nil {
 				return fmt.Errorf("environment teardown failed: %w", err)
@@ -646,6 +743,7 @@ func newEnvRestartCmd() *cobra.Command {
 			// state.json is now written by the daemon (Manager.Up). The client
 			// only writes .env.local for tooling that reads it directly.
 			writeEnvLocal(resp.EnvVars)
+			writeLastProfile(profile)
 
 			if jsonOutput {
 				json.NewEncoder(os.Stdout).Encode(resp)
@@ -1019,15 +1117,22 @@ func newEnvCmdRunCmd() *cobra.Command {
 		Use:   "cmd [command_name]",
 		Short: "Run an environment-specific command",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Once flag parsing has succeeded, any error from here on is a
+			// runtime failure (profile resolution, script exit) rather than
+			// misuse — the flag-help block just drowns out the real message.
+			cmd.SilenceUsage = true
+
 			cfg, err := config.LoadDefault()
 			if err != nil {
 				return err
 			}
 
-			// Determine active profile
-			profile := envProfile
-			if profile == "" {
-				profile, _ = state.GetString("environment")
+			profile, note, rerr := resolveEnvCmdProfile(envProfile, cfg)
+			if rerr != nil {
+				return rerr
+			}
+			if note != "" {
+				fmt.Fprint(os.Stderr, note)
 			}
 
 			resolved, err := config.ResolveEnvironment(cfg, profile)
