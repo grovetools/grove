@@ -149,6 +149,27 @@ func readStateFile(stateDir string) *coreenv.EnvStateFile {
 	return &sf
 }
 
+// FormatWorktreeStateSummary produces the short "● running" / "☁ applied" /
+// "◯ inactive" label shown in the CLI tables and the (shrunk) TUI grid.
+// Exported so `grove env ecosystem` keeps the same terminology as the TUI.
+func FormatWorktreeStateSummary(state WorktreeState) string {
+	if state.EnvState == nil {
+		return "inactive"
+	}
+	running := len(state.EnvState.Services) > 0 || len(state.EnvState.Endpoints) > 0
+	cloud := state.EnvState.Provider == "terraform"
+	switch {
+	case running && cloud:
+		return "● running · ☁ applied"
+	case running:
+		return "● running"
+	case cloud:
+		return "☁ applied"
+	default:
+		return "inactive"
+	}
+}
+
 // DetectLocalOrphans returns a WorktreeState for every .grove/env/state.json
 // under the ecosystem's .grove-worktrees/ directory that isn't owned by a
 // known worktree. Each returned state has Workspace == nil and
