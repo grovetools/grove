@@ -331,6 +331,26 @@ func newEnvUpCmd() *cobra.Command {
 				req.Config["display_endpoints"] = list
 			}
 
+			// Forward named commands into the provider config so the daemon
+			// can run any entries flagged `startup = true` after services are
+			// healthy. Sibling Commands stays the source of truth for
+			// `grove env cmd` lookups; this is just a transport-layer copy.
+			if len(resolved.Commands) > 0 {
+				if req.Config == nil {
+					req.Config = make(map[string]interface{})
+				}
+				cmds := make(map[string]interface{}, len(resolved.Commands))
+				for k, v := range resolved.Commands {
+					switch typed := v.(type) {
+					case string:
+						cmds[k] = map[string]interface{}{"command": typed}
+					case map[string]interface{}:
+						cmds[k] = typed
+					}
+				}
+				req.Config["commands"] = cmds
+			}
+
 			// Phase 4: Prepare shared_backend_config if shared_env is configured.
 			// Logic lives in core/pkg/env so flow/cmd/plan_init.go reuses it.
 			env.ApplySharedBackendConfig(&req)
@@ -1112,6 +1132,24 @@ func newEnvDefaultCmd() *cobra.Command {
 	return cmd
 }
 
+// extractCommandString resolves an EnvironmentConfig.Commands entry into the
+// shell string to execute. The schema accepts two forms:
+//
+//   - flat: `name = "shell command"`
+//   - table: `[environment.commands.name] command = "..." startup = true`
+//
+// Other types return "".
+func extractCommandString(raw interface{}) string {
+	switch v := raw.(type) {
+	case string:
+		return v
+	case map[string]interface{}:
+		s, _ := v["command"].(string)
+		return s
+	}
+	return ""
+}
+
 func newEnvCmdRunCmd() *cobra.Command {
 	var envProfile string
 	cmd := &cobra.Command{
@@ -1157,19 +1195,23 @@ func newEnvCmdRunCmd() *cobra.Command {
 
 				fmt.Println("Available commands:")
 				for _, name := range names {
-					fmt.Printf("  %-15s %s\n", name, resolved.Commands[name])
+					fmt.Printf("  %-15s %s\n", name, extractCommandString(resolved.Commands[name]))
 				}
 				return nil
 			}
 
 			cmdName := args[0]
-			cmdStr, exists := resolved.Commands[cmdName]
+			raw, exists := resolved.Commands[cmdName]
 			if !exists {
 				profileDesc := "default"
 				if profile != "" {
 					profileDesc = profile
 				}
 				return fmt.Errorf("command %q not defined in environment %q", cmdName, profileDesc)
+			}
+			cmdStr := extractCommandString(raw)
+			if cmdStr == "" {
+				return fmt.Errorf("command %q has no command string", cmdName)
 			}
 
 			// Load .env.local if it exists and inject into the command environment
