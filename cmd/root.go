@@ -268,5 +268,14 @@ func delegateToTool(toolName string, args []string) error {
 		cmd.Env = cmdEnv
 	}
 
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		// Propagate the child's exit code so callers (including Claude Code's
+		// asyncRewake at exit 2) see the real status. Without this, Cobra
+		// rewrites every non-zero exit to 1.
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		}
+		return err
+	}
+	return nil
 }
