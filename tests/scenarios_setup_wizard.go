@@ -410,7 +410,7 @@ func SetupWizardTUINavigationScenario() *harness.Scenario {
 				}
 
 				// Wait for config format step
-				if err := session.WaitForText("Configuration Format", 5*time.Second); err != nil {
+				if err := session.WaitForText("TOML is recommended", 5*time.Second); err != nil {
 					content, _ := session.Capture(tui.WithCleanedOutput())
 					return fmt.Errorf("config format step not reached: %w\nContent:\n%s", err, content)
 				}
@@ -511,12 +511,12 @@ func SetupWizardTUIFullWorkflowScenario() *harness.Scenario {
 			harness.NewStep("Deselect non-essential components", func(ctx *harness.Context) error {
 				session := ctx.Get("tui_session").(*tui.Session)
 
-				// Navigate down to Gemini (3rd item) and deselect it
-				if err := session.Type("j"); err != nil {
-					return err
-				}
-				if err := session.Type("j"); err != nil {
-					return err
+				// Component order: tui, ecosystem, notebook, gemini, flow, ...
+				// Navigate down to Gemini (4th item, index 3) and deselect it
+				for i := 0; i < 3; i++ {
+					if err := session.Type("j"); err != nil {
+						return err
+					}
 				}
 				// Toggle off Gemini
 				if err := session.Type(" "); err != nil {
@@ -534,7 +534,7 @@ func SetupWizardTUIFullWorkflowScenario() *harness.Scenario {
 				}
 
 				// Config format step - accept TOML default
-				if err := session.WaitForText("Configuration Format", 5*time.Second); err != nil {
+				if err := session.WaitForText("TOML is recommended", 5*time.Second); err != nil {
 					return err
 				}
 				if err := session.Type("Enter"); err != nil {
@@ -582,7 +582,7 @@ func SetupWizardTUIFullWorkflowScenario() *harness.Scenario {
 				}
 
 				// Review step - confirm to apply
-				if err := session.WaitForText("Review Configuration", 5*time.Second); err != nil {
+				if err := session.WaitForText("Configuration will be written to", 5*time.Second); err != nil {
 					return err
 				}
 				if err := session.Type("Enter"); err != nil {
@@ -653,23 +653,19 @@ func SetupWizardTUIDeselectAllScenario() *harness.Scenario {
 			harness.NewStep("Deselect all components", func(ctx *harness.Context) error {
 				session := ctx.Get("tui_session").(*tui.Session)
 
-				// Toggle off ecosystem (first item, already focused)
-				if err := session.Type(" "); err != nil {
-					return err
-				}
-				// Move to notebook and toggle off
-				if err := session.Type("j"); err != nil {
-					return err
-				}
-				if err := session.Type(" "); err != nil {
-					return err
-				}
-				// Move to gemini and toggle off
-				if err := session.Type("j"); err != nil {
-					return err
-				}
-				if err := session.Type(" "); err != nil {
-					return err
+				// Component order: tui, ecosystem, notebook, gemini, flow, ...
+				// Default-selected: tui, ecosystem, notebook, gemini, flow.
+				// Toggle each one off, advancing one row between toggles.
+				for i := 0; i < 5; i++ {
+					if err := session.Type(" "); err != nil {
+						return err
+					}
+					if i == 4 {
+						break
+					}
+					if err := session.Type("j"); err != nil {
+						return err
+					}
 				}
 
 				return nil
@@ -683,7 +679,7 @@ func SetupWizardTUIDeselectAllScenario() *harness.Scenario {
 				}
 
 				// Config format step still appears
-				if err := session.WaitForText("Configuration Format", 5*time.Second); err != nil {
+				if err := session.WaitForText("TOML is recommended", 5*time.Second); err != nil {
 					content, _ := session.Capture(tui.WithCleanedOutput())
 					return fmt.Errorf("config format not reached: %w\nContent:\n%s", err, content)
 				}
@@ -692,7 +688,7 @@ func SetupWizardTUIDeselectAllScenario() *harness.Scenario {
 				}
 
 				// Review step
-				if err := session.WaitForText("Review Configuration", 5*time.Second); err != nil {
+				if err := session.WaitForText("Configuration will be written to", 5*time.Second); err != nil {
 					content, _ := session.Capture(tui.WithCleanedOutput())
 					return fmt.Errorf("review not reached: %w\nContent:\n%s", err, content)
 				}
@@ -883,7 +879,7 @@ func SetupWizardTUIQuitScenario() *harness.Scenario {
 				}
 
 				// Config format step
-				if err := session.WaitForText("Configuration Format", 5*time.Second); err != nil {
+				if err := session.WaitForText("TOML is recommended", 5*time.Second); err != nil {
 					return err
 				}
 				if err := session.Type("Enter"); err != nil {
