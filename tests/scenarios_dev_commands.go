@@ -77,7 +77,7 @@ func DevCwdWorkflow() *harness.Scenario {
 			}),
 			harness.NewStep("Verify main binaries are active", func(ctx *harness.Context) error {
 				// Verify symlink
-				groveHome := filepath.Join(ctx.HomeDir(), ".grove")
+				groveHome := filepath.Join(ctx.HomeDir(), ".local", "share", "grove")
 				symlinkPath := filepath.Join(groveHome, "bin", "flow")
 				target, err := os.Readlink(symlinkPath)
 				if err != nil {
@@ -101,7 +101,7 @@ func DevCwdWorkflow() *harness.Scenario {
 			}),
 			harness.NewStep("Execute flow binary from main", func(ctx *harness.Context) error {
 				// Execute the binary via the symlink
-				groveHome := filepath.Join(ctx.HomeDir(), ".grove")
+				groveHome := filepath.Join(ctx.HomeDir(), ".local", "share", "grove")
 				flowPath := filepath.Join(groveHome, "bin", "flow")
 
 				result := ctx.Command(flowPath).Run()
@@ -123,7 +123,7 @@ func DevCwdWorkflow() *harness.Scenario {
 			}),
 			harness.NewStep("Verify feature binaries are active", func(ctx *harness.Context) error {
 				// Verify symlink
-				groveHome := filepath.Join(ctx.HomeDir(), ".grove")
+				groveHome := filepath.Join(ctx.HomeDir(), ".local", "share", "grove")
 				symlinkPath := filepath.Join(groveHome, "bin", "flow")
 				target, err := os.Readlink(symlinkPath)
 				if err != nil {
@@ -147,7 +147,7 @@ func DevCwdWorkflow() *harness.Scenario {
 			}),
 			harness.NewStep("Execute flow binary from feature", func(ctx *harness.Context) error {
 				// Execute the binary via the symlink
-				groveHome := filepath.Join(ctx.HomeDir(), ".grove")
+				groveHome := filepath.Join(ctx.HomeDir(), ".local", "share", "grove")
 				flowPath := filepath.Join(groveHome, "bin", "flow")
 
 				result := ctx.Command(flowPath).Run()
@@ -187,8 +187,7 @@ func DevLinkAndUseWorkflow() *harness.Scenario {
 			}),
 			harness.NewStep("Verify 'main' is active by default", func(ctx *harness.Context) error {
 				// Verify devlinks.json
-				groveHome := filepath.Join(ctx.HomeDir(), ".grove")
-				configPath := filepath.Join(groveHome, "devlinks.json")
+				configPath := filepath.Join(ctx.HomeDir(), ".local", "state", "grove", "devlinks.json")
 				content, err := fs.ReadString(configPath)
 				if err != nil {
 					return fmt.Errorf("failed to read devlinks.json: %w", err)
@@ -203,7 +202,7 @@ func DevLinkAndUseWorkflow() *harness.Scenario {
 				})
 			}),
 			harness.NewStep("Execute flow to verify main version", func(ctx *harness.Context) error {
-				groveHome := filepath.Join(ctx.HomeDir(), ".grove")
+				groveHome := filepath.Join(ctx.HomeDir(), ".local", "share", "grove")
 				flowPath := filepath.Join(groveHome, "bin", "flow")
 
 				result := ctx.Command(flowPath).Run()
@@ -219,7 +218,7 @@ func DevLinkAndUseWorkflow() *harness.Scenario {
 				return ctx.Check("run 'grove dev use'", result.AssertSuccess())
 			}),
 			harness.NewStep("Verify 'feature' is now active", func(ctx *harness.Context) error {
-				groveHome := filepath.Join(ctx.HomeDir(), ".grove")
+				groveHome := filepath.Join(ctx.HomeDir(), ".local", "share", "grove")
 				flowPath := filepath.Join(groveHome, "bin", "flow")
 
 				result := ctx.Command(flowPath).Run()
@@ -230,8 +229,7 @@ func DevLinkAndUseWorkflow() *harness.Scenario {
 				})
 			}),
 			harness.NewStep("Verify devlinks.json was updated", func(ctx *harness.Context) error {
-				groveHome := filepath.Join(ctx.HomeDir(), ".grove")
-				configPath := filepath.Join(groveHome, "devlinks.json")
+				configPath := filepath.Join(ctx.HomeDir(), ".local", "state", "grove", "devlinks.json")
 				content, err := fs.ReadString(configPath)
 				if err != nil {
 					return fmt.Errorf("failed to read devlinks.json: %w", err)
@@ -276,7 +274,7 @@ func DevPointWorkflow() *harness.Scenario {
 				return ctx.Check("set global dev link", result.AssertSuccess())
 			}),
 			harness.NewStep("Verify global default is used", func(ctx *harness.Context) error {
-				groveHome := filepath.Join(ctx.HomeDir(), ".grove")
+				groveHome := filepath.Join(ctx.HomeDir(), ".local", "share", "grove")
 				flowPath := filepath.Join(groveHome, "bin", "flow")
 
 				result := ctx.Command(flowPath).Run()
