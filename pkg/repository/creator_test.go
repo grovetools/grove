@@ -38,13 +38,13 @@ func TestValidateCreateOptions(t *testing.T) {
 	// Create a mock grove-ecosystem setup
 	tmpDir := t.TempDir()
 	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tmpDir)
+	defer func() { _ = os.Chdir(oldDir) }()
+	_ = os.Chdir(tmpDir)
 
 	// Create necessary files for validation
-	os.WriteFile("grove.yml", []byte("name: grove-ecosystem"), 0644)
-	os.WriteFile("go.work", []byte("go 1.24.4"), 0644)
-	os.WriteFile("Makefile", []byte("BINARIES = grove"), 0644)
+	_ = os.WriteFile("grove.yml", []byte("name: grove-ecosystem"), 0644)
+	_ = os.WriteFile("go.work", []byte("go 1.24.4"), 0644)
+	_ = os.WriteFile("Makefile", []byte("BINARIES = grove"), 0644)
 
 	tests := []struct {
 		name        string
@@ -156,13 +156,13 @@ func TestDryRun(t *testing.T) {
 	// Create a mock grove-ecosystem setup
 	tmpDir := t.TempDir()
 	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tmpDir)
+	defer func() { _ = os.Chdir(oldDir) }()
+	_ = os.Chdir(tmpDir)
 
 	// Create necessary files
-	os.WriteFile("grove.yml", []byte("name: grove-ecosystem"), 0644)
-	os.WriteFile("go.work", []byte("go 1.24.4"), 0644)
-	os.WriteFile("Makefile", []byte("BINARIES = grove"), 0644)
+	_ = os.WriteFile("grove.yml", []byte("name: grove-ecosystem"), 0644)
+	_ = os.WriteFile("go.work", []byte("go 1.24.4"), 0644)
+	_ = os.WriteFile("Makefile", []byte("BINARIES = grove"), 0644)
 
 	opts := CreateOptions{
 		Name:        "grove-dryrun",
@@ -196,8 +196,8 @@ func TestGenerateSkeleton(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tmpDir)
+	defer func() { _ = os.Chdir(oldDir) }()
+	_ = os.Chdir(tmpDir)
 
 	opts := CreateOptions{
 		Name:        "grove-skeleton",
@@ -300,11 +300,11 @@ func TestRollback(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tmpDir)
+	defer func() { _ = os.Chdir(oldDir) }()
+	_ = os.Chdir(tmpDir)
 
 	// Create necessary files
-	os.WriteFile("go.work", []byte("go 1.24.4\n\nuse (\n\t./existing\n)\n"), 0644)
+	_ = os.WriteFile("go.work", []byte("go 1.24.4\n\nuse (\n\t./existing\n)\n"), 0644)
 
 	opts := CreateOptions{
 		Name:        "grove-rollback",
@@ -314,7 +314,7 @@ func TestRollback(t *testing.T) {
 	}
 
 	// Create a directory to simulate partial creation
-	os.Mkdir(opts.Name, 0755)
+	_ = os.Mkdir(opts.Name, 0755)
 
 	state := &creationState{
 		localRepoCreated: true,

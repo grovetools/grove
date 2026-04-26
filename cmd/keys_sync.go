@@ -369,7 +369,6 @@ func runKeysSyncImport(importAll bool) error {
 				for i := len(toImport); i < len(external); i++ {
 					toImport = append(toImport, external[i])
 				}
-				break
 			case "q", "quit":
 				fmt.Println()
 				fmt.Println(t.Muted.Render("  Import cancelled."))

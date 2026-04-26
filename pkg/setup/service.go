@@ -25,10 +25,10 @@ type Action struct {
 type ActionType string
 
 const (
-	ActionWriteFile      ActionType = "write_file"
-	ActionAppendFile     ActionType = "append_file"
-	ActionCreateDir      ActionType = "create_dir"
-	ActionUpdateYAML     ActionType = "update_yaml"
+	ActionWriteFile       ActionType = "write_file"
+	ActionAppendFile      ActionType = "append_file"
+	ActionCreateDir       ActionType = "create_dir"
+	ActionUpdateYAML      ActionType = "update_yaml"
 	ActionCreateEcosystem ActionType = "create_ecosystem"
 )
 
@@ -84,7 +84,7 @@ func (s *Service) WriteFile(path string, content []byte, perm os.FileMode) error
 
 	// Ensure parent directory exists
 	dir := filepath.Dir(expandedPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		s.logAction(ActionWriteFile, description, expandedPath, false, err)
 		return fmt.Errorf("failed to create directory %s: %w", dir, err)
 	}
@@ -113,13 +113,13 @@ func (s *Service) AppendToFile(path string, content string) error {
 
 	// Ensure parent directory exists
 	dir := filepath.Dir(expandedPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		s.logAction(ActionAppendFile, description, expandedPath, false, err)
 		return fmt.Errorf("failed to create directory %s: %w", dir, err)
 	}
 
 	// Open file for appending, create if not exists
-	f, err := os.OpenFile(expandedPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(expandedPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		s.logAction(ActionAppendFile, description, expandedPath, false, err)
 		return fmt.Errorf("failed to open file %s: %w", path, err)
@@ -290,7 +290,7 @@ func (s *Service) ReplaceInFile(path, old, new string) error {
 	}
 
 	newContent := strings.ReplaceAll(string(content), old, new)
-	if err := os.WriteFile(expandedPath, []byte(newContent), 0644); err != nil {
+	if err := os.WriteFile(expandedPath, []byte(newContent), 0o644); err != nil {
 		s.logAction(ActionWriteFile, description, expandedPath, false, err)
 		return fmt.Errorf("failed to write %s: %w", path, err)
 	}

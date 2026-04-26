@@ -381,7 +381,7 @@ func newEnvUpCmd() *cobra.Command {
 			writeLastProfile(profile)
 
 			if jsonOutput {
-				json.NewEncoder(os.Stdout).Encode(resp)
+				_ = json.NewEncoder(os.Stdout).Encode(resp)
 			} else {
 				fmt.Printf("Environment started (%s)\n", resp.Status)
 				if len(resp.EnvVars) > 0 {
@@ -513,7 +513,7 @@ func newEnvDownCmd() *cobra.Command {
 			os.Remove(envStateDir())
 
 			if jsonOutput {
-				json.NewEncoder(os.Stdout).Encode(map[string]string{"status": "stopped"})
+				_ = json.NewEncoder(os.Stdout).Encode(map[string]string{"status": "stopped"})
 			} else {
 				fmt.Println("Environment stopped")
 			}
@@ -579,7 +579,7 @@ func runEnvStatusLocal(jsonOutput bool) error {
 				"sticky_default": sticky,
 				"config_default": configDefault,
 			}
-			json.NewEncoder(os.Stdout).Encode(payload)
+			_ = json.NewEncoder(os.Stdout).Encode(payload)
 			return nil
 		}
 		fmt.Println("No environment running")
@@ -599,7 +599,7 @@ func runEnvStatusLocal(jsonOutput bool) error {
 			"sticky_default": sticky,
 			"config_default": configDefault,
 		}
-		json.NewEncoder(os.Stdout).Encode(payload)
+		_ = json.NewEncoder(os.Stdout).Encode(payload)
 		return nil
 	}
 
@@ -649,7 +649,7 @@ func runEnvStatusForWorktree(worktree string, jsonOutput bool) error {
 	}
 
 	if jsonOutput {
-		json.NewEncoder(os.Stdout).Encode(resp)
+		_ = json.NewEncoder(os.Stdout).Encode(resp)
 		return nil
 	}
 
@@ -763,11 +763,11 @@ func newEnvRestartCmd() *cobra.Command {
 
 			// state.json is now written by the daemon (Manager.Up). The client
 			// only writes .env.local for tooling that reads it directly.
-			writeEnvLocal(resp.EnvVars)
+			_ = writeEnvLocal(resp.EnvVars)
 			writeLastProfile(profile)
 
 			if jsonOutput {
-				json.NewEncoder(os.Stdout).Encode(resp)
+				_ = json.NewEncoder(os.Stdout).Encode(resp)
 			} else {
 				fmt.Printf("Environment restarted (%s)\n", resp.Status)
 			}
@@ -795,7 +795,7 @@ func newEnvVarsCmd() *cobra.Command {
 			}
 
 			if jsonOutput {
-				json.NewEncoder(os.Stdout).Encode(stateFile.EnvVars)
+				_ = json.NewEncoder(os.Stdout).Encode(stateFile.EnvVars)
 				return nil
 			}
 

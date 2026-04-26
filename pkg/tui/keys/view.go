@@ -227,8 +227,10 @@ func newCanonicalPage(m *Model) *CanonicalPage {
 	}
 }
 
-func (p *CanonicalPage) Name() string  { return "Canonical" }
-func (p *CanonicalPage) Title() string { return theme.IconViewDashboard + " Canonical Actions & Consistency" }
+func (p *CanonicalPage) Name() string { return "Canonical" }
+func (p *CanonicalPage) Title() string {
+	return theme.IconViewDashboard + " Canonical Actions & Consistency"
+}
 
 func (p *CanonicalPage) Init() tea.Cmd { return nil }
 

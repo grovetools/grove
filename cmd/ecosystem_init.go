@@ -152,11 +152,11 @@ clean:
 		// Add and commit
 		gitAdd := exec.Command("git", "add", ".")
 		gitAdd.Dir = targetDir
-		gitAdd.Run()
+		_ = gitAdd.Run()
 
 		gitCommit := exec.Command("git", "commit", "-m", "feat: initialize Grove ecosystem")
 		gitCommit.Dir = targetDir
-		gitCommit.Run()
+		_ = gitCommit.Run()
 	}
 
 	fmt.Printf("\n%s Ecosystem created!\n", theme.IconSuccess)

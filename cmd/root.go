@@ -100,7 +100,7 @@ func printAvailableTools(t *theme.Theme) {
 	}
 
 	// Use a blue style for tool names
-	blue := t.Bold.Copy().Foreground(t.Colors.Blue)
+	blue := t.Bold.Foreground(t.Colors.Blue)
 
 	fmt.Println("\n " + t.Bold.Render("AVAILABLE TOOLS"))
 	fmt.Printf(" %s  %s  %s\n",
@@ -115,7 +115,7 @@ func printAvailableTools(t *theme.Theme) {
 	}
 
 	// Examples
-	cyan := t.Bold.Copy().Foreground(t.Colors.Cyan)
+	cyan := t.Bold.Foreground(t.Colors.Cyan)
 	fmt.Println("\n " + t.Muted.Render("Command examples:"))
 	fmt.Printf("   %s %s  %s\n", cyan.Render("grove"), blue.Render(pad("install cx", 16)), t.Muted.Render("# Install a tool"))
 	fmt.Printf("   %s %s  %s\n", cyan.Render("grove"), blue.Render(pad("setup", 16)), t.Muted.Render("# Run setup wizard"))

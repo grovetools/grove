@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -378,59 +377,6 @@ func runVerboseBuildWaves(waves [][]build.BuildJob, opts *build.RunOptions) erro
 	return nil
 }
 
-func runVerboseBuild(jobs []build.BuildJob) error {
-	ctx := context.Background()
-	continueOnError := !buildFailFast
-	resultsChan := build.Run(ctx, jobs, buildJobs, continueOnError)
-
-	var successCount, failCount int
-	var printMutex sync.Mutex
-	totalJobs := len(jobs)
-	pretty := logging.NewPrettyLogger()
-
-	pretty.Progress(fmt.Sprintf("Starting parallel build of %d projects (using %d workers)", totalJobs, buildJobs))
-	pretty.Blank()
-
-	for result := range resultsChan {
-		printMutex.Lock()
-		completed := successCount + failCount + 1
-		progress := fmt.Sprintf("[%d/%d]", completed, totalJobs)
-
-		buildUlog.Progress("Building project").
-			Field("name", result.Job.Name).
-			Field("completed", completed).
-			Field("total", totalJobs).
-			Pretty(fmt.Sprintf("\n%s Building %s...", progress, result.Job.Name)).
-			Emit()
-		pretty.Divider()
-
-		if len(result.Output) > 0 {
-			os.Stdout.Write(result.Output)
-		}
-
-		if result.Err != nil {
-			failCount++
-			pretty.Status("error", fmt.Sprintf("Failed (%v)", result.Duration.Round(time.Millisecond)))
-			if result.Err.Error() != "exit status 1" && result.Err.Error() != "exit status 2" {
-				pretty.ErrorPretty("Error", result.Err)
-			}
-		} else {
-			successCount++
-			pretty.Status("success", fmt.Sprintf("Success (%v)", result.Duration.Round(time.Millisecond)))
-		}
-		printMutex.Unlock()
-	}
-
-	pretty.Blank()
-	pretty.Divider()
-	pretty.InfoPretty(fmt.Sprintf("Build finished. Success: %d, Failed: %d", successCount, failCount))
-	if failCount > 0 {
-		return fmt.Errorf("%d builds failed", failCount)
-	}
-	return nil
-}
-
-
 // TUI types and functions
 
 type projectStatus struct {
@@ -455,7 +401,6 @@ type tuiModel struct {
 	maxLogLines   int
 	viewMode      string // "list" or "logs"
 	width, height int
-	err           error
 	finished      bool
 	interactive   bool
 	successCount  int
@@ -469,10 +414,6 @@ type tuiModel struct {
 type buildsStartedMsg struct {
 	eventsChan  <-chan build.BuildEvent
 	jobIndexMap map[string]int
-}
-
-func runTuiBuild(jobs []build.BuildJob) error {
-	return runTuiBuildWithOpts(jobs, nil)
 }
 
 func runTuiBuildWithOpts(jobs []build.BuildJob, opts *build.RunOptions) error {

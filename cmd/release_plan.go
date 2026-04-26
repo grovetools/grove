@@ -92,7 +92,7 @@ func runReleasePlan(ctx context.Context, isRC bool) (*release.ReleasePlan, error
 	}
 
 	// If using --with-deps, force include auto-dependencies even if they don't have changes
-	if releaseWithDeps && autoDependencies != nil {
+	if releaseWithDeps && len(autoDependencies) > 0 {
 		for dep := range autoDependencies {
 			if !hasChanges[dep] {
 				hasChanges[dep] = true

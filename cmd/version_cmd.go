@@ -256,7 +256,7 @@ func runVersionUse(cmd *cobra.Command, args []string) error {
 			logger.Infof("Clearing dev override for %s", toolName)
 			pretty.InfoPretty(fmt.Sprintf("Clearing dev override for %s", toolName))
 			binInfo.Current = ""
-			devlinks.SaveConfig(devConfig)
+			_ = devlinks.SaveConfig(devConfig)
 		}
 	}
 

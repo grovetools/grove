@@ -5,8 +5,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/invopop/jsonschema"
 	"github.com/grovetools/grove/pkg/llmconfig"
+	"github.com/invopop/jsonschema"
 )
 
 func main() {
@@ -29,7 +29,7 @@ func main() {
 	}
 
 	// Write to the package root
-	if err := os.WriteFile("llm.schema.json", data, 0644); err != nil {
+	if err := os.WriteFile("llm.schema.json", data, 0o644); err != nil { //nolint:gosec // G306: internal tool, non-sensitive config file
 		log.Fatalf("Error writing schema file: %v", err)
 	}
 

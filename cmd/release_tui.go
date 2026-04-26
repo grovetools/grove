@@ -56,9 +56,6 @@ type releaseTuiModel struct {
 	help          help.Model
 	width         int
 	height        int
-	err           error
-	applyOutput   string
-	applying      bool
 	generating    bool          // Whether changelog generation is in progress
 	genProgress   string        // Progress message for generation
 	spinner       int           // Spinner animation frame
@@ -187,7 +184,7 @@ func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				// Save the updated plan
-				release.SavePlan(m.plan)
+				_ = release.SavePlan(m.plan)
 			}
 		}
 		
@@ -310,7 +307,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if selectedCount > 0 {
 			m.genProgress = fmt.Sprintf("%s Selected %d repositories", theme.IconSuccess, selectedCount)
 			// Save the updated plan
-			release.SavePlan(m.plan)
+			_ = release.SavePlan(m.plan)
 			return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 				return clearProgressMsg{}
 			})
@@ -332,7 +329,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if deselectedCount > 0 {
 			m.genProgress = fmt.Sprintf("%s Deselected %d repositories", theme.IconSuccess, deselectedCount)
 			// Save the updated plan
-			release.SavePlan(m.plan)
+			_ = release.SavePlan(m.plan)
 			return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 				return clearProgressMsg{}
 			})
@@ -431,7 +428,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.genProgress = fmt.Sprintf("%s Applied %s version bump to %s", theme.IconSuccess,
 						strings.ToUpper(repo.SuggestedBump), repoName)
 					// Save the updated plan
-					release.SavePlan(m.plan)
+					_ = release.SavePlan(m.plan)
 					// Clear progress after a moment
 					return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 						return clearProgressMsg{}
@@ -562,7 +559,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						hash := sha256.Sum256(newContent)
 						repo.ChangelogHash = fmt.Sprintf("%x", hash)
 						repo.ChangelogState = "clean"
-						release.SavePlan(m.plan)
+						_ = release.SavePlan(m.plan)
 						
 						m.genProgress = fmt.Sprintf("%s Changelog written to %s", theme.IconSuccess, changelogPath)
 						
@@ -635,7 +632,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Create rules file if it doesn't exist
 			if _, err := os.Stat(rulesPath); os.IsNotExist(err) {
 				groveDir := filepath.Dir(rulesPath)
-				os.MkdirAll(groveDir, 0755)
+				_ = os.MkdirAll(groveDir, 0755)
 				content := `# Grove rules file for LLM context
 # Add file paths or patterns here, one per line
 # Examples:
@@ -643,7 +640,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 #   docs/*.md
 #   src/main.go
 `
-				os.WriteFile(rulesPath, []byte(content), 0644)
+				_ = os.WriteFile(rulesPath, []byte(content), 0644)
 			}
 
 			// Open in editor with repo as working directory
@@ -765,7 +762,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						m.genProgress = fmt.Sprintf("%s Approved %s for release", theme.IconSuccess, repoName)
 					}
 					// Save the updated plan
-					release.SavePlan(m.plan)
+					_ = release.SavePlan(m.plan)
 					return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 						return clearProgressMsg{}
 					})
@@ -1005,7 +1002,7 @@ func (m releaseTuiModel) viewTable() string {
 			changelogStatus = "-"
 		} else if repo.ChangelogState == "dirty" {
 			// Changelog was written and modified by user
-			changelogStatus = theme.DefaultTheme.Info.Copy().Bold(true).Render(theme.IconNote + " Modified")
+			changelogStatus = theme.DefaultTheme.Info.Bold(true).Render(theme.IconNote + " Modified")
 		} else if repoChangelogVersion := getRepoChangelogVersion(m.plan.RootDir, repoName); repoChangelogVersion != "" {
 			// Repo's CHANGELOG.md is dirty and has a version entry
 			changelogStatus = theme.DefaultTheme.Success.Render(fmt.Sprintf("%s In Repo (%s)", theme.IconSuccess, repoChangelogVersion))
@@ -1149,11 +1146,11 @@ func (m releaseTuiModel) viewTable() string {
 			var bumpType string
 			switch strings.ToLower(repo.SuggestedBump) {
 			case "major":
-				bumpType = theme.DefaultTheme.Error.Copy().Bold(true).Render("MAJOR")
+				bumpType = theme.DefaultTheme.Error.Bold(true).Render("MAJOR")
 			case "minor":
-				bumpType = theme.DefaultTheme.Warning.Copy().Bold(true).Render("MINOR")
+				bumpType = theme.DefaultTheme.Warning.Bold(true).Render("MINOR")
 			case "patch":
-				bumpType = theme.DefaultTheme.Success.Copy().Bold(true).Render("PATCH")
+				bumpType = theme.DefaultTheme.Success.Bold(true).Render("PATCH")
 			default:
 				bumpType = theme.DefaultTheme.Bold.Render(strings.ToUpper(repo.SuggestedBump))
 			}
@@ -1220,12 +1217,12 @@ func (m releaseTuiModel) viewSettings() string {
 		Padding(1, 2).
 		MarginBottom(1)
 	
-	activeStyle := theme.DefaultTheme.Success.Copy().
+	activeStyle := theme.DefaultTheme.Success.
 		Bold(true)
 		
 	inactiveStyle := theme.DefaultTheme.Muted
 	
-	selectedStyle := theme.DefaultTheme.Selected.Copy().
+	selectedStyle := theme.DefaultTheme.Selected.
 		Bold(true)
 	
 	// Build settings list
@@ -1296,9 +1293,9 @@ func calculateNextVersion(current, bump string) string {
 
 	// Parse version numbers
 	var majorNum, minorNum, patchNum int
-	fmt.Sscanf(major, "v%d", &majorNum)
-	fmt.Sscanf(minor, "%d", &minorNum)
-	fmt.Sscanf(patch, "%d", &patchNum)
+	_, _ = fmt.Sscanf(major, "v%d", &majorNum)
+	_, _ = fmt.Sscanf(minor, "%d", &minorNum)
+	_, _ = fmt.Sscanf(patch, "%d", &patchNum)
 
 	switch bump {
 	case "major":
@@ -1615,40 +1612,6 @@ func updateRepoChangelogVersion(rootDir, repoName, oldVersion, newVersion string
 	}
 
 	return nil
-}
-
-// checkChangelogDirty checks if a changelog file has been modified since we wrote it
-func checkChangelogDirty(rootDir, repoName string, repo *release.RepoReleasePlan) bool {
-	if repo.ChangelogHash == "" {
-		return false // No hash stored, can't check
-	}
-	
-	changelogPath := filepath.Join(rootDir, repoName, "CHANGELOG.md")
-	currentContent, err := os.ReadFile(changelogPath)
-	if err != nil {
-		return false // Can't read file, assume clean
-	}
-	
-	// Calculate current hash
-	currentHash := sha256.Sum256(currentContent)
-	currentHashStr := fmt.Sprintf("%x", currentHash)
-	
-	// Compare with stored hash
-	isDirty := currentHashStr != repo.ChangelogHash
-	
-	// If dirty, validate that it still contains the expected version header
-	if isDirty && repo.NextVersion != "" {
-		// Check if the changelog contains the expected version header
-		expectedHeader := fmt.Sprintf("## %s", repo.NextVersion)
-		if !strings.Contains(string(currentContent), expectedHeader) {
-			// Warning: changelog was modified but doesn't contain expected version
-			// This is still considered dirty, but might need a warning
-			fmt.Printf("%s  Warning: Changelog for %s was modified but doesn't contain expected version header '%s'\n",
-				theme.IconWarning, repoName, expectedHeader)
-		}
-	}
-	
-	return isDirty
 }
 
 // newReleaseTuiCmd creates the 'grove release tui' subcommand

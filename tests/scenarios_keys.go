@@ -34,18 +34,6 @@ command = "nav sz"
 style = "popup"
 `
 
-const groveKeysConflictConfig = `[keys]
-prefix = ""
-
-[keys.tmux]
-prefix = ""
-
-[keys.tmux.popups.conflict_test]
-key = "C-r"
-command = "echo conflict"
-style = "popup"
-`
-
 const groveKeysMinimalConfig = `[keys]
 prefix = "C-g"
 

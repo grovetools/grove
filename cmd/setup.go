@@ -885,7 +885,7 @@ func (m *setupModel) executeSetup() {
 
 	// Create notebook directory if selected
 	if m.selectedSteps["notebook"] {
-		m.service.MkdirAll(m.notebookPath, 0755)
+		_ = m.service.MkdirAll(m.notebookPath, 0755)
 	}
 
 	// These don't depend on config format
@@ -1033,22 +1033,22 @@ func (m *setupModel) generateYAMLConfig() ([]byte, string) {
 
 	// TUI theme
 	if m.selectedSteps["tui"] {
-		setup.SetValue(root, m.tuiTheme, "tui", "theme")
+		_ = setup.SetValue(root, m.tuiTheme, "tui", "theme")
 	}
 
 	// Flow settings
 	if m.selectedSteps["flow"] {
-		setup.SetValue(root, m.flowOneshotModel, "flow", "oneshot_model")
+		_ = setup.SetValue(root, m.flowOneshotModel, "flow", "oneshot_model")
 	}
 
 	// Tmux settings
 	if m.selectedSteps["tmux"] {
-		setup.SetValue(root, []string{"w", "e", "r", "t", "y", "o", "a", "f", "g", "v"}, "tmux", "available_keys")
+		_ = setup.SetValue(root, []string{"w", "e", "r", "t", "y", "o", "a", "f", "g", "v"}, "tmux", "available_keys")
 	}
 
 	// Ecosystem/groves
 	if m.selectedSteps["ecosystem"] {
-		setup.SetValue(root, map[string]interface{}{
+		_ = setup.SetValue(root, map[string]interface{}{
 			"path":        m.ecosystemPath,
 			"enabled":     true,
 			"description": "My projects",
@@ -1058,31 +1058,31 @@ func (m *setupModel) generateYAMLConfig() ([]byte, string) {
 
 	// Notebook
 	if m.selectedSteps["notebook"] {
-		setup.SetValue(root, m.notebookPath, "notebooks", "path")
-		setup.SetValue(root, "personal", "notebooks", "rules", "default")
+		_ = setup.SetValue(root, m.notebookPath, "notebooks", "path")
+		_ = setup.SetValue(root, "personal", "notebooks", "rules", "default")
 	}
 
 	// Agent settings
 	if m.selectedSteps["agent"] {
-		setup.SetValue(root, m.claudeArgs, "agent", "providers", "claude", "args")
+		_ = setup.SetValue(root, m.claudeArgs, "agent", "providers", "claude", "args")
 	}
 
 	// Gemini settings
 	if m.selectedSteps["gemini"] {
 		if m.geminiMethod == geminiMethodCommand {
-			setup.SetValue(root, m.geminiValue, "gemini", "api_key_command")
+			_ = setup.SetValue(root, m.geminiValue, "gemini", "api_key_command")
 		} else {
-			setup.SetValue(root, m.geminiValue, "gemini", "api_key")
+			_ = setup.SetValue(root, m.geminiValue, "gemini", "api_key")
 		}
 	}
 
 	// Hooks / plan preservation
 	if m.selectedSteps["hooks"] {
-		setup.SetValue(root, m.planPreservationEnabled, "hooks", "plan_preservation", "enabled")
+		_ = setup.SetValue(root, m.planPreservationEnabled, "hooks", "plan_preservation", "enabled")
 		if m.planPreservationEnabled {
-			setup.SetValue(root, "file", "hooks", "plan_preservation", "job_type")
-			setup.SetValue(root, "claude-plan", "hooks", "plan_preservation", "title_prefix")
-			setup.SetValue(root, true, "hooks", "plan_preservation", "kebab_case")
+			_ = setup.SetValue(root, "file", "hooks", "plan_preservation", "job_type")
+			_ = setup.SetValue(root, "claude-plan", "hooks", "plan_preservation", "title_prefix")
+			_ = setup.SetValue(root, true, "hooks", "plan_preservation", "kebab_case")
 		}
 	}
 
@@ -1093,7 +1093,7 @@ func (m *setupModel) generateYAMLConfig() ([]byte, string) {
 
 func (m *setupModel) setupEcosystemFiles() {
 	// Create ecosystem directory
-	m.service.MkdirAll(m.ecosystemPath, 0755)
+	_ = m.service.MkdirAll(m.ecosystemPath, 0755)
 
 	// Create grove.yml or grove.toml for ecosystem based on format selection
 	if m.configFormat == formatTOML {
@@ -1101,14 +1101,14 @@ func (m *setupModel) setupEcosystemFiles() {
 description = "A Grove ecosystem"
 workspaces = ["*"]
 `, m.ecosystemName)
-		m.service.WriteFile(filepath.Join(m.ecosystemPath, "grove.toml"), []byte(groveTOMLContent), 0644)
+		_ = m.service.WriteFile(filepath.Join(m.ecosystemPath, "grove.toml"), []byte(groveTOMLContent), 0644)
 	} else {
 		groveYMLContent := fmt.Sprintf(`name: %s
 description: A Grove ecosystem
 workspaces:
   - "*"
 `, m.ecosystemName)
-		m.service.WriteFile(filepath.Join(m.ecosystemPath, "grove.yml"), []byte(groveYMLContent), 0644)
+		_ = m.service.WriteFile(filepath.Join(m.ecosystemPath, "grove.yml"), []byte(groveYMLContent), 0644)
 	}
 
 	// Create .gitignore
@@ -1121,7 +1121,7 @@ Thumbs.db
 *.swo
 *~
 `
-	m.service.WriteFile(filepath.Join(m.ecosystemPath, ".gitignore"), []byte(gitignoreContent), 0644)
+	_ = m.service.WriteFile(filepath.Join(m.ecosystemPath, ".gitignore"), []byte(gitignoreContent), 0644)
 
 	// Create README.md
 	readmeContent := fmt.Sprintf(`# %s
@@ -1132,29 +1132,29 @@ A Grove ecosystem for managing related projects.
 
 Add projects to this directory and they will be automatically discovered by Grove tools.
 `, m.ecosystemName)
-	m.service.WriteFile(filepath.Join(m.ecosystemPath, "README.md"), []byte(readmeContent), 0644)
+	_ = m.service.WriteFile(filepath.Join(m.ecosystemPath, "README.md"), []byte(readmeContent), 0644)
 
 	// Initialize git repository
-	m.service.RunGitInit(m.ecosystemPath)
+	_ = m.service.RunGitInit(m.ecosystemPath)
 }
 
 func (m *setupModel) setupFirstProject() {
 	projectPath := filepath.Join(m.ecosystemPath, m.firstProjectName)
 
 	// Create project directory
-	m.service.MkdirAll(projectPath, 0755)
+	_ = m.service.MkdirAll(projectPath, 0755)
 
 	// Create grove.yml or grove.toml for the project based on format selection
 	if m.configFormat == formatTOML {
 		groveTOMLContent := fmt.Sprintf(`name = "%s"
 description = "A Grove project"
 `, m.firstProjectName)
-		m.service.WriteFile(filepath.Join(projectPath, "grove.toml"), []byte(groveTOMLContent), 0644)
+		_ = m.service.WriteFile(filepath.Join(projectPath, "grove.toml"), []byte(groveTOMLContent), 0644)
 	} else {
 		groveYMLContent := fmt.Sprintf(`name: %s
 description: A Grove project
 `, m.firstProjectName)
-		m.service.WriteFile(filepath.Join(projectPath, "grove.yml"), []byte(groveYMLContent), 0644)
+		_ = m.service.WriteFile(filepath.Join(projectPath, "grove.yml"), []byte(groveYMLContent), 0644)
 	}
 
 	// Create README.md
@@ -1162,16 +1162,16 @@ description: A Grove project
 
 A Grove project.
 `, m.firstProjectName)
-	m.service.WriteFile(filepath.Join(projectPath, "README.md"), []byte(readmeContent), 0644)
+	_ = m.service.WriteFile(filepath.Join(projectPath, "README.md"), []byte(readmeContent), 0644)
 
 	// Initialize git repository
-	m.service.RunGitInit(projectPath)
+	_ = m.service.RunGitInit(projectPath)
 }
 
 func (m *setupModel) setupTmuxBindings() {
 	// Generate tmux popup config using grove keys generate tmux
 	// This reads from [keys.tmux.popups] in grove.toml and writes to ~/.cache/grove/tmux/popups.conf
-	m.service.RunCommand("grove", "keys", "generate", "tmux")
+	_ = m.service.RunCommand("grove", "keys", "generate", "tmux")
 
 	// Use if-shell pattern for robust sourcing (only loads if file exists)
 	tmuxConfPath := "~/.config/tmux/tmux.conf"
@@ -1194,13 +1194,13 @@ func (m *setupModel) setupTmuxBindings() {
 		contains, _ := m.service.FileContains(tmuxConfPath, old)
 		if contains {
 			// Replace with if-shell pattern
-			m.service.ReplaceInFile(tmuxConfPath, old, ifShellLine)
+			_ = m.service.ReplaceInFile(tmuxConfPath, old, ifShellLine)
 			return
 		}
 	}
 
 	// Add new if-shell line
-	m.service.AppendToFile(tmuxConfPath, "\n# Grove popup bindings (managed by grove keys)\n"+ifShellLine+"\n")
+	_ = m.service.AppendToFile(tmuxConfPath, "\n# Grove popup bindings (managed by grove keys)\n"+ifShellLine+"\n")
 }
 
 func (m *setupModel) setupNeovimPlugin() {
@@ -1241,7 +1241,7 @@ return {
   },
 }
 `, displayPath)
-	m.service.WriteFile("~/.config/nvim/lua/plugins/grove.lua", []byte(nvimPluginContent), 0644)
+	_ = m.service.WriteFile("~/.config/nvim/lua/plugins/grove.lua", []byte(nvimPluginContent), 0644)
 }
 
 func (m *setupModel) View() string {
@@ -1414,7 +1414,7 @@ groves:
     path: ~/Code/projects
     enabled: true`
 	}
-	content.WriteString(theme.DefaultTheme.Box.Copy().Width(m.width - 12).Render(formatPreview))
+	content.WriteString(theme.DefaultTheme.Box.Width(m.width - 12).Render(formatPreview))
 
 	return content.String()
 }
@@ -1549,7 +1549,7 @@ This step is optional. You can skip it and configure the key later.`
 	content.WriteString("\n\n")
 
 	// Box using theme
-	boxStyle := theme.DefaultTheme.Box.Copy().Width(m.width - 8)
+	boxStyle := theme.DefaultTheme.Box.Width(m.width - 8)
 
 	var boxContent strings.Builder
 	if m.currentInput == inputMethod {
@@ -1612,7 +1612,7 @@ The bindings are stored in grove.toml and generated to a cache file.`
 	content.WriteString("\n\n")
 
 	// Box using theme
-	boxStyle := theme.DefaultTheme.Box.Copy().Width(m.width - 8)
+	boxStyle := theme.DefaultTheme.Box.Width(m.width - 8)
 
 	var boxContent strings.Builder
 	boxContent.WriteString(theme.DefaultTheme.Bold.Render("What will happen:") + "\n\n")
@@ -1708,7 +1708,7 @@ You can require or incorporate it into your plugin setup as you see fit.`
 	content.WriteString("\n\n")
 
 	// Box using theme
-	boxStyle := theme.DefaultTheme.Box.Copy().Width(m.width - 8)
+	boxStyle := theme.DefaultTheme.Box.Width(m.width - 8)
 
 	var boxContent strings.Builder
 	boxContent.WriteString(theme.DefaultTheme.Bold.Render("File to be created:") + "\n\n")
@@ -1732,7 +1732,7 @@ in your current flow plan directory with a kebab-case title.`
 	content.WriteString("\n\n")
 
 	// Box using theme
-	boxStyle := theme.DefaultTheme.Box.Copy().Width(m.width - 8)
+	boxStyle := theme.DefaultTheme.Box.Width(m.width - 8)
 
 	var boxContent strings.Builder
 	boxContent.WriteString(theme.DefaultTheme.Bold.Render("Enable plan preservation?") + "\n\n")
@@ -1783,7 +1783,7 @@ func (m *setupModel) viewReviewStep() string {
 	content.WriteString("\n")
 
 	// Config preview in a box using viewport for scrolling
-	previewStyle := theme.DefaultTheme.Box.Copy().
+	previewStyle := theme.DefaultTheme.Box.
 		Width(m.width - 8)
 
 	content.WriteString(previewStyle.Render(m.reviewViewport.View()))
@@ -1829,7 +1829,7 @@ func (m *setupModel) viewSummary() string {
 	content.WriteString(theme.DefaultTheme.Muted.Render("  3. Start building with 'grove build' in your ecosystem") + "\n")
 
 	// Wrap in box with success border
-	boxStyle := theme.DefaultTheme.Box.Copy().
+	boxStyle := theme.DefaultTheme.Box.
 		Width(m.width - 8).
 		BorderForeground(theme.DefaultTheme.Colors.Green)
 
@@ -1928,14 +1928,14 @@ func runSetupDefaults(service *setup.Service, selectedOnly map[string]bool, logg
 		ecosystemPath := filepath.Join(homeDir, "Code", "my-projects")
 		ecosystemName := "my-projects"
 
-		service.MkdirAll(ecosystemPath, 0755)
+		_ = service.MkdirAll(ecosystemPath, 0755)
 
 		groveYMLContent := fmt.Sprintf(`name: %s
 description: A Grove ecosystem
 workspaces:
   - "*"
 `, ecosystemName)
-		service.WriteFile(filepath.Join(ecosystemPath, "grove.yml"), []byte(groveYMLContent), 0644)
+		_ = service.WriteFile(filepath.Join(ecosystemPath, "grove.yml"), []byte(groveYMLContent), 0644)
 
 		gitignoreContent := `# OS files
 .DS_Store
@@ -1946,7 +1946,7 @@ Thumbs.db
 *.swo
 *~
 `
-		service.WriteFile(filepath.Join(ecosystemPath, ".gitignore"), []byte(gitignoreContent), 0644)
+		_ = service.WriteFile(filepath.Join(ecosystemPath, ".gitignore"), []byte(gitignoreContent), 0644)
 
 		readmeContent := fmt.Sprintf(`# %s
 
@@ -1956,26 +1956,26 @@ A Grove ecosystem for managing related projects.
 
 Add projects to this directory and they will be automatically discovered by Grove tools.
 `, ecosystemName)
-		service.WriteFile(filepath.Join(ecosystemPath, "README.md"), []byte(readmeContent), 0644)
+		_ = service.WriteFile(filepath.Join(ecosystemPath, "README.md"), []byte(readmeContent), 0644)
 
-		service.RunGitInit(ecosystemPath)
+		_ = service.RunGitInit(ecosystemPath)
 
 		root, _ := yamlHandler.LoadGlobalConfig()
-		setup.SetValue(root, map[string]interface{}{
+		_ = setup.SetValue(root, map[string]interface{}{
 			"path":    ecosystemPath,
 			"enabled": true,
 		}, "groves", ecosystemName)
-		yamlHandler.SaveGlobalConfig(root)
+		_ = yamlHandler.SaveGlobalConfig(root)
 	}
 
 	if runAll || selectedOnly["notebook"] {
 		pretty.InfoPretty("Setting up notebook directory...")
 		notebookPath := filepath.Join(homeDir, "notebooks")
-		service.MkdirAll(notebookPath, 0755)
+		_ = service.MkdirAll(notebookPath, 0755)
 
 		root, _ := yamlHandler.LoadGlobalConfig()
-		setup.SetValue(root, notebookPath, "notebooks", "path")
-		yamlHandler.SaveGlobalConfig(root)
+		_ = setup.SetValue(root, notebookPath, "notebooks", "path")
+		_ = yamlHandler.SaveGlobalConfig(root)
 	}
 
 	if selectedOnly["gemini"] {
@@ -1986,7 +1986,7 @@ Add projects to this directory and they will be automatically discovered by Grov
 		pretty.InfoPretty("Setting up tmux bindings...")
 
 		// Generate tmux popup config using grove keys generate tmux
-		service.RunCommand("grove", "keys", "generate", "tmux")
+		_ = service.RunCommand("grove", "keys", "generate", "tmux")
 
 		// Use if-shell pattern for robust sourcing
 		tmuxConfPath := "~/.config/tmux/tmux.conf"
@@ -1994,7 +1994,7 @@ Add projects to this directory and they will be automatically discovered by Grov
 
 		contains, _ := service.FileContains(tmuxConfPath, "popups.conf")
 		if !contains {
-			service.AppendToFile(tmuxConfPath, "\n# Grove popup bindings (managed by grove keys)\n"+ifShellLine+"\n")
+			_ = service.AppendToFile(tmuxConfPath, "\n# Grove popup bindings (managed by grove keys)\n"+ifShellLine+"\n")
 		}
 	}
 
@@ -2010,7 +2010,7 @@ Add projects to this directory and they will be automatically discovered by Grov
   },
 }
 `
-		service.WriteFile("~/.config/nvim/lua/plugins/grove.lua", []byte(nvimPluginContent), 0644)
+		_ = service.WriteFile("~/.config/nvim/lua/plugins/grove.lua", []byte(nvimPluginContent), 0644)
 	}
 
 	// Print summary

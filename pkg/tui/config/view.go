@@ -319,9 +319,8 @@ func (m Model) renderSourcesView() string {
 	addSource := func(name string, source coreconfig.ConfigSource, exists bool) {
 		path := m.layered.FilePaths[source]
 		var row string
-		nameStyle := theme.DefaultTheme.Normal
 		if exists && path != "" {
-			nameStyle = theme.DefaultTheme.Success
+			nameStyle := theme.DefaultTheme.Success
 			row = fmt.Sprintf("  %s  %s",
 				nameStyle.Render(fmt.Sprintf("%-16s", name)),
 				theme.DefaultTheme.Path.Render(path))

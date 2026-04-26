@@ -29,8 +29,8 @@ func PolyglotReleaseScenario() *harness.Scenario {
 					}
 
 					// Create ecosystem structure
-					fs.WriteString(filepath.Join(ecosystemDir, "grove.yml"), "name: grove-ecosystem\nworkspaces:\n  - \"*\"\n")
-					fs.WriteString(filepath.Join(ecosystemDir, "go.work"), `go 1.24.4
+					_ = fs.WriteString(filepath.Join(ecosystemDir, "grove.yml"), "name: grove-ecosystem\nworkspaces:\n  - \"*\"\n")
+					_ = fs.WriteString(filepath.Join(ecosystemDir, "go.work"), `go 1.24.4
 
 use (
 	./grove-shared
@@ -47,10 +47,10 @@ use (
 
 					// Create shared Go library
 					sharedDir := filepath.Join(ecosystemDir, "grove-shared")
-					os.MkdirAll(sharedDir, 0755)
-					fs.WriteString(filepath.Join(sharedDir, "grove.yml"), "name: grove-shared\n")
-					fs.WriteString(filepath.Join(sharedDir, "go.mod"), "module github.com/test/grove-shared\n\ngo 1.24.4\n")
-					fs.WriteString(filepath.Join(sharedDir, "main.go"), "package shared\n\nconst Version = \"1.0.0\"\n")
+					_ = os.MkdirAll(sharedDir, 0755)
+					_ = fs.WriteString(filepath.Join(sharedDir, "grove.yml"), "name: grove-shared\n")
+					_ = fs.WriteString(filepath.Join(sharedDir, "go.mod"), "module github.com/test/grove-shared\n\ngo 1.24.4\n")
+					_ = fs.WriteString(filepath.Join(sharedDir, "main.go"), "package shared\n\nconst Version = \"1.0.0\"\n")
 
 					cmd = ctx.Command("git", "init").Dir(sharedDir)
 					cmd.Run()
@@ -61,16 +61,16 @@ use (
 
 					// Create Go app that depends on shared
 					goAppDir := filepath.Join(ecosystemDir, "grove-go-app")
-					os.MkdirAll(goAppDir, 0755)
-					fs.WriteString(filepath.Join(goAppDir, "grove.yml"), "name: grove-go-app\n")
-					fs.WriteString(filepath.Join(goAppDir, "go.mod"), `module github.com/test/grove-go-app
+					_ = os.MkdirAll(goAppDir, 0755)
+					_ = fs.WriteString(filepath.Join(goAppDir, "grove.yml"), "name: grove-go-app\n")
+					_ = fs.WriteString(filepath.Join(goAppDir, "go.mod"), `module github.com/test/grove-go-app
 
 go 1.24.4
 
 require github.com/test/grove-shared v0.1.0
 `)
-					fs.WriteString(filepath.Join(goAppDir, "go.sum"), "")
-					fs.WriteString(filepath.Join(goAppDir, "main.go"), "package main\n\nimport _ \"github.com/test/grove-shared\"\n\nfunc main() {}\n")
+					_ = fs.WriteString(filepath.Join(goAppDir, "go.sum"), "")
+					_ = fs.WriteString(filepath.Join(goAppDir, "main.go"), "package main\n\nimport _ \"github.com/test/grove-shared\"\n\nfunc main() {}\n")
 
 					cmd = ctx.Command("git", "init").Dir(goAppDir)
 					cmd.Run()
@@ -81,9 +81,9 @@ require github.com/test/grove-shared v0.1.0
 
 					// Create Python library
 					pyLibDir := filepath.Join(ecosystemDir, "grove-py-lib")
-					os.MkdirAll(pyLibDir, 0755)
-					fs.WriteString(filepath.Join(pyLibDir, "grove.yml"), "name: grove-py-lib\ntype: maturin\n")
-					fs.WriteString(filepath.Join(pyLibDir, "pyproject.toml"), `[project]
+					_ = os.MkdirAll(pyLibDir, 0755)
+					_ = fs.WriteString(filepath.Join(pyLibDir, "grove.yml"), "name: grove-py-lib\ntype: maturin\n")
+					_ = fs.WriteString(filepath.Join(pyLibDir, "pyproject.toml"), `[project]
 name = "grove-py-lib"
 version = "0.1.0"
 dependencies = ["grove-shared>=0.1.0"]
@@ -144,84 +144,3 @@ build-backend = "maturin"
 		},
 	}
 }
-
-// Mock git script for release testing
-const releaseGitMockScript = `#!/bin/bash
-# Mock git for release testing
-
-if [[ "$1" == "describe" && "$2" == "--tags" ]]; then
-    # Simulate no tags (new repository)
-    exit 128
-fi
-
-if [[ "$1" == "rev-list" && "$2" == "--count" ]]; then
-    # Simulate commits since last tag
-    echo "5"
-    exit 0
-fi
-
-if [[ "$1" == "status" ]]; then
-    if [[ "$2" == "--porcelain" ]]; then
-        # Clean status
-        echo ""
-    else {
-        echo "On branch main"
-        echo "Your branch is up to date with 'origin/main'."
-        echo ""
-        echo "nothing to commit, working tree clean"
-    }
-    exit 0
-fi
-
-if [[ "$1" == "branch" ]]; then
-    if [[ "$2" == "--show-current" ]]; then
-        echo "main"
-        exit 0
-    fi
-    # Default branch command response
-    echo "* main"
-    exit 0
-fi
-
-if [[ "$1" == "config" && "$2" == "--get" ]]; then
-    if [[ "$3" == "branch.main.remote" ]]; then
-        echo "origin"
-    elif [[ "$3" == "remote.origin.url" ]]; then
-        echo "https://github.com/test/repo.git"
-    fi
-    exit 0
-fi
-
-if [[ "$1" == "submodule" ]]; then
-    if [[ "$2" == "status" ]]; then
-        # Return valid submodule status
-        echo " 0000000000000000000000000000000000000000 grove-shared (heads/main)"
-        echo " 0000000000000000000000000000000000000000 grove-go-app (heads/main)"
-        echo " 0000000000000000000000000000000000000000 grove-py-lib (heads/main)"
-        exit 0
-    elif [[ "$2" == "foreach" ]]; then
-        # Handle git submodule foreach --quiet "echo $sm_path"
-        echo "grove-shared"
-        echo "grove-go-app"
-        echo "grove-py-lib"
-        exit 0
-    fi
-    exit 0
-fi
-
-if [[ "$1" == "ls-remote" ]]; then
-    echo "0000000000000000000000000000000000000000	refs/heads/main"
-    exit 0
-fi
-
-if [[ "$1" == "add" ]] || [[ "$1" == "commit" ]] || [[ "$1" == "tag" ]] || [[ "$1" == "push" ]]; then
-    # Success for write operations
-    exit 0
-fi
-
-# Log unhandled commands for debugging
-echo "Unhandled git command: $@" >&2
-
-# Default
-exit 0
-`

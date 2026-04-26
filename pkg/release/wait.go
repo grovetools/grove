@@ -92,7 +92,7 @@ func checkGitTagExists(ctx context.Context, modulePath, version string) error {
 
 // checkModuleAvailable checks if a module version is available via go list
 func checkModuleAvailable(ctx context.Context, modulePath, version string) error {
-	cmd := exec.CommandContext(ctx, "go", "list", "-m", fmt.Sprintf("%s@%s", modulePath, version))
+	cmd := exec.CommandContext(ctx, "go", "list", "-m", fmt.Sprintf("%s@%s", modulePath, version)) //nolint:gosec // G204: args are not user-controlled
 
 	// Set up environment for private modules
 	cmd.Env = append(os.Environ(),

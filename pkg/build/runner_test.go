@@ -119,6 +119,7 @@ func TestRun(t *testing.T) {
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 		results := build.Run(ctx, jobs, 2, true)
 
 		// Cancel after receiving first result
@@ -270,7 +271,7 @@ func createTestProjects(t *testing.T, baseDir string, count int, success bool) [
 
 func createSuccessProject(t *testing.T, baseDir, name string) string {
 	projectDir := filepath.Join(baseDir, name)
-	require.NoError(t, os.MkdirAll(projectDir, 0755))
+	require.NoError(t, os.MkdirAll(projectDir, 0o755))
 
 	makefile := filepath.Join(projectDir, "Makefile")
 	content := `build:
@@ -278,13 +279,13 @@ func createSuccessProject(t *testing.T, baseDir, name string) string {
 	@sleep 0.01
 	@echo "Build complete"
 `
-	require.NoError(t, os.WriteFile(makefile, []byte(content), 0644))
+	require.NoError(t, os.WriteFile(makefile, []byte(content), 0o644))
 	return projectDir
 }
 
 func createFailProject(t *testing.T, baseDir, name string) string {
 	projectDir := filepath.Join(baseDir, name)
-	require.NoError(t, os.MkdirAll(projectDir, 0755))
+	require.NoError(t, os.MkdirAll(projectDir, 0o755))
 
 	makefile := filepath.Join(projectDir, "Makefile")
 	content := `build:
@@ -292,6 +293,6 @@ func createFailProject(t *testing.T, baseDir, name string) string {
 	@echo "Error: Build failed!" >&2
 	@exit 1
 `
-	require.NoError(t, os.WriteFile(makefile, []byte(content), 0644))
+	require.NoError(t, os.WriteFile(makefile, []byte(content), 0o644))
 	return projectDir
 }

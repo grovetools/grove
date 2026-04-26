@@ -102,7 +102,7 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 	}
 
 	// Add ecosystem to groves section
-	setup.SetValue(root, map[string]interface{}{
+	_ = setup.SetValue(root, map[string]interface{}{
 		"path":    ecosystemDir,
 		"enabled": true,
 	}, "groves", ecosystemName)

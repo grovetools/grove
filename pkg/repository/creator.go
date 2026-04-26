@@ -403,20 +403,6 @@ func (c *Creator) validateGitHubPrereqs(repoName string, isPublic bool) error {
 	return nil
 }
 
-// createLocalTag creates the initial v0.0.1 tag locally (without pushing)
-func (c *Creator) createLocalTag(opts CreateOptions, targetPath string) error {
-	c.logger.Info("Creating initial release tag v0.0.1...")
-
-	tagCmd := exec.Command("git", "tag", "v0.0.1", "-m", "Initial release")
-	tagCmd.Dir = targetPath
-	if err := tagCmd.Run(); err != nil {
-		return fmt.Errorf("failed to create tag: %w", err)
-	}
-
-	c.logger.Info(" Initial release tag created")
-	return nil
-}
-
 // addToEcosystemLocal adds the repository to the ecosystem without GitHub submodule URL
 func (c *Creator) addToEcosystemLocal(opts CreateOptions) error {
 	c.logger.Info("Adding repository to grove-ecosystem...")

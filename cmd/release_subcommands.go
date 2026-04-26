@@ -186,7 +186,7 @@ Use this to abort a release in progress and start fresh.`,
 			// Confirm
 			fmt.Print("\nAre you sure you want to clear the release plan? [y/N]: ")
 			var response string
-			fmt.Scanln(&response)
+			_, _ = fmt.Scanln(&response)
 			response = strings.TrimSpace(strings.ToLower(response))
 			
 			if response != "y" && response != "yes" {
@@ -257,7 +257,7 @@ Examples:
 					
 					fmt.Print("\nAre you sure? [y/N]: ")
 					var response string
-					fmt.Scanln(&response)
+					_, _ = fmt.Scanln(&response)
 					response = strings.TrimSpace(strings.ToLower(response))
 					
 					if response != "y" && response != "yes" {
@@ -358,7 +358,7 @@ Examples:
 				fmt.Print(". Continue? [y/N]: ")
 				
 				var response string
-				fmt.Scanln(&response)
+				_, _ = fmt.Scanln(&response)
 				response = strings.TrimSpace(strings.ToLower(response))
 				
 				if response != "y" && response != "yes" {
@@ -491,7 +491,7 @@ Examples:
 			// Confirm the action
 			fmt.Print("\nAre you sure you want to rollback? [y/N]: ")
 			var response string
-			fmt.Scanln(&response)
+			_, _ = fmt.Scanln(&response)
 			response = strings.TrimSpace(strings.ToLower(response))
 			
 			if response != "y" && response != "yes" {
@@ -526,7 +526,7 @@ Examples:
 				
 				// Create backup tag first
 				backupRepoTag := fmt.Sprintf("%s-%s", backupTag, repoName)
-				tagCmd := exec.CommandContext(ctx, "git", "tag", backupRepoTag, "-m", fmt.Sprintf("Backup before rollback"))
+				tagCmd := exec.CommandContext(ctx, "git", "tag", backupRepoTag, "-m", "Backup before rollback")
 				tagCmd.Dir = repoPath
 				if output, err := tagCmd.CombinedOutput(); err != nil {
 					// Don't fail if tag already exists, just warn

@@ -172,7 +172,7 @@ enabled = true
 	}
 
 	// Determine which shells to generate
-	shells := []string{}
+	var shells []string
 	if targetShell == "all" {
 		shells = []string{"fish", "bash", "zsh"}
 	} else {

@@ -142,7 +142,6 @@ func updateGoWork(repoName string) error {
 
 		if inUseBlock {
 			if trimmed == ")" {
-				inUseBlock = false
 				afterUse = lines[i:]
 				break
 			}
@@ -204,16 +203,6 @@ func updateGoWork(repoName string) error {
 		return fmt.Errorf("failed to write go.work: %w\nThe file may be read-only or you may lack permissions", err)
 	}
 
-	return nil
-}
-
-// validateGroveYML checks if grove.yml exists and has the expected structure
-func validateGroveYML() error {
-	// Try to find the grove root
-	_, err := workspace.FindEcosystemRoot("")
-	if err != nil {
-		return fmt.Errorf("not in a grove workspace: %w", err)
-	}
 	return nil
 }
 
@@ -301,15 +290,11 @@ func extractMakefileList(lines []string, startIdx int) []string {
 	for i := startIdx; i < len(lines); i++ {
 		if i == startIdx {
 			// First line already processed
-			if strings.HasSuffix(currentLine, "\\") {
-				currentLine = strings.TrimSuffix(currentLine, "\\")
-			}
+			currentLine = strings.TrimSuffix(currentLine, "\\")
 		} else {
 			// Subsequent lines
 			currentLine = strings.TrimSpace(lines[i])
-			if strings.HasSuffix(currentLine, "\\") {
-				currentLine = strings.TrimSuffix(currentLine, "\\")
-			}
+			currentLine = strings.TrimSuffix(currentLine, "\\")
 		}
 
 		// Split by whitespace and add non-empty items

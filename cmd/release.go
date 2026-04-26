@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -13,8 +12,6 @@ import (
 	"time"
 
 	"github.com/Masterminds/semver/v3"
-	"github.com/charmbracelet/lipgloss"
-	tablecomponent "github.com/grovetools/core/tui/components/table"
 	"github.com/grovetools/core/command"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/git"
@@ -39,7 +36,6 @@ var (
 	releasePatch          []string
 	releaseVersions       []string // Explicit version settings like "repo=v1.2.3"
 	releaseVersionAll     string   // Set all repos to this version
-	releaseYes            bool
 	releaseSkipParent     bool
 	releaseWithDeps       bool
 	releaseLLMChangelog   bool
@@ -138,7 +134,7 @@ Examples:
 
 	// Legacy flags for backwards compatibility
 	cmd.Flags().BoolVar(&releaseInteractive, "interactive", false, "Launch interactive TUI (deprecated: use 'grove release tui')")
-	cmd.Flags().MarkHidden("interactive")
+	_ = cmd.Flags().MarkHidden("interactive")
 
 	// Add subcommands
 	cmd.AddCommand(newReleasePlanCmd())
@@ -158,101 +154,11 @@ Examples:
 // - runReleaseTUI (in release_tui.go)  
 // - runReleaseApply (in release_plan.go)
 
-func autoCommitEcosystemChanges(ctx context.Context, rootDir string, hasChanges map[string]bool, logger *logrus.Logger) error {
-	// Check if grove-ecosystem has uncommitted changes
-	status, err := git.GetStatus(rootDir)
-	if err != nil {
-		return fmt.Errorf("failed to get git status: %w", err)
-	}
-
-	if !status.IsDirty {
-		// No changes to commit
-		return nil
-	}
-
-	if releaseDryRun {
-		displayInfo("[DRY RUN] Would auto-commit grove-ecosystem changes")
-		return nil
-	}
-
-	displayInfo("Auto-committing grove-ecosystem changes...")
-
-	// Check what files are modified
-	statusCmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
-	statusCmd.Dir = rootDir
-	statusOutput, err := statusCmd.Output()
-	if err != nil {
-		return fmt.Errorf("failed to get git status output: %w", err)
-	}
-
-	// Parse the status output to understand what changed
-	lines := strings.Split(string(statusOutput), "\n")
-	var submodulesToCommit []string
-	var relevantSubmodules []string
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		// Status format is "XY filename"
-		if len(line) < 3 {
-			continue
-		}
-
-		filename := strings.TrimSpace(line[2:])
-
-		// Check if it's a submodule (git status shows them as modified)
-		if strings.HasPrefix(filename, "grove-") {
-			// Check if this is actually a submodule
-			checkCmd := exec.CommandContext(ctx, "git", "submodule", "status", filename)
-			checkCmd.Dir = rootDir
-			if _, err := checkCmd.Output(); err == nil {
-				// It's a submodule - check if it's being released
-				if changes, ok := hasChanges[filename]; ok && changes {
-					submodulesToCommit = append(submodulesToCommit, filename)
-					relevantSubmodules = append(relevantSubmodules, filename)
-				}
-			}
-		}
-	}
-
-	// Only proceed if we have submodules to commit that are being released
-	if len(submodulesToCommit) == 0 {
-		displayInfo("No submodule updates needed for repos being released")
-		return nil
-	}
-
-	// Stage only the specific submodules being released
-	for _, submodule := range submodulesToCommit {
-		if err := executeGitCommand(ctx, rootDir, []string{"add", submodule}, fmt.Sprintf("Stage submodule %s", submodule), logger); err != nil {
-			return err
-		}
-	}
-
-	// Create a descriptive commit message
-	commitMsg := fmt.Sprintf("chore: update submodule references for release (%s)", strings.Join(relevantSubmodules, ", "))
-
-	if err := executeGitCommand(ctx, rootDir, []string{"commit", "-m", commitMsg}, "Auto-commit submodule updates", logger); err != nil {
-		// Check if there's nothing to commit
-		if strings.Contains(err.Error(), "nothing to commit") {
-			return nil
-		}
-		return err
-	}
-
-	displaySuccess(fmt.Sprintf("Auto-committed submodule updates for: %s", strings.Join(relevantSubmodules, ", ")))
-
-	return nil
-}
-
 func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces []string, logger *logrus.Logger) error {
 	displaySection(theme.IconFilter + " Pre-flight Checks")
 
-	// Check main repository status
-	mainStatus, err := git.GetStatus(rootDir)
-	if err != nil {
+	// Check main repository status (grove-ecosystem display is disabled; status is not added to the table)
+	if _, err := git.GetStatus(rootDir); err != nil {
 		return fmt.Errorf("failed to get main repository status: %w", err)
 	}
 
@@ -304,34 +210,9 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces
 	var tableRows [][]string
 
 	// Main repository
-	mainIssues := []string{}
-	// Don't consider dirty status an issue since we auto-commit
-	// but still show it in the display
-	if mainStatus.Branch != "main" {
-		mainIssues = append(mainIssues, "not on main branch")
-	}
-	// Don't treat "ahead of remote" as a blocking issue for main repo either
+	// Don't consider dirty status or ahead-of-remote as blocking issues since we auto-commit
+	// grove-ecosystem status display is disabled; main repo is not added to the table
 
-	// For display purposes, still show uncommitted changes
-	displayMainIssues := make([]string, len(mainIssues))
-	copy(displayMainIssues, mainIssues)
-	if mainStatus.IsDirty {
-		displayMainIssues = append(displayMainIssues, "uncommitted changes (will auto-commit relevant submodules)")
-	}
-	// Skip grove-ecosystem status display since ecosystem operations are disabled
-	// Add ahead info even if not an issue
-	displayIssues := displayMainIssues
-	if releasePush && mainStatus.HasUpstream && mainStatus.AheadCount > 0 && len(displayMainIssues) == 0 {
-		displayIssues = []string{fmt.Sprintf("ahead of remote by %d commits (will push)", mainStatus.AheadCount)}
-	} else if releasePush && mainStatus.HasUpstream && mainStatus.AheadCount > 0 {
-		// Update the ahead message to indicate it will be pushed
-		for i, issue := range displayIssues {
-			if strings.Contains(issue, "ahead of remote") {
-				displayIssues[i] = fmt.Sprintf("ahead of remote by %d commits (will push)", mainStatus.AheadCount)
-			}
-		}
-	}
-	// Skip adding grove-ecosystem to the table - ecosystem operations are disabled
 
 	// Workspaces
 	hasIssues := false // Don't consider grove-ecosystem issues since ecosystem operations are disabled
@@ -438,90 +319,6 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces
 }
 
 
-func tagSubmodules(ctx context.Context, rootDir string, versions map[string]string, hasChanges map[string]bool, logger *logrus.Logger) error {
-	// Get list of submodules
-	cmd := command.NewSafeBuilder()
-	listCmd, err := cmd.Build(ctx, "git", "submodule", "status")
-	if err != nil {
-		return fmt.Errorf("failed to build git command: %w", err)
-	}
-
-	execCmd := listCmd.Exec()
-	execCmd.Dir = rootDir
-	output, err := execCmd.Output()
-	if err != nil {
-		return fmt.Errorf("failed to list submodules: %w", err)
-	}
-
-	// Parse and process each submodule
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-
-		// Parse submodule path from status output
-		// Format: " <hash> <path> (<description>)"
-		parts := strings.Fields(line)
-		if len(parts) < 2 {
-			continue
-		}
-		smPath := parts[1]
-
-		// Get the repo name from path
-		repoName := filepath.Base(smPath)
-		version, ok := versions[repoName]
-		if !ok {
-			// Don't warn if we're filtering repos - this is expected
-			if len(releaseRepos) == 0 {
-				logger.WithField("path", smPath).Warn("No version found for submodule")
-			}
-			continue
-		}
-
-		// Skip if no changes
-		if changes, ok := hasChanges[repoName]; ok && !changes {
-			logger.WithField("path", smPath).Info("Skipping submodule (no changes)")
-			continue
-		}
-
-		smFullPath := filepath.Join(rootDir, smPath)
-		logger.WithFields(logrus.Fields{"path": smPath, "version": version}).Info("Tagging submodule")
-
-		// Check if clean (unless force)
-		if !releaseForce {
-			status, err := git.GetStatus(smFullPath)
-			if err != nil {
-				return fmt.Errorf("failed to get status for %s: %w", smPath, err)
-			}
-			if status.IsDirty {
-				return fmt.Errorf("submodule %s has uncommitted changes", smPath)
-			}
-			if status.Branch != "main" {
-				return fmt.Errorf("submodule %s is not on main branch (current: %s)", smPath, status.Branch)
-			}
-			// Check if local branch is ahead of remote (only if we didn't just push)
-			if !releasePush && status.HasUpstream && status.AheadCount > 0 {
-				return fmt.Errorf("submodule %s is ahead of remote by %d commits - please push changes first", smPath, status.AheadCount)
-			}
-		}
-
-		// Tag the submodule
-		if err := executeGitCommand(ctx, smFullPath, []string{"tag", "-a", version, "-m", fmt.Sprintf("Release %s", version)},
-			fmt.Sprintf("Tag %s", smPath), logger); err != nil {
-			return err
-		}
-
-		// Push the tag
-		if err := executeGitCommand(ctx, smFullPath, []string{"push", "origin", version},
-			fmt.Sprintf("Push tag for %s", smPath), logger); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func executeGitCommand(ctx context.Context, dir string, args []string, description string, logger *logrus.Logger) error {
 	cmd := fmt.Sprintf("git %s", strings.Join(args, " "))
 	if releaseDryRun {
@@ -599,13 +396,6 @@ func executeGitCommand(ctx context.Context, dir string, args []string, descripti
 	}
 
 	return nil
-}
-
-func boolToString(b bool) string {
-	if b {
-		return "true"
-	}
-	return "false"
 }
 
 // expandReposWithDependencies expands the list of repositories to include all their dependencies
@@ -873,59 +663,6 @@ func calculateNextVersions(ctx context.Context, rootDir string, workspaces []str
 	return versions, currentVersions, commitsSinceTag, nil
 }
 
-func getVersionIncrement(current, proposed string) string {
-	if current == "-" || current == "" {
-		return "initial"
-	}
-
-	// Check if this looks like a date-based version (v2025.01.08 format)
-	if strings.Count(proposed, ".") >= 2 && len(proposed) > 6 {
-		// Try to parse as date version
-		var year1, month1, day1, suffix1 int
-		var year2, month2, day2, suffix2 int
-
-		// Parse current version
-		n1, _ := fmt.Sscanf(current, "v%d.%d.%d.%d", &year1, &month1, &day1, &suffix1)
-		if n1 < 3 {
-			n1, _ = fmt.Sscanf(current, "v%d.%d.%d", &year1, &month1, &day1)
-		}
-
-		// Parse proposed version
-		n2, _ := fmt.Sscanf(proposed, "v%d.%d.%d.%d", &year2, &month2, &day2, &suffix2)
-		if n2 < 3 {
-			n2, _ = fmt.Sscanf(proposed, "v%d.%d.%d", &year2, &month2, &day2)
-		}
-
-		// If both parsed as date versions
-		if n1 >= 3 && n2 >= 3 && year1 > 2000 && year2 > 2000 {
-			if year1 != year2 || month1 != month2 || day1 != day2 {
-				return "new date"
-			} else if suffix1 != suffix2 {
-				return "same day"
-			}
-			return "-"
-		}
-	}
-
-	// Fall back to semver parsing
-	currentVer, err1 := semver.NewVersion(current)
-	proposedVer, err2 := semver.NewVersion(proposed)
-
-	if err1 != nil || err2 != nil {
-		return "update"
-	}
-
-	if currentVer.Major() != proposedVer.Major() {
-		return "major"
-	} else if currentVer.Minor() != proposedVer.Minor() {
-		return "minor"
-	} else if currentVer.Patch() != proposedVer.Patch() {
-		return "patch"
-	}
-
-	return "-"
-}
-
 func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]string, versions map[string]string, currentVersions map[string]string, hasChanges map[string]bool, graph *depsgraph.Graph, logger *logrus.Logger, useLLMChangelog bool, plan *release.ReleasePlan) error {
 	displaySection(theme.IconBullet + " Release Orchestration")
 
@@ -1190,7 +927,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 										if repoPlan, ok := plan.Repos[repo]; ok {
 											repoPlan.ChangelogPushed = true
 											repoPlan.LastFailedOperation = "ci_wait" // Next operation that could fail
-											release.SavePlan(plan) // Save updated state
+											_ = release.SavePlan(plan) // Save updated state
 										}
 									}
 									
@@ -1209,7 +946,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 										if repoPlan, ok := plan.Repos[repo]; ok {
 											repoPlan.CIPassed = true
 											repoPlan.LastFailedOperation = "" // Clear failure since CI passed
-											release.SavePlan(plan) // Save updated state
+											_ = release.SavePlan(plan) // Save updated state
 										}
 									}
 								}
@@ -1249,7 +986,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 												if repoPlan, ok := plan.Repos[repo]; ok {
 													repoPlan.ChangelogPushed = true
 													repoPlan.LastFailedOperation = "ci_wait" // Next operation that could fail
-													release.SavePlan(plan) // Save updated state
+													_ = release.SavePlan(plan) // Save updated state
 												}
 											}
 											
@@ -1268,7 +1005,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 												if repoPlan, ok := plan.Repos[repo]; ok {
 													repoPlan.CIPassed = true
 													repoPlan.LastFailedOperation = "" // Clear failure since CI passed
-													release.SavePlan(plan) // Save updated state
+													_ = release.SavePlan(plan) // Save updated state
 												}
 											}
 										}
@@ -1293,13 +1030,13 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 							// Mark CI as passed and save plan
 							repoPlan.CIPassed = true
 							repoPlan.LastFailedOperation = "" // Clear failure since CI passed
-							release.SavePlan(plan)
+							_ = release.SavePlan(plan)
 						} else {
 							displayInfo(fmt.Sprintf("Skipping CI wait for %s (--skip-ci enabled)", repo))
 							// Even with --skip-ci, mark it as passed to avoid future waits
 							repoPlan.CIPassed = true
 							repoPlan.LastFailedOperation = "" // Clear failure since we're skipping CI
-							release.SavePlan(plan)
+							_ = release.SavePlan(plan)
 						}
 					}
 				}
@@ -1324,7 +1061,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 				if plan != nil && plan.Repos != nil {
 					if repoPlan, ok := plan.Repos[repo]; ok {
 						repoPlan.LastFailedOperation = "tag_creation"
-						release.SavePlan(plan)
+						_ = release.SavePlan(plan)
 					}
 				}
 				
@@ -1356,7 +1093,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 					if repoPlan, ok := plan.Repos[repo]; ok {
 						repoPlan.TagPushed = true
 						repoPlan.LastFailedOperation = "" // Clear any previous failures
-						release.SavePlan(plan)
+						_ = release.SavePlan(plan)
 					}
 				}
 
@@ -1753,291 +1490,6 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 
 	logger.WithField("modulePath", modulePath).Info("[updateGoDependencies] Completed successfully")
 	return nil
-}
-
-func displayAndConfirmVersionsWithOrder(rootDir string, versions map[string]string, currentVersions map[string]string, hasChanges map[string]bool, releaseLevels [][]string, graph *depsgraph.Graph, parentVersion string, autoDependencies map[string]bool, logger *logrus.Logger) bool {
-	displaySection(" Proposed Versions")
-
-	// Create separate lists for repos with and without changes
-	var reposWithChanges []string
-	var reposWithoutChanges []string
-	for repo := range versions {
-		if hasChanges[repo] {
-			reposWithChanges = append(reposWithChanges, repo)
-		} else {
-			reposWithoutChanges = append(reposWithoutChanges, repo)
-		}
-	}
-
-	// Sort both lists
-	sortRepos := func(repos []string) {
-		for i := 0; i < len(repos); i++ {
-			for j := i + 1; j < len(repos); j++ {
-				if repos[i] > repos[j] {
-					repos[i], repos[j] = repos[j], repos[i]
-				}
-			}
-		}
-	}
-	sortRepos(reposWithChanges)
-	sortRepos(reposWithoutChanges)
-
-	// Count repos with changes
-	changeCount := len(reposWithChanges)
-
-	if changeCount == 0 {
-		fmt.Println("\nNo repositories have changes to release.")
-		return false
-	}
-
-	// Prepare rows
-	var rows [][]string
-
-	// Add grove-ecosystem first (parent repository)
-	if changeCount > 0 {
-		// Get current version of grove-ecosystem - find the latest tag
-		cmd := exec.Command("git", "describe", "--tags", "--abbrev=0")
-		cmd.Dir = rootDir // Ensure we're in the root directory
-		output, err := cmd.Output()
-		currentEcosystemVersion := "-"
-		if err == nil {
-			currentEcosystemVersion = strings.TrimSpace(string(output))
-		}
-
-		// Check if parent version would need a suffix
-		displayParentVersion := parentVersion
-		// Check if this version already exists
-		checkCmd := exec.Command("git", "tag", "-l", parentVersion)
-		checkCmd.Dir = rootDir
-		checkOutput, _ := checkCmd.Output()
-		if len(strings.TrimSpace(string(checkOutput))) > 0 {
-			// Show with asterisk to indicate it will be adjusted
-			displayParentVersion = parentVersion + "*"
-		}
-
-		// Style the parent version
-		styledParentVersion := releaseHighlightStyle.Render(displayParentVersion)
-		// For date-based versions, show "date" as increment type
-		parentIncrement := "date"
-		if currentEcosystemVersion == parentVersion {
-			parentIncrement = "-"
-		}
-		rows = append(rows, []string{"grove-ecosystem", currentEcosystemVersion, styledParentVersion, parentIncrement})
-
-		// Add a separator
-		rows = append(rows, []string{"───────────────", "─────────", "──────────", "───────────"})
-	}
-
-	// Add repos with changes
-	for _, repo := range reposWithChanges {
-		current := currentVersions[repo]
-		if current == "" {
-			current = "-"
-		}
-		proposed := versions[repo]
-		increment := getVersionIncrement(current, proposed)
-
-		// Add indicator if this was auto-included as a dependency
-		repoDisplay := repo
-		if autoDependencies != nil && autoDependencies[repo] {
-			repoDisplay = repo + " (auto)"
-		}
-
-		// Pre-style the proposed version
-		styledProposed := releaseHighlightStyle.Render(proposed)
-		rows = append(rows, []string{repoDisplay, current, styledProposed, increment})
-	}
-
-	// Then add repos without changes
-	for _, repo := range reposWithoutChanges {
-		current := currentVersions[repo]
-		if current == "" {
-			current = "-"
-		}
-		proposed := versions[repo]
-		// Pre-style all columns for dimmed rows
-		rows = append(rows, []string{
-			releaseDimStyle.Render(repo),
-			releaseDimStyle.Render(current),
-			releaseDimStyle.Render(proposed),
-			releaseDimStyle.Render("-"),
-		})
-	}
-
-	// Create table with lipgloss
-
-	headerStyle := theme.DefaultTheme.Header.Copy().Padding(0, 1)
-
-	// Create the table
-	t := tablecomponent.NewStyledTable().
-		Border(lipgloss.NormalBorder()).
-		BorderStyle(theme.DefaultTheme.Muted).
-		Headers("REPOSITORY", "CURRENT", "PROPOSED", "INCREMENT").
-		Rows(rows...)
-
-	// Apply styling only to header since content is pre-styled
-	t.StyleFunc(func(row, col int) lipgloss.Style {
-		if row == 0 {
-			return headerStyle
-		}
-		// Return a minimal style that preserves the pre-styled content
-		return lipgloss.NewStyle().Padding(0, 1)
-	})
-
-	fmt.Println(t)
-
-	// Display release order with better formatting
-	displayReleaseSummary(releaseLevels, versions, currentVersions, hasChanges)
-
-	fmt.Printf("\n%d repositories will be released.\n", changeCount)
-
-	// Show auto-included dependencies info
-	if autoDependencies != nil && len(autoDependencies) > 0 {
-		fmt.Printf("\nNote: %d repositories were auto-included as dependencies (marked with 'auto').\n", len(autoDependencies))
-		if releaseWithDeps {
-			fmt.Println("Use --repos without --with-deps to release only the specified repositories.")
-		}
-	}
-
-	// Check if parent version needs adjustment
-	checkCmd := exec.Command("git", "tag", "-l", parentVersion)
-	checkCmd.Dir = rootDir
-	checkOutput, _ := checkCmd.Output()
-	if len(strings.TrimSpace(string(checkOutput))) > 0 {
-		fmt.Printf("\nNote: grove-ecosystem tag %s already exists - will use %s.1 instead\n",
-			parentVersion, parentVersion)
-	}
-
-	if releaseDryRun {
-		fmt.Println("\n[DRY RUN] Would proceed with these versions")
-		return true
-	}
-
-	if releaseYes {
-		fmt.Println("\n[AUTO-CONFIRM] Proceeding with release (--yes flag)")
-		return true
-	}
-
-	// Ask for confirmation
-	fmt.Print("\nProceed with release? [y/N]: ")
-	reader := bufio.NewReader(os.Stdin)
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		logger.Error("Failed to read input", "error", err)
-		return false
-	}
-
-	response = strings.TrimSpace(strings.ToLower(response))
-	return response == "y" || response == "yes"
-}
-
-func displayAndConfirmVersions(versions map[string]string, currentVersions map[string]string, hasChanges map[string]bool, logger *logrus.Logger) bool {
-	displaySection(" Proposed Versions")
-
-	// Create separate lists for repos with and without changes
-	var reposWithChanges []string
-	var reposWithoutChanges []string
-	for repo := range versions {
-		if hasChanges[repo] {
-			reposWithChanges = append(reposWithChanges, repo)
-		} else {
-			reposWithoutChanges = append(reposWithoutChanges, repo)
-		}
-	}
-
-	// Sort both lists
-	sortRepos := func(repos []string) {
-		for i := 0; i < len(repos); i++ {
-			for j := i + 1; j < len(repos); j++ {
-				if repos[i] > repos[j] {
-					repos[i], repos[j] = repos[j], repos[i]
-				}
-			}
-		}
-	}
-	sortRepos(reposWithChanges)
-	sortRepos(reposWithoutChanges)
-
-	// Count repos with changes
-	changeCount := len(reposWithChanges)
-
-	// Prepare rows
-	var rows [][]string
-
-	// Add repos with changes first
-	for _, repo := range reposWithChanges {
-		current := currentVersions[repo]
-		if current == "" {
-			current = "-"
-		}
-		proposed := versions[repo]
-		increment := getVersionIncrement(current, proposed)
-		// Pre-style the proposed version
-		styledProposed := releaseHighlightStyle.Render(proposed)
-		rows = append(rows, []string{repo, current, styledProposed, increment})
-	}
-
-	// Then add repos without changes
-	for _, repo := range reposWithoutChanges {
-		current := currentVersions[repo]
-		if current == "" {
-			current = "-"
-		}
-		proposed := versions[repo]
-		// Pre-style all columns for dimmed rows
-		rows = append(rows, []string{
-			releaseDimStyle.Render(repo),
-			releaseDimStyle.Render(current),
-			releaseDimStyle.Render(proposed),
-			releaseDimStyle.Render("-"),
-		})
-	}
-
-	// Create table with lipgloss
-
-	headerStyle := theme.DefaultTheme.Header.Copy().Padding(0, 1)
-
-	// Create the table
-	t := tablecomponent.NewStyledTable().
-		Border(lipgloss.NormalBorder()).
-		BorderStyle(theme.DefaultTheme.Muted).
-		Headers("REPOSITORY", "CURRENT", "PROPOSED", "INCREMENT").
-		Rows(rows...)
-
-	// Apply styling only to header since content is pre-styled
-	t.StyleFunc(func(row, col int) lipgloss.Style {
-		if row == 0 {
-			return headerStyle
-		}
-		// Return a minimal style that preserves the pre-styled content
-		return lipgloss.NewStyle().Padding(0, 1)
-	})
-
-	fmt.Println(t)
-
-	if changeCount == 0 {
-		fmt.Println("\nNo repositories have changes to release.")
-		return false
-	}
-
-	fmt.Printf("\n%d repositories will be released.\n", changeCount)
-
-	if releaseDryRun {
-		fmt.Println("\n[DRY RUN] Would proceed with these versions")
-		return true
-	}
-
-	// Ask for confirmation
-	fmt.Print("\nProceed with release? [y/N]: ")
-	reader := bufio.NewReader(os.Stdin)
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		logger.Error("Failed to read input", "error", err)
-		return false
-	}
-
-	response = strings.TrimSpace(strings.ToLower(response))
-	return response == "y" || response == "yes"
 }
 
 func determineParentVersion(rootDir string, versions map[string]string, hasChanges map[string]bool) string {

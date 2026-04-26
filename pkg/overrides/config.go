@@ -61,7 +61,7 @@ func SaveConfig(workspaceRoot string, config *Config) error {
 		return err
 	}
 
-	return os.WriteFile(configPath, data, 0644)
+	return os.WriteFile(configPath, data, 0644) //nolint:gosec // G306: internal tool, non-sensitive config file
 }
 
 // GetBinaryOverride returns the override path for a binary in a workspace

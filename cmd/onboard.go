@@ -7,7 +7,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -105,9 +104,6 @@ type onboardModel struct {
 type installDoneMsg struct {
 	err error
 }
-
-// tickMsg for spinner animation
-type tickMsg time.Time
 
 func newOnboardModel() *onboardModel {
 	// Initialize shell manager
@@ -335,7 +331,7 @@ func (m *onboardModel) runInstallCmd() tea.Cmd {
 		os.Stderr = oldStderr
 
 		// Read captured output
-		io.Copy(m.installOutput, r)
+		_, _ = io.Copy(m.installOutput, r)
 		r.Close()
 
 		return installDoneMsg{err: err}
@@ -445,7 +441,7 @@ func (m *onboardModel) viewPath() string {
 		content.WriteString("\n\n")
 
 		// Show the line that will be added
-		boxStyle := t.Box.Copy().Width(min(m.width-12, 60))
+		boxStyle := t.Box.Width(min(m.width-12, 60))
 		content.WriteString(boxStyle.Render(exportLine))
 		content.WriteString("\n\n")
 	} else {

@@ -148,7 +148,7 @@ func main() {
 
 	// Write to pkg/sdk/registry_generated.go
 	outputPath := filepath.Join(cwd, "pkg", "sdk", "registry_generated.go")
-	if err := os.WriteFile(outputPath, formatted, 0644); err != nil {
+	if err := os.WriteFile(outputPath, formatted, 0644); err != nil { //nolint:gosec // G306: internal tool, non-sensitive config file
 		log.Fatalf("Failed to write registry file: %v", err)
 	}
 

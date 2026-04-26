@@ -25,8 +25,8 @@ func RepoGitHubInitDryRunScenario() *harness.Scenario {
 					repoDir := ctx.NewDir("grove-test-repo")
 
 					// Create minimal grove.yml to make it a Grove repo
-					fs.WriteString(filepath.Join(repoDir, "grove.yml"), "name: grove-test-repo\nbinary:\n  alias: gtr\n")
-					fs.WriteString(filepath.Join(repoDir, "go.mod"), "module github.com/grovetools/grove-test-repo\n\ngo 1.24.4\n")
+					_ = fs.WriteString(filepath.Join(repoDir, "grove.yml"), "name: grove-test-repo\nbinary:\n  alias: gtr\n")
+					_ = fs.WriteString(filepath.Join(repoDir, "go.mod"), "module github.com/grovetools/grove-test-repo\n\ngo 1.24.4\n")
 
 					// Initialize git
 					cmd := ctx.Command("git", "init")
@@ -54,8 +54,8 @@ func RepoGitHubInitDryRunScenario() *harness.Scenario {
 
 					// Mock gh
 					ghMockPath := filepath.Join(mockDir, "gh")
-					fs.WriteString(ghMockPath, ghMockScript)
-					os.Chmod(ghMockPath, 0755)
+					_ = fs.WriteString(ghMockPath, ghMockScript)
+					_ = os.Chmod(ghMockPath, 0755)
 
 					os.Setenv("PATH", mockDir+":"+os.Getenv("PATH"))
 					os.Setenv("GROVE_PAT", "test-pat-12345")

@@ -146,26 +146,6 @@ func renderMinimalNavPreview(rootName, rootPath, newProjectName string) string {
 	return sb.String()
 }
 
-// renderGmuxView is kept for backward compatibility, delegates to renderNavPreview
-// TODO: Remove once all callers are updated
-func renderGmuxView(ecosystemName string, projectName string, isNew bool, width int) string {
-	// Convert ecosystem name to a path for the new function
-	rootPath := "~/Code/" + ecosystemName
-	if ecosystemName == "" {
-		rootPath = "~/Code/my-projects"
-	}
-	return renderNavPreview(rootPath, projectName, width)
-}
-
-// renderMinimalGmuxView is kept for backward compatibility
-func renderMinimalGmuxView(ecosystemName, projectName string) string {
-	rootPath := "~/Code/" + ecosystemName
-	if ecosystemName == "" {
-		rootPath = "~/Code/my-projects"
-	}
-	return renderMinimalNavPreview(ecosystemName, rootPath, projectName)
-}
-
 // renderNotebookPreview renders a simple preview of the notebook directory structure
 func renderNotebookPreview(notebookPath string, width int) string {
 	t := theme.DefaultTheme
@@ -189,79 +169,6 @@ func renderNotebookPreview(notebookPath string, width int) string {
 	sb.WriteString("  " + t.Muted.Render("Each workspace gets its own folder for notes and plans."))
 
 	return sb.String()
-}
-
-// renderNbView returns a captured nb tui tree view with ANSI styling
-// The workspace name is substituted into the template
-func renderNbView(workspaceName string, width int) string {
-	wsName := workspaceName
-	if wsName == "" {
-		wsName = "my-project"
-	}
-
-	// Use a simpler view if width is very constrained
-	if width < 50 {
-		template := "  \x1b[1mnb > %s\x1b[0m\n" +
-			"\n" +
-			"   \x1b[93m▶ \x1b[39m󰇧 \x1b[3;4mglobal\x1b[0m\n" +
-			"      \x1b[3m%s\x1b[0m\n" +
-			"     \x1b[2m│ \x1b[0m\x1b[93m󰚇\x1b[39m inbox\x1b[2m (2)\x1b[0m\n" +
-			"     \x1b[2m│ \x1b[0m\x1b[34m󰠡\x1b[39m \x1b[3mplans\x1b[0m\x1b[2m (2)\x1b[0m\n" +
-			"     \x1b[2m└ \x1b[0m\x1b[32m󰄳\x1b[39m completed\x1b[2m (2)\x1b[0m\n"
-
-		return fmt.Sprintf(template, wsName, wsName)
-	}
-
-	// Captured from real nb tui output - using \x1b for escape character
-	template := "  \x1b[1mnb > %s\x1b[0m\n" +
-		"\n" +
-		"   \x1b[93m▶ \x1b[39m󰇧 \x1b[3;4mglobal\x1b[0m\n" +
-		"      \x1b[3m%s\x1b[0m\n" +
-		"     \x1b[2m│ \x1b[0m\x1b[93m󰚇\x1b[39m inbox\x1b[2m (2)\x1b[0m\n" +
-		"     \x1b[2m│ \x1b[0m\x1b[31m\x1b[39m issues\x1b[2m (3)\x1b[0m\n" +
-		"     \x1b[2m│ \x1b[0m\x1b[34m󰠡\x1b[39m \x1b[3mplans\x1b[0m\x1b[2m (2)\x1b[0m\n" +
-		"     \x1b[2m│ └ \x1b[0m\x1b[34m󰦖 \x1b[3m\x1b[39minitial-setup\x1b[0m\x1b[2m [\x1b[3mnote:\x1b[0m ← setup]\x1b[2m (3)\x1b[0m\n" +
-		"     \x1b[2m│ \x1b[0m\x1b[34m󰔟\x1b[39m \x1b[3min_progress\x1b[0m\x1b[2m (1)\x1b[0m\n" +
-		"     \x1b[2m│ └ \x1b[0m\x1b[34m󰡯\x1b[39m 20260106-kickoff.md\x1b[2m [\x1b[3mplan:\x1b[0m → setup]\n" +
-		"     \x1b[2m└ \x1b[0m\x1b[32m󰄳\x1b[39m completed\x1b[2m (2)\x1b[0m\n" +
-		"\n" +
-		"  \x1b[2m6 notes shown | Press \x1b[0m\x1b[1m\x1b[93m?\x1b[0m\x1b[2m for help\x1b[0m"
-
-	return fmt.Sprintf(template, wsName, wsName)
-}
-
-// renderNoteCreationExample shows a sample nb new command and resulting file structure
-func renderNoteCreationExample(notebookPath string, width int) string {
-	var content strings.Builder
-
-	cmdStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("39"))
-	pathStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("214"))
-	mutedStyle := theme.DefaultTheme.Muted
-
-	// Command example
-	content.WriteString(cmdStyle.Render("$ nb new \"Initial project plan\""))
-	content.WriteString("\n\n")
-
-	// Tree view of result
-	content.WriteString(mutedStyle.Render("Creates:"))
-	content.WriteString("\n")
-	content.WriteString(pathStyle.Render(notebookPath))
-	content.WriteString("\n")
-	content.WriteString(mutedStyle.Render("└── default/"))
-	content.WriteString("\n")
-	content.WriteString(mutedStyle.Render("    └── "))
-	content.WriteString(pathStyle.Render("initial-project-plan.md"))
-	content.WriteString("\n")
-
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Padding(0, 1).
-		Width(min(width-12, 60))
-
-	return boxStyle.Render(content.String())
 }
 
 // renderTmuxConfig shows the exact tmux configuration that will be created

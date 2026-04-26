@@ -62,6 +62,7 @@ func RunWithOptions(ctx context.Context, jobs []BuildJob, numWorkers int, contin
 
 	// If we don't continue on error, we need a cancellable context.
 	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	var once sync.Once
 
 	var wg sync.WaitGroup
@@ -163,6 +164,7 @@ func RunWithEventsAndOptions(ctx context.Context, jobs []BuildJob, numWorkers in
 
 	// If we don't continue on error, we need a cancellable context.
 	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	var once sync.Once
 
 	var wg sync.WaitGroup

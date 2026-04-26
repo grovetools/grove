@@ -14,7 +14,6 @@ import (
 
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/util/delegation"
-	"github.com/grovetools/grove/pkg/devlinks"
 	"github.com/grovetools/grove/pkg/workspace"
 )
 
@@ -60,7 +59,7 @@ func LoadAliases() (*AliasConfig, error) {
 // SaveAliases saves the user's custom alias configuration
 func SaveAliases(config *AliasConfig) error {
 	stateDir := paths.StateDir()
-	if err := os.MkdirAll(stateDir, 0755); err != nil {
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create state directory: %w", err)
 	}
 	aliasFile := filepath.Join(stateDir, "aliases.json")
@@ -68,7 +67,7 @@ func SaveAliases(config *AliasConfig) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal aliases: %w", err)
 	}
-	return os.WriteFile(aliasFile, data, 0644)
+	return os.WriteFile(aliasFile, data, 0o644) //nolint:gosec // G306: internal tool, non-sensitive config file
 }
 
 // FindTool resolves a user-provided identifier (repo name, alias) to its canonical info
@@ -121,10 +120,8 @@ type Manager struct {
 
 // NewManager creates a new SDK manager instance
 func NewManager() (*Manager, error) {
-	// Run migration on initialization
-	if err := MigrateFromSingleVersion(); err != nil {
-		// Ignore migration errors - it's a one-time operation
-	}
+	// Run migration on initialization; ignore errors - it's a one-time operation
+	_ = MigrateFromSingleVersion()
 
 	return &Manager{
 		useGH: false,
@@ -203,10 +200,8 @@ func (m *Manager) EnsureDirs() error {
 // GetActiveVersion returns the currently active version (DEPRECATED)
 // This method is kept for backward compatibility but should not be used
 func (m *Manager) GetActiveVersion() (string, error) {
-	// Try to migrate from old format if needed
-	if err := MigrateFromSingleVersion(); err != nil {
-		// Ignore migration errors
-	}
+	// Try to migrate from old format if needed; ignore errors
+	_ = MigrateFromSingleVersion()
 
 	// Return empty string as there's no single active version anymore
 	return "", fmt.Errorf("no single active version - use GetToolVersion instead")
@@ -303,7 +298,7 @@ func (m *Manager) GetLatestVersionTag(toolName string) (string, error) {
 
 	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", GitHubAPI, GitHubOwner, repoName)
 
-	resp, err := http.Get(url)
+	resp, err := http.Get(url) //nolint:gosec // G107: URL constructed from trusted config
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch latest release: %w", err)
 	}
@@ -323,7 +318,7 @@ func (m *Manager) GetLatestVersionTag(toolName string) (string, error) {
 
 // getLatestVersionTagWithGH fetches the latest release tag using gh CLI
 func (m *Manager) getLatestVersionTagWithGH(repoName string) (string, error) {
-	cmd := exec.Command("gh", "release", "view", "--repo", fmt.Sprintf("%s/%s", GitHubOwner, repoName), "--json", "tagName")
+	cmd := exec.Command("gh", "release", "view", "--repo", fmt.Sprintf("%s/%s", GitHubOwner, repoName), "--json", "tagName") //nolint:gosec // G204: args are not user-controlled
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -350,7 +345,7 @@ func (m *Manager) GetLatestPrereleaseVersionTag(toolName string) (string, error)
 
 	if m.useGH {
 		// Use gh CLI to list releases including pre-releases
-		cmd := exec.Command("gh", "release", "list", "--repo", fmt.Sprintf("%s/%s", GitHubOwner, repoName), "--limit", "20", "--json", "tagName,isPrerelease")
+		cmd := exec.Command("gh", "release", "list", "--repo", fmt.Sprintf("%s/%s", GitHubOwner, repoName), "--limit", "20", "--json", "tagName,isPrerelease") //nolint:gosec // G204: args are not user-controlled
 		output, err := cmd.Output()
 		if err != nil {
 			return "", fmt.Errorf("gh CLI failed to list releases: %w", err)
@@ -378,7 +373,7 @@ func (m *Manager) GetLatestPrereleaseVersionTag(toolName string) (string, error)
 	// Use GitHub API to list releases
 	url := fmt.Sprintf("%s/repos/%s/%s/releases", GitHubAPI, GitHubOwner, repoName)
 
-	resp, err := http.Get(url)
+	resp, err := http.Get(url) //nolint:gosec // G107: URL constructed from trusted config
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch releases: %w", err)
 	}
@@ -416,7 +411,7 @@ func (m *Manager) GetRelease(toolName, version string) (*GitHubRelease, error) {
 
 	url := fmt.Sprintf("%s/repos/%s/%s/releases/tags/%s", GitHubAPI, GitHubOwner, repoName, version)
 
-	resp, err := http.Get(url)
+	resp, err := http.Get(url) //nolint:gosec // G107: URL constructed from trusted config
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch release %s: %w", version, err)
 	}
@@ -436,7 +431,7 @@ func (m *Manager) GetRelease(toolName, version string) (*GitHubRelease, error) {
 
 // getReleaseWithGH fetches release information using gh CLI
 func (m *Manager) getReleaseWithGH(repoName, version string) (*GitHubRelease, error) {
-	cmd := exec.Command("gh", "release", "view", version, "--repo", fmt.Sprintf("%s/%s", GitHubOwner, repoName), "--json", "tagName,assets")
+	cmd := exec.Command("gh", "release", "view", version, "--repo", fmt.Sprintf("%s/%s", GitHubOwner, repoName), "--json", "tagName,assets") //nolint:gosec // G204: args are not user-controlled
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -534,7 +529,7 @@ func (m *Manager) InstallTool(toolName, versionTag string) error {
 
 	// Create version directory
 	versionBinDir := filepath.Join(paths.DataDir(), VersionsDir, versionTag, BinDir)
-	if err := os.MkdirAll(versionBinDir, 0755); err != nil {
+	if err := os.MkdirAll(versionBinDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create version directory: %w", err)
 	}
 
@@ -545,7 +540,7 @@ func (m *Manager) InstallTool(toolName, versionTag string) error {
 	}
 
 	// Make executable
-	if err := os.Chmod(targetPath, 0755); err != nil {
+	if err := os.Chmod(targetPath, 0o755); err != nil {
 		return fmt.Errorf("failed to make %s executable: %w", effectiveAlias, err)
 	}
 
@@ -561,7 +556,7 @@ func (m *Manager) InstallAllToolsFromSource() error {
 
 	// Use a persistent workspace directory
 	workspaceDir := filepath.Join(paths.DataDir(), "source-workspace")
-	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create workspace directory: %w", err)
 	}
 
@@ -593,7 +588,7 @@ func (m *Manager) InstallAllToolsFromSource() error {
 		// Check if already cloned
 		if _, err := os.Stat(repoPath); err == nil {
 			fmt.Printf("  Updating %s...\n", repo)
-			pullCmd := exec.Command("git", "-C", repoPath, "pull", "--ff-only")
+			pullCmd := exec.Command("git", "-C", repoPath, "pull", "--ff-only") //nolint:gosec // G204: args are not user-controlled
 			if err := pullCmd.Run(); err != nil {
 				// If pull fails, remove and re-clone
 				os.RemoveAll(repoPath)
@@ -604,7 +599,7 @@ func (m *Manager) InstallAllToolsFromSource() error {
 
 		fmt.Printf("  Cloning %s...\n", repo)
 		repoSlug := fmt.Sprintf("%s/%s", GitHubOwner, repo)
-		cloneCmd := exec.Command("gh", "repo", "clone", repoSlug, repoPath, "--", "--depth=1")
+		cloneCmd := exec.Command("gh", "repo", "clone", repoSlug, repoPath, "--", "--depth=1") //nolint:gosec // G204: args are not user-controlled
 		if output, err := cloneCmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("failed to clone %s: %w\nOutput: %s", repo, err, string(output))
 		}
@@ -626,7 +621,7 @@ func (m *Manager) InstallAllToolsFromSource() error {
 	workContent.WriteString(")\n\n")
 	workContent.WriteString("replace github.com/fsnotify/fsevents => ./grove-proxy/internal/fsevents-stub\n")
 
-	if err := os.WriteFile(goWorkPath, []byte(workContent.String()), 0644); err != nil {
+	if err := os.WriteFile(goWorkPath, []byte(workContent.String()), 0o644); err != nil { //nolint:gosec // G306: internal tool, non-sensitive config file
 		return fmt.Errorf("failed to create go.work: %w", err)
 	}
 
@@ -651,7 +646,7 @@ func (m *Manager) InstallAllToolsFromSource() error {
 		fmt.Printf("  Building %s...\n", toolName)
 
 		// Build with workspace
-		buildCmd := exec.Command("make", "build")
+		buildCmd := exec.Command("make", "build") //nolint:gosec // G204: args are not user-controlled
 		buildCmd.Dir = buildDir
 		buildCmd.Env = append(os.Environ(),
 			"GOPRIVATE=github.com/grovetools/*",
@@ -662,7 +657,7 @@ func (m *Manager) InstallAllToolsFromSource() error {
 		}
 
 		// Get commit SHA for version tag
-		shaCmd := exec.Command("git", "-C", buildDir, "rev-parse", "--short", "HEAD")
+		shaCmd := exec.Command("git", "-C", buildDir, "rev-parse", "--short", "HEAD") //nolint:gosec // G204: args are not user-controlled
 		shaOutput, err := shaCmd.Output()
 		if err != nil {
 			return fmt.Errorf("failed to get commit SHA for %s: %w", toolName, err)
@@ -679,7 +674,7 @@ func (m *Manager) InstallAllToolsFromSource() error {
 
 		// Install binary
 		versionBinDir := filepath.Join(paths.DataDir(), VersionsDir, versionTag, BinDir)
-		if err := os.MkdirAll(versionBinDir, 0755); err != nil {
+		if err := os.MkdirAll(versionBinDir, 0o755); err != nil {
 			return fmt.Errorf("failed to create version directory: %w", err)
 		}
 
@@ -700,7 +695,7 @@ func (m *Manager) InstallAllToolsFromSource() error {
 			return fmt.Errorf("failed to copy binary: %w", err)
 		}
 
-		if err := os.Chmod(targetPath, 0755); err != nil {
+		if err := os.Chmod(targetPath, 0o755); err != nil {
 			return fmt.Errorf("failed to make %s executable: %w", effectiveAlias, err)
 		}
 
@@ -737,7 +732,7 @@ func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
 
 	// Use a persistent workspace directory
 	workspaceDir := filepath.Join(paths.DataDir(), "source-workspace")
-	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
 		return "", fmt.Errorf("failed to create workspace directory: %w", err)
 	}
 
@@ -760,7 +755,7 @@ func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
 		// Check if already cloned, if so pull latest
 		if _, err := os.Stat(repoPath); err == nil {
 			// Already exists, pull latest
-			pullCmd := exec.Command("git", "-C", repoPath, "pull", "--ff-only")
+			pullCmd := exec.Command("git", "-C", repoPath, "pull", "--ff-only") //nolint:gosec // G204: args are not user-controlled
 			if err := pullCmd.Run(); err != nil {
 				// If pull fails, remove and re-clone
 				os.RemoveAll(repoPath)
@@ -771,7 +766,7 @@ func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
 
 		// Clone the repository
 		repoSlug := fmt.Sprintf("%s/%s", GitHubOwner, repo)
-		cloneCmd := exec.Command("gh", "repo", "clone", repoSlug, repoPath, "--", "--depth=1")
+		cloneCmd := exec.Command("gh", "repo", "clone", repoSlug, repoPath, "--", "--depth=1") //nolint:gosec // G204: args are not user-controlled
 		if output, err := cloneCmd.CombinedOutput(); err != nil {
 			return "", fmt.Errorf("failed to clone %s: %w\nOutput: %s", repo, err, string(output))
 		}
@@ -787,7 +782,7 @@ func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
 	}
 	workContent.WriteString(")\n")
 
-	if err := os.WriteFile(goWorkPath, []byte(workContent.String()), 0644); err != nil {
+	if err := os.WriteFile(goWorkPath, []byte(workContent.String()), 0o644); err != nil { //nolint:gosec // G306: internal tool, non-sensitive config file
 		return "", fmt.Errorf("failed to create go.work: %w", err)
 	}
 
@@ -795,7 +790,7 @@ func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
 	buildDir := filepath.Join(workspaceDir, repoName)
 
 	// Get the short commit SHA from the main tool repo
-	shaCmd := exec.Command("git", "-C", buildDir, "rev-parse", "--short", "HEAD")
+	shaCmd := exec.Command("git", "-C", buildDir, "rev-parse", "--short", "HEAD") //nolint:gosec // G204: args are not user-controlled
 	shaOutput, err := shaCmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get commit SHA: %w", err)
@@ -804,7 +799,7 @@ func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
 	versionTag := fmt.Sprintf("source-%s", sha)
 
 	// Build the binary using make with workspace
-	buildCmd := exec.Command("make", "build")
+	buildCmd := exec.Command("make", "build") //nolint:gosec // G204: args are not user-controlled
 	buildCmd.Dir = buildDir
 	buildCmd.Env = append(os.Environ(),
 		"GOPRIVATE=github.com/grovetools/*",
@@ -834,7 +829,7 @@ func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
 
 	// Create version directory
 	versionBinDir := filepath.Join(paths.DataDir(), VersionsDir, versionTag, BinDir)
-	if err := os.MkdirAll(versionBinDir, 0755); err != nil {
+	if err := os.MkdirAll(versionBinDir, 0o755); err != nil {
 		return "", fmt.Errorf("failed to create version directory: %w", err)
 	}
 
@@ -857,7 +852,7 @@ func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
 	}
 
 	// Make executable
-	if err := os.Chmod(targetPath, 0755); err != nil {
+	if err := os.Chmod(targetPath, 0o755); err != nil {
 		return "", fmt.Errorf("failed to make %s executable: %w", effectiveAlias, err)
 	}
 
@@ -934,7 +929,7 @@ func (m *Manager) downloadFile(url, targetPath string) error {
 		return m.downloadFileWithGH(url, targetPath)
 	}
 
-	resp, err := http.Get(url)
+	resp, err := http.Get(url) //nolint:gosec // G107: URL constructed from trusted config
 	if err != nil {
 		return err
 	}
@@ -969,7 +964,7 @@ func (m *Manager) downloadFileWithGH(url, targetPath string) error {
 	asset := parts[8]
 
 	// Use gh CLI to download the release asset
-	cmd := exec.Command("gh", "release", "download", tag, "--repo", fmt.Sprintf("%s/%s", owner, repo), "--pattern", asset, "--dir", filepath.Dir(targetPath))
+	cmd := exec.Command("gh", "release", "download", tag, "--repo", fmt.Sprintf("%s/%s", owner, repo), "--pattern", asset, "--dir", filepath.Dir(targetPath)) //nolint:gosec // G204: args are not user-controlled
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -985,11 +980,6 @@ func (m *Manager) downloadFileWithGH(url, targetPath string) error {
 	}
 
 	return nil
-}
-
-// resetDevLinks clears all active development links
-func (m *Manager) resetDevLinks() error {
-	return devlinks.ClearAllCurrentLinks()
 }
 
 // GetToolToRepoMap returns the alias to repository name mapping

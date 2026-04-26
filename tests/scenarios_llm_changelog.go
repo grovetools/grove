@@ -330,10 +330,9 @@ func TestLoadConfig(t *testing.T) {
 						}
 					}
 					
-					if len(missingSections) > 0 {
-						// This is normal as the LLM may consolidate or rename sections
-						// We don't fail the test for missing sections
-					}
+					// This is normal as the LLM may consolidate or rename sections
+					// We don't fail the test for missing sections (missingSections may be non-empty)
+					_ = missingSections
 					
 					// Store the changelog for inspection if needed
 					ctx.Set("final_changelog", changelogContent)
@@ -370,9 +369,7 @@ const Version = "v0.3.0"
 					}
 					
 					// Clear existing changelog for clean test
-					if err := os.Remove(filepath.Join(repoDir, "CHANGELOG.md")); err != nil {
-						// No existing CHANGELOG.md to remove
-					}
+					_ = os.Remove(filepath.Join(repoDir, "CHANGELOG.md"))
 					
 					// Run release with LLM changelog in dry-run mode
 					cmd := command.New(ctx.GroveBinary, "release", 
@@ -388,10 +385,9 @@ const Version = "v0.3.0"
 					ctx.ShowCommandOutput("grove release --llm-changelog --dry-run", 
 						result.Stdout, result.Stderr)
 					
-					if result.Error != nil {
-						// This might fail because we're not in a proper grove ecosystem
-						// Dry-run completed with errors (expected in test environment)
-					}
+					// This might fail because we're not in a proper grove ecosystem
+					// Dry-run completed with errors (expected in test environment)
+					_ = result.Error
 					
 					// LLM changelog integration tested in release workflow
 					return nil

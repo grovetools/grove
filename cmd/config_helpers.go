@@ -201,21 +201,6 @@ func updateGlobalConfig(groveName, grovePath, notebook string) (string, error) {
 	return targetPath, nil
 }
 
-// isHomeDirectory checks if the given path is the user's home directory.
-func isHomeDirectory(path string) bool {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return false
-	}
-
-	return filepath.Clean(absPath) == filepath.Clean(homeDir)
-}
-
 // deriveGroveName derives a grove name from a path.
 // It uses the base name of the path and checks for conflicts.
 func deriveGroveName(path string, existingGroves map[string]config.GroveSourceConfig) (string, error) {

@@ -87,7 +87,7 @@ func TestGitFetcher_Fetch_TempDirHandling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create GitFetcher: %v", err)
 	}
-	defer fetcher.Cleanup()
+	defer func() { _ = fetcher.Cleanup() }()
 
 	// Create a fake "cloned" structure in the temp dir to simulate success
 	cloneDir := filepath.Join(fetcher.tempDir, "repo")

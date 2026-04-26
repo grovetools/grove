@@ -66,16 +66,6 @@ func getPlanPath() (string, error) {
 	return filepath.Join(releaseDir, "release_plan.json"), nil
 }
 
-func getStagingDir() (string, error) {
-	releaseDir := getReleaseStateDir()
-	stagingDir := filepath.Join(releaseDir, "staging")
-	// The staging dir itself may be removed, so ensure it exists when requested.
-	if err := os.MkdirAll(stagingDir, 0755); err != nil {
-		return "", err
-	}
-	return stagingDir, nil
-}
-
 // LoadPlan reads and unmarshals the release plan from disk.
 func LoadPlan() (*ReleasePlan, error) {
 	planPath, err := getPlanPath()
@@ -111,7 +101,7 @@ func SavePlan(plan *ReleasePlan) error {
 		return err
 	}
 
-	return os.WriteFile(planPath, data, 0644)
+	return os.WriteFile(planPath, data, 0644) //nolint:gosec // G306: internal tool, non-sensitive config file
 }
 
 // ClearPlan deletes the plan file and staging directory.

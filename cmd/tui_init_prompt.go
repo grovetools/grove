@@ -75,7 +75,6 @@ type initPromptModel struct {
 	notebooks        []string // available notebook keys
 	cursor           int      // cursor for current state's selection
 	confirmCursor    int      // 0 = Yes, 1 = No
-	selectedNotebook string
 	result           initPromptResult
 	width            int
 	height           int

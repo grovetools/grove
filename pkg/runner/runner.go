@@ -52,7 +52,7 @@ func runStreamingMode(opts Options) error {
 		fmt.Println(strings.Repeat("-", len(header)))
 
 		// Create command
-		cmd := exec.Command(opts.Command, opts.Args...)
+		cmd := exec.Command(opts.Command, opts.Args...) //nolint:gosec // G204: args are not user-controlled
 		cmd.Dir = workspace
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
@@ -82,7 +82,7 @@ func runJSONMode(opts Options) error {
 
 		// Create command with --json flag
 		args := append(opts.Args, "--json")
-		cmd := exec.Command(opts.Command, args...)
+		cmd := exec.Command(opts.Command, args...) //nolint:gosec // G204: args are not user-controlled
 		cmd.Dir = workspace
 
 		// Capture output

@@ -110,45 +110,6 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	return runner.Run(runnerOpts)
 }
 
-// runScript is a helper for running shell scripts across workspaces
-func runScript(cmd *cobra.Command, script string) error {
-	logger := logging.NewLogger("run")
-
-	// Discover projects using the shared context-aware helper
-	projects, rootDir, err := DiscoverTargetProjects()
-	if err != nil {
-		return fmt.Errorf("failed to discover workspaces: %w", err)
-	}
-
-	var workspaces []string
-	for _, p := range projects {
-		workspaces = append(workspaces, p.Path)
-	}
-
-	if len(workspaces) == 0 {
-		return fmt.Errorf("no workspaces found")
-	}
-
-	// Apply filter if provided
-	if runFilter != "" {
-		workspaces = discovery.FilterWorkspaces(workspaces, runFilter)
-	}
-
-	// Apply exclude filter if provided
-	if runExclude != "" {
-		workspaces = applyExcludeFilter(workspaces, runExclude)
-	}
-
-	// Execute script
-	runnerOpts := runner.Options{
-		Workspaces: workspaces,
-		Logger:     logger.Logger,
-		RootDir:    rootDir,
-	}
-
-	return runner.RunScript(runnerOpts, script)
-}
-
 // applyExcludeFilter removes workspaces that match any of the exclude patterns
 func applyExcludeFilter(workspaces []string, excludeStr string) []string {
 	if excludeStr == "" {

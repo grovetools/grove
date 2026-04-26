@@ -568,7 +568,7 @@ func parseIntValue(v interface{}) int {
 		return int(val)
 	case string:
 		var i int
-		fmt.Sscanf(val, "%d", &i)
+		_, _ = fmt.Sscanf(val, "%d", &i)
 		return i
 	default:
 		return 0
