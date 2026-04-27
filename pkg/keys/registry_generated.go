@@ -1207,6 +1207,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "toggle release", Keys: []string{"r"}, Description: "toggle release", Enabled: true, ConfigKey: "toggle_release"},
 					{Name: "toggle tool/version", Keys: []string{"y"}, Description: "toggle tool/version", Enabled: true, ConfigKey: "toggle_binary"},
 					{Name: "toggle remote", Keys: []string{"l"}, Description: "toggle remote", Enabled: true, ConfigKey: "toggle_link"},
+					{Name: "toggle validation matrix", Keys: []string{"v"}, Description: "toggle validation matrix", Enabled: true, ConfigKey: "toggle_task_results"},
 				},
 			},
 			{

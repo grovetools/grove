@@ -40,6 +40,7 @@ func init() {
 	rootCmd.AddCommand(newSetupCmd())
 	rootCmd.AddCommand(newStatusCmd())
 	rootCmd.AddCommand(newTestCmd())
+	rootCmd.AddCommand(newTestReportCmd())
 	rootCmd.AddCommand(newVetCmd())
 	rootCmd.AddCommand(internal.NewInternalCmd())
 

@@ -172,15 +172,74 @@ func runStatusTable(scoped []*models.EnrichedWorkspace, displayVerbs []string, s
 
 	fmt.Println(tbl.Render())
 
-	if showErrors && len(failures) > 0 {
-		fmt.Println("\nFailures:")
-		for _, f := range failures {
-			// Show first line of error summary
-			firstLine := f.summary
-			if idx := strings.Index(firstLine, "\n"); idx >= 0 {
-				firstLine = firstLine[:idx]
+	if showErrors {
+		if len(failures) > 0 {
+			fmt.Println("\nFailures:")
+			for _, f := range failures {
+				firstLine := f.summary
+				if idx := strings.Index(firstLine, "\n"); idx >= 0 {
+					firstLine = firstLine[:idx]
+				}
+				fmt.Printf("  %s/%s: %s\n", f.workspace, f.verb, firstLine)
 			}
-			fmt.Printf("  %s/%s: %s\n", f.workspace, f.verb, firstLine)
+		}
+
+		// Show scenario-level failures from TestReports
+		for _, ws := range scoped {
+			name := filepath.Base(ws.Path)
+			for verb, report := range ws.TestReports {
+				if report == nil || report.Summary.Failed == 0 {
+					continue
+				}
+				fmt.Printf("\n  %s/%s: %d/%d failed\n", name, verb, report.Summary.Failed, report.Summary.Total)
+				for _, sc := range report.Scenarios {
+					if sc.Status != "fail" {
+						continue
+					}
+					detail := sc.Name
+					if sc.FailedStep != "" {
+						detail += fmt.Sprintf(" (step %q)", sc.FailedStep)
+					}
+					if sc.Error != "" {
+						detail += ": " + sc.Error
+					}
+					fmt.Printf("    %s\n", detail)
+				}
+			}
+		}
+
+		// Show slowest scenarios across all workspaces
+		type slowEntry struct {
+			workspace string
+			scenario  string
+			duration  time.Duration
+		}
+		var all []slowEntry
+		for _, ws := range scoped {
+			name := filepath.Base(ws.Path)
+			for _, report := range ws.TestReports {
+				if report == nil {
+					continue
+				}
+				for _, sc := range report.Scenarios {
+					all = append(all, slowEntry{
+						workspace: name,
+						scenario:  sc.Name,
+						duration:  time.Duration(sc.DurationMs) * time.Millisecond,
+					})
+				}
+			}
+		}
+		if len(all) > 0 {
+			sort.Slice(all, func(i, j int) bool { return all[i].duration > all[j].duration })
+			limit := 3
+			if len(all) < limit {
+				limit = len(all)
+			}
+			fmt.Println("\nSlowest scenarios:")
+			for _, e := range all[:limit] {
+				fmt.Printf("  %s/%s: %s\n", e.workspace, e.scenario, e.duration.Round(time.Second))
+			}
 		}
 	}
 
@@ -196,11 +255,12 @@ func runStatusJSON(scoped []*models.EnrichedWorkspace, displayVerbs []string) er
 		ErrorSummary string `json:"error_summary,omitempty"`
 	}
 	type JSONWorkspace struct {
-		Name    string                     `json:"name"`
-		Path    string                     `json:"path"`
-		Branch  string                     `json:"branch"`
-		Dirty   bool                       `json:"dirty"`
-		Results map[string]*JSONTaskResult `json:"results"`
+		Name        string                        `json:"name"`
+		Path        string                        `json:"path"`
+		Branch      string                        `json:"branch"`
+		Dirty       bool                          `json:"dirty"`
+		Results     map[string]*JSONTaskResult    `json:"results"`
+		TestReports map[string]*models.TestReport `json:"test_reports,omitempty"`
 	}
 
 	var output []JSONWorkspace
@@ -232,11 +292,12 @@ func runStatusJSON(scoped []*models.EnrichedWorkspace, displayVerbs []string) er
 		}
 
 		output = append(output, JSONWorkspace{
-			Name:    name,
-			Path:    ws.Path,
-			Branch:  branch,
-			Dirty:   dirty,
-			Results: results,
+			Name:        name,
+			Path:        ws.Path,
+			Branch:      branch,
+			Dirty:       dirty,
+			Results:     results,
+			TestReports: ws.TestReports,
 		})
 	}
 
