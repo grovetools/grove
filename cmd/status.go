@@ -11,6 +11,7 @@ import (
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/tui/components/table"
 	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/core/util/pathutil"
 	"github.com/spf13/cobra"
 )
 
@@ -29,6 +30,21 @@ func runStatus(_ *cobra.Command) error {
 		return fmt.Errorf("daemon is not running; status requires groved")
 	}
 
+	// Scope to the current ecosystem/project
+	projects, _, err := DiscoverTargetProjects()
+	if err != nil {
+		return fmt.Errorf("failed to discover projects: %w", err)
+	}
+
+	scopePaths := make(map[string]bool, len(projects))
+	for _, p := range projects {
+		norm, err := pathutil.NormalizeForLookup(p.Path)
+		if err != nil {
+			norm = p.Path
+		}
+		scopePaths[norm] = true
+	}
+
 	ctx := context.Background()
 	workspaces, err := client.GetEnrichedWorkspaces(ctx, &models.EnrichmentOptions{
 		FetchGitStatus: true,
@@ -44,6 +60,10 @@ func runStatus(_ *cobra.Command) error {
 
 	for _, ws := range workspaces {
 		if ws.WorkspaceNode == nil {
+			continue
+		}
+		wsNorm, _ := pathutil.NormalizeForLookup(ws.Path)
+		if !scopePaths[wsNorm] {
 			continue
 		}
 
