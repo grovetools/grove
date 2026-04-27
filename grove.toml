@@ -14,13 +14,13 @@ format = "json"
 default_rules = "dev-no-tests"
 
 [[hooks.on_stop]]
-name = "Format Go files with gofumpt"
-command = "gofumpt -w ."
+name = "Auto-format"
+command = "make fmt; CODE=$?; grove internal task-report . fmt $CODE; exit $CODE"
 run_if = "changes"
 
 [[hooks.on_stop]]
-name = "tests"
-command = "make build && tend run -p"
+name = "Validation & Smart E2E"
+command = "make check; CODE=$?; grove internal task-report . check $CODE; if [ $CODE -eq 0 ]; then grove internal test-smart --skip-tags=slow; fi"
 run_if = "changes"
 cancel_previous = true
 timeout = 300

@@ -41,3 +41,10 @@ nb concept list --ecosystem --json
 This helps you understand existing architectural decisions and avoid duplicating documentation.
 
 When done with your task, offer to invoke the `/concept-maintainer` skill to update any affected concepts.
+## Ecosystem Validation
+- **Status Check**: Run `grove status` to view a matrix of git state and validation caches.
+- **Fast Affected Checks**: Run `grove check --affected` to run AST checks, linters, and unit tests ONLY on changed repos and their dependents.
+- **Auto-formatting**: Run `grove fmt --affected` to format only modified workspaces.
+
+## Smart Test Scopes (tend + cx)
+If you create or modify `.rules` files for context boundaries, or add new `tend` E2E scenarios, you MUST update the `[[test_scopes]]` array in `grove.toml`. This allows the orchestrator to selectively run your tests only when related files change.
