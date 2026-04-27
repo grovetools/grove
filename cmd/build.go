@@ -20,10 +20,12 @@ import (
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/logging"
 	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/spf13/cobra"
 
-	"github.com/grovetools/grove/pkg/build"
+	orch "github.com/grovetools/grove/pkg/orchestrator"
+
 	"github.com/grovetools/grove/pkg/discovery"
 )
 
@@ -88,7 +90,6 @@ This command replaces the root 'make build' for a faster and more informative bu
 func runBuild(cmd *cobra.Command, args []string) error {
 	opts := cli.GetOptions(cmd)
 
-	// Discover projects using context-aware discovery
 	projects, _, err := DiscoverTargetProjects()
 	if err != nil {
 		return fmt.Errorf("failed to discover projects: %w", err)
@@ -99,7 +100,6 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		workspaces = append(workspaces, p.Path)
 	}
 
-	// Apply filters
 	if buildFilter != "" {
 		workspaces = discovery.FilterWorkspaces(workspaces, buildFilter)
 	}
@@ -116,116 +116,61 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Create build jobs and load configs for dependency resolution
-	var jobs []build.BuildJob
+	var jobs []orch.TaskJob
 	configMap := make(map[string]*config.Config)
 
 	for _, wsPath := range workspaces {
-		cfg, err := config.LoadFrom(wsPath)
-		var buildCmd []string
-		if err == nil && cfg.BuildCmd != "" {
-			buildCmd = strings.Fields(cfg.BuildCmd)
-		} else {
-			buildCmd = []string{"make", "build"}
-		}
-
+		cfg, loadErr := config.LoadFrom(wsPath)
 		name := filepath.Base(wsPath)
-		jobs = append(jobs, build.BuildJob{
+		buildCmd := orch.ResolveCommand(cfg, "build")
+
+		jobs = append(jobs, orch.TaskJob{
 			Name:    name,
 			Path:    wsPath,
 			Command: buildCmd,
 		})
 
-		if err == nil {
+		if loadErr == nil {
 			configMap[name] = cfg
 		}
 	}
 
-	// Sort into build waves based on build_after dependencies
-	waves := sortIntoBuildWaves(jobs, configMap)
+	waves := orch.SortIntoWaves(jobs, configMap)
 	hasWaves := len(waves) > 1
 
-	// Collect all bin directories so built tools are available during build
 	var binDirs []string
 	for _, wsPath := range workspaces {
-		binDir := filepath.Join(wsPath, "bin")
-		binDirs = append(binDirs, binDir)
+		binDirs = append(binDirs, filepath.Join(wsPath, "bin"))
 	}
-	buildOpts := &build.RunOptions{ExtraPathDirs: binDirs}
+	runOpts := &orch.RunOptions{ExtraPathDirs: binDirs}
 
-	// Handle dry-run mode
+	// Initialize daemon client and state provider
+	client := daemon.New()
+	var stateProvider orch.StateProvider
+	if client.IsRunning() {
+		stateProvider = &orch.DaemonStateProvider{Client: client}
+	} else {
+		stateProvider = &orch.LocalStateProvider{}
+	}
+
+	o := &orch.Orchestrator{
+		Options: orch.OrchestratorOptions{
+			Verb:     "build",
+			Strategy: orch.StrategyWaveSorted,
+			Jobs:     buildJobs,
+		},
+		RunOpts:       runOpts,
+		StateProvider: stateProvider,
+		DaemonClient:  client,
+		Configs:       configMap,
+	}
+
 	if buildDryRun {
-		if opts.JSONOutput {
-			result := map[string]interface{}{
-				"mode":  "dry-run",
-				"waves": len(waves),
-				"total": len(jobs),
-			}
-			if hasWaves {
-				waveData := make([][]string, len(waves))
-				for i, wave := range waves {
-					for _, job := range wave {
-						waveData[i] = append(waveData[i], job.Name)
-					}
-				}
-				result["build_order"] = waveData
-			} else {
-				var names []string
-				for _, job := range jobs {
-					names = append(names, job.Name)
-				}
-				result["projects"] = names
-			}
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			return enc.Encode(result)
-		}
-
-		buildUlog.Info("Dry run - projects to build").
-			Field("total", len(jobs)).
-			Field("waves", len(waves)).
-			Pretty("Projects that would be built:").
-			Emit()
-
-		if hasWaves {
-			for i, wave := range waves {
-				buildUlog.Info("Build wave").
-					Field("wave", i+1).
-					Field("count", len(wave)).
-					Pretty(fmt.Sprintf("\nWave %d:", i+1)).
-					Emit()
-				for _, job := range wave {
-					deps := ""
-					if cfg, ok := configMap[job.Name]; ok && len(cfg.BuildAfter) > 0 {
-						deps = fmt.Sprintf(" (after: %s)", strings.Join(cfg.BuildAfter, ", "))
-					}
-					buildUlog.Info("Build job").
-						Field("name", job.Name).
-						Field("path", job.Path).
-						Pretty(fmt.Sprintf("  - %s%s", job.Name, deps)).
-						Emit()
-				}
-			}
-		} else {
-			for i, job := range jobs {
-				buildUlog.Info("Build job").
-					Field("index", i+1).
-					Field("name", job.Name).
-					Field("path", job.Path).
-					Pretty(fmt.Sprintf("  %d. %s (%s)", i+1, job.Name, job.Path)).
-					Emit()
-			}
-		}
-		buildUlog.Info("Dry run summary").
-			Field("total", len(jobs)).
-			Field("waves", len(waves)).
-			Pretty(fmt.Sprintf("\nTotal: %d projects in %d wave(s)", len(jobs), len(waves))).
-			Emit()
-		return nil
+		return runDryRun(opts, jobs, waves, configMap, hasWaves)
 	}
 
 	if opts.JSONOutput {
-		return runJSONBuildWaves(waves, buildOpts)
+		return runJSONBuildWaves(o, waves)
 	}
 
 	if buildVerbose || hasWaves {
@@ -234,14 +179,84 @@ func runBuild(cmd *cobra.Command, args []string) error {
 				Pretty("Building in waves due to build_after dependencies...").
 				Emit()
 		}
-		return runVerboseBuildWaves(waves, buildOpts)
+		return runVerboseBuildWaves(o, waves)
 	}
 
-	return runTuiBuildWithOpts(jobs, buildOpts)
+	return runTuiBuild(o, jobs)
 }
 
-func runJSONBuildWaves(waves [][]build.BuildJob, opts *build.RunOptions) error {
-	type BuildResult struct {
+func runDryRun(opts cli.CommandOptions, jobs []orch.TaskJob, waves [][]orch.TaskJob, configMap map[string]*config.Config, hasWaves bool) error {
+	if opts.JSONOutput {
+		result := map[string]interface{}{
+			"mode":  "dry-run",
+			"waves": len(waves),
+			"total": len(jobs),
+		}
+		if hasWaves {
+			waveData := make([][]string, len(waves))
+			for i, wave := range waves {
+				for _, job := range wave {
+					waveData[i] = append(waveData[i], job.Name)
+				}
+			}
+			result["build_order"] = waveData
+		} else {
+			var names []string
+			for _, job := range jobs {
+				names = append(names, job.Name)
+			}
+			result["projects"] = names
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
+	}
+
+	buildUlog.Info("Dry run - projects to build").
+		Field("total", len(jobs)).
+		Field("waves", len(waves)).
+		Pretty("Projects that would be built:").
+		Emit()
+
+	if hasWaves {
+		for i, wave := range waves {
+			buildUlog.Info("Build wave").
+				Field("wave", i+1).
+				Field("count", len(wave)).
+				Pretty(fmt.Sprintf("\nWave %d:", i+1)).
+				Emit()
+			for _, job := range wave {
+				deps := ""
+				if cfg, ok := configMap[job.Name]; ok && len(cfg.BuildAfter) > 0 {
+					deps = fmt.Sprintf(" (after: %s)", strings.Join(cfg.BuildAfter, ", "))
+				}
+				buildUlog.Info("Build job").
+					Field("name", job.Name).
+					Field("path", job.Path).
+					Pretty(fmt.Sprintf("  - %s%s", job.Name, deps)).
+					Emit()
+			}
+		}
+	} else {
+		for i, job := range jobs {
+			buildUlog.Info("Build job").
+				Field("index", i+1).
+				Field("name", job.Name).
+				Field("path", job.Path).
+				Pretty(fmt.Sprintf("  %d. %s (%s)", i+1, job.Name, job.Path)).
+				Emit()
+		}
+	}
+	buildUlog.Info("Dry run summary").
+		Field("total", len(jobs)).
+		Field("waves", len(waves)).
+		Pretty(fmt.Sprintf("\nTotal: %d projects in %d wave(s)", len(jobs), len(waves))).
+		Emit()
+	return nil
+}
+
+func runJSONBuildWaves(o *orch.Orchestrator, waves [][]orch.TaskJob) error {
+	type JSONResult struct {
 		Name     string `json:"name"`
 		Path     string `json:"path"`
 		Wave     int    `json:"wave"`
@@ -249,39 +264,47 @@ func runJSONBuildWaves(waves [][]build.BuildJob, opts *build.RunOptions) error {
 		Duration string `json:"duration"`
 		Error    string `json:"error,omitempty"`
 		Output   string `json:"output,omitempty"`
+		Cached   bool   `json:"cached,omitempty"`
 	}
 
-	var results []BuildResult
+	var results []JSONResult
 	var successCount, failCount int
 
 	for waveIdx, waveJobs := range waves {
 		ctx := context.Background()
-		continueOnError := !buildFailFast
-		resultsChan := build.RunWithOptions(ctx, waveJobs, buildJobs, continueOnError, opts)
+		events := o.RunWithEvents(ctx, waveJobs)
 
-		for result := range resultsChan {
-			br := BuildResult{
-				Name:     result.Job.Name,
-				Path:     result.Job.Path,
+		for event := range events {
+			if event.Type != "finish" && event.Type != "cached" {
+				continue
+			}
+			if event.Result == nil {
+				continue
+			}
+			r := event.Result
+			jr := JSONResult{
+				Name:     r.Job.Name,
+				Path:     r.Job.Path,
 				Wave:     waveIdx + 1,
-				Duration: result.Duration.Round(time.Millisecond).String(),
+				Duration: r.Duration.Round(time.Millisecond).String(),
+				Cached:   r.Cached,
 			}
 
-			if result.Err != nil {
+			if r.Err != nil {
 				failCount++
-				br.Success = false
-				br.Error = result.Err.Error()
-				br.Output = string(result.Output)
+				jr.Success = false
+				jr.Error = r.Err.Error()
+				jr.Output = string(r.Output)
 
 				if buildFailFast {
-					results = append(results, br)
+					results = append(results, jr)
 					return outputJSONResults(results, successCount, failCount, len(waves))
 				}
 			} else {
 				successCount++
-				br.Success = true
+				jr.Success = true
 			}
-			results = append(results, br)
+			results = append(results, jr)
 		}
 	}
 
@@ -313,7 +336,7 @@ func outputJSONResults[T any](results []T, successCount, failCount, totalWaves i
 	return nil
 }
 
-func runVerboseBuildWaves(waves [][]build.BuildJob, opts *build.RunOptions) error {
+func runVerboseBuildWaves(o *orch.Orchestrator, waves [][]orch.TaskJob) error {
 	var successCount, failCount int
 	totalJobs := 0
 	for _, wave := range waves {
@@ -331,40 +354,58 @@ func runVerboseBuildWaves(waves [][]build.BuildJob, opts *build.RunOptions) erro
 		}
 
 		ctx := context.Background()
-		continueOnError := !buildFailFast
-		resultsChan := build.RunWithOptions(ctx, waveJobs, buildJobs, continueOnError, opts)
+		events := o.RunWithEvents(ctx, waveJobs)
 
-		for result := range resultsChan {
-			completedJobs++
-			progress := fmt.Sprintf("[%d/%d]", completedJobs, totalJobs)
-
-			buildUlog.Progress("Building project").
-				Field("name", result.Job.Name).
-				Field("completed", completedJobs).
-				Field("total", totalJobs).
-				Pretty(fmt.Sprintf("\n%s Building %s...", progress, result.Job.Name)).
-				Emit()
-			pretty.Divider()
-
-			if len(result.Output) > 0 {
-				os.Stdout.Write(result.Output)
-			}
-
-			if result.Err != nil {
-				failCount++
-				pretty.Status("error", fmt.Sprintf("Failed (%v)", result.Duration.Round(time.Millisecond)))
-				if result.Err.Error() != "exit status 1" && result.Err.Error() != "exit status 2" {
-					pretty.ErrorPretty("Error", result.Err)
+		for event := range events {
+			switch event.Type {
+			case "cached":
+				if event.Result != nil {
+					completedJobs++
+					successCount++
+					progress := fmt.Sprintf("[%d/%d]", completedJobs, totalJobs)
+					buildUlog.Progress("Cached project").
+						Field("name", event.Result.Job.Name).
+						Field("completed", completedJobs).
+						Field("total", totalJobs).
+						Pretty(fmt.Sprintf("\n%s %s (cached)", progress, event.Result.Job.Name)).
+						Emit()
 				}
-				if buildFailFast {
-					pretty.Blank()
-					pretty.Divider()
-					pretty.InfoPretty(fmt.Sprintf("Build stopped (fail-fast). Success: %d, Failed: %d", successCount, failCount))
-					return fmt.Errorf("%d builds failed", failCount)
+			case "finish":
+				if event.Result == nil {
+					continue
 				}
-			} else {
-				successCount++
-				pretty.Status("success", fmt.Sprintf("Success (%v)", result.Duration.Round(time.Millisecond)))
+				result := event.Result
+				completedJobs++
+				progress := fmt.Sprintf("[%d/%d]", completedJobs, totalJobs)
+
+				buildUlog.Progress("Building project").
+					Field("name", result.Job.Name).
+					Field("completed", completedJobs).
+					Field("total", totalJobs).
+					Pretty(fmt.Sprintf("\n%s Building %s...", progress, result.Job.Name)).
+					Emit()
+				pretty.Divider()
+
+				if len(result.Output) > 0 {
+					os.Stdout.Write(result.Output)
+				}
+
+				if result.Err != nil {
+					failCount++
+					pretty.Status("error", fmt.Sprintf("Failed (%v)", result.Duration.Round(time.Millisecond)))
+					if result.Err.Error() != "exit status 1" && result.Err.Error() != "exit status 2" {
+						pretty.ErrorPretty("Error", result.Err)
+					}
+					if buildFailFast {
+						pretty.Blank()
+						pretty.Divider()
+						pretty.InfoPretty(fmt.Sprintf("Build stopped (fail-fast). Success: %d, Failed: %d", successCount, failCount))
+						return fmt.Errorf("%d builds failed", failCount)
+					}
+				} else {
+					successCount++
+					pretty.Status("success", fmt.Sprintf("Success (%v)", result.Duration.Round(time.Millisecond)))
+				}
 			}
 		}
 	}
@@ -382,7 +423,7 @@ func runVerboseBuildWaves(waves [][]build.BuildJob, opts *build.RunOptions) erro
 
 type projectStatus struct {
 	name     string
-	status   string // "pending", "running", "success", "failed"
+	status   string // "pending", "running", "success", "failed", "cached"
 	output   string
 	duration time.Duration
 }
@@ -393,8 +434,8 @@ func (p projectStatus) FilterValue() string { return p.name }
 
 type tuiModel struct {
 	projects      []projectStatus
-	jobs          []build.BuildJob
-	buildOpts     *build.RunOptions
+	orchestrator  *orch.Orchestrator
+	jobs          []orch.TaskJob
 	list          list.Model
 	spinner       spinner.Model
 	logViewport   viewport.Model
@@ -407,17 +448,17 @@ type tuiModel struct {
 	successCount  int
 	failCount     int
 	runningCount  int
-	eventsChan    <-chan build.BuildEvent
+	eventsChan    <-chan orch.TaskEvent
 	jobIndexMap   map[string]int
-	viewport      viewport.Model // For full-screen log inspection
+	viewport      viewport.Model
 }
 
 type buildsStartedMsg struct {
-	eventsChan  <-chan build.BuildEvent
+	eventsChan  <-chan orch.TaskEvent
 	jobIndexMap map[string]int
 }
 
-func runTuiBuildWithOpts(jobs []build.BuildJob, opts *build.RunOptions) error {
+func runTuiBuild(o *orch.Orchestrator, jobs []orch.TaskJob) error {
 	var projects []projectStatus
 	for _, job := range jobs {
 		projects = append(projects, projectStatus{name: job.Name, status: "pending"})
@@ -443,15 +484,15 @@ func runTuiBuildWithOpts(jobs []build.BuildJob, opts *build.RunOptions) error {
 	logViewport.SetContent("Waiting for build output...")
 
 	m := tuiModel{
-		projects:    projects,
-		jobs:        jobs,
-		buildOpts:   opts,
-		list:        l,
-		spinner:     s,
-		logViewport: logViewport,
-		maxLogLines: 200, // Keep last 200 lines
-		viewMode:    "list",
-		interactive: buildInteractive,
+		projects:     projects,
+		orchestrator: o,
+		jobs:         jobs,
+		list:         l,
+		spinner:      s,
+		logViewport:  logViewport,
+		maxLogLines:  200,
+		viewMode:     "list",
+		interactive:  buildInteractive,
 	}
 
 	p := tea.NewProgram(m)
@@ -460,13 +501,10 @@ func runTuiBuildWithOpts(jobs []build.BuildJob, opts *build.RunOptions) error {
 		return err
 	}
 
-	// After TUI exits, check for errors and print failures if not in interactive mode
 	if fm, ok := finalModel.(tuiModel); ok && fm.failCount > 0 {
 		if !buildInteractive {
-			// Print failure details using pretty logging
 			pretty := logging.NewPrettyLogger()
 
-			// Print summary with visual distinction using equals dividers
 			pretty.Blank()
 			buildUlog.Info("Build summary separator").
 				Pretty(strings.Repeat("=", 60)).
@@ -478,7 +516,6 @@ func runTuiBuildWithOpts(jobs []build.BuildJob, opts *build.RunOptions) error {
 				PrettyOnly().
 				Emit()
 
-			// For single project builds, skip showing output again (already shown in streaming logs)
 			if len(fm.projects) > 1 {
 				for _, p := range fm.projects {
 					if p.status == "failed" {
@@ -505,8 +542,7 @@ func (m tuiModel) Init() tea.Cmd {
 func (m tuiModel) startBuildsCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		continueOnError := !buildFailFast
-		eventsChan := build.RunWithEventsAndOptions(ctx, m.jobs, buildJobs, continueOnError, m.buildOpts)
+		eventsChan := m.orchestrator.RunWithEvents(ctx, m.jobs)
 
 		jobIndexMap := make(map[string]int)
 		for i, job := range m.jobs {
@@ -524,7 +560,6 @@ func (m tuiModel) waitForBuildEventCmd() tea.Cmd {
 	return func() tea.Msg {
 		event, ok := <-m.eventsChan
 		if !ok {
-			// Channel closed, all builds done
 			return nil
 		}
 		return event
@@ -538,23 +573,17 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		headerHeight := 1
 		bottomPadding := 3
 
-		// for full-screen log inspection
 		m.viewport.Width = msg.Width
 		m.viewport.Height = msg.Height - 2
 
-		// Single project: vertical layout
 		if len(m.projects) == 1 {
-			// List takes minimal space (just the one line + chrome)
 			listHeight := 2
 			m.list.SetSize(msg.Width, listHeight)
 
-			// Logs use fixed height (about 6 lines)
 			logHeight := 6
 			m.logViewport.Width = msg.Width
 			m.logViewport.Height = logHeight
 		} else {
-			// Multiple projects: horizontal layout
-			// Calculate list height (min 3, max available height)
 			listHeight := len(m.projects) + 1
 			if listHeight < 3 {
 				listHeight = 3
@@ -563,14 +592,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				listHeight = msg.Height - headerHeight - bottomPadding
 			}
 
-			// Split width: 50% for list, 50% for logs
 			listWidth := msg.Width / 2
 			logWidth := msg.Width - listWidth
 
 			m.list.SetSize(listWidth, listHeight)
 
-			// for streaming log view - match list height
-			m.logViewport.Width = logWidth - 2 // -2 for border
+			m.logViewport.Width = logWidth - 2
 			m.logViewport.Height = listHeight
 		}
 		return m, nil
@@ -604,10 +631,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case buildsStartedMsg:
 		m.eventsChan = msg.eventsChan
 		m.jobIndexMap = msg.jobIndexMap
-		// Start listening for events
 		return m, m.waitForBuildEventCmd()
 
-	case build.BuildEvent:
+	case orch.TaskEvent:
 		var cmds []tea.Cmd
 
 		switch msg.Type {
@@ -618,6 +644,22 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				items := m.list.Items()
 				items[index] = m.projects[index]
 				cmds = append(cmds, m.list.SetItems(items))
+			}
+
+		case "cached":
+			if index, ok := m.jobIndexMap[msg.Job.Name]; ok {
+				m.projects[index].status = "cached"
+				m.successCount++
+				items := m.list.Items()
+				items[index] = m.projects[index]
+				cmds = append(cmds, m.list.SetItems(items))
+
+				if m.successCount+m.failCount == len(m.projects) {
+					m.finished = true
+					if !m.interactive {
+						cmds = append(cmds, tea.Quit)
+					}
+				}
 			}
 
 		case "finish":
@@ -647,9 +689,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "output":
 			if _, ok := m.jobIndexMap[msg.Job.Name]; ok {
-				// Find color for workspace name
 				wsStyle := getWorkspaceStyle(msg.Job.Name)
-				// Format line
 				line := fmt.Sprintf("%s %s", wsStyle.Render(fmt.Sprintf("[%s]", msg.Job.Name)), msg.OutputLine)
 				m.logLines = append(m.logLines, line)
 				if len(m.logLines) > m.maxLogLines {
@@ -660,7 +700,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Continue listening for events if not finished
 		if !m.finished {
 			cmds = append(cmds, m.waitForBuildEventCmd())
 		}
@@ -683,7 +722,6 @@ func (m tuiModel) View() string {
 		return fmt.Sprintf("%s\n%s", header, m.viewport.View())
 	}
 
-	// Update list delegate for dynamic rendering
 	m.list.SetDelegate(projectDelegate{
 		spinner:       m.spinner,
 		totalProjects: len(m.projects),
@@ -703,9 +741,7 @@ func (m tuiModel) View() string {
 
 	var mainContent string
 
-	// For single project, show logs below; for multiple projects, show logs to the right
 	if len(m.projects) == 1 {
-		// Show all log lines directly without a viewport
 		logStyle := lipgloss.NewStyle().
 			Foreground(theme.DefaultTheme.Muted.GetForeground())
 
@@ -767,6 +803,9 @@ func (d projectDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	case "success":
 		statusIcon = theme.DefaultTheme.Success.Render(theme.IconSuccess)
 		durationStr = theme.DefaultTheme.Muted.Render(fmt.Sprintf("(%v)", p.duration.Round(time.Millisecond)))
+	case "cached":
+		statusIcon = theme.DefaultTheme.Success.Render(theme.IconSuccess)
+		durationStr = theme.DefaultTheme.Muted.Render("(cached)")
 	case "failed":
 		statusIcon = theme.DefaultTheme.Error.Render(theme.IconError)
 		durationStr = theme.DefaultTheme.Muted.Render(fmt.Sprintf("(%v)", p.duration.Round(time.Millisecond)))
@@ -774,7 +813,6 @@ func (d projectDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	line := fmt.Sprintf("%s %s %s", statusIcon, p.name, durationStr)
 	if d.totalProjects > 1 {
-		// Only show arrow if builds are finished and in interactive mode
 		if d.finished && d.interactive && index == m.Index() {
 			line = "  " + theme.IconArrowRightBold + " " + line
 		} else {
@@ -784,78 +822,4 @@ func (d projectDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		line = "  " + line
 	}
 	fmt.Fprint(w, line)
-}
-
-// sortIntoBuildWaves organizes build jobs into waves based on build_after dependencies.
-// Projects within a wave can be built in parallel; waves must be built sequentially.
-func sortIntoBuildWaves(jobs []build.BuildJob, configMap map[string]*config.Config) [][]build.BuildJob {
-	// Build dependency map: project name -> list of projects it depends on
-	deps := make(map[string][]string)
-	nameSet := make(map[string]bool)
-
-	for _, job := range jobs {
-		nameSet[job.Name] = true
-	}
-
-	for _, job := range jobs {
-		if cfg, ok := configMap[job.Name]; ok && len(cfg.BuildAfter) > 0 {
-			// Only include deps that are actually in our build set
-			var validDeps []string
-			for _, dep := range cfg.BuildAfter {
-				if nameSet[dep] {
-					validDeps = append(validDeps, dep)
-				}
-			}
-			deps[job.Name] = validDeps
-		}
-	}
-
-	// Track which projects are built
-	built := make(map[string]bool)
-	var waves [][]build.BuildJob
-
-	remaining := len(jobs)
-	for remaining > 0 {
-		var wave []build.BuildJob
-
-		for _, job := range jobs {
-			if built[job.Name] {
-				continue
-			}
-
-			// Check if all dependencies are built
-			canBuild := true
-			for _, dep := range deps[job.Name] {
-				if !built[dep] {
-					canBuild = false
-					break
-				}
-			}
-
-			if canBuild {
-				wave = append(wave, job)
-			}
-		}
-
-		if len(wave) == 0 && remaining > 0 {
-			// Circular dependency or missing dep - just build remaining
-			buildUlog.Warn("Possible circular dependency detected, building remaining projects").Emit()
-			for _, job := range jobs {
-				if !built[job.Name] {
-					wave = append(wave, job)
-				}
-			}
-		}
-
-		for _, job := range wave {
-			built[job.Name] = true
-			remaining--
-		}
-
-		if len(wave) > 0 {
-			waves = append(waves, wave)
-		}
-	}
-
-	return waves
 }
