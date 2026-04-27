@@ -30,7 +30,6 @@ func addTaskFlags(cmd *cobra.Command) {
 	cmd.Flags().String("exclude", "", "Comma-separated glob patterns to exclude projects")
 	cmd.Flags().Bool("fail-fast", false, "Stop immediately when one task fails")
 	cmd.Flags().Bool("dry-run", false, "Show what would run without executing")
-	cmd.Flags().BoolP("verbose", "v", false, "Stream raw output instead of using the TUI")
 	cmd.Flags().BoolP("interactive", "i", false, "Keep TUI open after completion for inspection")
 }
 
@@ -46,7 +45,6 @@ func executeTaskWithCommand(cmd *cobra.Command, verb string, rawCommand []string
 	exclude, _ := cmd.Flags().GetString("exclude")
 	failFast, _ := cmd.Flags().GetBool("fail-fast")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
-	verbose, _ := cmd.Flags().GetBool("verbose")
 	interactive, _ := cmd.Flags().GetBool("interactive")
 
 	projects, _, err := DiscoverTargetProjects()
@@ -128,20 +126,14 @@ func executeTaskWithCommand(cmd *cobra.Command, verb string, rawCommand []string
 	buildInteractive = interactive
 	buildJobs = jobs
 
-	if !term.IsTerminal(int(os.Stdout.Fd())) {
-		verbose = true
-	}
+	isTTY := term.IsTerminal(int(os.Stdout.Fd()))
 
 	if dryRun {
 		return runTaskDryRun(opts, verb, taskJobs, waves, configMap, hasWaves)
 	}
 
-	if opts.JSONOutput {
+	if opts.JSONOutput || !isTTY {
 		return runJSONTaskWaves(o, verb, waves)
-	}
-
-	if verbose {
-		return runVerboseTaskWaves(o, verb, waves)
 	}
 
 	return runTuiTask(o, verb, taskJobs)
@@ -157,7 +149,6 @@ func executeTask(cmd *cobra.Command, verb string, strategy orch.ConcurrencyStrat
 	exclude, _ := cmd.Flags().GetString("exclude")
 	failFast, _ := cmd.Flags().GetBool("fail-fast")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
-	verbose, _ := cmd.Flags().GetBool("verbose")
 	interactive, _ := cmd.Flags().GetBool("interactive")
 
 	projects, _, err := DiscoverTargetProjects()
@@ -243,25 +234,14 @@ func executeTask(cmd *cobra.Command, verb string, strategy orch.ConcurrencyStrat
 	buildInteractive = interactive
 	buildJobs = jobs
 
-	if !term.IsTerminal(int(os.Stdout.Fd())) {
-		verbose = true
-	}
+	isTTY := term.IsTerminal(int(os.Stdout.Fd()))
 
 	if dryRun {
 		return runTaskDryRun(opts, verb, taskJobs, waves, configMap, hasWaves)
 	}
 
-	if opts.JSONOutput {
+	if opts.JSONOutput || !isTTY {
 		return runJSONTaskWaves(o, verb, waves)
-	}
-
-	if verbose || hasWaves {
-		if hasWaves && !verbose {
-			taskUlog.Info("Using verbose mode for wave-based execution").
-				Pretty(fmt.Sprintf("Running %s in waves due to build_after dependencies...", verb)).
-				Emit()
-		}
-		return runVerboseTaskWaves(o, verb, waves)
 	}
 
 	return runTuiTask(o, verb, taskJobs)
