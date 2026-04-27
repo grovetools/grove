@@ -12,3 +12,25 @@ format = "json"
 
 [context]
 default_rules = "dev-no-tests"
+
+[[hooks.on_stop]]
+name = "Format Go files with gofumpt"
+command = "gofumpt -w ."
+run_if = "changes"
+
+[[hooks.on_stop]]
+name = "tests"
+command = "make build && tend run -p"
+run_if = "changes"
+cancel_previous = true
+timeout = 300
+
+[[hooks.post_tool_use]]
+name = "concept-reminder"
+if = "Bash(git commit *)"
+additional_context = """
+You just committed. If these changes affected architecture, behavior, or
+public interfaces, invoke the concept-maintainer skill to update or add
+concept docs. Skip if this was a trivial fix or docs-only change.
+"""
+
