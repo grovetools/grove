@@ -119,7 +119,7 @@ build:
 		require.NoError(t, err)
 
 		outputStr := string(output)
-		assert.Contains(t, outputStr, "Builds all discovered Grove packages in parallel")
+		assert.Contains(t, outputStr, "Build all Grove packages in parallel")
 		assert.Contains(t, outputStr, "--verbose")
 		assert.Contains(t, outputStr, "--jobs")
 		assert.Contains(t, outputStr, "--filter")
@@ -148,51 +148,50 @@ build_cmd: echo "Custom build command executed successfully"
 
 		require.NoError(t, os.Chdir(testProject))
 
-		// Run grove build in the test project
-		cmd := exec.Command(groveBin, "build", "--verbose")
+		// Run grove build in the test project (non-TTY produces JSON output)
+		cmd := exec.Command(groveBin, "build")
 		output, err := cmd.CombinedOutput()
-		require.NoError(t, err, "build should succeed with custom command")
+		require.NoError(t, err, "build should succeed with custom command: %s", string(output))
 
 		outputStr := string(output)
-		assert.Contains(t, outputStr, "Custom build command executed successfully",
-			"should execute the custom build command from grove.yml")
-		assert.Contains(t, outputStr, "Success", "build should report success")
+		assert.Contains(t, outputStr, `"success": true`,
+			"should report success for custom build command")
+		assert.Contains(t, outputStr, "test-custom-build",
+			"should include the project name")
 	})
 
 	t.Run("CustomBuildCommandFallback", func(t *testing.T) {
-		// Create a temporary project without build_cmd (should fall back to 'make build')
 		tempDir := t.TempDir()
 		testProject := filepath.Join(tempDir, "test-fallback")
 		require.NoError(t, os.MkdirAll(testProject, 0o755))
 
-		// Create a grove.yml without build_cmd
 		groveYml := filepath.Join(testProject, "grove.yml")
 		require.NoError(t, os.WriteFile(groveYml, []byte(`name: test-fallback
 version: "1.0"
 `), 0o644))
 
-		// Create a Makefile with a build target
 		makefile := filepath.Join(testProject, "Makefile")
 		require.NoError(t, os.WriteFile(makefile, []byte(`
 build:
 	@echo "Using default make build"
 `), 0o644))
 
-		// Change to the test project directory
 		originalDir, err := os.Getwd()
 		require.NoError(t, err)
 		defer func() { _ = os.Chdir(originalDir) }()
 
 		require.NoError(t, os.Chdir(testProject))
 
-		// Run grove build in the test project
-		cmd := exec.Command(groveBin, "build", "--verbose")
+		// Run grove build (non-TTY produces JSON output)
+		cmd := exec.Command(groveBin, "build")
 		output, err := cmd.CombinedOutput()
-		require.NoError(t, err, "build should succeed with default make build")
+		require.NoError(t, err, "build should succeed with default make build: %s", string(output))
 
 		outputStr := string(output)
-		assert.Contains(t, outputStr, "Using default make build",
-			"should fall back to 'make build' when build_cmd is not specified")
+		assert.Contains(t, outputStr, `"success": true`,
+			"should report success when falling back to 'make build'")
+		assert.Contains(t, outputStr, "test-fallback",
+			"should include the project name")
 	})
 }
 

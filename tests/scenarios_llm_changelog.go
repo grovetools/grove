@@ -16,10 +16,11 @@ import (
 // LLMChangelogScenario tests the LLM-powered changelog generation feature
 func LLMChangelogScenario() *harness.Scenario {
 	return &harness.Scenario{
-		Name:        "llm-changelog",
-		Description: "Tests LLM-powered changelog generation with the --llm-changelog flag",
-		Tags:        []string{"llm", "changelog", "release", "local-only"},
-		LocalOnly:   true, // This test requires grove-gemini to be available
+		Name:         "llm-changelog",
+		Description:  "Tests LLM-powered changelog generation with the --llm-changelog flag",
+		Tags:         []string{"llm", "changelog", "release", "local-only", "explicit_only"},
+		LocalOnly:    true, // This test requires grove-gemini to be available
+		ExplicitOnly: true, // Requires grove-gemini and API key
 		Steps: []harness.Step{
 			{
 				Name:        "Setup test repository",
