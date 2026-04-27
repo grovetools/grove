@@ -17,6 +17,7 @@ func NewInternalCmd() *cobra.Command {
 
 	cmd.AddCommand(newValidateCommitMsgCmd())
 	cmd.AddCommand(newTaskReportCmd())
+	cmd.AddCommand(newTestSmartCmd())
 	return cmd
 }
 
