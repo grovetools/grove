@@ -14,8 +14,9 @@ import (
 )
 
 var (
-	runFilter  string
-	runExclude string
+	runFilter   string
+	runExclude  string
+	runParallel bool
 )
 
 func init() {
@@ -31,35 +32,45 @@ func newRunCmd() *cobra.Command {
 The command will be executed in each workspace directory with the
 workspace as the current working directory.
 
+Use --parallel (-p) to run with the parallel orchestrator TUI,
+the same engine behind grove build/fmt/lint/check.
+
 Use -- to separate grove run flags from the command and its arguments.`,
-		Example: `  # Run grove context stats in all workspaces
-  grove run cx stats
-  
-  # Run git status in all workspaces
+		Example: `  # Run make test-e2e in parallel across all workspaces
+  grove run -p -- make test-e2e
+
+  # Run git status in all workspaces (sequential)
   grove run git status
-  
+
   # Filter workspaces by pattern
   grove run --filter "grove-*" -- npm test
-  
-  # Exclude specific workspaces
-  grove run --exclude "grove-core,grove-flow" -- npm test
-  
-  # Run command with flags (using -- separator)
-  grove run -- docgen generate --output docs/
-  
-  # Run with JSON output aggregation
-  grove run --json -- cx stats`,
+
+  # Parallel with affected detection
+  grove run -p --affected -- make test-e2e`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: runCommand,
 	}
 
+	cmd.Flags().BoolVarP(&runParallel, "parallel", "p", false, "Run in parallel with TUI (uses the orchestrator engine)")
 	cmd.Flags().StringVarP(&runFilter, "filter", "f", "", "Filter workspaces by glob pattern")
 	cmd.Flags().StringVar(&runExclude, "exclude", "", "Comma-separated list of workspace patterns to exclude (glob patterns)")
+	cmd.Flags().Bool("affected", false, "Only run on workspaces with uncommitted changes (requires --parallel)")
+	cmd.Flags().Bool("no-cache", false, "Ignore cached task results (requires --parallel)")
+	cmd.Flags().IntP("jobs", "j", 10, "Number of parallel workers")
+	cmd.Flags().Bool("fail-fast", false, "Stop immediately when one task fails")
+	cmd.Flags().Bool("dry-run", false, "Show what would run without executing")
+	cmd.Flags().BoolP("interactive", "i", false, "Keep TUI open after completion")
 
 	return cmd
 }
 
 func runCommand(cmd *cobra.Command, args []string) error {
+	if runParallel {
+		// Parallel mode: use the orchestrator with the raw command
+		verb := strings.Join(args, " ")
+		return executeTaskWithCommand(cmd, verb, args)
+	}
+
 	logger := logging.NewLogger("run")
 	opts := cli.GetOptions(cmd)
 

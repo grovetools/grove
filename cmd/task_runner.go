@@ -33,6 +33,114 @@ func addTaskFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolP("interactive", "i", false, "Keep TUI open after completion for inspection")
 }
 
+// executeTaskWithCommand runs a raw command across workspaces using the orchestrator.
+// Used by `grove run --parallel` where the command is user-provided, not resolved from config.
+func executeTaskWithCommand(cmd *cobra.Command, verb string, rawCommand []string) error {
+	opts := cli.GetOptions(cmd)
+
+	affected, _ := cmd.Flags().GetBool("affected")
+	noCache, _ := cmd.Flags().GetBool("no-cache")
+	jobs, _ := cmd.Flags().GetInt("jobs")
+	filter, _ := cmd.Flags().GetString("filter")
+	exclude, _ := cmd.Flags().GetString("exclude")
+	failFast, _ := cmd.Flags().GetBool("fail-fast")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	verbose, _ := cmd.Flags().GetBool("verbose")
+	interactive, _ := cmd.Flags().GetBool("interactive")
+
+	projects, _, err := DiscoverTargetProjects()
+	if err != nil {
+		return fmt.Errorf("failed to discover projects: %w", err)
+	}
+
+	var workspaces []string
+	for _, p := range projects {
+		workspaces = append(workspaces, p.Path)
+	}
+
+	if filter != "" {
+		workspaces = discovery.FilterWorkspaces(workspaces, filter)
+	}
+	if exclude != "" {
+		workspaces = applyExcludeFilter(workspaces, exclude)
+	}
+
+	if len(workspaces) == 0 {
+		taskUlog.Info("No projects to run").
+			Field("verb", verb).
+			Pretty(fmt.Sprintf("No projects to run after filtering.")).
+			Emit()
+		return nil
+	}
+
+	var taskJobs []orch.TaskJob
+	configMap := make(map[string]*config.Config)
+
+	for _, wsPath := range workspaces {
+		cfg, loadErr := config.LoadFrom(wsPath)
+		name := filepath.Base(wsPath)
+
+		taskJobs = append(taskJobs, orch.TaskJob{
+			Name:    name,
+			Path:    wsPath,
+			Command: rawCommand,
+		})
+
+		if loadErr == nil {
+			configMap[name] = cfg
+		}
+	}
+
+	waves := orch.SortIntoWaves(taskJobs, configMap)
+	hasWaves := len(waves) > 1
+
+	var binDirs []string
+	for _, wsPath := range workspaces {
+		binDirs = append(binDirs, filepath.Join(wsPath, "bin"))
+	}
+	runOpts := &orch.RunOptions{ExtraPathDirs: binDirs}
+
+	client := daemon.New()
+	var stateProvider orch.StateProvider
+	if client.IsRunning() {
+		stateProvider = &orch.DaemonStateProvider{Client: client}
+	} else {
+		stateProvider = &orch.LocalStateProvider{}
+	}
+
+	o := &orch.Orchestrator{
+		Options: orch.OrchestratorOptions{
+			Verb:         verb,
+			Strategy:     orch.StrategyFlat,
+			AffectedOnly: affected,
+			NoCache:      noCache,
+			Jobs:         jobs,
+		},
+		RunOpts:       runOpts,
+		StateProvider: stateProvider,
+		DaemonClient:  client,
+		Configs:       configMap,
+	}
+
+	buildFailFast = failFast
+	buildInteractive = interactive
+	buildJobs = jobs
+
+	if dryRun {
+		return runTaskDryRun(opts, verb, taskJobs, waves, configMap, hasWaves)
+	}
+
+	if opts.JSONOutput {
+		return runJSONTaskWaves(o, verb, waves)
+	}
+
+	if verbose {
+		return runVerboseTaskWaves(o, verb, waves)
+	}
+
+	return runTuiTask(o, verb, taskJobs)
+}
+
 func executeTask(cmd *cobra.Command, verb string, strategy orch.ConcurrencyStrategy) error {
 	opts := cli.GetOptions(cmd)
 
