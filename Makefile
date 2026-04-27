@@ -118,6 +118,7 @@ build-all:
 # Pass arguments via ARGS, e.g., make test-e2e ARGS="run -i"
 test-e2e: build
 	@echo "Running E2E tests..."
+	@go build -o $(BIN_DIR)/$(E2E_BINARY_NAME) ./tests/e2e/
 	@tend run $(ARGS)
 
 # Run Docker-based E2E tests
