@@ -72,8 +72,15 @@ func (o *Orchestrator) RunWithEvents(ctx context.Context, jobs []TaskJob) <-chan
 		states, _ = o.StateProvider.GetState(ctx, jobPaths(jobs))
 	}
 
-	if o.Options.AffectedOnly && states != nil {
-		jobs = FilterAffected(jobs, states, o.Configs, o.Options.Strategy)
+	if o.Options.AffectedOnly {
+		if len(states) == 0 {
+			// Fallback to local git if daemon returned nothing
+			local := &LocalStateProvider{}
+			states, _ = local.GetState(ctx, jobPaths(jobs))
+		}
+		if states != nil {
+			jobs = FilterAffected(jobs, states, o.Configs, o.Options.Strategy)
+		}
 	}
 
 	if o.Options.Strategy == StrategyWaveSorted {
