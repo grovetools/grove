@@ -8,14 +8,14 @@ linters:
     - ineffassign
     - typecheck
     - gosec
-    - gofmt
+    - gofumpt
     - goimports
     - misspell
     - unconvert
 
 linters-settings:
-  gofmt:
-    simplify: true
+  gofumpt:
+    extra-rules: true
   goimports:
     local-prefixes: github.com/grovetools/grove
   gosec:
