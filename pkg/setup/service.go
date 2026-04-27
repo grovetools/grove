@@ -290,7 +290,7 @@ func (s *Service) ReplaceInFile(path, old, new string) error {
 	}
 
 	newContent := strings.ReplaceAll(string(content), old, new)
-	if err := os.WriteFile(expandedPath, []byte(newContent), 0o644); err != nil {
+	if err := os.WriteFile(expandedPath, []byte(newContent), 0o600); err != nil {
 		s.logAction(ActionWriteFile, description, expandedPath, false, err)
 		return fmt.Errorf("failed to write %s: %w", path, err)
 	}

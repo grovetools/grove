@@ -93,7 +93,7 @@ func TestGitFetcher_Fetch_TempDirHandling(t *testing.T) {
 	cloneDir := filepath.Join(fetcher.tempDir, "repo")
 	templateDir := filepath.Join(cloneDir, "template")
 
-	if err := os.MkdirAll(templateDir, 0755); err != nil {
+	if err := os.MkdirAll(templateDir, 0o755); err != nil {
 		t.Fatalf("Failed to create test directories: %v", err)
 	}
 

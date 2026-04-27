@@ -130,7 +130,7 @@ func main() {
 
 	// Write to pkg/configui/schema_generated.go
 	outputPath := filepath.Join(cwd, "pkg", "configui", "schema_generated.go")
-	if err := os.WriteFile(outputPath, code, 0644); err != nil {
+	if err := os.WriteFile(outputPath, code, 0o600); err != nil {
 		log.Fatalf("Failed to write schema file: %v", err)
 	}
 

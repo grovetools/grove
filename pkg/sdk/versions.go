@@ -45,7 +45,7 @@ func LoadToolVersions() (*ToolVersions, error) {
 // Save saves the tool versions to disk
 func (tv *ToolVersions) Save() error {
 	stateDir := paths.StateDir()
-	if err := os.MkdirAll(stateDir, 0755); err != nil {
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create state directory: %w", err)
 	}
 	versionsFile := filepath.Join(stateDir, "active_versions.json")
@@ -55,7 +55,7 @@ func (tv *ToolVersions) Save() error {
 		return fmt.Errorf("failed to marshal versions: %w", err)
 	}
 
-	return os.WriteFile(versionsFile, data, 0644)
+	return os.WriteFile(versionsFile, data, 0o600)
 }
 
 // GetToolVersion returns the active version for a specific tool

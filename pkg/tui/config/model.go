@@ -15,6 +15,7 @@ import (
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/components/pager"
 	"github.com/grovetools/core/tui/embed"
+
 	"github.com/grovetools/grove/pkg/configui"
 	grovekeymap "github.com/grovetools/grove/pkg/keymap"
 	"github.com/grovetools/grove/pkg/setup"
@@ -32,10 +33,10 @@ const (
 
 // uiState holds persisted UI preferences for the config editor.
 type uiState struct {
-	ShowPreview    bool                   `json:"show_preview"`
-	ViewMode       configui.ViewMode      `json:"view_mode"`
+	ShowPreview    bool                    `json:"show_preview"`
+	ViewMode       configui.ViewMode       `json:"view_mode"`
 	MaturityFilter configui.MaturityFilter `json:"maturity_filter"`
-	SortMode       configui.SortMode      `json:"sort_mode"`
+	SortMode       configui.SortMode       `json:"sort_mode"`
 }
 
 // uiStateFile returns the path to the config UI state file.
@@ -69,11 +70,11 @@ func saveUIStateToDisk(state uiState) {
 	}
 
 	stateDir := paths.StateDir()
-	if err := os.MkdirAll(stateDir, 0755); err != nil {
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return
 	}
 
-	_ = os.WriteFile(uiStateFile(), data, 0644)
+	_ = os.WriteFile(uiStateFile(), data, 0o600)
 }
 
 // Model is the embeddable config TUI model. It wraps a pager.Model for

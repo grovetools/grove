@@ -55,7 +55,7 @@ func LoadConfig() (*Config, error) {
 // SaveConfig saves the devlinks configuration to the registry file
 func SaveConfig(config *Config) error {
 	stateDir := paths.StateDir()
-	if err := os.MkdirAll(stateDir, 0755); err != nil {
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return err
 	}
 	configPath := filepath.Join(stateDir, "devlinks.json")
@@ -65,7 +65,7 @@ func SaveConfig(config *Config) error {
 		return err
 	}
 
-	return os.WriteFile(configPath, data, 0644) //nolint:gosec // G306: internal tool, non-sensitive config file
+	return os.WriteFile(configPath, data, 0o600) //nolint:gosec // G306: internal tool, non-sensitive config file
 }
 
 // ClearAllCurrentLinks resets all active development links

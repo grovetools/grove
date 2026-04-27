@@ -589,7 +589,7 @@ func KeysIntegrationScenario() *harness.Scenario {
 			harness.NewStep("Generate tmux config to file", func(ctx *harness.Context) error {
 				// Generate tmux config to a test location
 				outputPath := filepath.Join(ctx.CacheDir(), "grove", "tmux", "test-popups.conf")
-				if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+				if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 					return err
 				}
 

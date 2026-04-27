@@ -216,7 +216,7 @@ func SetupWizardConfigPreservationScenario() *harness.Scenario {
 		[]harness.Step{
 			harness.NewStep("Create existing config with custom settings", func(ctx *harness.Context) error {
 				configDir := filepath.Join(ctx.ConfigDir(), "grove")
-				if err := os.MkdirAll(configDir, 0755); err != nil {
+				if err := os.MkdirAll(configDir, 0o755); err != nil {
 					return fmt.Errorf("failed to create config dir: %w", err)
 				}
 
@@ -263,7 +263,7 @@ func SetupWizardTmuxIdempotentScenario() *harness.Scenario {
 		[]harness.Step{
 			harness.NewStep("Create tmux.conf with existing source-file", func(ctx *harness.Context) error {
 				tmuxDir := filepath.Join(ctx.ConfigDir(), "tmux")
-				if err := os.MkdirAll(tmuxDir, 0755); err != nil {
+				if err := os.MkdirAll(tmuxDir, 0o755); err != nil {
 					return fmt.Errorf("failed to create tmux dir: %w", err)
 				}
 
@@ -600,7 +600,6 @@ func SetupWizardTUIFullWorkflowScenario() *harness.Scenario {
 					"Setup completed",
 					"Actions performed",
 				}, 10*time.Second)
-
 				if err != nil {
 					content, _ := session.Capture(tui.WithCleanedOutput())
 					return fmt.Errorf("summary screen not reached: %w\nContent:\n%s", err, content)
@@ -702,7 +701,6 @@ func SetupWizardTUIDeselectAllScenario() *harness.Scenario {
 					"Setup completed",
 					"No changes",
 				}, 5*time.Second)
-
 				if err != nil {
 					content, _ := session.Capture(tui.WithCleanedOutput())
 					return fmt.Errorf("summary not reached: %w\nContent:\n%s", err, content)
@@ -816,35 +814,34 @@ func SetupWizardRealBinariesScenario() *harness.Scenario {
 				}
 				return nil
 			}),
-		harness.NewStep("Verify note was created", func(ctx *harness.Context) error {
-			// nb creates notes under .grove/notebooks/nb/workspaces/<workspace>/inbox/
-			notebookPath := filepath.Join(ctx.HomeDir(), ".grove", "notebooks", "nb")
+			harness.NewStep("Verify note was created", func(ctx *harness.Context) error {
+				// nb creates notes under .grove/notebooks/nb/workspaces/<workspace>/inbox/
+				notebookPath := filepath.Join(ctx.HomeDir(), ".grove", "notebooks", "nb")
 
-			// Recursively search for .md files
-			var foundNote bool
-			
+				// Recursively search for .md files
+				var foundNote bool
 
-			err := filepath.Walk(notebookPath, func(path string, info os.FileInfo, err error) error {
+				err := filepath.Walk(notebookPath, func(path string, info os.FileInfo, err error) error {
+					if err != nil {
+						return nil // skip errors
+					}
+					if !info.IsDir() && strings.HasSuffix(info.Name(), ".md") {
+						foundNote = true
+						_ = path
+						return filepath.SkipAll
+					}
+					return nil
+				})
 				if err != nil {
-					return nil // skip errors
+					return fmt.Errorf("failed to search for note: %w", err)
 				}
-				if !info.IsDir() && strings.HasSuffix(info.Name(), ".md") {
-					foundNote = true
-					_ = path
-					return filepath.SkipAll
+
+				if !foundNote {
+					return fmt.Errorf("no .md note file found in %s", notebookPath)
 				}
+
 				return nil
-			})
-			if err != nil {
-				return fmt.Errorf("failed to search for note: %w", err)
-			}
-
-			if !foundNote {
-				return fmt.Errorf("no .md note file found in %s", notebookPath)
-			}
-
-			return nil
-		}),
+			}),
 		},
 		true, // localOnly - requires tmux
 		true, // explicitOnly - uses real nb binary

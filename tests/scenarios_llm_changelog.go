@@ -26,33 +26,33 @@ func LLMChangelogScenario() *harness.Scenario {
 				Description: "Creates a new Git repository with initial structure",
 				Func: func(ctx *harness.Context) error {
 					repoDir := ctx.NewDir("llm-changelog-test")
-					
+
 					// Ensure the directory exists
-					if err := os.MkdirAll(repoDir, 0755); err != nil {
+					if err := os.MkdirAll(repoDir, 0o755); err != nil {
 						return fmt.Errorf("failed to create directory %s: %w", repoDir, err)
 					}
-					
+
 					// Initialize git repository
 					if err := git.Init(repoDir); err != nil {
 						return fmt.Errorf("failed to initialize git repository: %w", err)
 					}
-					
+
 					// Configure Git for testing
 					if err := git.SetupTestConfig(repoDir); err != nil {
 						return fmt.Errorf("failed to setup git config: %w", err)
 					}
-					
+
 					// Create initial files
-					if err := fs.WriteString(filepath.Join(repoDir, "README.md"), 
+					if err := fs.WriteString(filepath.Join(repoDir, "README.md"),
 						"# LLM Changelog Test Repository\n\nTesting LLM-powered changelog generation."); err != nil {
 						return err
 					}
-					
-					if err := fs.WriteString(filepath.Join(repoDir, "go.mod"), 
+
+					if err := fs.WriteString(filepath.Join(repoDir, "go.mod"),
 						"module github.com/test/llm-changelog\n\ngo 1.21"); err != nil {
 						return err
 					}
-					
+
 					// Create grove.yml with LLM model configuration
 					groveConfig := `name: llm-changelog-test
 type: go
@@ -64,7 +64,7 @@ flow:
 					if err := fs.WriteString(filepath.Join(repoDir, "grove.yml"), groveConfig); err != nil {
 						return err
 					}
-					
+
 					// Create main.go file
 					mainContent := `package main
 
@@ -77,7 +77,7 @@ func main() {
 					if err := fs.WriteString(filepath.Join(repoDir, "main.go"), mainContent); err != nil {
 						return err
 					}
-					
+
 					// Initial commit
 					if err := git.Add(repoDir, "."); err != nil {
 						return err
@@ -85,13 +85,13 @@ func main() {
 					if err := git.Commit(repoDir, "chore: initial commit with basic structure"); err != nil {
 						return err
 					}
-					
+
 					// Tag initial version
 					tag := command.New("git", "tag", "v0.1.0").Dir(repoDir)
 					if result := tag.Run(); result.Error != nil {
 						return fmt.Errorf("failed to create initial tag: %w", result.Error)
 					}
-					
+
 					ctx.Set("repo_dir", repoDir)
 					return nil
 				},
@@ -101,7 +101,7 @@ func main() {
 				Description: "Creates multiple commits with different types of changes",
 				Func: func(ctx *harness.Context) error {
 					repoDir := ctx.Get("repo_dir").(string)
-					
+
 					// Feature 1: Add configuration support
 					configContent := `package main
 
@@ -128,7 +128,7 @@ func LoadConfig() *Config {
 					if err := git.Commit(repoDir, "feat: add configuration support with Config struct"); err != nil {
 						return err
 					}
-					
+
 					// Feature 2: Update main to use config
 					mainUpdated := `package main
 
@@ -148,7 +148,7 @@ func main() {
 					if err := git.Commit(repoDir, "feat: integrate configuration into main application"); err != nil {
 						return err
 					}
-					
+
 					// Bug fix: Fix port number
 					configFixed := `package main
 
@@ -175,7 +175,7 @@ func LoadConfig() *Config {
 					if err := git.Commit(repoDir, "fix: change default port to 8081 to avoid conflicts"); err != nil {
 						return err
 					}
-					
+
 					// Performance improvement
 					perfContent := `package main
 
@@ -204,7 +204,7 @@ func LoadConfigSingleton() *Config {
 					if err := git.Commit(repoDir, "perf: implement singleton pattern for config loading"); err != nil {
 						return err
 					}
-					
+
 					// Documentation update
 					readmeUpdated := `# LLM Changelog Test Repository
 
@@ -224,7 +224,7 @@ Testing LLM-powered changelog generation.
 					if err := git.Commit(repoDir, "docs: update README with new features"); err != nil {
 						return err
 					}
-					
+
 					// Add tests
 					testContent := `package main
 
@@ -246,7 +246,7 @@ func TestLoadConfig(t *testing.T) {
 					if err := git.Commit(repoDir, "test: add unit tests for configuration loading"); err != nil {
 						return err
 					}
-					
+
 					// Created 6 commits with various change types
 					return nil
 				},
@@ -258,12 +258,12 @@ func TestLoadConfig(t *testing.T) {
 					// Check if grove-gemini is available
 					cmd := command.New("which", "grove-gemini")
 					result := cmd.Run()
-					
+
 					if result.Error != nil {
 						// grove-gemini not found - this test requires it
 						return fmt.Errorf("grove-gemini is required for LLM changelog generation")
 					}
-					
+
 					// grove-gemini found, continue with test
 					return nil
 				},
@@ -273,30 +273,30 @@ func TestLoadConfig(t *testing.T) {
 				Description: "Uses grove changelog with --llm flag to generate changelog",
 				Func: func(ctx *harness.Context) error {
 					repoDir := ctx.Get("repo_dir").(string)
-					
+
 					// Run grove release changelog with LLM flag
 					cmd := command.New(ctx.GroveBinary, "release", "changelog", repoDir,
 						"--llm", "--version", "v0.2.0").Dir(repoDir)
 					result := cmd.Run()
-					
+
 					if result.Error != nil {
-						return fmt.Errorf("failed to generate LLM changelog: %w\nStderr: %s", 
+						return fmt.Errorf("failed to generate LLM changelog: %w\nStderr: %s",
 							result.Error, result.Stderr)
 					}
-					
+
 					ctx.ShowCommandOutput("grove release changelog --llm", result.Stdout, result.Stderr)
-					
+
 					// Read the generated changelog
 					changelogPath := filepath.Join(repoDir, "CHANGELOG.md")
 					if !fs.Exists(changelogPath) {
 						return fmt.Errorf("CHANGELOG.md was not created")
 					}
-					
+
 					changelogContent, err := fs.ReadString(changelogPath)
 					if err != nil {
 						return fmt.Errorf("failed to read changelog: %w", err)
 					}
-					
+
 					ctx.Set("changelog_content", changelogContent)
 					// Generated CHANGELOG.md with LLM
 					return nil
@@ -307,12 +307,12 @@ func TestLoadConfig(t *testing.T) {
 				Description: "Validates that the LLM-generated changelog contains expected sections",
 				Func: func(ctx *harness.Context) error {
 					changelogContent := ctx.Get("changelog_content").(string)
-					
+
 					// Check for version header
 					if !strings.Contains(changelogContent, "## v0.2.0") {
 						return fmt.Errorf("changelog missing version header v0.2.0")
 					}
-					
+
 					// Check for expected sections based on our commits
 					expectedSections := []string{
 						"### Features",
@@ -322,27 +322,23 @@ func TestLoadConfig(t *testing.T) {
 						"### Tests",
 						"### File Changes",
 					}
-					
+
 					missingSections := []string{}
 					for _, section := range expectedSections {
 						if !strings.Contains(changelogContent, section) {
 							missingSections = append(missingSections, section)
 						}
 					}
-					
+
 					// This is normal as the LLM may consolidate or rename sections
 					// We don't fail the test for missing sections (missingSections may be non-empty)
 					_ = missingSections
-					
+
 					// Store the changelog for inspection if needed
 					ctx.Set("final_changelog", changelogContent)
-					
-					// Verify git diff stat is included
-					if !strings.Contains(changelogContent, "files changed") || 
-					   !strings.Contains(changelogContent, "insertions") {
-						// Git diff statistics might not be fully included, but we don't fail
-					}
-					
+
+					// Git diff statistics might not be fully included — not a failure condition.
+
 					// LLM changelog generated successfully with appropriate content
 					return nil
 				},
@@ -352,9 +348,9 @@ func TestLoadConfig(t *testing.T) {
 				Description: "Simulates a full release cycle with --llm-changelog flag",
 				Func: func(ctx *harness.Context) error {
 					repoDir := ctx.Get("repo_dir").(string)
-					
+
 					// Make one more change for a new release
-					if err := fs.WriteString(filepath.Join(repoDir, "version.go"), 
+					if err := fs.WriteString(filepath.Join(repoDir, "version.go"),
 						`package main
 
 const Version = "v0.3.0"
@@ -367,28 +363,28 @@ const Version = "v0.3.0"
 					if err := git.Commit(repoDir, "feat: add version constant"); err != nil {
 						return err
 					}
-					
+
 					// Clear existing changelog for clean test
 					_ = os.Remove(filepath.Join(repoDir, "CHANGELOG.md"))
-					
+
 					// Run release with LLM changelog in dry-run mode
-					cmd := command.New(ctx.GroveBinary, "release", 
-						"--llm-changelog", 
+					cmd := command.New(ctx.GroveBinary, "release",
+						"--llm-changelog",
 						"--dry-run",
 						"--force",
 						"--skip-parent",
 						"--patch", "llm-changelog-test").Dir(filepath.Dir(repoDir))
-					
+
 					result := cmd.Run()
-					
+
 					// In dry-run mode, it won't actually create tags but should show what it would do
-					ctx.ShowCommandOutput("grove release --llm-changelog --dry-run", 
+					ctx.ShowCommandOutput("grove release --llm-changelog --dry-run",
 						result.Stdout, result.Stderr)
-					
+
 					// This might fail because we're not in a proper grove ecosystem
 					// Dry-run completed with errors (expected in test environment)
 					_ = result.Error
-					
+
 					// LLM changelog integration tested in release workflow
 					return nil
 				},
@@ -412,21 +408,21 @@ func ReleaseTUIScenario() *harness.Scenario {
 					// Run grove release --help to see available subcommands
 					cmd := command.New(ctx.GroveBinary, "release", "--help")
 					result := cmd.Run()
-					
+
 					if result.Error != nil {
 						return fmt.Errorf("failed to run grove release --help: %w", result.Error)
 					}
-					
+
 					// Check if 'tui' appears in the help output
 					if !strings.Contains(result.Stdout, "tui") {
 						return fmt.Errorf("'tui' subcommand not found in release help")
 					}
-					
+
 					// Also verify the --interactive flag exists
 					if !strings.Contains(result.Stdout, "--interactive") {
 						return fmt.Errorf("'--interactive' flag not found in release help")
 					}
-					
+
 					return nil
 				},
 			},
@@ -436,28 +432,28 @@ func ReleaseTUIScenario() *harness.Scenario {
 				Func: func(ctx *harness.Context) error {
 					// Create a test repository structure
 					repoDir := ctx.NewDir("release-tui-test")
-					
+
 					// Ensure the directory exists
-					if err := os.MkdirAll(repoDir, 0755); err != nil {
+					if err := os.MkdirAll(repoDir, 0o755); err != nil {
 						return fmt.Errorf("failed to create directory %s: %w", repoDir, err)
 					}
-					
+
 					// Initialize git repository
 					if err := git.Init(repoDir); err != nil {
 						return fmt.Errorf("failed to initialize git repository: %w", err)
 					}
-					
+
 					// Configure Git for testing
 					if err := git.SetupTestConfig(repoDir); err != nil {
 						return fmt.Errorf("failed to setup git config: %w", err)
 					}
-					
+
 					// Create initial files
-					if err := fs.WriteString(filepath.Join(repoDir, "README.md"), 
+					if err := fs.WriteString(filepath.Join(repoDir, "README.md"),
 						"# Test Repository\n"); err != nil {
 						return err
 					}
-					
+
 					// Create grove.yml with LLM configuration
 					groveConfig := `name: test-repo
 type: go
@@ -469,7 +465,7 @@ flow:
 					if err := fs.WriteString(filepath.Join(repoDir, "grove.yml"), groveConfig); err != nil {
 						return err
 					}
-					
+
 					// Initial commit and tag
 					if err := git.Add(repoDir, "."); err != nil {
 						return err
@@ -477,13 +473,13 @@ flow:
 					if err := git.Commit(repoDir, "chore: initial commit"); err != nil {
 						return err
 					}
-					
+
 					// Tag initial version
 					tagCmd := command.New("git", "tag", "v0.1.0").Dir(repoDir)
 					if result := tagCmd.Run(); result.Error != nil {
 						return fmt.Errorf("failed to create initial tag: %w", result.Error)
 					}
-					
+
 					// Make a change for new release
 					if err := fs.WriteString(filepath.Join(repoDir, "main.go"),
 						"package main\n\nfunc main() {}\n"); err != nil {
@@ -495,7 +491,7 @@ flow:
 					if err := git.Commit(repoDir, "feat: add main function"); err != nil {
 						return err
 					}
-					
+
 					ctx.Set("test_repo", repoDir)
 
 					// Check if release plan file would be created (without actually running TUI)
@@ -511,11 +507,11 @@ flow:
 				Func: func(ctx *harness.Context) error {
 					cmd := command.New(ctx.GroveBinary, "release", "tui", "--help")
 					result := cmd.Run()
-					
+
 					if result.Error != nil {
 						return fmt.Errorf("failed to run grove release tui --help: %w", result.Error)
 					}
-					
+
 					// Verify help output contains expected content
 					expectedStrings := []string{
 						"interactive Terminal User Interface",
@@ -523,15 +519,15 @@ flow:
 						"LLM-suggested version bumps",
 						"Grove state directory",
 					}
-					
+
 					for _, expected := range expectedStrings {
 						if !strings.Contains(result.Stdout, expected) {
 							return fmt.Errorf("help output missing expected string: %s", expected)
 						}
 					}
-					
+
 					ctx.ShowCommandOutput("grove release tui --help", result.Stdout, result.Stderr)
-					
+
 					return nil
 				},
 			},
@@ -541,38 +537,38 @@ flow:
 				Func: func(ctx *harness.Context) error {
 					// Run grove release with --dry-run to verify it still works
 					testRepo := ctx.Get("test_repo").(string)
-					
+
 					// The original command should work without TUI
 					// Use the parent directory which is the ecosystem root
 					ecosystemDir := filepath.Dir(testRepo)
-					
+
 					// Initialize it as a grove ecosystem if needed
-					if err := fs.WriteString(filepath.Join(ecosystemDir, "grove.yml"), 
+					if err := fs.WriteString(filepath.Join(ecosystemDir, "grove.yml"),
 						"name: test-ecosystem\nworkspaces:\n  - \"*\"\n"); err != nil {
 						return err
 					}
-					
-					cmd := command.New(ctx.GroveBinary, "release", 
+
+					cmd := command.New(ctx.GroveBinary, "release",
 						"--dry-run",
 						"--force",
 						"--skip-parent").Dir(ecosystemDir)
-					
+
 					result := cmd.Run()
-					
+
 					// Check that it doesn't launch TUI (would error in non-interactive environment)
 					// The command might fail due to repository structure, but shouldn't hang waiting for input
 					// Note: We check for actual TUI error messages, not help text that might contain these words
-					if strings.Contains(result.Stderr, "failed to start TUI") || 
-					   strings.Contains(result.Stderr, "cannot run TUI") ||
-					   strings.Contains(result.Stderr, "terminal required") {
+					if strings.Contains(result.Stderr, "failed to start TUI") ||
+						strings.Contains(result.Stderr, "cannot run TUI") ||
+						strings.Contains(result.Stderr, "terminal required") {
 						return fmt.Errorf("release command incorrectly launched TUI in non-interactive mode: %s", result.Stderr)
 					}
-					
+
 					// The command should not hang - if it returns, that's success for this test
 					// Even if it fails with an error, as long as it didn't try to launch TUI
-					ctx.ShowCommandOutput("grove release --dry-run (backward compatibility)", 
+					ctx.ShowCommandOutput("grove release --dry-run (backward compatibility)",
 						result.Stdout, result.Stderr)
-					
+
 					return nil
 				},
 			},

@@ -16,10 +16,11 @@ import (
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/tui/theme"
+	"github.com/spf13/cobra"
+
 	grovekeymap "github.com/grovetools/grove/pkg/keymap"
 	"github.com/grovetools/grove/pkg/sdk"
 	"github.com/grovetools/grove/pkg/shell"
-	"github.com/spf13/cobra"
 )
 
 // Type alias for the extracted keymap

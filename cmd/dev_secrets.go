@@ -10,8 +10,9 @@ import (
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
-	"github.com/grovetools/grove/pkg/discovery"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/grove/pkg/discovery"
 )
 
 func newDevSecretsCmd() *cobra.Command {

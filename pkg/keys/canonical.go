@@ -32,7 +32,7 @@ var ReservedKeys = map[string]string{
 	"ctrl+l": "clear search",
 
 	// Selection
-	" ":  "select",
+	" ":      "select",
 	"ctrl+a": "select all",
 	"-":      "select none",
 
@@ -122,9 +122,9 @@ var StandardActions = []CanonicalAction{
 // CandidateActions are actions that appear in multiple TUIs and could
 // potentially be standardized in keymap.Base in the future.
 var CandidateActions = []CanonicalAction{
-	{"run", []string{"r"}},            // flow-status, tend-runner
-	{"open", []string{"o"}},           // hooks, gemini, flow
-	{"toggle view", []string{"tab"}},  // multiple TUIs
+	{"run", []string{"r"}},           // flow-status, tend-runner
+	{"open", []string{"o"}},          // hooks, gemini, flow
+	{"toggle view", []string{"tab"}}, // multiple TUIs
 }
 
 // freeKeysSet is a set for fast lookup of free keys.
@@ -165,9 +165,9 @@ type ReservedKeyViolation struct {
 
 // AnalysisReport contains the full analysis of keybindings.
 type AnalysisReport struct {
-	Consistency            map[string]ConsistencyResult `json:"canonical_consistency"`
-	SemanticConflicts      []SemanticConflict           `json:"semantic_conflicts"`
-	ReservedKeyViolations  []ReservedKeyViolation       `json:"reserved_key_violations"`
+	Consistency           map[string]ConsistencyResult `json:"canonical_consistency"`
+	SemanticConflicts     []SemanticConflict           `json:"semantic_conflicts"`
+	ReservedKeyViolations []ReservedKeyViolation       `json:"reserved_key_violations"`
 }
 
 // NormalizeAction standardizes action names to allow cross-TUI comparison.
@@ -204,16 +204,16 @@ func NormalizeAction(name string) string {
 		"all":  "select all",
 		"none": "select none",
 		// Navigation
-		"next field":       "down",
-		"prev field":       "up",
-		"move up":          "up",
-		"move down":        "down",
-		"scroll up":        "page up",
-		"scroll down":      "page down",
-		"normal mode":      "back",
-		"back to plan":     "quit",
-		"clear":            "cancel/clear",
-		"cancel":           "cancel/clear",
+		"next field":   "down",
+		"prev field":   "up",
+		"move up":      "up",
+		"move down":    "down",
+		"scroll up":    "page up",
+		"scroll down":  "page down",
+		"normal mode":  "back",
+		"back to plan": "quit",
+		"clear":        "cancel/clear",
+		"cancel":       "cancel/clear",
 		// Actions
 		"submit":              "confirm",
 		"submit form":         "confirm",
@@ -224,12 +224,12 @@ func NormalizeAction(name string) string {
 		"attach":              "confirm",
 		"run":                 "confirm", // enter for run is acceptable
 		"attach to":           "confirm",
-		"toggle":           "select",
-		"toggle select":    "select",
-		"toggle selection": "select",
+		"toggle":              "select",
+		"toggle select":       "select",
+		"toggle selection":    "select",
 		"close detail pane":   "back",
-		"edit notes":  "edit",
-		"edit config": "edit",
+		"edit notes":          "edit",
+		"edit config":         "edit",
 		"create new plan":     "create", // n for create is intentional, not search-next
 		"inspect":             "confirm",
 		"previous period":     "left",

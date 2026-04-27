@@ -16,13 +16,14 @@ import (
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/tui/theme"
+	"github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
+	"golang.org/x/mod/modfile"
+
 	"github.com/grovetools/grove/pkg/depsgraph"
 	"github.com/grovetools/grove/pkg/gh"
 	"github.com/grovetools/grove/pkg/project"
 	"github.com/grovetools/grove/pkg/release"
-	"github.com/sirupsen/logrus"
-	"github.com/spf13/cobra"
-	"golang.org/x/mod/modfile"
 )
 
 var (
@@ -57,7 +58,7 @@ func tagExists(ctx context.Context, repoPath, tag string) (bool, error) {
 	if err == nil && len(strings.TrimSpace(string(output))) > 0 {
 		return true, nil
 	}
-	
+
 	// Check remote tags
 	cmd = exec.CommandContext(ctx, "git", "ls-remote", "--tags", "origin", tag)
 	cmd.Dir = repoPath
@@ -65,7 +66,7 @@ func tagExists(ctx context.Context, repoPath, tag string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	
+
 	return len(strings.TrimSpace(string(output))) > 0, nil
 }
 
@@ -74,10 +75,10 @@ func isRepoFullyReleased(ctx context.Context, repoPath string, repoPlan *release
 	if repoPlan == nil {
 		return false
 	}
-	
+
 	// Check if all release stages are complete
 	allStagesComplete := repoPlan.ChangelogPushed && repoPlan.CIPassed && repoPlan.TagPushed
-	
+
 	// If plan says it's complete, verify tag actually exists
 	if allStagesComplete {
 		tagExists, err := tagExists(ctx, repoPath, repoPlan.NextVersion)
@@ -87,7 +88,7 @@ func isRepoFullyReleased(ctx context.Context, repoPath string, repoPlan *release
 		}
 		return tagExists
 	}
-	
+
 	return false
 }
 
@@ -126,7 +127,7 @@ Examples:
 				ctx := context.Background()
 				return runReleaseTUI(ctx)
 			}
-			
+
 			// Otherwise show help for the parent command
 			return cmd.Help()
 		},
@@ -151,7 +152,7 @@ Examples:
 
 // Legacy runRelease function removed - replaced by stateful workflow:
 // - runReleasePlan (in release_plan.go)
-// - runReleaseTUI (in release_tui.go)  
+// - runReleaseTUI (in release_tui.go)
 // - runReleaseApply (in release_plan.go)
 
 func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces []string, logger *logrus.Logger) error {
@@ -213,7 +214,6 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces
 	// Don't consider dirty status or ahead-of-remote as blocking issues since we auto-commit
 	// grove-ecosystem status display is disabled; main repo is not added to the table
 
-
 	// Workspaces
 	hasIssues := false // Don't consider grove-ecosystem issues since ecosystem operations are disabled
 	for _, ws := range workspaceStatuses {
@@ -233,14 +233,14 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces
 				diffCmd := exec.Command("git", "diff", "--name-only")
 				diffCmd.Dir = fullPath
 				diffOutput, _ := diffCmd.Output()
-				
+
 				stagedCmd := exec.Command("git", "diff", "--cached", "--name-only")
 				stagedCmd.Dir = fullPath
 				stagedOutput, _ := stagedCmd.Output()
-				
+
 				allChanges := strings.TrimSpace(string(diffOutput)) + "\n" + strings.TrimSpace(string(stagedOutput))
 				allChanges = strings.TrimSpace(allChanges)
-				
+
 				// If the only change is CHANGELOG.md, don't treat it as a blocker
 				if allChanges != "" && allChanges != "CHANGELOG.md" {
 					issues = append(issues, "uncommitted changes")
@@ -265,7 +265,7 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces
 		// Add ahead info as display-only (not a blocking issue)
 		displayIssues := make([]string, len(issues))
 		copy(displayIssues, issues)
-		
+
 		if ws.AheadCount > 0 {
 			if releasePush {
 				displayIssues = append(displayIssues, fmt.Sprintf("ahead of remote by %d commits (will push)", ws.AheadCount))
@@ -273,7 +273,7 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces
 				displayIssues = append(displayIssues, fmt.Sprintf("ahead of remote by %d commits", ws.AheadCount))
 			}
 		}
-		
+
 		// If dirty but only CHANGELOG.md, add a note
 		if statusStr == "◯ Changelog" && len(issues) == 0 {
 			// This means it's only the CHANGELOG.md that's dirty
@@ -317,7 +317,6 @@ func runPreflightChecks(ctx context.Context, rootDir, version string, workspaces
 
 	return nil
 }
-
 
 func executeGitCommand(ctx context.Context, dir string, args []string, description string, logger *logrus.Logger) error {
 	cmd := fmt.Sprintf("git %s", strings.Join(args, " "))
@@ -712,12 +711,12 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 			if plan != nil && plan.Repos != nil {
 				repoPlan = plan.Repos[repoName]
 			}
-			
+
 			if isRepoFullyReleased(ctx, wsPath, repoPlan) {
 				displayInfo(fmt.Sprintf("%s %s already fully released (%s), skipping", theme.IconSuccess, repoName, version))
 				continue
 			}
-			
+
 			// If --resume flag is used, provide detailed status
 			if releaseResume && repoPlan != nil {
 				if repoPlan.LastFailedOperation != "" {
@@ -816,19 +815,19 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 				// Update dependencies to latest versions (skip in dry-run mode)
 				if !releaseDryRun {
 					logger.WithFields(logrus.Fields{
-						"repo": repo,
+						"repo":   repo,
 						"wsPath": wsPath,
 					}).Info("[orchestrateRelease] Calling updateDependencies")
 					if err := updateDependencies(ctx, wsPath, versions, graph, plan.Type, logger); err != nil {
 						logger.WithFields(logrus.Fields{
-							"repo": repo,
+							"repo":  repo,
 							"error": err,
 						}).Error("[orchestrateRelease] updateDependencies failed")
 						errChan <- fmt.Errorf("failed to update dependencies for %s: %w", repo, err)
 						return
 					}
 					logger.WithField("repo", repo).Info("[orchestrateRelease] updateDependencies completed successfully")
-					
+
 					// After updating dependencies, check for changes and push them
 					status, _ := git.GetStatus(wsPath)
 					if status.IsDirty {
@@ -870,12 +869,12 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 							}
 						}
 					}
-					
+
 					// Check if CHANGELOG.md is already modified (from TUI workflow)
 					// First check the plan's ChangelogState if available
 					changelogModified := false
 					skipChangelog := false
-					
+
 					// Check plan for changelog state
 					if plan != nil && plan.Repos != nil {
 						if repoPlan, ok := plan.Repos[repo]; ok && repoPlan.ChangelogState == "dirty" {
@@ -885,7 +884,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 							displayInfo(fmt.Sprintf("Using manually edited changelog for %s", repo))
 						}
 					}
-					
+
 					// If not marked in plan, check git status
 					if !changelogModified {
 						// Check using git diff --name-only to see if CHANGELOG.md has changes
@@ -894,7 +893,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 						if diffOutput, _ := diffCmd.Output(); len(diffOutput) > 0 {
 							changelogModified = true
 						}
-						
+
 						// Also check if it's staged
 						if !changelogModified {
 							diffCmd = exec.Command("git", "diff", "--cached", "--name-only", "CHANGELOG.md")
@@ -904,7 +903,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 							}
 						}
 					}
-					
+
 					if changelogModified {
 						// CHANGELOG.md was already modified (likely from TUI workflow)
 						// Just commit it as-is
@@ -927,10 +926,10 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 										if repoPlan, ok := plan.Repos[repo]; ok {
 											repoPlan.ChangelogPushed = true
 											repoPlan.LastFailedOperation = "ci_wait" // Next operation that could fail
-											_ = release.SavePlan(plan) // Save updated state
+											_ = release.SavePlan(plan)               // Save updated state
 										}
 									}
-									
+
 									if !releaseSkipCI {
 										displayInfo(fmt.Sprintf("Waiting for CI to pass for %s after changelog update...", repo))
 										if err := gh.WaitForCIWorkflow(ctx, wsPath); err != nil {
@@ -940,13 +939,13 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 									} else {
 										displayInfo(fmt.Sprintf("Skipping CI wait for %s after changelog update (--skip-ci enabled)", repo))
 									}
-									
+
 									// Mark CI as passed only after successful wait or skip
 									if plan != nil && plan.Repos != nil {
 										if repoPlan, ok := plan.Repos[repo]; ok {
 											repoPlan.CIPassed = true
 											repoPlan.LastFailedOperation = "" // Clear failure since CI passed
-											_ = release.SavePlan(plan) // Save updated state
+											_ = release.SavePlan(plan)        // Save updated state
 										}
 									}
 								}
@@ -986,10 +985,10 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 												if repoPlan, ok := plan.Repos[repo]; ok {
 													repoPlan.ChangelogPushed = true
 													repoPlan.LastFailedOperation = "ci_wait" // Next operation that could fail
-													_ = release.SavePlan(plan) // Save updated state
+													_ = release.SavePlan(plan)               // Save updated state
 												}
 											}
-											
+
 											if !releaseSkipCI {
 												displayInfo(fmt.Sprintf("Waiting for CI to pass for %s after changelog update...", repo))
 												if err := gh.WaitForCIWorkflow(ctx, wsPath); err != nil {
@@ -999,13 +998,13 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 											} else {
 												displayInfo(fmt.Sprintf("Skipping CI wait for %s after changelog update (--skip-ci enabled)", repo))
 											}
-											
+
 											// Mark CI as passed only after successful wait or skip
 											if plan != nil && plan.Repos != nil {
 												if repoPlan, ok := plan.Repos[repo]; ok {
 													repoPlan.CIPassed = true
 													repoPlan.LastFailedOperation = "" // Clear failure since CI passed
-													_ = release.SavePlan(plan) // Save updated state
+													_ = release.SavePlan(plan)        // Save updated state
 												}
 											}
 										}
@@ -1056,7 +1055,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 						}
 					}
 				}
-				
+
 				// Track operation for error reporting
 				if plan != nil && plan.Repos != nil {
 					if repoPlan, ok := plan.Repos[repo]; ok {
@@ -1064,7 +1063,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 						_ = release.SavePlan(plan)
 					}
 				}
-				
+
 				// Tag the module
 				if err := executeGitCommand(ctx, wsPath, []string{"tag", "-a", version, "-m", fmt.Sprintf("Release %s", version)},
 					fmt.Sprintf("Tag %s", repo), logger); err != nil {
@@ -1168,11 +1167,11 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 
 func updateDependencies(ctx context.Context, modulePath string, releasedVersions map[string]string, graph *depsgraph.Graph, planType string, logger *logrus.Logger) error {
 	logger.WithFields(logrus.Fields{
-		"modulePath": modulePath,
+		"modulePath":       modulePath,
 		"releasedVersions": releasedVersions,
-		"planType": planType,
+		"planType":         planType,
 	}).Info("[updateDependencies] Starting dependency update")
-	
+
 	// Load grove.yml to get project type
 	groveYmlPath := filepath.Join(modulePath, "grove.yml")
 	cfg, err := config.Load(groveYmlPath)
@@ -1235,14 +1234,14 @@ func updateDependencies(ctx context.Context, modulePath string, releasedVersions
 
 		// Determine the target version for this dependency
 		var targetVersion string
-		
+
 		// First check if this dependency is being released in the current batch
 		if newVersion, hasNewVersion := releasedVersions[depWorkspaceName]; hasNewVersion {
 			targetVersion = newVersion
 			logger.WithFields(logrus.Fields{
-				"dep": dep.Name,
+				"dep":       dep.Name,
 				"workspace": depWorkspaceName,
-				"version": newVersion,
+				"version":   newVersion,
 			}).Info("Using version from current release batch")
 		} else {
 			// Dependency is not in current release batch, fetch latest version
@@ -1259,9 +1258,9 @@ func updateDependencies(ctx context.Context, modulePath string, releasedVersions
 						continue
 					}
 					logger.WithFields(logrus.Fields{
-						"dep": dep.Name,
+						"dep":       dep.Name,
 						"workspace": depWorkspaceName,
-						"version": latestVersion,
+						"version":   latestVersion,
 					}).Info("Using latest prerelease version from module proxy")
 				} else {
 					latestVersion, err = getLatestModuleVersion(dep.Name)
@@ -1270,9 +1269,9 @@ func updateDependencies(ctx context.Context, modulePath string, releasedVersions
 						continue
 					}
 					logger.WithFields(logrus.Fields{
-						"dep": dep.Name,
+						"dep":       dep.Name,
 						"workspace": depWorkspaceName,
-						"version": latestVersion,
+						"version":   latestVersion,
 					}).Info("Using latest version from module proxy")
 				}
 				targetVersion = latestVersion
@@ -1285,7 +1284,7 @@ func updateDependencies(ctx context.Context, modulePath string, releasedVersions
 		// Check if update is needed
 		if dep.Version == targetVersion {
 			logger.WithFields(logrus.Fields{
-				"dep": dep.Name,
+				"dep":     dep.Name,
 				"version": dep.Version,
 			}).Debug("Dependency already at target version")
 			continue
@@ -1343,10 +1342,10 @@ func updateDependencies(ctx context.Context, modulePath string, releasedVersions
 // Keep the original function for backward compatibility
 func updateGoDependencies(ctx context.Context, modulePath string, releasedVersions map[string]string, graph *depsgraph.Graph, logger *logrus.Logger) error {
 	logger.WithFields(logrus.Fields{
-		"modulePath": modulePath,
+		"modulePath":       modulePath,
 		"releasedVersions": releasedVersions,
 	}).Info("[updateGoDependencies] Starting dependency update")
-	
+
 	goModPath := filepath.Join(modulePath, "go.mod")
 
 	// Read current go.mod
@@ -1386,12 +1385,12 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 
 		// Determine the target version for this dependency
 		var targetVersion string
-		
+
 		// First check if this dependency is being released in the current batch
 		if newVersion, hasNewVersion := releasedVersions[depName]; hasNewVersion {
 			targetVersion = newVersion
 			logger.WithFields(logrus.Fields{
-				"dep": req.Mod.Path,
+				"dep":     req.Mod.Path,
 				"depName": depName,
 				"version": newVersion,
 			}).Info("[updateGoDependencies] Using version from current release batch")
@@ -1404,7 +1403,7 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 			}
 			targetVersion = latestVersion
 			logger.WithFields(logrus.Fields{
-				"dep": req.Mod.Path,
+				"dep":     req.Mod.Path,
 				"depName": depName,
 				"version": latestVersion,
 			}).Info("[updateGoDependencies] Using latest version from module proxy")
@@ -1413,7 +1412,7 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 		// Check if update is needed
 		if req.Mod.Version == targetVersion {
 			logger.WithFields(logrus.Fields{
-				"dep": req.Mod.Path,
+				"dep":     req.Mod.Path,
 				"version": req.Mod.Version,
 			}).Debug("[updateGoDependencies] Dependency already at target version")
 			continue
@@ -1444,10 +1443,10 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 
 	if hasUpdates {
 		logger.WithFields(logrus.Fields{
-			"modulePath": modulePath,
+			"modulePath":  modulePath,
 			"updatedDeps": updatedDeps,
 		}).Info("[updateGoDependencies] Running go mod tidy after updates")
-		
+
 		// Run go mod tidy
 		cmd := exec.CommandContext(ctx, "go", "mod", "tidy")
 		cmd.Dir = modulePath

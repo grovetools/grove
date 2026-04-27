@@ -23,7 +23,7 @@ func EcosystemInitAlreadyDiscoverableScenario() *harness.Scenario {
 		[]harness.Step{
 			harness.NewStep("Create grove root directory", func(ctx *harness.Context) error {
 				groveRoot := ctx.NewDir("grove-root")
-				if err := os.MkdirAll(groveRoot, 0755); err != nil {
+				if err := os.MkdirAll(groveRoot, 0o755); err != nil {
 					return fmt.Errorf("failed to create grove root: %w", err)
 				}
 				ctx.Set("grove_root", groveRoot)
@@ -84,7 +84,7 @@ func EcosystemInitNotDiscoverableScenario() *harness.Scenario {
 		[]harness.Step{
 			harness.NewStep("Create isolated directory (no grove)", func(ctx *harness.Context) error {
 				isolatedRoot := ctx.NewDir("isolated-root")
-				if err := os.MkdirAll(isolatedRoot, 0755); err != nil {
+				if err := os.MkdirAll(isolatedRoot, 0o755); err != nil {
 					return fmt.Errorf("failed to create isolated root: %w", err)
 				}
 				ctx.Set("isolated_root", isolatedRoot)
@@ -93,7 +93,7 @@ func EcosystemInitNotDiscoverableScenario() *harness.Scenario {
 			harness.NewStep("Setup global config WITHOUT this path", func(ctx *harness.Context) error {
 				// Create a minimal config without any groves pointing to our isolated dir
 				globalConfigDir := filepath.Join(ctx.ConfigDir(), "grove")
-				if err := os.MkdirAll(globalConfigDir, 0755); err != nil {
+				if err := os.MkdirAll(globalConfigDir, 0o755); err != nil {
 					return fmt.Errorf("failed to create global config dir: %w", err)
 				}
 
@@ -214,7 +214,7 @@ func EcosystemInitDeclineAddScenario() *harness.Scenario {
 		[]harness.Step{
 			harness.NewStep("Create isolated directory", func(ctx *harness.Context) error {
 				isolatedRoot := ctx.NewDir("isolated-decline")
-				if err := os.MkdirAll(isolatedRoot, 0755); err != nil {
+				if err := os.MkdirAll(isolatedRoot, 0o755); err != nil {
 					return fmt.Errorf("failed to create isolated root: %w", err)
 				}
 				ctx.Set("isolated_root", isolatedRoot)
@@ -222,7 +222,7 @@ func EcosystemInitDeclineAddScenario() *harness.Scenario {
 			}),
 			harness.NewStep("Setup empty global config", func(ctx *harness.Context) error {
 				globalConfigDir := filepath.Join(ctx.ConfigDir(), "grove")
-				if err := os.MkdirAll(globalConfigDir, 0755); err != nil {
+				if err := os.MkdirAll(globalConfigDir, 0o755); err != nil {
 					return fmt.Errorf("failed to create global config dir: %w", err)
 				}
 
@@ -310,7 +310,7 @@ func EcosystemInitNonInteractiveScenario() *harness.Scenario {
 		[]harness.Step{
 			harness.NewStep("Create isolated directory", func(ctx *harness.Context) error {
 				isolatedRoot := ctx.NewDir("isolated-nonint")
-				if err := os.MkdirAll(isolatedRoot, 0755); err != nil {
+				if err := os.MkdirAll(isolatedRoot, 0o755); err != nil {
 					return fmt.Errorf("failed to create isolated root: %w", err)
 				}
 				ctx.Set("isolated_root", isolatedRoot)
@@ -318,7 +318,7 @@ func EcosystemInitNonInteractiveScenario() *harness.Scenario {
 			}),
 			harness.NewStep("Setup empty global config", func(ctx *harness.Context) error {
 				globalConfigDir := filepath.Join(ctx.ConfigDir(), "grove")
-				if err := os.MkdirAll(globalConfigDir, 0755); err != nil {
+				if err := os.MkdirAll(globalConfigDir, 0o755); err != nil {
 					return fmt.Errorf("failed to create global config dir: %w", err)
 				}
 
@@ -372,7 +372,7 @@ func EcosystemInitNonInteractiveScenario() *harness.Scenario {
 // setupGrovesConfig creates a global grove.yml with the new 'groves' key format.
 func setupGrovesConfig(ctx *harness.Context, groveName, grovePath string) error {
 	globalConfigDir := filepath.Join(ctx.ConfigDir(), "grove")
-	if err := os.MkdirAll(globalConfigDir, 0755); err != nil {
+	if err := os.MkdirAll(globalConfigDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create global config dir: %w", err)
 	}
 
@@ -396,7 +396,7 @@ func EcosystemInitPreservesConfigScenario() *harness.Scenario {
 		[]harness.Step{
 			harness.NewStep("Create isolated directory", func(ctx *harness.Context) error {
 				isolatedRoot := ctx.NewDir("isolated-preserve")
-				if err := os.MkdirAll(isolatedRoot, 0755); err != nil {
+				if err := os.MkdirAll(isolatedRoot, 0o755); err != nil {
 					return fmt.Errorf("failed to create isolated root: %w", err)
 				}
 				ctx.Set("isolated_root", isolatedRoot)
@@ -404,7 +404,7 @@ func EcosystemInitPreservesConfigScenario() *harness.Scenario {
 			}),
 			harness.NewStep("Setup global config with existing fields", func(ctx *harness.Context) error {
 				globalConfigDir := filepath.Join(ctx.ConfigDir(), "grove")
-				if err := os.MkdirAll(globalConfigDir, 0755); err != nil {
+				if err := os.MkdirAll(globalConfigDir, 0o755); err != nil {
 					return fmt.Errorf("failed to create global config dir: %w", err)
 				}
 
@@ -515,7 +515,7 @@ func EcosystemInitEditsCorrectFileScenario() *harness.Scenario {
 		[]harness.Step{
 			harness.NewStep("Create isolated directory", func(ctx *harness.Context) error {
 				isolatedRoot := ctx.NewDir("isolated-correct-file")
-				if err := os.MkdirAll(isolatedRoot, 0755); err != nil {
+				if err := os.MkdirAll(isolatedRoot, 0o755); err != nil {
 					return fmt.Errorf("failed to create isolated root: %w", err)
 				}
 				ctx.Set("isolated_root", isolatedRoot)
@@ -523,7 +523,7 @@ func EcosystemInitEditsCorrectFileScenario() *harness.Scenario {
 			}),
 			harness.NewStep("Setup groves in base grove.yml (not override)", func(ctx *harness.Context) error {
 				globalConfigDir := filepath.Join(ctx.ConfigDir(), "grove")
-				if err := os.MkdirAll(globalConfigDir, 0755); err != nil {
+				if err := os.MkdirAll(globalConfigDir, 0o755); err != nil {
 					return fmt.Errorf("failed to create global config dir: %w", err)
 				}
 

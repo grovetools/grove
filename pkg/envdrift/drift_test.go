@@ -56,7 +56,7 @@ func newDriftHelperArgs(t *testing.T, mode string) (scriptPath string, env []str
 	scriptPath = filepath.Join(tmpDir, "terraform")
 
 	script := fmt.Sprintf("#!/bin/sh\nexec %s -test.run=TestHelperDrift -- \"$@\"\n", os.Args[0])
-	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("failed to create terraform shim: %v", err)
 	}
 
@@ -184,7 +184,7 @@ func TestParsePlanJSONStream_StripsActionValues(t *testing.T) {
 func TestReadImageVarsFromState_MissingStateFile(t *testing.T) {
 	dir := t.TempDir()
 	cwd, _ := os.Getwd()
-	defer os.Chdir(cwd)
+	defer func() { _ = os.Chdir(cwd) }()
 	if err := os.Chdir(dir); err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestReadImageVarsFromState_MissingStateFile(t *testing.T) {
 func TestReadImageVarsFromState_ExtractsImageKeys(t *testing.T) {
 	dir := t.TempDir()
 	cwd, _ := os.Getwd()
-	defer os.Chdir(cwd)
+	defer func() { _ = os.Chdir(cwd) }()
 	if err := os.Chdir(dir); err != nil {
 		t.Fatal(err)
 	}
@@ -210,11 +210,11 @@ func TestReadImageVarsFromState_ExtractsImageKeys(t *testing.T) {
 			"other_field": "irrelevant",
 		},
 	}
-	if err := os.MkdirAll(".grove/env", 0755); err != nil {
+	if err := os.MkdirAll(".grove/env", 0o755); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := json.Marshal(stateFile)
-	if err := os.WriteFile(".grove/env/state.json", data, 0644); err != nil {
+	if err := os.WriteFile(".grove/env/state.json", data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -239,7 +239,7 @@ func TestReadImageVarsFromState_ExtractsImageKeys(t *testing.T) {
 func TestReadImageVarsFromState_NoImageKeys(t *testing.T) {
 	dir := t.TempDir()
 	cwd, _ := os.Getwd()
-	defer os.Chdir(cwd)
+	defer func() { _ = os.Chdir(cwd) }()
 	if err := os.Chdir(dir); err != nil {
 		t.Fatal(err)
 	}
@@ -248,11 +248,11 @@ func TestReadImageVarsFromState_NoImageKeys(t *testing.T) {
 		Provider: "terraform",
 		State:    map[string]string{"other": "val"},
 	}
-	if err := os.MkdirAll(".grove/env", 0755); err != nil {
+	if err := os.MkdirAll(".grove/env", 0o755); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := json.Marshal(stateFile)
-	if err := os.WriteFile(".grove/env/state.json", data, 0644); err != nil {
+	if err := os.WriteFile(".grove/env/state.json", data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 

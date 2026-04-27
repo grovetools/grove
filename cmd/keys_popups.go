@@ -14,9 +14,10 @@ import (
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/keybind"
 	"github.com/grovetools/core/tui/theme"
-	"github.com/grovetools/grove/pkg/keys"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
+
+	"github.com/grovetools/grove/pkg/keys"
 )
 
 // newKeysPopupsCmd creates the 'grove keys popups' command group.
@@ -474,7 +475,7 @@ func removePopupConfig(name string) error {
 // writeConfig writes the config map back to the file.
 func writeConfig(path string, cfg map[string]interface{}, isTOML bool) error {
 	// Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
@@ -495,7 +496,7 @@ func writeConfig(path string, cfg map[string]interface{}, isTOML bool) error {
 		}
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0o600)
 }
 
 // regenerateTmuxConfig runs 'grove keys generate tmux' to update the cache.

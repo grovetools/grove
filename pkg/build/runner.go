@@ -38,7 +38,7 @@ type BuildResult struct {
 // BuildEvent represents an event during the build process
 type BuildEvent struct {
 	Job        BuildJob
-	Type       string // "start", "finish", or "output"
+	Type       string       // "start", "finish", or "output"
 	Result     *BuildResult // nil for start and output events
 	OutputLine string       // For "output" events
 }
@@ -86,7 +86,7 @@ func RunWithOptions(ctx context.Context, jobs []BuildJob, numWorkers int, contin
 				if len(job.Command) == 0 {
 					cmd = exec.CommandContext(runCtx, "make", "build")
 				} else {
-					cmd = exec.CommandContext(runCtx, job.Command[0], job.Command[1:]...)
+					cmd = exec.CommandContext(runCtx, job.Command[0], job.Command[1:]...) //nolint:gosec // commands from trusted build config
 				}
 
 				cmd.Dir = job.Path
@@ -198,7 +198,7 @@ func RunWithEventsAndOptions(ctx context.Context, jobs []BuildJob, numWorkers in
 				if len(job.Command) == 0 {
 					cmd = exec.CommandContext(runCtx, "make", "build")
 				} else {
-					cmd = exec.CommandContext(runCtx, job.Command[0], job.Command[1:]...)
+					cmd = exec.CommandContext(runCtx, job.Command[0], job.Command[1:]...) //nolint:gosec // commands from trusted build config
 				}
 
 				cmd.Dir = job.Path

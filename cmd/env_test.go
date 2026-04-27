@@ -33,12 +33,12 @@ func TestResolveEnvCmdProfile_ExplicitFlag(t *testing.T) {
 	chdir(t, tmp)
 
 	// Both an active env AND a sidecar exist; --env must still win.
-	if err := os.MkdirAll(envStateDir(), 0755); err != nil {
+	if err := os.MkdirAll(envStateDir(), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 	state := env.EnvStateFile{Environment: "active-profile"}
 	data, _ := json.Marshal(&state)
-	if err := os.WriteFile(envStatePath(), data, 0644); err != nil {
+	if err := os.WriteFile(envStatePath(), data, 0o600); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
 	writeLastProfile("sidecar-profile")
@@ -61,12 +61,12 @@ func TestResolveEnvCmdProfile_ActiveEnv(t *testing.T) {
 	tmp := t.TempDir()
 	chdir(t, tmp)
 
-	if err := os.MkdirAll(envStateDir(), 0755); err != nil {
+	if err := os.MkdirAll(envStateDir(), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 	state := env.EnvStateFile{Environment: "hybrid-api"}
 	data, _ := json.Marshal(&state)
-	if err := os.WriteFile(envStatePath(), data, 0644); err != nil {
+	if err := os.WriteFile(envStatePath(), data, 0o600); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
 
@@ -147,7 +147,7 @@ func TestReadWriteLastProfile(t *testing.T) {
 		t.Errorf("readLastProfile after write = %q, want terraform-infra", got)
 	}
 	// Trailing whitespace/newline must be trimmed.
-	if err := os.WriteFile(envLastProfilePath(), []byte("hybrid-api\n\n"), 0644); err != nil {
+	if err := os.WriteFile(envLastProfilePath(), []byte("hybrid-api\n\n"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	if got := readLastProfile(); got != "hybrid-api" {

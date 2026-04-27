@@ -5,9 +5,10 @@ import (
 	"sort"
 
 	"github.com/grovetools/core/cli"
+	"github.com/spf13/cobra"
+
 	"github.com/grovetools/grove/pkg/reconciler"
 	"github.com/grovetools/grove/pkg/sdk"
-	"github.com/spf13/cobra"
 )
 
 func newDevCurrentCmd() *cobra.Command {

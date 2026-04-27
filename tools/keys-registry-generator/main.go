@@ -24,12 +24,13 @@ import (
 	cx_view "github.com/grovetools/cx/pkg/tui/view"
 	flow_cmd "github.com/grovetools/flow/cmd"
 	flow_status "github.com/grovetools/flow/pkg/tui/status"
-	gemini_cmd "github.com/grovetools/grove-gemini/cmd"
-	grove_cmd "github.com/grovetools/grove/cmd"
 	hooks_cmd "github.com/grovetools/hooks/cmd"
 	nav_cmd "github.com/grovetools/nav/cmd"
 	nb_cmd "github.com/grovetools/nb/cmd"
 	tend_cmd "github.com/grovetools/tend/cmd"
+
+	gemini_cmd "github.com/grovetools/grove-gemini/cmd"
+	grove_cmd "github.com/grovetools/grove/cmd"
 )
 
 // getTUIInfos returns all TUI keymap info from across the ecosystem.

@@ -7,8 +7,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/grovetools/grove/pkg/envdrift"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/grove/pkg/envdrift"
 )
 
 func newEnvDriftCmd() *cobra.Command {

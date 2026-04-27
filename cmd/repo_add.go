@@ -11,8 +11,9 @@ import (
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/workspace"
-	"github.com/grovetools/grove/pkg/repository"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/grove/pkg/repository"
 )
 
 var (

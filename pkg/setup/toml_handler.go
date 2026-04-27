@@ -45,11 +45,11 @@ func (h *TOMLHandler) SaveTOML(path string, config map[string]interface{}) error
 
 	// Ensure parent directory exists
 	dir := filepath.Dir(expandedPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", dir, err)
 	}
 
-	if err := os.WriteFile(expandedPath, data, 0644); err != nil {
+	if err := os.WriteFile(expandedPath, data, 0o600); err != nil {
 		h.service.logAction(ActionUpdateYAML, fmt.Sprintf("Write %s", displayPath), expandedPath, false, err)
 		return fmt.Errorf("failed to write TOML file %s: %w", path, err)
 	}

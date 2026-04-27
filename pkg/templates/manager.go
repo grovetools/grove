@@ -43,7 +43,7 @@ func (m *Manager) GenerateFile(templateName, outputPath string, data TemplateDat
 	}
 
 	// Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 		return err
 	}
 

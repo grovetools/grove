@@ -7,9 +7,10 @@ import (
 
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/tui/theme"
+	"github.com/spf13/cobra"
+
 	"github.com/grovetools/grove/pkg/overrides"
 	meta_workspace "github.com/grovetools/grove/pkg/workspace"
-	"github.com/spf13/cobra"
 )
 
 // newDevPointCmd creates the `dev point` command.

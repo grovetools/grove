@@ -55,7 +55,7 @@ func RepoGitHubInitDryRunScenario() *harness.Scenario {
 					// Mock gh
 					ghMockPath := filepath.Join(mockDir, "gh")
 					_ = fs.WriteString(ghMockPath, ghMockScript)
-					_ = os.Chmod(ghMockPath, 0755)
+					_ = os.Chmod(ghMockPath, 0o755)
 
 					os.Setenv("PATH", mockDir+":"+os.Getenv("PATH"))
 					os.Setenv("GROVE_PAT", "test-pat-12345")

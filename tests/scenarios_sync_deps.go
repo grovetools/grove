@@ -29,30 +29,32 @@ func SyncDepsReleaseScenario() *harness.Scenario {
 
 					// Set up mocks by writing mock scripts to temporary directories
 					mockDir := ctx.NewDir("mocks-success")
-					os.MkdirAll(mockDir, 0755)
-					
+					if err := os.MkdirAll(mockDir, 0o755); err != nil {
+						return err
+					}
+
 					ghMockPath := filepath.Join(mockDir, "gh")
 					if err := fs.WriteString(ghMockPath, ghSyncDepsMockScript); err != nil {
 						return err
 					}
-					if err := os.Chmod(ghMockPath, 0755); err != nil {
+					if err := os.Chmod(ghMockPath, 0o755); err != nil {
 						return err
 					}
-					
+
 					goMockPath := filepath.Join(mockDir, "go")
 					if err := fs.WriteString(goMockPath, goSyncDepsMockScript); err != nil {
 						return err
 					}
-					if err := os.Chmod(goMockPath, 0755); err != nil {
+					if err := os.Chmod(goMockPath, 0o755); err != nil {
 						return err
 					}
-					
+
 					// Add git mock that intercepts push but passes through everything else
 					gitMockPath := filepath.Join(mockDir, "git")
 					if err := fs.WriteString(gitMockPath, gitPushMockScript); err != nil {
 						return err
 					}
-					if err := os.Chmod(gitMockPath, 0755); err != nil {
+					if err := os.Chmod(gitMockPath, 0o755); err != nil {
 						return err
 					}
 
@@ -127,29 +129,31 @@ func SyncDepsReleaseScenario() *harness.Scenario {
 
 					// Setup mocks
 					mockDir := ctx.NewDir("mocks-failure")
-					os.MkdirAll(mockDir, 0755)
-					
+					if err := os.MkdirAll(mockDir, 0o755); err != nil {
+						return err
+					}
+
 					ghMockPath := filepath.Join(mockDir, "gh")
 					if err := fs.WriteString(ghMockPath, ghSyncDepsMockScript); err != nil {
 						return err
 					}
-					if err := os.Chmod(ghMockPath, 0755); err != nil {
+					if err := os.Chmod(ghMockPath, 0o755); err != nil {
 						return err
 					}
-					
+
 					goMockPath := filepath.Join(mockDir, "go")
 					if err := fs.WriteString(goMockPath, goSyncDepsMockScript); err != nil {
 						return err
 					}
-					if err := os.Chmod(goMockPath, 0755); err != nil {
+					if err := os.Chmod(goMockPath, 0o755); err != nil {
 						return err
 					}
-					
+
 					gitMockPath := filepath.Join(mockDir, "git")
 					if err := fs.WriteString(gitMockPath, gitPushMockScript); err != nil {
 						return err
 					}
-					if err := os.Chmod(gitMockPath, 0755); err != nil {
+					if err := os.Chmod(gitMockPath, 0o755); err != nil {
 						return err
 					}
 
@@ -228,7 +232,7 @@ func setupSyncDepsEcosystem(ctx *harness.Context, testName string) (ecosystemDir
 	}
 
 	// Ensure the directory exists
-	if err = os.MkdirAll(ecosystemDir, 0755); err != nil {
+	if err = os.MkdirAll(ecosystemDir, 0o755); err != nil {
 		return
 	}
 
@@ -251,7 +255,7 @@ func setupSyncDepsEcosystem(ctx *harness.Context, testName string) (ecosystemDir
 
 	// Setup lib-a (upstream)
 	libAPath = filepath.Join(ecosystemDir, "lib-a")
-	if err = os.Mkdir(libAPath, 0755); err != nil {
+	if err = os.Mkdir(libAPath, 0o755); err != nil {
 		return
 	}
 	if err = git.Init(libAPath); err != nil {
@@ -261,9 +265,7 @@ func setupSyncDepsEcosystem(ctx *harness.Context, testName string) (ecosystemDir
 		return
 	}
 	// Add a GitHub-compatible remote URL to satisfy CI monitoring
-	if res := ctx.Command("git", "remote", "add", "origin", "https://github.com/test/lib-a.git").Dir(libAPath).Run(); res.Error != nil {
-		// Ignore error, it's okay if this fails
-	}
+	_ = ctx.Command("git", "remote", "add", "origin", "https://github.com/test/lib-a.git").Dir(libAPath).Run()
 	if err = fs.WriteString(filepath.Join(libAPath, "grove.yml"), "name: lib-a\n"); err != nil {
 		return
 	}
@@ -280,10 +282,10 @@ func setupSyncDepsEcosystem(ctx *harness.Context, testName string) (ecosystemDir
 		err = res.Error
 		return
 	}
-	
+
 	// Create .github/workflows/ci.yml to trigger CI monitoring
 	libAGitHubDir := filepath.Join(libAPath, ".github", "workflows")
-	if err = os.MkdirAll(libAGitHubDir, 0755); err != nil {
+	if err = os.MkdirAll(libAGitHubDir, 0o755); err != nil {
 		return
 	}
 	ciWorkflowContent := "name: CI\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo 'Test CI'\n"
@@ -296,7 +298,7 @@ func setupSyncDepsEcosystem(ctx *harness.Context, testName string) (ecosystemDir
 	if err = git.Commit(libAPath, "ci: add workflow"); err != nil {
 		return
 	}
-	
+
 	// Make a change so it's eligible for release
 	if err = fs.WriteString(filepath.Join(libAPath, "lib.go"), "package liba\n\nconst Version = \"v0.1.1\"\n"); err != nil {
 		return
@@ -310,7 +312,7 @@ func setupSyncDepsEcosystem(ctx *harness.Context, testName string) (ecosystemDir
 
 	// Setup app-b (downstream)
 	appBPath = filepath.Join(ecosystemDir, "app-b")
-	if err = os.Mkdir(appBPath, 0755); err != nil {
+	if err = os.Mkdir(appBPath, 0o755); err != nil {
 		return
 	}
 	if err = git.Init(appBPath); err != nil {
@@ -320,9 +322,7 @@ func setupSyncDepsEcosystem(ctx *harness.Context, testName string) (ecosystemDir
 		return
 	}
 	// Add a GitHub-compatible remote URL to satisfy CI monitoring
-	if res := ctx.Command("git", "remote", "add", "origin", "https://github.com/test/app-b.git").Dir(appBPath).Run(); res.Error != nil {
-		// Ignore error, it's okay if this fails
-	}
+	_ = ctx.Command("git", "remote", "add", "origin", "https://github.com/test/app-b.git").Dir(appBPath).Run()
 	if err = fs.WriteString(filepath.Join(appBPath, "grove.yml"), "name: app-b\n"); err != nil {
 		return
 	}
@@ -339,10 +339,10 @@ func setupSyncDepsEcosystem(ctx *harness.Context, testName string) (ecosystemDir
 		err = res.Error
 		return
 	}
-	
+
 	// Create .github/workflows/ci.yml for app-b as well
 	appBGitHubDir := filepath.Join(appBPath, ".github", "workflows")
-	if err = os.MkdirAll(appBGitHubDir, 0755); err != nil {
+	if err = os.MkdirAll(appBGitHubDir, 0o755); err != nil {
 		return
 	}
 	if err = fs.WriteString(filepath.Join(appBGitHubDir, "ci.yml"), ciWorkflowContent); err != nil {
@@ -354,7 +354,7 @@ func setupSyncDepsEcosystem(ctx *harness.Context, testName string) (ecosystemDir
 	if err = git.Commit(appBPath, "ci: add workflow"); err != nil {
 		return
 	}
-	
+
 	// Make a change to app-b so it's also eligible for release
 	if err = fs.WriteString(filepath.Join(appBPath, "main.go"), "package main\n\nfunc main() {}\n"); err != nil {
 		return

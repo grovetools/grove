@@ -13,7 +13,7 @@ import (
 // nbCreateGitRepo creates a minimal .git directory marker at the given path.
 func nbCreateGitRepo(repoPath string) error {
 	gitDir := filepath.Join(repoPath, ".git")
-	if err := os.MkdirAll(gitDir, 0755); err != nil {
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create .git dir at %s: %w", repoPath, err)
 	}
 	return fs.WriteString(filepath.Join(gitDir, "HEAD"), "ref: refs/heads/main\n")
@@ -21,7 +21,7 @@ func nbCreateGitRepo(repoPath string) error {
 
 // nbCreateEcosystemDir creates a directory with a grove.toml ecosystem marker.
 func nbCreateEcosystemDir(path string, name string) error {
-	if err := os.MkdirAll(path, 0755); err != nil {
+	if err := os.MkdirAll(path, 0o755); err != nil {
 		return err
 	}
 	content := fmt.Sprintf("name = %q\nworkspaces = [\"*\"]\n", name)
@@ -31,7 +31,7 @@ func nbCreateEcosystemDir(path string, name string) error {
 // nbSetupGlobalConfig creates a global grove.toml with the given TOML content.
 func nbSetupGlobalConfig(ctx *harness.Context, configTOML string) error {
 	globalConfigDir := filepath.Join(ctx.ConfigDir(), "grove")
-	if err := os.MkdirAll(globalConfigDir, 0755); err != nil {
+	if err := os.MkdirAll(globalConfigDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create global config dir: %w", err)
 	}
 	return fs.WriteString(filepath.Join(globalConfigDir, "grove.toml"), configTOML)
@@ -39,7 +39,7 @@ func nbSetupGlobalConfig(ctx *harness.Context, configTOML string) error {
 
 // nbResolveSymlinks resolves symlinks in a path to avoid macOS /var → /private/var mismatches.
 func nbResolveSymlinks(path string) string {
-	if err := os.MkdirAll(path, 0755); err != nil {
+	if err := os.MkdirAll(path, 0o755); err != nil {
 		return path
 	}
 	resolved, err := filepath.EvalSymlinks(path)

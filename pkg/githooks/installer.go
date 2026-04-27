@@ -31,13 +31,13 @@ func Install(repoPath string) error {
 	}
 
 	// Ensure hooks directory exists
-	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create hooks directory: %w", err)
 	}
 
 	// Write the commit-msg hook
 	hookPath := filepath.Join(hooksDir, "commit-msg")
-	if err := os.WriteFile(hookPath, []byte(commitMsgHookContent), 0755); err != nil {
+	if err := os.WriteFile(hookPath, []byte(commitMsgHookContent), 0o700); err != nil { //nolint:gosec // hook must be executable
 		return fmt.Errorf("failed to write commit-msg hook: %w", err)
 	}
 

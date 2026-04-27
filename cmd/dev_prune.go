@@ -7,10 +7,11 @@ import (
 
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/spf13/cobra"
+
 	"github.com/grovetools/grove/pkg/devlinks"
 	"github.com/grovetools/grove/pkg/reconciler"
 	"github.com/grovetools/grove/pkg/sdk"
-	"github.com/spf13/cobra"
 )
 
 func newDevPruneCmd() *cobra.Command {

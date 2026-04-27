@@ -80,12 +80,12 @@ use (
 			// Create temporary directory
 			tmpDir := t.TempDir()
 			oldDir, _ := os.Getwd()
-			defer os.Chdir(oldDir)
-			os.Chdir(tmpDir)
+			defer func() { _ = os.Chdir(oldDir) }()
+			_ = os.Chdir(tmpDir)
 
 			// Write initial go.work file
 			workPath := filepath.Join(tmpDir, "go.work")
-			if err := os.WriteFile(workPath, []byte(tt.initialWork), 0644); err != nil {
+			if err := os.WriteFile(workPath, []byte(tt.initialWork), 0o600); err != nil {
 				t.Fatalf("Failed to write initial go.work: %v", err)
 			}
 
@@ -247,12 +247,12 @@ BINARIES = grove gm
 			// Create temporary directory
 			tmpDir := t.TempDir()
 			oldDir, _ := os.Getwd()
-			defer os.Chdir(oldDir)
-			os.Chdir(tmpDir)
+			defer func() { _ = os.Chdir(oldDir) }()
+			_ = os.Chdir(tmpDir)
 
 			// Write initial Makefile
 			makePath := filepath.Join(tmpDir, "Makefile")
-			if err := os.WriteFile(makePath, []byte(tt.initialMake), 0644); err != nil {
+			if err := os.WriteFile(makePath, []byte(tt.initialMake), 0o600); err != nil {
 				t.Fatalf("Failed to write initial Makefile: %v", err)
 			}
 
@@ -367,11 +367,11 @@ func TestCheckBinaryAliasConflict(t *testing.T) {
 			// Create temporary directory
 			tmpDir := t.TempDir()
 			oldDir, _ := os.Getwd()
-			defer os.Chdir(oldDir)
-			os.Chdir(tmpDir)
+			defer func() { _ = os.Chdir(oldDir) }()
+			_ = os.Chdir(tmpDir)
 
 			// Write Makefile
-			if err := os.WriteFile("Makefile", []byte(tt.makefile), 0644); err != nil {
+			if err := os.WriteFile("Makefile", []byte(tt.makefile), 0o600); err != nil {
 				t.Fatalf("Failed to write Makefile: %v", err)
 			}
 

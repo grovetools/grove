@@ -29,10 +29,10 @@ func TestReadPortFile(t *testing.T) {
 	}
 
 	dir := filepath.Join(tmp, ".local", "state", "grove")
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "dashboard.port"), []byte("54321\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "dashboard.port"), []byte("54321\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

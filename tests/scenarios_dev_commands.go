@@ -10,6 +10,7 @@ import (
 	"github.com/grovetools/tend/pkg/fs"
 	"github.com/grovetools/tend/pkg/harness"
 	"github.com/grovetools/tend/pkg/verify"
+
 	"github.com/grovetools/grove/pkg/devlinks"
 )
 
@@ -37,7 +38,7 @@ var setupMockEcosystem = harness.NewStep("Setup mock ecosystem", func(ctx *harne
 			if err := fs.WriteString(scriptPath, scriptContent); err != nil {
 				return err
 			}
-			if err := os.Chmod(scriptPath, 0755); err != nil {
+			if err := os.Chmod(scriptPath, 0o755); err != nil {
 				return err
 			}
 		}

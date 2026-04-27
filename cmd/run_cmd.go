@@ -7,13 +7,16 @@ import (
 
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/logging"
+	"github.com/spf13/cobra"
+
 	"github.com/grovetools/grove/pkg/discovery"
 	"github.com/grovetools/grove/pkg/runner"
-	"github.com/spf13/cobra"
 )
 
-var runFilter string
-var runExclude string
+var (
+	runFilter  string
+	runExclude string
+)
 
 func init() {
 	rootCmd.AddCommand(newRunCmd())
@@ -46,8 +49,8 @@ Use -- to separate grove run flags from the command and its arguments.`,
   
   # Run with JSON output aggregation
   grove run --json -- cx stats`,
-		Args:                  cobra.MinimumNArgs(1),
-		RunE:                  runCommand,
+		Args: cobra.MinimumNArgs(1),
+		RunE: runCommand,
 	}
 
 	cmd.Flags().StringVarP(&runFilter, "filter", "f", "", "Filter workspaces by glob pattern")
@@ -55,7 +58,6 @@ Use -- to separate grove run flags from the command and its arguments.`,
 
 	return cmd
 }
-
 
 func runCommand(cmd *cobra.Command, args []string) error {
 	logger := logging.NewLogger("run")
@@ -131,7 +133,7 @@ func applyExcludeFilter(workspaces []string, excludeStr string) []string {
 	var filtered []string
 	for _, ws := range workspaces {
 		workspaceName := filepath.Base(ws)
-		
+
 		// Check if workspace matches any exclude pattern
 		excluded := false
 		for _, pattern := range excludePatterns {
@@ -140,7 +142,7 @@ func applyExcludeFilter(workspaces []string, excludeStr string) []string {
 				break
 			}
 		}
-		
+
 		// Include workspace if it doesn't match any exclude pattern
 		if !excluded {
 			filtered = append(filtered, ws)

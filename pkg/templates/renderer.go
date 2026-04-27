@@ -81,7 +81,7 @@ func (r *Renderer) renderTemplateFile(templatePath, outputPath string, data Temp
 
 	// Ensure output directory exists
 	outputDir := filepath.Dir(outputPath)
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create output directory %s: %w", outputDir, err)
 	}
 
@@ -110,7 +110,7 @@ func (r *Renderer) renderTemplateFile(templatePath, outputPath string, data Temp
 func (r *Renderer) copyFile(src, dst string) error {
 	// Ensure output directory exists
 	outputDir := filepath.Dir(dst)
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create output directory %s: %w", outputDir, err)
 	}
 

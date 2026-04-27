@@ -76,13 +76,13 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create the directory if needed
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", targetDir, err)
 	}
 
 	content := fmt.Sprintf("name = %q\n", projectName)
 
-	if err := os.WriteFile(targetPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(targetPath, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("failed to write grove.toml: %w", err)
 	}
 

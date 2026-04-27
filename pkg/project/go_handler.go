@@ -76,7 +76,7 @@ func (h *GoHandler) getProductionImports(workspacePath string) map[string]bool {
 	imports := make(map[string]bool)
 	importRegex := regexp.MustCompile(`"(github\.com/grovetools/[^"]+)"`)
 
-	filepath.Walk(workspacePath, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(workspacePath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // Skip errors
 		}
@@ -158,7 +158,7 @@ func (h *GoHandler) UpdateDependency(workspacePath string, dep Dependency) error
 	}
 
 	// Update to new version using go get
-	cmd := exec.CommandContext(ctx, "go", "get", fmt.Sprintf("%s@%s", dep.Name, dep.Version))
+	cmd := exec.CommandContext(ctx, "go", "get", fmt.Sprintf("%s@%s", dep.Name, dep.Version)) //nolint:gosec // args are from trusted config
 	cmd.Dir = workspacePath
 	cmd.Env = append(os.Environ(),
 		"GOPRIVATE=github.com/grovetools/*",
@@ -213,7 +213,7 @@ func (h *GoHandler) removeReplaceDirective(goModPath, modulePath string) error {
 		return fmt.Errorf("failed to format go.mod: %w", err)
 	}
 
-	if err := os.WriteFile(goModPath, newData, 0644); err != nil {
+	if err := os.WriteFile(goModPath, newData, 0o600); err != nil {
 		return fmt.Errorf("failed to write go.mod: %w", err)
 	}
 

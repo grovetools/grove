@@ -22,7 +22,7 @@ func main() {
 
 	switch command {
 	case "init":
-		os.MkdirAll(mockGitDir, 0755)
+		_ = os.MkdirAll(mockGitDir, 0o755)
 		fmt.Println("Initialized empty mock Git repository in", mockGitDir)
 	case "add", "commit", "push":
 		// No-op for now, just simulate success
@@ -42,11 +42,11 @@ func main() {
 					newLines = append(newLines, line)
 				}
 			}
-			os.WriteFile(tagsFile, []byte(strings.Join(newLines, "\n")), 0644)
+			_ = os.WriteFile(tagsFile, []byte(strings.Join(newLines, "\n")), 0o600)
 			fmt.Printf("Deleted tag '%s' (mock)\n", tagToDelete)
 		} else if len(args) > 0 { // Handle tag creation
 			tag := args[0]
-			f, _ := os.OpenFile(tagsFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			f, _ := os.OpenFile(tagsFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 			defer f.Close()
 			fmt.Fprintln(f, tag)
 		}
@@ -111,7 +111,7 @@ func main() {
 
 			// Create or append to .gitmodules
 			gitmodulesPath := ".gitmodules"
-			f, err := os.OpenFile(gitmodulesPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			f, err := os.OpenFile(gitmodulesPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "mock git submodule add: failed to create .gitmodules: %v\n", err)
 				os.Exit(1)

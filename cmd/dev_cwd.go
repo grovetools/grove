@@ -7,9 +7,10 @@ import (
 	"time"
 
 	"github.com/grovetools/core/cli"
+	"github.com/spf13/cobra"
+
 	"github.com/grovetools/grove/pkg/devlinks"
 	meta_workspace "github.com/grovetools/grove/pkg/workspace"
-	"github.com/spf13/cobra"
 )
 
 func newDevCwdCmd() *cobra.Command {
@@ -91,7 +92,7 @@ specific version built from a local worktree.`
 
 			config.Binaries[binaryName].Links[alias] = linkInfo
 			fmt.Printf("Registered binary '%s' version '%s'\n", binaryName, alias)
-			
+
 			// Track this as successfully registered
 			registeredBinaries = append(registeredBinaries, binary)
 		}

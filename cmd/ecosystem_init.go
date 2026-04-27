@@ -9,16 +9,14 @@ import (
 	"sort"
 	"time"
 
-	"github.com/mattn/go-isatty"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/tui/theme"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
 
-var (
-	ecosystemInitGo bool
-)
+var ecosystemInitGo bool
 
 func newEcosystemInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -57,7 +55,7 @@ func runEcosystemInit(cmd *cobra.Command, args []string) error {
 		ecosystemName = args[0]
 		targetDir = args[0]
 		// Create the directory
-		if err := os.MkdirAll(targetDir, 0755); err != nil {
+		if err := os.MkdirAll(targetDir, 0o755); err != nil {
 			return fmt.Errorf("failed to create directory: %w", err)
 		}
 	} else {
@@ -82,14 +80,14 @@ func runEcosystemInit(cmd *cobra.Command, args []string) error {
 workspaces:
   - "*"
 `, ecosystemName)
-	if err := os.WriteFile(groveYmlPath, []byte(groveYmlContent), 0644); err != nil {
+	if err := os.WriteFile(groveYmlPath, []byte(groveYmlContent), 0o600); err != nil {
 		return fmt.Errorf("failed to create grove.yml: %w", err)
 	}
 	fmt.Println("  grove.yml")
 
 	// Create README.md
 	readmeContent := fmt.Sprintf("# %s\n\nA Grove ecosystem.\n", ecosystemName)
-	if err := os.WriteFile(filepath.Join(targetDir, "README.md"), []byte(readmeContent), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(targetDir, "README.md"), []byte(readmeContent), 0o600); err != nil {
 		return fmt.Errorf("failed to create README.md: %w", err)
 	}
 	fmt.Println("  README.md")
@@ -102,7 +100,7 @@ bin/
 # OS files
 .DS_Store
 `
-	if err := os.WriteFile(filepath.Join(targetDir, ".gitignore"), []byte(gitignoreContent), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(targetDir, ".gitignore"), []byte(gitignoreContent), 0o600); err != nil {
 		return fmt.Errorf("failed to create .gitignore: %w", err)
 	}
 	fmt.Println("  .gitignore")
@@ -115,7 +113,7 @@ bin/
 use (
 )
 `
-		if err := os.WriteFile(filepath.Join(targetDir, "go.work"), []byte(goWorkContent), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(targetDir, "go.work"), []byte(goWorkContent), 0o600); err != nil {
 			return fmt.Errorf("failed to create go.work: %w", err)
 		}
 		fmt.Println("  go.work")
@@ -134,7 +132,7 @@ test:
 clean:
 	@rm -rf bin/
 `
-		if err := os.WriteFile(filepath.Join(targetDir, "Makefile"), []byte(makefileContent), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(targetDir, "Makefile"), []byte(makefileContent), 0o600); err != nil {
 			return fmt.Errorf("failed to create Makefile: %w", err)
 		}
 		fmt.Println("  Makefile")

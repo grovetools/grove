@@ -47,7 +47,7 @@ use (
 
 					// Create shared Go library
 					sharedDir := filepath.Join(ecosystemDir, "grove-shared")
-					_ = os.MkdirAll(sharedDir, 0755)
+					_ = os.MkdirAll(sharedDir, 0o755)
 					_ = fs.WriteString(filepath.Join(sharedDir, "grove.yml"), "name: grove-shared\n")
 					_ = fs.WriteString(filepath.Join(sharedDir, "go.mod"), "module github.com/test/grove-shared\n\ngo 1.24.4\n")
 					_ = fs.WriteString(filepath.Join(sharedDir, "main.go"), "package shared\n\nconst Version = \"1.0.0\"\n")
@@ -61,7 +61,7 @@ use (
 
 					// Create Go app that depends on shared
 					goAppDir := filepath.Join(ecosystemDir, "grove-go-app")
-					_ = os.MkdirAll(goAppDir, 0755)
+					_ = os.MkdirAll(goAppDir, 0o755)
 					_ = fs.WriteString(filepath.Join(goAppDir, "grove.yml"), "name: grove-go-app\n")
 					_ = fs.WriteString(filepath.Join(goAppDir, "go.mod"), `module github.com/test/grove-go-app
 
@@ -81,7 +81,7 @@ require github.com/test/grove-shared v0.1.0
 
 					// Create Python library
 					pyLibDir := filepath.Join(ecosystemDir, "grove-py-lib")
-					_ = os.MkdirAll(pyLibDir, 0755)
+					_ = os.MkdirAll(pyLibDir, 0o755)
 					_ = fs.WriteString(filepath.Join(pyLibDir, "grove.yml"), "name: grove-py-lib\ntype: maturin\n")
 					_ = fs.WriteString(filepath.Join(pyLibDir, "pyproject.toml"), `[project]
 name = "grove-py-lib"

@@ -33,6 +33,9 @@ func main() {
 	re := regexp.MustCompile(fmt.Sprintf(`(?m)^(\s*%s\s+)v\S+`, regexp.QuoteMeta(modulePath)))
 	newContent := re.ReplaceAllString(string(content), fmt.Sprintf("${1}%s", newVersion))
 
-	os.WriteFile(goModPath, []byte(newContent), 0644)
+	if err := os.WriteFile(goModPath, []byte(newContent), 0o600); err != nil {
+		fmt.Fprintln(os.Stderr, "mock go: failed to write go.mod")
+		os.Exit(1)
+	}
 	fmt.Printf("mock go: updated %s to %s\n", modulePath, newVersion)
 }

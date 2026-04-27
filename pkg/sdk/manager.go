@@ -14,6 +14,7 @@ import (
 
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/util/delegation"
+
 	"github.com/grovetools/grove/pkg/workspace"
 )
 
@@ -67,7 +68,7 @@ func SaveAliases(config *AliasConfig) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal aliases: %w", err)
 	}
-	return os.WriteFile(aliasFile, data, 0o644) //nolint:gosec // G306: internal tool, non-sensitive config file
+	return os.WriteFile(aliasFile, data, 0o600) //nolint:gosec // G306: internal tool, non-sensitive config file
 }
 
 // FindTool resolves a user-provided identifier (repo name, alias) to its canonical info
@@ -621,7 +622,7 @@ func (m *Manager) InstallAllToolsFromSource() error {
 	workContent.WriteString(")\n\n")
 	workContent.WriteString("replace github.com/fsnotify/fsevents => ./grove-proxy/internal/fsevents-stub\n")
 
-	if err := os.WriteFile(goWorkPath, []byte(workContent.String()), 0o644); err != nil { //nolint:gosec // G306: internal tool, non-sensitive config file
+	if err := os.WriteFile(goWorkPath, []byte(workContent.String()), 0o600); err != nil { //nolint:gosec // G306: internal tool, non-sensitive config file
 		return fmt.Errorf("failed to create go.work: %w", err)
 	}
 
@@ -782,7 +783,7 @@ func (m *Manager) InstallToolFromSource(toolName string) (string, error) {
 	}
 	workContent.WriteString(")\n")
 
-	if err := os.WriteFile(goWorkPath, []byte(workContent.String()), 0o644); err != nil { //nolint:gosec // G306: internal tool, non-sensitive config file
+	if err := os.WriteFile(goWorkPath, []byte(workContent.String()), 0o600); err != nil { //nolint:gosec // G306: internal tool, non-sensitive config file
 		return "", fmt.Errorf("failed to create go.work: %w", err)
 	}
 

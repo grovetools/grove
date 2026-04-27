@@ -10,8 +10,9 @@ import (
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/prune"
-	envtui "github.com/grovetools/grove/pkg/tui/env"
 	"github.com/spf13/cobra"
+
+	envtui "github.com/grovetools/grove/pkg/tui/env"
 )
 
 // newEnvPruneCmd wires the `grove env prune` subcommand. Dry-run by

@@ -53,7 +53,7 @@ func SaveCache(stateDir string, summary *DriftSummary) error {
 	if summary == nil {
 		return errors.New("drift cache: refusing to persist nil summary")
 	}
-	if err := os.MkdirAll(stateDir, 0755); err != nil {
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create state directory: %w", err)
 	}
 	cache := DriftCache{Summary: summary, CheckedAt: time.Now().UTC()}
@@ -61,7 +61,7 @@ func SaveCache(stateDir string, summary *DriftSummary) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal drift cache: %w", err)
 	}
-	if err := os.WriteFile(cachePath(stateDir), data, 0644); err != nil {
+	if err := os.WriteFile(cachePath(stateDir), data, 0o600); err != nil {
 		return fmt.Errorf("failed to write drift cache: %w", err)
 	}
 	return nil

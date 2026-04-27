@@ -13,9 +13,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	ecosystemImportPath string
-)
+var ecosystemImportPath string
 
 func newEcosystemImportCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -192,5 +190,5 @@ func addToGoWork(repoPath string) error {
 		newLines = append(newLines, line)
 	}
 
-	return os.WriteFile("go.work", []byte(strings.Join(newLines, "\n")), 0644)
+	return os.WriteFile("go.work", []byte(strings.Join(newLines, "\n")), 0o600)
 }

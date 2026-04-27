@@ -8,8 +8,9 @@ import (
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/workspace"
-	"github.com/grovetools/grove/pkg/setup"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/grove/pkg/setup"
 )
 
 var bootstrapDryRun bool
@@ -75,7 +76,7 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 	groveSymlink := filepath.Join(groveBinDir, "grove")
 
 	// 1. Create Grove binary directory
-	if err := service.MkdirAll(groveBinDir, 0755); err != nil {
+	if err := service.MkdirAll(groveBinDir, 0o755); err != nil {
 		return err
 	}
 

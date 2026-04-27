@@ -9,10 +9,11 @@ import (
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/tui/theme"
+	"github.com/spf13/cobra"
+
 	"github.com/grovetools/grove/pkg/devlinks"
 	"github.com/grovetools/grove/pkg/reconciler"
 	"github.com/grovetools/grove/pkg/sdk"
-	"github.com/spf13/cobra"
 )
 
 func init() {
@@ -138,7 +139,7 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 	// Install each tool
 	for _, toolSpec := range toolsToProcess {
 		var toolName, version string
-		
+
 		// If we're processing all tools with a specific version, use that
 		if versionForAll != "" {
 			toolName = toolSpec

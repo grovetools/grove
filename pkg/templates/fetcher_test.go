@@ -13,13 +13,13 @@ func TestLocalFetcher_Fetch(t *testing.T) {
 	// Test case 1: Directory with template subdirectory
 	withTemplateDir := filepath.Join(tempDir, "with-template")
 	templateSubdir := filepath.Join(withTemplateDir, "template")
-	if err := os.MkdirAll(templateSubdir, 0755); err != nil {
+	if err := os.MkdirAll(templateSubdir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
 	// Test case 2: Directory without template subdirectory
 	withoutTemplateDir := filepath.Join(tempDir, "without-template")
-	if err := os.MkdirAll(withoutTemplateDir, 0755); err != nil {
+	if err := os.MkdirAll(withoutTemplateDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -28,7 +28,7 @@ func TestLocalFetcher_Fetch(t *testing.T) {
 
 	// Test case 4: File instead of directory
 	fileInsteadOfDir := filepath.Join(tempDir, "file.txt")
-	if err := os.WriteFile(fileInsteadOfDir, []byte("test"), 0644); err != nil {
+	if err := os.WriteFile(fileInsteadOfDir, []byte("test"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

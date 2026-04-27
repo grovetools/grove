@@ -11,14 +11,15 @@ import (
 	"time"
 
 	"github.com/grovetools/core/tui/theme"
-	"github.com/grovetools/grove/pkg/release"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/grove/pkg/release"
 )
 
 // newReleasePlanCmd creates the 'grove release plan' subcommand
 func newReleasePlanCmd() *cobra.Command {
 	var isRC bool
-	
+
 	cmd := &cobra.Command{
 		Use:   "plan",
 		Short: "Generate a release plan for the ecosystem",
@@ -59,10 +60,10 @@ and documentation updates.`,
 			if err := release.SavePlan(plan); err != nil {
 				return fmt.Errorf("failed to save release plan: %w", err)
 			}
-			
+
 			// Display summary
 			fmt.Println("\n" + theme.IconSuccess + " Release plan generated successfully!")
-			
+
 			// Count repos with changes
 			reposWithChanges := 0
 			for _, repo := range plan.Repos {
@@ -71,15 +72,15 @@ and documentation updates.`,
 				}
 			}
 			fmt.Printf("   Repositories with changes: %d\n", reposWithChanges)
-			
+
 			fmt.Println("\nNext steps:")
 			fmt.Println("1. Review and modify: grove release tui")
 			fmt.Println("2. Apply the release: grove release apply")
-			
+
 			return nil
 		},
 	}
-	
+
 	cmd.Flags().BoolVar(&isRC, "rc", false, "Generate a Release Candidate plan (skip docs/changelogs)")
 
 	// Add the same repo selection flags as main release command
@@ -91,7 +92,7 @@ and documentation updates.`,
 	cmd.Flags().StringSliceVar(&releaseVersions, "version", []string{}, "Set explicit version for repositories (format: repo=v1.2.3)")
 	cmd.Flags().StringVar(&releaseVersionAll, "version-all", "", "Set all repositories to this version (e.g., v0.6.0)")
 	cmd.Flags().BoolVar(&releaseLLMChangelog, "llm-changelog", false, "Generate changelog using an LLM")
-	
+
 	return cmd
 }
 
@@ -112,7 +113,7 @@ This command will:
 Use --dry-run to preview what would be done without making changes.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			
+
 			// Check if a plan exists
 			plan, err := release.LoadPlan()
 			if err != nil {
@@ -121,7 +122,7 @@ Use --dry-run to preview what would be done without making changes.`,
 				}
 				return fmt.Errorf("failed to load release plan: %w", err)
 			}
-			
+
 			// Check that at least one repo is approved
 			hasApproved := false
 			for _, repo := range plan.Repos {
@@ -130,22 +131,22 @@ Use --dry-run to preview what would be done without making changes.`,
 					break
 				}
 			}
-			
+
 			if !hasApproved {
 				return fmt.Errorf("no repositories are approved for release - run 'grove release tui' to review and approve")
 			}
-			
+
 			// Execute the release
 			return runReleaseApply(ctx)
 		},
 	}
-	
+
 	cmd.Flags().BoolVar(&releaseDryRun, "dry-run", false, "Print commands without executing them")
 	cmd.Flags().BoolVar(&releasePush, "push", true, "Push changes to remote repositories (default: true)")
 	cmd.Flags().BoolVar(&releaseSkipParent, "skip-parent", false, "Skip parent repository updates")
 	cmd.Flags().BoolVar(&releaseSkipCI, "skip-ci", false, "Skip CI waits after changelog updates (still waits for release workflows)")
 	cmd.Flags().BoolVar(&releaseResume, "resume", false, "Only process repos that haven't completed successfully")
-	
+
 	return cmd
 }
 
@@ -169,11 +170,11 @@ Use this to abort a release in progress and start fresh.`,
 				}
 				return fmt.Errorf("failed to check for existing plan: %w", err)
 			}
-			
+
 			// Show what will be cleared
 			fmt.Println("This will clear:")
 			fmt.Printf("- Release plan created at: %s\n", plan.CreatedAt.Format("2006-01-02 15:04:05"))
-			
+
 			repoCount := 0
 			for _, repo := range plan.Repos {
 				if repo.Selected {
@@ -182,28 +183,28 @@ Use this to abort a release in progress and start fresh.`,
 			}
 			fmt.Printf("- %d repositories in the plan\n", repoCount)
 			fmt.Println("- All staged changelogs")
-			
+
 			// Confirm
 			fmt.Print("\nAre you sure you want to clear the release plan? [y/N]: ")
 			var response string
 			_, _ = fmt.Scanln(&response)
 			response = strings.TrimSpace(strings.ToLower(response))
-			
+
 			if response != "y" && response != "yes" {
 				fmt.Println("Cancelled")
 				return nil
 			}
-			
+
 			// Clear the plan
 			if err := release.ClearPlan(); err != nil {
 				return fmt.Errorf("failed to clear plan: %w", err)
 			}
-			
+
 			fmt.Println(theme.IconSuccess + " Release plan cleared successfully")
 			return nil
 		},
 	}
-	
+
 	return cmd
 }
 
@@ -213,7 +214,7 @@ func newReleaseUndoTagCmd() *cobra.Command {
 	var remote bool
 	var force bool
 	var fromPlan bool
-	
+
 	cmd := &cobra.Command{
 		Use:   "undo-tag [tag]",
 		Short: "Remove tags locally and optionally from remote",
@@ -229,7 +230,7 @@ Examples:
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			
+
 			if fromPlan {
 				// Load the release plan
 				plan, err := release.LoadPlan()
@@ -239,7 +240,7 @@ Examples:
 					}
 					return fmt.Errorf("failed to load release plan: %w", err)
 				}
-				
+
 				// Confirm the action
 				if !force {
 					fmt.Println("This will remove the following tags:")
@@ -254,28 +255,28 @@ Examples:
 							fmt.Println()
 						}
 					}
-					
+
 					fmt.Print("\nAre you sure? [y/N]: ")
 					var response string
 					_, _ = fmt.Scanln(&response)
 					response = strings.TrimSpace(strings.ToLower(response))
-					
+
 					if response != "y" && response != "yes" {
 						fmt.Println("Cancelled")
 						return nil
 					}
 				}
-				
+
 				// Track results
 				var successCount, failCount int
 				var errors []string
-				
+
 				// Process each repository
 				for repoName, repo := range plan.Repos {
 					if !repo.Selected || repo.NextVersion == "" {
 						continue
 					}
-					
+
 					// Find the repository path
 					repoPath := findRepositoryPath(repoName)
 					if repoPath == "" {
@@ -283,9 +284,9 @@ Examples:
 						failCount++
 						continue
 					}
-					
+
 					version := repo.NextVersion
-					
+
 					// Delete local tag
 					deleteCmd := exec.CommandContext(ctx, "git", "tag", "-d", version)
 					deleteCmd.Dir = repoPath
@@ -300,7 +301,7 @@ Examples:
 					} else {
 						fmt.Printf("  * Removed local tag %s from %s\n", version, repoName)
 					}
-					
+
 					// Delete remote tag if requested
 					if remote {
 						pushCmd := exec.CommandContext(ctx, "git", "push", "origin", ":refs/tags/"+version)
@@ -317,10 +318,10 @@ Examples:
 							fmt.Printf("  * Removed remote tag %s from %s\n", version, repoName)
 						}
 					}
-					
+
 					successCount++
 				}
-				
+
 				// Report results
 				fmt.Printf("\n%s Successfully processed %d repositories\n", theme.IconSuccess, successCount)
 				if failCount > 0 {
@@ -330,15 +331,15 @@ Examples:
 					}
 					return fmt.Errorf("some operations failed")
 				}
-				
+
 				return nil
 			}
-			
+
 			// Single tag mode
 			if len(args) > 0 {
 				tagName = args[0]
 			}
-			
+
 			if tagName == "" {
 				// Get the last tag
 				gitCmd := exec.Command("git", "describe", "--tags", "--abbrev=0")
@@ -348,7 +349,7 @@ Examples:
 				}
 				tagName = strings.TrimSpace(string(output))
 			}
-			
+
 			// Confirm if not forced
 			if !force && remote {
 				fmt.Printf("This will remove tag %s locally", tagName)
@@ -356,28 +357,28 @@ Examples:
 					fmt.Print(" and from remote")
 				}
 				fmt.Print(". Continue? [y/N]: ")
-				
+
 				var response string
 				_, _ = fmt.Scanln(&response)
 				response = strings.TrimSpace(strings.ToLower(response))
-				
+
 				if response != "y" && response != "yes" {
 					fmt.Println("Cancelled")
 					return nil
 				}
 			}
-			
+
 			fmt.Printf("Removing tag: %s\n", tagName)
-			
+
 			// Remove from current repository
 			gitCmd := exec.Command("git", "tag", "-d", tagName)
 			output, err := gitCmd.CombinedOutput()
 			if err != nil {
 				return fmt.Errorf("failed to delete tag: %w\n%s", err, string(output))
 			}
-			
+
 			fmt.Printf("%s Successfully removed local tag %s\n", theme.IconSuccess, tagName)
-			
+
 			// Remove from remote if requested
 			if remote {
 				pushCmd := exec.Command("git", "push", "origin", ":refs/tags/"+tagName)
@@ -387,15 +388,15 @@ Examples:
 				}
 				fmt.Printf("%s Successfully removed remote tag %s\n", theme.IconSuccess, tagName)
 			}
-			
+
 			return nil
 		},
 	}
-	
+
 	cmd.Flags().BoolVar(&remote, "remote", false, "Also delete tags from origin")
 	cmd.Flags().BoolVar(&force, "force", false, "Skip confirmation prompts")
 	cmd.Flags().BoolVar(&fromPlan, "from-plan", false, "Remove tags for all repos in the release plan")
-	
+
 	return cmd
 }
 
@@ -403,11 +404,11 @@ Examples:
 func findRepositoryPath(repoName string) string {
 	// Try common patterns
 	patterns := []string{
-		repoName,                                              // Current directory subdirectory
-		filepath.Join("..", repoName),                        // Sibling directory
+		repoName,                      // Current directory subdirectory
+		filepath.Join("..", repoName), // Sibling directory
 		filepath.Join("..", "..", "grove-ecosystem", repoName), // Grove ecosystem structure
 	}
-	
+
 	for _, pattern := range patterns {
 		if info, err := os.Stat(pattern); err == nil && info.IsDir() {
 			// Check if it's a git repository
@@ -418,7 +419,7 @@ func findRepositoryPath(repoName string) string {
 			}
 		}
 	}
-	
+
 	// If not found, return empty string
 	return ""
 }
@@ -429,7 +430,7 @@ func newReleaseRollbackCmd() *cobra.Command {
 	var mode string
 	var push bool
 	var forcePush bool
-	
+
 	cmd := &cobra.Command{
 		Use:   "rollback",
 		Short: "Rollback commits in repositories from the release plan",
@@ -447,7 +448,7 @@ Examples:
   grove release rollback --push --force     # Force push after rollback`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			
+
 			// Load the release plan
 			plan, err := release.LoadPlan()
 			if err != nil {
@@ -456,19 +457,19 @@ Examples:
 				}
 				return fmt.Errorf("failed to load release plan: %w", err)
 			}
-			
+
 			// Validate mode
 			validModes := map[string]bool{"hard": true, "soft": true, "mixed": true}
 			if !validModes[mode] {
 				return fmt.Errorf("invalid mode %q - must be hard, soft, or mixed", mode)
 			}
-			
+
 			// Warn about destructive operation
 			fmt.Printf("%s This will rollback %d commit(s) using %s reset\n", theme.IconWarning, commits, mode)
 			if mode == "hard" {
 				fmt.Println("   WARNING: Hard reset will LOSE all uncommitted changes!")
 			}
-			
+
 			// List affected repositories
 			fmt.Println("\nAffected repositories:")
 			repoCount := 0
@@ -482,38 +483,38 @@ Examples:
 					repoCount++
 				}
 			}
-			
+
 			if repoCount == 0 {
 				fmt.Println("No repositories selected in the plan")
 				return nil
 			}
-			
+
 			// Confirm the action
 			fmt.Print("\nAre you sure you want to rollback? [y/N]: ")
 			var response string
 			_, _ = fmt.Scanln(&response)
 			response = strings.TrimSpace(strings.ToLower(response))
-			
+
 			if response != "y" && response != "yes" {
 				fmt.Println("Cancelled")
 				return nil
 			}
-			
+
 			// Create backup tag with timestamp
 			backupTag := fmt.Sprintf("backup-%d", time.Now().Unix())
 			fmt.Printf("\nCreating backup tags with prefix: %s\n", backupTag)
-			
+
 			// Track results
 			var successCount, failCount int
 			var errors []string
 			rollbackState := make(map[string]string) // Track what we rolled back
-			
+
 			// Process each repository
 			for repoName, repo := range plan.Repos {
 				if !repo.Selected {
 					continue
 				}
-				
+
 				// Find the repository path
 				repoPath := findRepositoryPath(repoName)
 				if repoPath == "" {
@@ -521,9 +522,9 @@ Examples:
 					failCount++
 					continue
 				}
-				
+
 				fmt.Printf("\nProcessing %s...\n", repoName)
-				
+
 				// Create backup tag first
 				backupRepoTag := fmt.Sprintf("%s-%s", backupTag, repoName)
 				tagCmd := exec.CommandContext(ctx, "git", "tag", backupRepoTag, "-m", "Backup before rollback")
@@ -536,7 +537,7 @@ Examples:
 				} else {
 					fmt.Printf("  * Created backup tag: %s\n", backupRepoTag)
 				}
-				
+
 				// Check for uncommitted changes if using hard reset
 				if mode == "hard" {
 					statusCmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
@@ -545,7 +546,7 @@ Examples:
 						fmt.Printf("  %s Warning: %s has uncommitted changes that will be lost!\n", theme.IconWarning, repoName)
 					}
 				}
-				
+
 				// Perform the reset
 				resetArgs := []string{"reset", "--" + mode, fmt.Sprintf("HEAD~%d", commits)}
 				resetCmd := exec.CommandContext(ctx, "git", resetArgs...)
@@ -556,21 +557,21 @@ Examples:
 					failCount++
 					continue
 				}
-				
+
 				// Get the new HEAD commit for tracking
 				headCmd := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
 				headCmd.Dir = repoPath
 				if headOutput, err := headCmd.Output(); err == nil {
 					rollbackState[repoName] = strings.TrimSpace(string(headOutput))
 				}
-				
+
 				fmt.Printf("  * Rolled back %d commit(s) (%s mode)\n", commits, mode)
-				
+
 				// Push if requested
 				if push {
 					// Check if we need force push
 					needsForce := false
-					
+
 					// Check if local branch has diverged from remote
 					statusCmd := exec.CommandContext(ctx, "git", "status", "-sb")
 					statusCmd.Dir = repoPath
@@ -580,14 +581,14 @@ Examples:
 							needsForce = true
 						}
 					}
-					
+
 					if needsForce && !forcePush {
 						errors = append(errors, fmt.Sprintf("%s: needs force push but --force not provided", repoName))
 						fmt.Printf("  %s Skipping push: force push required but --force not provided\n", theme.IconWarning)
 						failCount++
 						continue
 					}
-					
+
 					// Perform the push
 					pushArgs := []string{"push", "origin", "HEAD"}
 					if needsForce && forcePush {
@@ -596,7 +597,7 @@ Examples:
 					} else {
 						fmt.Printf("  → Pushing to origin...\n")
 					}
-					
+
 					pushCmd := exec.CommandContext(ctx, "git", pushArgs...)
 					pushCmd.Dir = repoPath
 					output, err := pushCmd.CombinedOutput()
@@ -605,17 +606,17 @@ Examples:
 						failCount++
 						continue
 					}
-					
+
 					if needsForce && forcePush {
 						fmt.Printf("  * Force pushed to origin\n")
 					} else {
 						fmt.Printf("  * Pushed to origin\n")
 					}
 				}
-				
+
 				successCount++
 			}
-			
+
 			// Save rollback state for potential recovery
 			if len(rollbackState) > 0 {
 				if err := saveRollbackState(rollbackState); err != nil {
@@ -624,7 +625,7 @@ Examples:
 					fmt.Printf("\n%s Rollback state saved to ~/.grove/release_rollback.json\n", theme.IconNote)
 				}
 			}
-			
+
 			// Report results
 			fmt.Printf("\n%s Successfully rolled back %d repositories\n", theme.IconSuccess, successCount)
 			if failCount > 0 {
@@ -634,23 +635,23 @@ Examples:
 				}
 				return fmt.Errorf("some rollback operations failed")
 			}
-			
+
 			fmt.Printf("\n%s To recover, use the backup tags created with prefix: %s\n", theme.IconLightbulb, backupTag)
-			
+
 			return nil
 		},
 	}
-	
+
 	cmd.Flags().IntVar(&commits, "commits", 1, "Number of commits to roll back")
 	cmd.Flags().StringVar(&mode, "mode", "mixed", "Reset mode: hard, soft, or mixed")
 	cmd.Flags().BoolVar(&push, "push", false, "Push the rollback to origin")
 	cmd.Flags().BoolVar(&forcePush, "force", false, "Allow force push if needed")
-	
+
 	// Add shortcuts for modes
 	cmd.Flags().Bool("hard", false, "Shortcut for --mode=hard")
 	cmd.Flags().Bool("soft", false, "Shortcut for --mode=soft")
 	cmd.Flags().Bool("mixed", false, "Shortcut for --mode=mixed")
-	
+
 	// Handle mode shortcuts
 	cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
 		if cmd.Flags().Changed("hard") {
@@ -662,7 +663,7 @@ Examples:
 		}
 		return nil
 	}
-	
+
 	return cmd
 }
 
@@ -672,26 +673,26 @@ func saveRollbackState(state map[string]string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	groveDir := filepath.Join(home, ".grove")
-	if err := os.MkdirAll(groveDir, 0755); err != nil {
+	if err := os.MkdirAll(groveDir, 0o755); err != nil {
 		return err
 	}
-	
+
 	statePath := filepath.Join(groveDir, "release_rollback.json")
-	
+
 	// Create rollback record
 	record := map[string]interface{}{
 		"timestamp":    time.Now().Format(time.RFC3339),
 		"repositories": state,
 	}
-	
+
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
 		return err
 	}
-	
-	return os.WriteFile(statePath, data, 0644)
+
+	return os.WriteFile(statePath, data, 0o600)
 }
 
 // newReleaseReviewCmd creates an alias for the TUI command
@@ -707,6 +708,6 @@ This is an alias for 'grove release tui'.`,
 			return runReleaseTUI(ctx)
 		},
 	}
-	
+
 	return cmd
 }

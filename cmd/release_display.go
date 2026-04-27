@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	tablecomponent "github.com/grovetools/core/tui/components/table"
 	grovelogging "github.com/grovetools/core/logging"
+	tablecomponent "github.com/grovetools/core/tui/components/table"
 	"github.com/grovetools/core/tui/theme"
 )
 
@@ -85,7 +85,6 @@ func displayComplete(message string) {
 
 // Create a styled pre-flight checks table
 func displayPreflightTable(headers []string, rows [][]string) {
-
 	// Style each row based on status
 	styledRows := make([][]string, 0, len(rows))
 	for _, row := range rows {

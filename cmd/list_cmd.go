@@ -21,15 +21,15 @@ import (
 	"github.com/grovetools/core/pkg/workspace"
 	tablecomponent "github.com/grovetools/core/tui/components/table"
 	"github.com/grovetools/core/tui/theme"
+	"github.com/spf13/cobra"
+
 	"github.com/grovetools/grove/pkg/discovery"
 	"github.com/grovetools/grove/pkg/reconciler"
 	"github.com/grovetools/grove/pkg/sdk"
 	meta_workspace "github.com/grovetools/grove/pkg/workspace"
-	"github.com/spf13/cobra"
 )
 
 var listUlog = grovelogging.NewUnifiedLogger("grove-meta.list")
-
 
 func init() {
 	rootCmd.AddCommand(newListCmd())

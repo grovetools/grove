@@ -94,11 +94,11 @@ func (h *YAMLHandler) SaveYAML(path string, root *yaml.Node) error {
 
 	// Ensure parent directory exists
 	dir := filepath.Dir(expandedPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", dir, err)
 	}
 
-	if err := os.WriteFile(expandedPath, data, 0644); err != nil {
+	if err := os.WriteFile(expandedPath, data, 0o600); err != nil {
 		h.service.logAction(ActionUpdateYAML, fmt.Sprintf("Update %s", displayPath), expandedPath, false, err)
 		return fmt.Errorf("failed to write YAML file %s: %w", path, err)
 	}

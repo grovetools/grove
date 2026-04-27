@@ -16,13 +16,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/logging"
-	grovecontext "github.com/grovetools/cx/pkg/context"
-	tablecomponent "github.com/grovetools/core/tui/components/table"
 	"github.com/grovetools/core/tui/components/help"
+	tablecomponent "github.com/grovetools/core/tui/components/table"
 	"github.com/grovetools/core/tui/theme"
+	grovecontext "github.com/grovetools/cx/pkg/context"
+	"github.com/spf13/cobra"
+
 	grovekeymap "github.com/grovetools/grove/pkg/keymap"
 	"github.com/grovetools/grove/pkg/release"
-	"github.com/spf13/cobra"
 )
 
 // Type alias for the extracted keymap
@@ -30,7 +31,6 @@ type releaseKeyMap = grovekeymap.ReleaseKeyMap
 
 // TUI logger for debugging
 var tuiLog = logging.NewUnifiedLogger("grove-meta.release-tui")
-
 
 // releaseKeys is the singleton instance of the release TUI keymap.
 var releaseKeys = func() grovekeymap.ReleaseKeyMap {
@@ -56,19 +56,19 @@ type releaseTuiModel struct {
 	help          help.Model
 	width         int
 	height        int
-	generating    bool          // Whether changelog generation is in progress
-	genProgress   string        // Progress message for generation
-	spinner       int           // Spinner animation frame
-	genQueue      []string      // Queue of repos being generated (tracks pending)
-	genCurrent    string        // Current repo being generated (for single mode display)
-	genCompleted  int           // Number of completed generations
-	genTotal      int           // Total number of repos being generated (for parallel mode)
-	dryRun        bool          // Whether to run in dry-run mode
-	shouldApply   bool          // Flag to indicate we should exit and apply
-	push          bool          // Whether to push to remote
-	settingsIndex int           // Currently selected setting in settings view
-	llmModel      string        // LLM model being used for changelog generation
-	cxRulesPath   string        // Path to cx rules being used
+	generating    bool     // Whether changelog generation is in progress
+	genProgress   string   // Progress message for generation
+	spinner       int      // Spinner animation frame
+	genQueue      []string // Queue of repos being generated (tracks pending)
+	genCurrent    string   // Current repo being generated (for single mode display)
+	genCompleted  int      // Number of completed generations
+	genTotal      int      // Total number of repos being generated (for parallel mode)
+	dryRun        bool     // Whether to run in dry-run mode
+	shouldApply   bool     // Flag to indicate we should exit and apply
+	push          bool     // Whether to push to remote
+	settingsIndex int      // Currently selected setting in settings view
+	llmModel      string   // LLM model being used for changelog generation
+	cxRulesPath   string   // Path to cx rules being used
 }
 
 func initialReleaseModel(plan *release.ReleasePlan) releaseTuiModel {
@@ -145,7 +145,7 @@ func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Always update the viewport, regardless of the message type
 	var vpCmd tea.Cmd
 	m.viewport, vpCmd = m.viewport.Update(msg)
-	
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -167,7 +167,6 @@ func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSettings(msg)
 		}
 
-
 	case changelogGeneratedMsg:
 		// Update the repo with results
 		if msg.err == nil {
@@ -187,7 +186,7 @@ func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_ = release.SavePlan(m.plan)
 			}
 		}
-		
+
 		// Check if we have more in the queue
 		if len(m.genQueue) > 0 {
 			// Remove completed repo from queue (parallel mode - all already running)
@@ -228,11 +227,11 @@ func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return clearProgressMsg{}
 			})
 		}
-	
+
 	case clearProgressMsg:
 		m.genProgress = ""
 		return m, nil
-	
+
 	case spinnerTickMsg:
 		// Only animate if we're generating
 		if m.generating {
@@ -255,7 +254,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Ignore ALL other keys when help is shown, including 'A'
 		return m, nil
 	}
-	
+
 	switch {
 	case key.Matches(msg, m.keys.Base.Quit):
 		return m, tea.Quit
@@ -481,7 +480,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if _, err := os.Stat(changelogPath); os.IsNotExist(err) {
 				// Create with a basic template
 				template := fmt.Sprintf("# Changelog\n\nAll notable changes to %s will be documented in this file.\n\nThe format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),\nand this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).\n\n", repoName)
-				if err := os.WriteFile(changelogPath, []byte(template), 0644); err != nil {
+				if err := os.WriteFile(changelogPath, []byte(template), 0o600); err != nil {
 					m.genProgress = fmt.Sprintf("%s Failed to create CHANGELOG.md: %v", theme.IconError, err)
 					return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 						return clearProgressMsg{}
@@ -531,17 +530,17 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 							return clearProgressMsg{}
 						})
 					}
-					
+
 					// Write to the repository's CHANGELOG.md
 					repoPath := filepath.Join(m.plan.RootDir, repoName)
 					changelogPath := filepath.Join(repoPath, "CHANGELOG.md")
-					
+
 					// Read existing content if file exists
 					var existingContent []byte
 					if _, err := os.Stat(changelogPath); err == nil {
 						existingContent, _ = os.ReadFile(changelogPath)
 					}
-					
+
 					// Prepend new changelog to existing content
 					var newContent []byte
 					if len(existingContent) > 0 {
@@ -550,9 +549,9 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					} else {
 						newContent = stagedContent
 					}
-					
+
 					// Write the file
-					if err := os.WriteFile(changelogPath, newContent, 0644); err != nil {
+					if err := os.WriteFile(changelogPath, newContent, 0o600); err != nil {
 						m.genProgress = fmt.Sprintf("%s Failed to write changelog: %v", theme.IconError, err)
 					} else {
 						// Calculate and store hash of the written content
@@ -560,9 +559,9 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						repo.ChangelogHash = fmt.Sprintf("%x", hash)
 						repo.ChangelogState = "clean"
 						_ = release.SavePlan(m.plan)
-						
+
 						m.genProgress = fmt.Sprintf("%s Changelog written to %s", theme.IconSuccess, changelogPath)
-						
+
 						// Open in editor for further editing
 						return m, tea.Batch(
 							editFileCmd(changelogPath, repoPath),
@@ -571,7 +570,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 							}),
 						)
 					}
-					
+
 					return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 						return clearProgressMsg{}
 					})
@@ -598,20 +597,20 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 					// Create parent directory if it doesn't exist
 					groveDir := filepath.Dir(rulesPath)
-					if err := os.MkdirAll(groveDir, 0755); err != nil {
+					if err := os.MkdirAll(groveDir, 0o755); err != nil {
 						continue
 					}
-					
+
 					// Write "*" to rules file to include all files
 					content := "# Grove rules - include all repository files\n*\n"
-					if err := os.WriteFile(rulesPath, []byte(content), 0644); err != nil {
+					if err := os.WriteFile(rulesPath, []byte(content), 0o600); err != nil {
 						continue
 					}
 					resetCount++
 				}
 			}
 		}
-		
+
 		if resetCount > 0 {
 			m.genProgress = fmt.Sprintf("%s Reset rules to '*' for %d repositories", theme.IconSuccess, resetCount)
 		} else {
@@ -632,7 +631,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Create rules file if it doesn't exist
 			if _, err := os.Stat(rulesPath); os.IsNotExist(err) {
 				groveDir := filepath.Dir(rulesPath)
-				_ = os.MkdirAll(groveDir, 0755)
+				_ = os.MkdirAll(groveDir, 0o755)
 				content := `# Grove rules file for LLM context
 # Add file paths or patterns here, one per line
 # Examples:
@@ -640,7 +639,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 #   docs/*.md
 #   src/main.go
 `
-				_ = os.WriteFile(rulesPath, []byte(content), 0644)
+				_ = os.WriteFile(rulesPath, []byte(content), 0o600)
 			}
 
 			// Open in editor with repo as working directory
@@ -884,7 +883,7 @@ func (m releaseTuiModel) View() string {
 	if m.help.ShowAll {
 		return m.help.View()
 	}
-	
+
 	switch m.currentView {
 	case viewChangelog:
 		return m.viewChangelog()
@@ -894,7 +893,6 @@ func (m releaseTuiModel) View() string {
 		return m.viewTable()
 	}
 }
-
 
 func (m releaseTuiModel) viewTable() string {
 	headerText := theme.IconSparkle + " Grove Release Manager"
@@ -917,7 +915,7 @@ func (m releaseTuiModel) viewTable() string {
 	t := tablecomponent.NewStyledTable().
 		Border(lipgloss.NormalBorder()).
 		BorderStyle(theme.DefaultTheme.Muted)
-	
+
 	// Conditionally add headers based on plan type
 	// First column is arrow indicator, second is checkbox
 	if m.plan.Type == "full" {
@@ -939,24 +937,24 @@ func (m releaseTuiModel) viewTable() string {
 		var row []string
 		if m.plan.Type == "full" {
 			row = []string{
-				" ",  // Arrow indicator (none for parent)
-				" ",  // No selection checkbox for parent
+				" ", // Arrow indicator (none for parent)
+				" ", // No selection checkbox for parent
 				"grove-ecosystem",
-				"-",  // Branch
-				"-",  // Git Status
-				m.plan.ParentCurrentVersion,  // Changes/Release (current version)
+				"-",                         // Branch
+				"-",                         // Git Status
+				m.plan.ParentCurrentVersion, // Changes/Release (current version)
 				m.plan.ParentVersion,
 				"-",
 				"-", // No changelog status for parent
 			}
 		} else {
 			row = []string{
-				" ",  // Arrow indicator (none for parent)
-				" ",  // No selection checkbox for parent
+				" ", // Arrow indicator (none for parent)
+				" ", // No selection checkbox for parent
 				"grove-ecosystem",
-				"-",  // Branch
-				"-",  // Git Status
-				m.plan.ParentCurrentVersion,  // Changes/Release (current version)
+				"-",                         // Branch
+				"-",                         // Git Status
+				m.plan.ParentCurrentVersion, // Changes/Release (current version)
 				m.plan.ParentVersion,
 				"-",
 			}
@@ -1114,7 +1112,7 @@ func (m releaseTuiModel) viewTable() string {
 				for _, repo := range level {
 					if repoPlan, ok := m.plan.Repos[repo]; ok {
 						if repoPlan.Selected && repoPlan.CurrentVersion != repoPlan.NextVersion {
-							releaseInfo += fmt.Sprintf("  • %s: %s → %s (%s)\n", 
+							releaseInfo += fmt.Sprintf("  • %s: %s → %s (%s)\n",
 								repo, repoPlan.CurrentVersion, repoPlan.NextVersion, repoPlan.SelectedBump)
 						}
 					}
@@ -1127,7 +1125,6 @@ func (m releaseTuiModel) viewTable() string {
 			releaseInfo += "\nNo repositories selected. Use space to select repositories.\n"
 		}
 	}
-
 
 	// Footer with help hint
 	var footer string
@@ -1154,12 +1151,12 @@ func (m releaseTuiModel) viewTable() string {
 			default:
 				bumpType = theme.DefaultTheme.Bold.Render(strings.ToUpper(repo.SuggestedBump))
 			}
-			
+
 			versionChange := theme.DefaultTheme.Bold.Render(
 				fmt.Sprintf("%s → %s", repo.CurrentVersion, repo.NextVersion),
 			)
-			
-			reasoning = fmt.Sprintf("\n\n%s Suggested: %s version bump (%s)\n   %s", theme.IconLightbulb, 
+
+			reasoning = fmt.Sprintf("\n\n%s Suggested: %s version bump (%s)\n   %s", theme.IconLightbulb,
 				bumpType, versionChange, repo.SuggestionReasoning)
 		}
 	}
@@ -1170,7 +1167,7 @@ func (m releaseTuiModel) viewTable() string {
 		spinnerChars := []string{"⣷", "⣯", "⣟", "⡿", "⢿", "⣻", "⣽", "⣾"}
 		spinner := spinnerChars[m.spinner%len(spinnerChars)]
 		progress = fmt.Sprintf("\n\n%s %s", spinner, m.genProgress)
-		
+
 		// Show queue status if batch generating
 		if len(m.genQueue) > 0 {
 			remaining := m.genQueue[1:]
@@ -1202,7 +1199,7 @@ func (m releaseTuiModel) viewTable() string {
 
 func (m releaseTuiModel) viewChangelog() string {
 	header := theme.DefaultTheme.Header.Render(fmt.Sprintf("%s Changelog Preview: %s", theme.IconNote, m.repoNames[m.selectedIndex]))
-	
+
 	help := theme.DefaultTheme.Muted.Render("a: approve • esc: back • q: quit")
 
 	return fmt.Sprintf("%s\n\n%s\n\n%s", header, m.viewport.View(), help)
@@ -1211,30 +1208,30 @@ func (m releaseTuiModel) viewChangelog() string {
 func (m releaseTuiModel) viewSettings() string {
 	headerText := theme.IconShell + " Release Settings"
 	header := theme.DefaultTheme.Header.Render(headerText)
-	
+
 	// Create toggle items with current states
 	toggleStyle := lipgloss.NewStyle().
 		Padding(1, 2).
 		MarginBottom(1)
-	
+
 	activeStyle := theme.DefaultTheme.Success.
 		Bold(true)
-		
+
 	inactiveStyle := theme.DefaultTheme.Muted
-	
+
 	selectedStyle := theme.DefaultTheme.Selected.
 		Bold(true)
-	
+
 	// Build settings list
 	var settings []string
-	
+
 	// Helper to format each setting
 	formatSetting := func(index int, key, title, desc string, enabled bool) string {
 		state := inactiveStyle.Render("OFF")
 		if enabled {
 			state = activeStyle.Render("ON")
 		}
-		
+
 		selector := "  "
 		if index == m.settingsIndex {
 			selector = "▸ "
@@ -1243,35 +1240,34 @@ func (m releaseTuiModel) viewSettings() string {
 		} else {
 			key = "[" + key + "]"
 		}
-		
+
 		line1 := fmt.Sprintf("%s%s %s: %s", selector, key, title, state)
 		line2 := fmt.Sprintf("      %s", desc)
-		
+
 		if index == m.settingsIndex {
 			// Highlight the entire setting when selected
 			return selectedStyle.Render(line1) + "\n" + desc
 		}
 		return line1 + "\n" + line2
 	}
-	
+
 	// Dry run toggle
 	settings = append(settings, formatSetting(0, "d", "Dry Run Mode", "Preview commands without executing them", m.dryRun))
-	
+
 	// Push toggle
 	settings = append(settings, formatSetting(1, "P", "Push to Remote", "Push changes to remote repositories after release", m.push))
-	
-	
+
 	content := toggleStyle.Render(strings.Join(settings, "\n\n"))
-	
+
 	// Progress message if any
 	progressMsg := ""
 	if m.genProgress != "" {
 		progressMsg = "\n\n" + theme.DefaultTheme.Warning.
 			Render(m.genProgress)
 	}
-	
+
 	help := theme.DefaultTheme.Muted.Render("↑/↓,j/k: navigate • space/enter: toggle • tab/esc: back • q: quit")
-	
+
 	// Combine all elements
 	return fmt.Sprintf("%s\n\n%s%s\n\n%s", header, content, progressMsg, help)
 }
@@ -1313,7 +1309,7 @@ func calculateNextVersion(current, bump string) string {
 }
 
 // Messages for async operations
-type changelogGeneratedMsg struct{
+type changelogGeneratedMsg struct {
 	repoName            string
 	changelogPath       string
 	changelogCommit     string
@@ -1322,8 +1318,10 @@ type changelogGeneratedMsg struct{
 	err                 error
 }
 
-type clearProgressMsg struct{}
-type spinnerTickMsg struct{}
+type (
+	clearProgressMsg struct{}
+	spinnerTickMsg   struct{}
+)
 
 // Command to tick the spinner animation
 func tickSpinner() tea.Cmd {
@@ -1331,7 +1329,6 @@ func tickSpinner() tea.Cmd {
 		return spinnerTickMsg{}
 	})
 }
-
 
 // Command to edit rules file in external editor
 func editRulesCmd(rulesPath, repoPath string) tea.Cmd {
@@ -1373,7 +1370,7 @@ func generateChangelogCmd(rootDir, repoName string, repo *release.RepoReleasePla
 	return func() tea.Msg {
 		// Get repository path
 		wsPath := filepath.Join(rootDir, repoName)
-		
+
 		// Get current commit hash
 		commitCmd := exec.Command("git", "rev-parse", "HEAD")
 		commitCmd.Dir = wsPath
@@ -1385,15 +1382,15 @@ func generateChangelogCmd(rootDir, repoName string, repo *release.RepoReleasePla
 			}
 		}
 		currentCommit := strings.TrimSpace(string(commitOutput))
-		
+
 		// Get last tag
 		lastTag, _ := getLastTag(wsPath)
-		
+
 		commitRange := "HEAD"
 		if lastTag != "" {
 			commitRange = fmt.Sprintf("%s..HEAD", lastTag)
 		}
-		
+
 		// Gather git context with commit hashes
 		// Format includes both full and short hash for easy reference
 		logCmd := exec.Command("git", "log", commitRange, "--pretty=format:commit %H (%h)%nAuthor: %an <%ae>%nDate: %ad%nCommit: %cn <%ce>%nCommitDate: %cd%n%n    %s%n%n%b%n")
@@ -1405,7 +1402,7 @@ func generateChangelogCmd(rootDir, repoName string, repo *release.RepoReleasePla
 				err:      fmt.Errorf("failed to get git log: %w", err),
 			}
 		}
-		
+
 		diffCmd := exec.Command("git", "diff", "--stat", commitRange)
 		diffCmd.Dir = wsPath
 		diffOutput, err := diffCmd.CombinedOutput()
@@ -1415,9 +1412,9 @@ func generateChangelogCmd(rootDir, repoName string, repo *release.RepoReleasePla
 				err:      fmt.Errorf("failed to get git diff: %w", err),
 			}
 		}
-		
+
 		gitContext := fmt.Sprintf("GIT LOG:\n%s\n\nGIT DIFF STAT:\n%s", string(logOutput), string(diffOutput))
-		
+
 		// Generate changelog with LLM (skip interactive prompts in TUI mode)
 		result, err := generateChangelogWithLLMInteractive(gitContext, repo.NextVersion, wsPath, true)
 		if err != nil {
@@ -1426,24 +1423,24 @@ func generateChangelogCmd(rootDir, repoName string, repo *release.RepoReleasePla
 				err:      fmt.Errorf("failed to generate LLM changelog: %w", err),
 			}
 		}
-		
+
 		// Save changelog to staging
 		stagingDir, _ := getStagingDirPath()
 		changelogPath := filepath.Join(stagingDir, repoName, "CHANGELOG.md")
-		if err := os.MkdirAll(filepath.Dir(changelogPath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(changelogPath), 0o755); err != nil {
 			return changelogGeneratedMsg{
 				repoName: repoName,
 				err:      fmt.Errorf("failed to create changelog directory: %w", err),
 			}
 		}
-		
-		if err := os.WriteFile(changelogPath, []byte(result.Changelog), 0644); err != nil {
+
+		if err := os.WriteFile(changelogPath, []byte(result.Changelog), 0o600); err != nil {
 			return changelogGeneratedMsg{
 				repoName: repoName,
 				err:      fmt.Errorf("failed to write changelog: %w", err),
 			}
 		}
-		
+
 		// Return the message with all the information including LLM suggestion and commit
 		return changelogGeneratedMsg{
 			repoName:            repoName,
@@ -1455,7 +1452,6 @@ func generateChangelogCmd(rootDir, repoName string, repo *release.RepoReleasePla
 		}
 	}
 }
-
 
 // runReleaseTUI starts the interactive release TUI
 func runReleaseTUI(ctx context.Context) error {
@@ -1474,18 +1470,18 @@ func runReleaseTUI(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("error running TUI: %w", err)
 	}
-	
+
 	// Check if we should apply the release
 	if model, ok := finalModel.(releaseTuiModel); ok && model.shouldApply {
 		// Set the global flags from the TUI state
 		releasePush = model.push
 		releaseDryRun = model.dryRun
-		
+
 		// Exit the TUI and run the release in the terminal
 		// runReleaseApply will print its own header
 		return runReleaseApply(ctx)
 	}
-	
+
 	return nil
 }
 
@@ -1509,7 +1505,7 @@ func updateStagedChangelogVersion(changelogPath, oldVersion, newVersion string) 
 	updatedContent := strings.Replace(string(content), oldHeader, newHeader, 1)
 
 	// Write back the updated content
-	if err := os.WriteFile(changelogPath, []byte(updatedContent), 0644); err != nil {
+	if err := os.WriteFile(changelogPath, []byte(updatedContent), 0o600); err != nil {
 		return fmt.Errorf("failed to write updated changelog: %w", err)
 	}
 
@@ -1607,7 +1603,7 @@ func updateRepoChangelogVersion(rootDir, repoName, oldVersion, newVersion string
 	updatedContent := strings.Replace(string(content), oldHeader, newHeader, 1)
 
 	// Write back the updated content
-	if err := os.WriteFile(changelogPath, []byte(updatedContent), 0644); err != nil {
+	if err := os.WriteFile(changelogPath, []byte(updatedContent), 0o600); err != nil {
 		return fmt.Errorf("failed to write updated repo changelog: %w", err)
 	}
 
@@ -1617,7 +1613,7 @@ func updateRepoChangelogVersion(rootDir, repoName, oldVersion, newVersion string
 // newReleaseTuiCmd creates the 'grove release tui' subcommand
 func newReleaseTuiCmd() *cobra.Command {
 	var forceFresh bool
-	
+
 	cmd := &cobra.Command{
 		Use:   "tui",
 		Short: "Launch interactive TUI for release planning",
@@ -1634,7 +1630,7 @@ The release plan is persisted in the Grove state directory and can be
 resumed if interrupted.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			
+
 			// Clear stale plan if requested
 			if forceFresh {
 				fmt.Println("Clearing existing release plan...")
@@ -1642,13 +1638,12 @@ resumed if interrupted.`,
 					return fmt.Errorf("failed to clear plan: %w", err)
 				}
 			}
-			
+
 			return runReleaseTUI(ctx)
 		},
 	}
-	
+
 	cmd.Flags().BoolVar(&forceFresh, "fresh", false, "Clear any existing release plan and start fresh")
-	
+
 	return cmd
 }
-

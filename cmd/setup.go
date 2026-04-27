@@ -19,12 +19,13 @@ import (
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/theme"
-	grovekeymap "github.com/grovetools/grove/pkg/keymap"
-	"github.com/grovetools/grove/pkg/setup"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
+
+	grovekeymap "github.com/grovetools/grove/pkg/keymap"
+	"github.com/grovetools/grove/pkg/setup"
 )
 
 // Type alias for the extracted keymap
@@ -32,9 +33,9 @@ type setupKeyMap = grovekeymap.SetupKeyMap
 
 // Command flags
 var (
-	setupOnlySteps   []string
-	setupDefaults    bool
-	setupDryRun      bool
+	setupOnlySteps []string
+	setupDefaults  bool
+	setupDryRun    bool
 )
 
 // wizardStep represents the current step in the setup wizard
@@ -99,8 +100,8 @@ var setupKeys = func() grovekeymap.SetupKeyMap {
 // componentDelegate renders component items with checkboxes
 type componentDelegate struct{}
 
-func (d componentDelegate) Height() int                             { return 2 }
-func (d componentDelegate) Spacing() int                            { return 0 }
+func (d componentDelegate) Height() int                               { return 2 }
+func (d componentDelegate) Spacing() int                              { return 0 }
 func (d componentDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd { return nil }
 
 func (d componentDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
@@ -158,38 +159,38 @@ const (
 // setupModel is the main TUI model for the setup wizard
 type setupModel struct {
 	// Current wizard state
-	step           wizardStep
-	selectedSteps  map[string]bool
-	components     []componentItem
-	componentList  list.Model
+	step          wizardStep
+	selectedSteps map[string]bool
+	components    []componentItem
+	componentList list.Model
 
 	// Text inputs for various steps
-	textInput      textinput.Model
-	currentInput   inputStep
+	textInput    textinput.Model
+	currentInput inputStep
 
 	// Config format step state
-	configFormat   configFormat
-	formatList     list.Model
+	configFormat configFormat
+	formatList   list.Model
 
 	// TUI theme step state
-	tuiTheme       string
-	themeList      list.Model
+	tuiTheme  string
+	themeList list.Model
 
 	// Ecosystem step state
-	ecosystemPath  string
-	ecosystemName  string
+	ecosystemPath string
+	ecosystemName string
 
 	// First project step state
 	firstProjectName string
 	skipFirstProject bool
 
 	// Notebook step state
-	notebookPath   string
+	notebookPath string
 
 	// Gemini key step state
-	geminiMethod   geminiKeyMethod
-	geminiValue    string
-	methodList     list.Model
+	geminiMethod geminiKeyMethod
+	geminiValue  string
+	methodList   list.Model
 
 	// Flow settings step state
 	flowOneshotModel string
@@ -211,17 +212,17 @@ type setupModel struct {
 	reviewViewport   viewport.Model
 
 	// Service and config handlers
-	service        *setup.Service
-	yamlHandler    *setup.YAMLHandler
-	tomlHandler    *setup.TOMLHandler
+	service     *setup.Service
+	yamlHandler *setup.YAMLHandler
+	tomlHandler *setup.TOMLHandler
 
 	// TUI state
-	keys           setupKeyMap
-	help           help.Model
-	width          int
-	height         int
-	ready          bool
-	err            error
+	keys   setupKeyMap
+	help   help.Model
+	width  int
+	height int
+	ready  bool
+	err    error
 
 	// For step navigation
 	orderedSteps   []wizardStep
@@ -335,35 +336,35 @@ func newSetupModel(service *setup.Service, selectedOnly map[string]bool) *setupM
 	}
 
 	return &setupModel{
-		step:             stepSelectComponents,
-		selectedSteps:   make(map[string]bool),
-		components:      components,
-		componentList:   componentList,
-		textInput:       ti,
-		currentInput:    inputPath,
-		configFormat:    formatTOML,
-		formatList:      formatList,
-		tuiTheme:        "terminal",
-		themeList:       themeList,
-		ecosystemPath:   defaultEcosystemPath,
-		ecosystemName:   "my-projects",
-		notebookPath:    defaultNotebookPath,
-		geminiMethod:    geminiMethodCommand,
-		geminiValue:     "op read 'op://Private/Gemini API Key/credential' --no-newline",
-		methodList:      methodList,
-		flowOneshotModel: "gemini-3-pro-preview",
-		claudeArgs:      []string{"--dangerously-skip-permissions", "--chrome"},
-		agentArgItems:   agentArgs,
-		agentArgCursor:  0,
-		agentExtraArgs:  "",
+		step:              stepSelectComponents,
+		selectedSteps:     make(map[string]bool),
+		components:        components,
+		componentList:     componentList,
+		textInput:         ti,
+		currentInput:      inputPath,
+		configFormat:      formatTOML,
+		formatList:        formatList,
+		tuiTheme:          "terminal",
+		themeList:         themeList,
+		ecosystemPath:     defaultEcosystemPath,
+		ecosystemName:     "my-projects",
+		notebookPath:      defaultNotebookPath,
+		geminiMethod:      geminiMethodCommand,
+		geminiValue:       "op read 'op://Private/Gemini API Key/credential' --no-newline",
+		methodList:        methodList,
+		flowOneshotModel:  "gemini-3-pro-preview",
+		claudeArgs:        []string{"--dangerously-skip-permissions", "--chrome"},
+		agentArgItems:     agentArgs,
+		agentArgCursor:    0,
+		agentExtraArgs:    "",
 		agentInputFocused: false,
-		service:         service,
-		yamlHandler:     setup.NewYAMLHandler(service),
-		tomlHandler:     setup.NewTOMLHandler(service),
-		reviewViewport:  viewport.New(80, 20),
-		keys:            setupKeys,
-		help:            help.New(setupKeys),
-		ready:           false,
+		service:           service,
+		yamlHandler:       setup.NewYAMLHandler(service),
+		tomlHandler:       setup.NewTOMLHandler(service),
+		reviewViewport:    viewport.New(80, 20),
+		keys:              setupKeys,
+		help:              help.New(setupKeys),
+		ready:             false,
 	}
 }
 
@@ -879,13 +880,13 @@ func (m *setupModel) updateSummaryStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *setupModel) executeSetup() {
 	// Write the config file
-	if err := m.service.WriteFile(m.targetPath, m.generatedContent, 0644); err != nil {
+	if err := m.service.WriteFile(m.targetPath, m.generatedContent, 0o600); err != nil {
 		m.err = err
 	}
 
 	// Create notebook directory if selected
 	if m.selectedSteps["notebook"] {
-		_ = m.service.MkdirAll(m.notebookPath, 0755)
+		_ = m.service.MkdirAll(m.notebookPath, 0o755)
 	}
 
 	// These don't depend on config format
@@ -1093,7 +1094,7 @@ func (m *setupModel) generateYAMLConfig() ([]byte, string) {
 
 func (m *setupModel) setupEcosystemFiles() {
 	// Create ecosystem directory
-	_ = m.service.MkdirAll(m.ecosystemPath, 0755)
+	_ = m.service.MkdirAll(m.ecosystemPath, 0o755)
 
 	// Create grove.yml or grove.toml for ecosystem based on format selection
 	if m.configFormat == formatTOML {
@@ -1101,14 +1102,14 @@ func (m *setupModel) setupEcosystemFiles() {
 description = "A Grove ecosystem"
 workspaces = ["*"]
 `, m.ecosystemName)
-		_ = m.service.WriteFile(filepath.Join(m.ecosystemPath, "grove.toml"), []byte(groveTOMLContent), 0644)
+		_ = m.service.WriteFile(filepath.Join(m.ecosystemPath, "grove.toml"), []byte(groveTOMLContent), 0o600)
 	} else {
 		groveYMLContent := fmt.Sprintf(`name: %s
 description: A Grove ecosystem
 workspaces:
   - "*"
 `, m.ecosystemName)
-		_ = m.service.WriteFile(filepath.Join(m.ecosystemPath, "grove.yml"), []byte(groveYMLContent), 0644)
+		_ = m.service.WriteFile(filepath.Join(m.ecosystemPath, "grove.yml"), []byte(groveYMLContent), 0o600)
 	}
 
 	// Create .gitignore
@@ -1121,7 +1122,7 @@ Thumbs.db
 *.swo
 *~
 `
-	_ = m.service.WriteFile(filepath.Join(m.ecosystemPath, ".gitignore"), []byte(gitignoreContent), 0644)
+	_ = m.service.WriteFile(filepath.Join(m.ecosystemPath, ".gitignore"), []byte(gitignoreContent), 0o600)
 
 	// Create README.md
 	readmeContent := fmt.Sprintf(`# %s
@@ -1132,7 +1133,7 @@ A Grove ecosystem for managing related projects.
 
 Add projects to this directory and they will be automatically discovered by Grove tools.
 `, m.ecosystemName)
-	_ = m.service.WriteFile(filepath.Join(m.ecosystemPath, "README.md"), []byte(readmeContent), 0644)
+	_ = m.service.WriteFile(filepath.Join(m.ecosystemPath, "README.md"), []byte(readmeContent), 0o600)
 
 	// Initialize git repository
 	_ = m.service.RunGitInit(m.ecosystemPath)
@@ -1142,19 +1143,19 @@ func (m *setupModel) setupFirstProject() {
 	projectPath := filepath.Join(m.ecosystemPath, m.firstProjectName)
 
 	// Create project directory
-	_ = m.service.MkdirAll(projectPath, 0755)
+	_ = m.service.MkdirAll(projectPath, 0o755)
 
 	// Create grove.yml or grove.toml for the project based on format selection
 	if m.configFormat == formatTOML {
 		groveTOMLContent := fmt.Sprintf(`name = "%s"
 description = "A Grove project"
 `, m.firstProjectName)
-		_ = m.service.WriteFile(filepath.Join(projectPath, "grove.toml"), []byte(groveTOMLContent), 0644)
+		_ = m.service.WriteFile(filepath.Join(projectPath, "grove.toml"), []byte(groveTOMLContent), 0o600)
 	} else {
 		groveYMLContent := fmt.Sprintf(`name: %s
 description: A Grove project
 `, m.firstProjectName)
-		_ = m.service.WriteFile(filepath.Join(projectPath, "grove.yml"), []byte(groveYMLContent), 0644)
+		_ = m.service.WriteFile(filepath.Join(projectPath, "grove.yml"), []byte(groveYMLContent), 0o600)
 	}
 
 	// Create README.md
@@ -1162,7 +1163,7 @@ description: A Grove project
 
 A Grove project.
 `, m.firstProjectName)
-	_ = m.service.WriteFile(filepath.Join(projectPath, "README.md"), []byte(readmeContent), 0644)
+	_ = m.service.WriteFile(filepath.Join(projectPath, "README.md"), []byte(readmeContent), 0o600)
 
 	// Initialize git repository
 	_ = m.service.RunGitInit(projectPath)
@@ -1241,7 +1242,7 @@ return {
   },
 }
 `, displayPath)
-	_ = m.service.WriteFile("~/.config/nvim/lua/plugins/grove.lua", []byte(nvimPluginContent), 0644)
+	_ = m.service.WriteFile("~/.config/nvim/lua/plugins/grove.lua", []byte(nvimPluginContent), 0o600)
 }
 
 func (m *setupModel) View() string {
@@ -1928,14 +1929,14 @@ func runSetupDefaults(service *setup.Service, selectedOnly map[string]bool, logg
 		ecosystemPath := filepath.Join(homeDir, "Code", "my-projects")
 		ecosystemName := "my-projects"
 
-		_ = service.MkdirAll(ecosystemPath, 0755)
+		_ = service.MkdirAll(ecosystemPath, 0o755)
 
 		groveYMLContent := fmt.Sprintf(`name: %s
 description: A Grove ecosystem
 workspaces:
   - "*"
 `, ecosystemName)
-		_ = service.WriteFile(filepath.Join(ecosystemPath, "grove.yml"), []byte(groveYMLContent), 0644)
+		_ = service.WriteFile(filepath.Join(ecosystemPath, "grove.yml"), []byte(groveYMLContent), 0o600)
 
 		gitignoreContent := `# OS files
 .DS_Store
@@ -1946,7 +1947,7 @@ Thumbs.db
 *.swo
 *~
 `
-		_ = service.WriteFile(filepath.Join(ecosystemPath, ".gitignore"), []byte(gitignoreContent), 0644)
+		_ = service.WriteFile(filepath.Join(ecosystemPath, ".gitignore"), []byte(gitignoreContent), 0o600)
 
 		readmeContent := fmt.Sprintf(`# %s
 
@@ -1956,7 +1957,7 @@ A Grove ecosystem for managing related projects.
 
 Add projects to this directory and they will be automatically discovered by Grove tools.
 `, ecosystemName)
-		_ = service.WriteFile(filepath.Join(ecosystemPath, "README.md"), []byte(readmeContent), 0644)
+		_ = service.WriteFile(filepath.Join(ecosystemPath, "README.md"), []byte(readmeContent), 0o600)
 
 		_ = service.RunGitInit(ecosystemPath)
 
@@ -1971,7 +1972,7 @@ Add projects to this directory and they will be automatically discovered by Grov
 	if runAll || selectedOnly["notebook"] {
 		pretty.InfoPretty("Setting up notebook directory...")
 		notebookPath := filepath.Join(homeDir, "notebooks")
-		_ = service.MkdirAll(notebookPath, 0755)
+		_ = service.MkdirAll(notebookPath, 0o755)
 
 		root, _ := yamlHandler.LoadGlobalConfig()
 		_ = setup.SetValue(root, notebookPath, "notebooks", "path")
@@ -2010,7 +2011,7 @@ Add projects to this directory and they will be automatically discovered by Grov
   },
 }
 `
-		_ = service.WriteFile("~/.config/nvim/lua/plugins/grove.lua", []byte(nvimPluginContent), 0644)
+		_ = service.WriteFile("~/.config/nvim/lua/plugins/grove.lua", []byte(nvimPluginContent), 0o600)
 	}
 
 	// Print summary

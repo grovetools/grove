@@ -10,8 +10,9 @@ import (
 
 	coreenv "github.com/grovetools/core/pkg/env"
 	"github.com/grovetools/core/pkg/workspace"
-	"github.com/grovetools/grove/pkg/envdrift"
 	"github.com/sirupsen/logrus"
+
+	"github.com/grovetools/grove/pkg/envdrift"
 )
 
 // WorktreeState is the per-worktree slice of data the ecosystem TUI renders

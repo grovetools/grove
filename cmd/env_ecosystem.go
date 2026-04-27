@@ -9,9 +9,10 @@ import (
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/spf13/cobra"
+
 	"github.com/grovetools/grove/pkg/envdrift"
 	envtui "github.com/grovetools/grove/pkg/tui/env"
-	"github.com/spf13/cobra"
 )
 
 // EcosystemJSON is the stable JSON surface emitted by `grove env ecosystem

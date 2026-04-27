@@ -6,8 +6,9 @@ import (
 
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/config"
-	"github.com/grovetools/grove/pkg/keys"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/grove/pkg/keys"
 )
 
 func newKeysDumpCmd() *cobra.Command {

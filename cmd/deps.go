@@ -11,9 +11,10 @@ import (
 
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/spf13/cobra"
+
 	"github.com/grovetools/grove/pkg/depsgraph"
 	"github.com/grovetools/grove/pkg/discovery"
-	"github.com/spf13/cobra"
 )
 
 func newDepsCmd() *cobra.Command {

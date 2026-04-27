@@ -122,7 +122,7 @@ func runLlmRequest(cmd *cobra.Command, args []string) error {
 			delegateArgs = append(delegateArgs, "--model", model)
 			return
 		}
-		
+
 		// For slice flags, we need to append them correctly
 		if f.Value.Type() == "stringSlice" {
 			slice, _ := cmd.Flags().GetStringSlice(f.Name)

@@ -31,23 +31,23 @@ type RepoReleasePlan struct {
 	ChangelogCommit     string `json:"changelog_commit"` // Git commit hash when changelog was generated
 	Status              string `json:"status"`           // "Pending Review", "Approved", "-"
 	Selected            bool   `json:"selected"`         // Whether this repo is selected for release
-	
+
 	// Changelog tracking for dirty detection
-	ChangelogHash       string `json:"changelog_hash,omitempty"`  // SHA256 hash of generated changelog content
-	ChangelogState      string `json:"changelog_state,omitempty"` // "clean", "dirty", or "none"
-	ChangelogPushed     bool   `json:"changelog_pushed,omitempty"` // Whether changelog has been committed and pushed
-	CIPassed           bool   `json:"ci_passed,omitempty"`        // Whether CI passed after changelog push
-	TagPushed          bool   `json:"tag_pushed,omitempty"`       // Whether release tag has been created and pushed
-	
+	ChangelogHash   string `json:"changelog_hash,omitempty"`   // SHA256 hash of generated changelog content
+	ChangelogState  string `json:"changelog_state,omitempty"`  // "clean", "dirty", or "none"
+	ChangelogPushed bool   `json:"changelog_pushed,omitempty"` // Whether changelog has been committed and pushed
+	CIPassed        bool   `json:"ci_passed,omitempty"`        // Whether CI passed after changelog push
+	TagPushed       bool   `json:"tag_pushed,omitempty"`       // Whether release tag has been created and pushed
+
 	// Release operation tracking
 	LastFailedOperation string `json:"last_failed_operation,omitempty"` // Track which operation failed for better recovery
-	
+
 	// Git status information
 	Branch              string `json:"branch,omitempty"`
 	IsDirty             bool   `json:"is_dirty,omitempty"`
 	HasUpstream         bool   `json:"has_upstream,omitempty"`
-	AheadCount          int    `json:"ahead_count,omitempty"`   // Commits ahead of upstream
-	BehindCount         int    `json:"behind_count,omitempty"`  // Commits behind upstream
+	AheadCount          int    `json:"ahead_count,omitempty"`  // Commits ahead of upstream
+	BehindCount         int    `json:"behind_count,omitempty"` // Commits behind upstream
 	ModifiedCount       int    `json:"modified_count,omitempty"`
 	StagedCount         int    `json:"staged_count,omitempty"`
 	UntrackedCount      int    `json:"untracked_count,omitempty"`
@@ -60,7 +60,7 @@ func getReleaseStateDir() string {
 
 func getPlanPath() (string, error) {
 	releaseDir := getReleaseStateDir()
-	if err := os.MkdirAll(releaseDir, 0755); err != nil {
+	if err := os.MkdirAll(releaseDir, 0o755); err != nil {
 		return "", err
 	}
 	return filepath.Join(releaseDir, "release_plan.json"), nil
@@ -101,7 +101,7 @@ func SavePlan(plan *ReleasePlan) error {
 		return err
 	}
 
-	return os.WriteFile(planPath, data, 0644) //nolint:gosec // G306: internal tool, non-sensitive config file
+	return os.WriteFile(planPath, data, 0o600) //nolint:gosec // G306: internal tool, non-sensitive config file
 }
 
 // ClearPlan deletes the plan file and staging directory.

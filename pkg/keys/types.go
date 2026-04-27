@@ -78,8 +78,8 @@ type NvimBindingConfig struct {
 
 // NvimKeysConfig defines neovim-specific keybindings.
 type NvimKeysConfig struct {
-	Enabled  bool                          `yaml:"enabled,omitempty" toml:"enabled,omitempty" jsonschema:"description=Whether Grove manages Neovim keybindings."`
-	Bindings map[string]NvimBindingConfig  `yaml:"bindings,omitempty" toml:"bindings,omitempty" jsonschema:"description=Map of key to binding config."`
+	Enabled  bool                         `yaml:"enabled,omitempty" toml:"enabled,omitempty" jsonschema:"description=Whether Grove manages Neovim keybindings."`
+	Bindings map[string]NvimBindingConfig `yaml:"bindings,omitempty" toml:"bindings,omitempty" jsonschema:"description=Map of key to binding config."`
 }
 
 // TmuxKeysConfig defines tmux-specific keybindings.

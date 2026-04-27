@@ -74,10 +74,10 @@ func writeLastProfile(profile string) {
 	if profile == "" {
 		profile = "default"
 	}
-	if err := os.MkdirAll(envStateDir(), 0755); err != nil {
+	if err := os.MkdirAll(envStateDir(), 0o755); err != nil {
 		return
 	}
-	_ = os.WriteFile(envLastProfilePath(), []byte(profile+"\n"), 0644)
+	_ = os.WriteFile(envLastProfilePath(), []byte(profile+"\n"), 0o600)
 }
 
 // readLastProfile returns the persisted last-used profile or "" if none was
@@ -171,16 +171,16 @@ func writeEnvLocal(envVars map[string]string) error {
 	}
 
 	// Write to .grove/env/.env.local
-	if err := os.MkdirAll(envStateDir(), 0755); err != nil {
+	if err := os.MkdirAll(envStateDir(), 0o755); err != nil {
 		return err
 	}
 	envPath := filepath.Join(envStateDir(), ".env.local")
-	if err := os.WriteFile(envPath, []byte(content.String()), 0644); err != nil {
+	if err := os.WriteFile(envPath, []byte(content.String()), 0o600); err != nil {
 		return err
 	}
 
 	// Also write to project root .env.local for tool compatibility
-	return os.WriteFile(filepath.Join(".", ".env.local"), []byte(content.String()), 0644)
+	return os.WriteFile(filepath.Join(".", ".env.local"), []byte(content.String()), 0o600)
 }
 
 // resolveEnvConfig resolves the environment config for the active/specified profile.
@@ -284,7 +284,7 @@ func newEnvUpCmd() *cobra.Command {
 
 			cwd, _ := os.Getwd()
 			stateDir, _ := filepath.Abs(envStateDir())
-			if err := os.MkdirAll(stateDir, 0755); err != nil {
+			if err := os.MkdirAll(stateDir, 0o755); err != nil {
 				return fmt.Errorf("failed to create state directory: %w", err)
 			}
 
@@ -719,7 +719,7 @@ func newEnvRestartCmd() *cobra.Command {
 			}
 
 			stateDir := envStateDir()
-			if err := os.MkdirAll(stateDir, 0755); err != nil {
+			if err := os.MkdirAll(stateDir, 0o755); err != nil {
 				return fmt.Errorf("failed to create state directory: %w", err)
 			}
 
@@ -1241,4 +1241,3 @@ func newEnvCmdRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&envProfile, "env", "", "Override the active environment profile")
 	return cmd
 }
-

@@ -19,6 +19,7 @@ import (
 	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
+
 	pkgkeys "github.com/grovetools/grove/pkg/keys"
 )
 

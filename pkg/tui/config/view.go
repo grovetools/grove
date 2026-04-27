@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	coreconfig "github.com/grovetools/core/config"
 	"github.com/grovetools/core/tui/theme"
+
 	"github.com/grovetools/grove/pkg/configui"
 	"github.com/grovetools/grove/pkg/setup"
 )

@@ -18,6 +18,9 @@ linters-settings:
     simplify: true
   goimports:
     local-prefixes: github.com/grovetools/grove
+  gosec:
+    excludes:
+      - G204 # Subprocess launched with variable — expected for a CLI tool that shells out
   staticcheck:
     checks: ["all", "-ST1000", "-ST1003", "-ST1016", "-ST1020", "-ST1021", "-ST1022"]
     # Disable ST1000: at least one file in a package should have a package comment

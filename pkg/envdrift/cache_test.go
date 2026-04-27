@@ -67,7 +67,7 @@ func TestLoadCache_MissingFile(t *testing.T) {
 
 func TestLoadCache_CorruptFile(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "drift.json"), []byte("not json"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "drift.json"), []byte("not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err := LoadCache(dir)

@@ -70,9 +70,9 @@ func renderNavPreview(ecosystemPath string, newProjectName string, width int) st
 	}
 
 	// Table header
-	sb.WriteString(borderStyle.Render("  ╭" + strings.Repeat("─", wsColWidth+2) + "┬" + strings.Repeat("─", pathColWidth+2) + "╮") + "\n")
+	sb.WriteString(borderStyle.Render("  ╭"+strings.Repeat("─", wsColWidth+2)+"┬"+strings.Repeat("─", pathColWidth+2)+"╮") + "\n")
 	sb.WriteString(borderStyle.Render("  │ ") + headerStyle.Render(padTo("WORKSPACE", wsColWidth)) + borderStyle.Render(" │ ") + headerStyle.Render(padTo("PATH", pathColWidth)) + borderStyle.Render(" │") + "\n")
-	sb.WriteString(borderStyle.Render("  ├" + strings.Repeat("─", wsColWidth+2) + "┼" + strings.Repeat("─", pathColWidth+2) + "┤") + "\n")
+	sb.WriteString(borderStyle.Render("  ├"+strings.Repeat("─", wsColWidth+2)+"┼"+strings.Repeat("─", pathColWidth+2)+"┤") + "\n")
 
 	// Root row (ecosystem) - icon takes ~2 visual chars + 1 space = 3
 	displayName := truncateName(rootName, wsColWidth-3)
@@ -121,7 +121,7 @@ func renderNavPreview(ecosystemPath string, newProjectName string, width int) st
 	}
 
 	// Table footer
-	sb.WriteString(borderStyle.Render("  ╰" + strings.Repeat("─", wsColWidth+2) + "┴" + strings.Repeat("─", pathColWidth+2) + "╯") + "\n")
+	sb.WriteString(borderStyle.Render("  ╰"+strings.Repeat("─", wsColWidth+2)+"┴"+strings.Repeat("─", pathColWidth+2)+"╯") + "\n")
 
 	// Legend
 	sb.WriteString(t.Muted.Render(fmt.Sprintf("  Icons: %s ecosystem • %s project", theme.IconTree, theme.IconRepo)))

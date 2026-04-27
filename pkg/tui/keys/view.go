@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+
 	pkgkeys "github.com/grovetools/grove/pkg/keys"
 
 	"github.com/grovetools/core/tui/components/pager"

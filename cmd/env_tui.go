@@ -6,8 +6,9 @@ import (
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/embed"
-	envtui "github.com/grovetools/grove/pkg/tui/env"
 	"github.com/spf13/cobra"
+
+	envtui "github.com/grovetools/grove/pkg/tui/env"
 )
 
 func newEnvTUICmd() *cobra.Command {

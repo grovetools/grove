@@ -52,7 +52,7 @@ func SaveConfig(workspaceRoot string, config *Config) error {
 
 	// Ensure .grove directory exists
 	groveDir := filepath.Dir(configPath)
-	if err := os.MkdirAll(groveDir, 0755); err != nil {
+	if err := os.MkdirAll(groveDir, 0o755); err != nil {
 		return err
 	}
 
@@ -61,7 +61,7 @@ func SaveConfig(workspaceRoot string, config *Config) error {
 		return err
 	}
 
-	return os.WriteFile(configPath, data, 0644) //nolint:gosec // G306: internal tool, non-sensitive config file
+	return os.WriteFile(configPath, data, 0o600) //nolint:gosec // G306: internal tool, non-sensitive config file
 }
 
 // GetBinaryOverride returns the override path for a binary in a workspace

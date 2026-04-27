@@ -72,7 +72,7 @@ func RunEnvDrift(ctx context.Context, profile string) (*DriftSummary, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve state dir: %w", err)
 	}
-	if err := os.MkdirAll(stateDir, 0755); err != nil {
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create state directory: %w", err)
 	}
 

@@ -111,7 +111,7 @@ func (h *MaturinHandler) UpdateDependency(workspacePath string, dep Dependency) 
 		return fmt.Errorf("marshaling pyproject.toml: %w", err)
 	}
 
-	if err := os.WriteFile(pyprojectPath, updatedData, 0644); err != nil {
+	if err := os.WriteFile(pyprojectPath, updatedData, 0o600); err != nil {
 		return fmt.Errorf("writing pyproject.toml: %w", err)
 	}
 
@@ -171,7 +171,7 @@ func (h *MaturinHandler) SetVersion(workspacePath string, version string) error 
 		return fmt.Errorf("marshaling pyproject.toml: %w", err)
 	}
 
-	if err := os.WriteFile(pyprojectPath, updatedData, 0644); err != nil {
+	if err := os.WriteFile(pyprojectPath, updatedData, 0o600); err != nil {
 		return fmt.Errorf("writing pyproject.toml: %w", err)
 	}
 

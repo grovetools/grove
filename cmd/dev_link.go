@@ -8,9 +8,10 @@ import (
 
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/pkg/paths"
+	"github.com/spf13/cobra"
+
 	"github.com/grovetools/grove/pkg/devlinks"
 	meta_workspace "github.com/grovetools/grove/pkg/workspace"
-	"github.com/spf13/cobra"
 )
 
 func newDevLinkCmd() *cobra.Command {
@@ -136,7 +137,7 @@ func activateDevLink(binaryName, alias string) error {
 
 	// Get grove bin directory using paths package
 	binDir := paths.BinDir()
-	if err := os.MkdirAll(binDir, 0755); err != nil {
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return err
 	}
 

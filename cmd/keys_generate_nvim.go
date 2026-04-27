@@ -13,8 +13,9 @@ import (
 	"github.com/grovetools/core/pkg/keybind"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/tui/theme"
-	"github.com/grovetools/grove/pkg/keys"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/grove/pkg/keys"
 )
 
 // newKeysGenerateNvimCmd creates the 'grove keys generate nvim' command.
@@ -180,12 +181,12 @@ func generateNvimConfig(nvimCfg keys.NvimKeysConfig, outputPath string, dryRun b
 
 	// Create directory if needed
 	outDir := filepath.Dir(outputPath)
-	if err := os.MkdirAll(outDir, 0755); err != nil {
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", outDir, err)
 	}
 
 	// Write the file
-	if err := os.WriteFile(outputPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(outputPath, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("failed to write %s: %w", outputPath, err)
 	}
 

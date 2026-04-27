@@ -6,8 +6,9 @@ import (
 	"strings"
 
 	"github.com/grovetools/core/config"
-	"github.com/grovetools/grove/pkg/project"
 	"github.com/sirupsen/logrus"
+
+	"github.com/grovetools/grove/pkg/project"
 )
 
 // Builder constructs a dependency graph for all workspaces

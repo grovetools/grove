@@ -33,14 +33,14 @@ type ConfigNode struct {
 
 // LayeredValue holds the values for a node across all config layers.
 type LayeredValue struct {
-	Default        interface{}
-	Global         interface{}
-	GlobalOverride interface{}
-	EnvOverlay     interface{}
+	Default         interface{}
+	Global          interface{}
+	GlobalOverride  interface{}
+	EnvOverlay      interface{}
 	Ecosystem       interface{}
 	ProjectNotebook interface{}
 	Project         interface{}
-	Override       interface{} // From grove.override.toml
+	Override        interface{} // From grove.override.toml
 }
 
 // HasValue returns true if the node has a non-nil value.
@@ -807,4 +807,3 @@ func FilterNodes(nodes []*ConfigNode, viewMode ViewMode, maturityFilter Maturity
 	}
 	return filtered
 }
-

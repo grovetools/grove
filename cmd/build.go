@@ -21,9 +21,10 @@ import (
 	"github.com/grovetools/core/logging"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/tui/theme"
+	"github.com/spf13/cobra"
+
 	"github.com/grovetools/grove/pkg/build"
 	"github.com/grovetools/grove/pkg/discovery"
-	"github.com/spf13/cobra"
 )
 
 var buildUlog = grovelogging.NewUnifiedLogger("grove-meta.build")
@@ -156,9 +157,9 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	if buildDryRun {
 		if opts.JSONOutput {
 			result := map[string]interface{}{
-				"mode":   "dry-run",
-				"waves":  len(waves),
-				"total":  len(jobs),
+				"mode":  "dry-run",
+				"waves": len(waves),
+				"total": len(jobs),
 			}
 			if hasWaves {
 				waveData := make([][]string, len(waves))
@@ -289,9 +290,9 @@ func runJSONBuildWaves(waves [][]build.BuildJob, opts *build.RunOptions) error {
 
 func outputJSONResults[T any](results []T, successCount, failCount, totalWaves int) error {
 	output := map[string]interface{}{
-		"mode":   "build",
-		"jobs":   buildJobs,
-		"waves":  totalWaves,
+		"mode":    "build",
+		"jobs":    buildJobs,
+		"waves":   totalWaves,
 		"results": results,
 		"summary": map[string]int{
 			"total":   len(results),
@@ -755,10 +756,10 @@ func (d projectDelegate) Spacing() int                              { return 0 }
 func (d projectDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd { return nil }
 
 func (d projectDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
-		p := item.(projectStatus)
-		var statusIcon, durationStr string
+	p := item.(projectStatus)
+	var statusIcon, durationStr string
 
-		switch p.status {
+	switch p.status {
 	case "pending":
 		statusIcon = theme.DefaultTheme.Muted.Render("⋯")
 	case "running":

@@ -10,8 +10,9 @@ import (
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/paths"
-	"github.com/grovetools/grove/pkg/discovery"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/grove/pkg/discovery"
 )
 
 // newSchemaCmd creates the `schema` command and its subcommands.
@@ -134,7 +135,7 @@ func runSchemaGenerate(cmd *cobra.Command, args []string) error {
 	schema["description"] = "Composed schema for the local ecosystem."
 
 	outputDir := filepath.Join(ecosystemRoot, ".grove")
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return err
 	}
 	outputPath := filepath.Join(outputDir, "grove.schema.json")
@@ -144,7 +145,7 @@ func runSchemaGenerate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := os.WriteFile(outputPath, outputBytes, 0644); err != nil {
+	if err := os.WriteFile(outputPath, outputBytes, 0o600); err != nil {
 		return err
 	}
 
@@ -152,9 +153,9 @@ func runSchemaGenerate(cmd *cobra.Command, args []string) error {
 
 	// Also write to global data dir for global config file support
 	globalSchemaDir := filepath.Join(paths.DataDir(), "schemas")
-	if err := os.MkdirAll(globalSchemaDir, 0755); err == nil {
+	if err := os.MkdirAll(globalSchemaDir, 0o755); err == nil {
 		globalSchemaPath := filepath.Join(globalSchemaDir, "grove.schema.json")
-		if err := os.WriteFile(globalSchemaPath, outputBytes, 0644); err == nil {
+		if err := os.WriteFile(globalSchemaPath, outputBytes, 0o600); err == nil {
 			fmt.Printf(" Global schema generated at: %s\n", globalSchemaPath)
 		}
 	}

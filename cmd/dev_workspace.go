@@ -7,9 +7,10 @@ import (
 	"strings"
 
 	"github.com/grovetools/core/cli"
-	meta_workspace "github.com/grovetools/grove/pkg/workspace"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
+
+	meta_workspace "github.com/grovetools/grove/pkg/workspace"
 )
 
 // WorkspaceMetadata represents the structure of .grove/workspace file
@@ -95,7 +96,7 @@ To make Grove prioritize binaries from the current workspace, run:
 					fmt.Printf("   Branch: %s | Plan: %s\n", metadata.Branch, metadata.Plan)
 				}
 			}
-			
+
 			// Try to discover binaries, but don't fail if we can't
 			binaries, err := meta_workspace.DiscoverLocalBinaries(workspaceRoot)
 			if err != nil {

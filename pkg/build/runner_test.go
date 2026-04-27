@@ -10,9 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/grovetools/grove/pkg/build"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/grovetools/grove/pkg/build"
 )
 
 func TestRun(t *testing.T) {
@@ -279,7 +280,7 @@ func createSuccessProject(t *testing.T, baseDir, name string) string {
 	@sleep 0.01
 	@echo "Build complete"
 `
-	require.NoError(t, os.WriteFile(makefile, []byte(content), 0o644))
+	require.NoError(t, os.WriteFile(makefile, []byte(content), 0o600))
 	return projectDir
 }
 
@@ -293,6 +294,6 @@ func createFailProject(t *testing.T, baseDir, name string) string {
 	@echo "Error: Build failed!" >&2
 	@exit 1
 `
-	require.NoError(t, os.WriteFile(makefile, []byte(content), 0o644))
+	require.NoError(t, os.WriteFile(makefile, []byte(content), 0o600))
 	return projectDir
 }

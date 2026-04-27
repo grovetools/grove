@@ -7,8 +7,9 @@ import (
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/tui/theme"
-	"github.com/grovetools/grove/pkg/keys"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/grove/pkg/keys"
 )
 
 // newKeysCheckCmd creates the 'grove keys check' command.

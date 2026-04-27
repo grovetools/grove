@@ -7,6 +7,7 @@ import (
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/tui/embed"
+
 	"github.com/grovetools/grove/pkg/keys"
 	keystui "github.com/grovetools/grove/pkg/tui/keys"
 )

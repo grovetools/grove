@@ -17,10 +17,10 @@ func TestDetectLocalOrphans_CaseInsensitivePaths(t *testing.T) {
 	tmp := t.TempDir()
 	wtName := "tier1-a"
 	statePath := filepath.Join(tmp, ".grove-worktrees", wtName, ".grove", "env", "state.json")
-	if err := os.MkdirAll(filepath.Dir(statePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(statePath, []byte(`{"provider":"docker"}`), 0644); err != nil {
+	if err := os.WriteFile(statePath, []byte(`{"provider":"docker"}`), 0o600); err != nil {
 		t.Fatalf("write state.json: %v", err)
 	}
 
@@ -44,10 +44,10 @@ func TestDetectLocalOrphans_CaseInsensitivePaths(t *testing.T) {
 func TestDetectLocalOrphans_TrueOrphan(t *testing.T) {
 	tmp := t.TempDir()
 	statePath := filepath.Join(tmp, ".grove-worktrees", "ghost", ".grove", "env", "state.json")
-	if err := os.MkdirAll(filepath.Dir(statePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(statePath, []byte(`{"provider":"docker"}`), 0644); err != nil {
+	if err := os.WriteFile(statePath, []byte(`{"provider":"docker"}`), 0o600); err != nil {
 		t.Fatalf("write state.json: %v", err)
 	}
 

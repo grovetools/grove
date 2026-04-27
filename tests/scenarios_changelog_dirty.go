@@ -26,21 +26,21 @@ func ReleaseTUIChangelogWorkflowScenario() *harness.Scenario {
 			harness.NewStep("Launch TUI and wait for it to load", func(ctx *harness.Context) error {
 				// Instead of using the real grove binary, we'll use a wrapper that includes our mock in PATH
 				mockDir := ctx.Get("mock_dir").(string)
-				
+
 				// Create a simple wrapper that sets PATH and exec's grove
 				wrapperContent := fmt.Sprintf(`#!/bin/bash
 export PATH="%s:$PATH"
 exec "%s" "$@"
 `, mockDir, ctx.GroveBinary)
-				
+
 				wrapperPath := filepath.Join(ctx.RootDir, "grove")
 				if err := fs.WriteString(wrapperPath, wrapperContent); err != nil {
 					return fmt.Errorf("failed to create grove wrapper: %w", err)
 				}
-				if err := os.Chmod(wrapperPath, 0755); err != nil {
+				if err := os.Chmod(wrapperPath, 0o755); err != nil {
 					return fmt.Errorf("failed to chmod grove wrapper: %w", err)
 				}
-				
+
 				session, err := ctx.StartTUI(wrapperPath, []string{"release", "tui", "--fresh"})
 				if err != nil {
 					return fmt.Errorf("failed to start TUI: %w", err)
@@ -58,11 +58,11 @@ exec "%s" "$@"
 				if err := session.SendKeysAndWaitForChange(5*time.Second, "g"); err != nil {
 					return fmt.Errorf("failed to send 'g' key: %w", err)
 				}
-				
+
 				// The LLM might fail or succeed - wait for either case
 				// If it fails, we should see "Failed" in the UI, if it succeeds we see the version or Ready
 				time.Sleep(3 * time.Second) // Give it time to process
-				
+
 				result, err := session.WaitForAnyText([]string{"* Ready", "## v0.1.1", "Failed", "* Written", "minor"}, 15*time.Second)
 				if err != nil {
 					// Capture current screen for debugging
@@ -79,21 +79,21 @@ exec "%s" "$@"
 			}),
 			harness.NewStep("Write changelog and verify file creation", func(ctx *harness.Context) error {
 				session := ctx.Get("tui_session").(*tui.Session)
-				
+
 				// Try pressing Enter first in case there's a selection needed
 				if err := session.SendKeys("Enter"); err != nil {
 					return fmt.Errorf("failed to send Enter key: %w", err)
 				}
 				time.Sleep(500 * time.Millisecond)
-				
+
 				// Now send 'w' to write the changelog
 				if err := session.SendKeysAndWaitForChange(5*time.Second, "w"); err != nil {
 					return fmt.Errorf("failed to send 'w' key and wait for change: %w", err)
 				}
-				
+
 				// Give it a bit more time and check both possible locations
 				time.Sleep(1 * time.Second)
-				
+
 				// Try the expected path first
 				if err := session.WaitForFile("tui-workflow-repo/CHANGELOG.md", 3*time.Second); err != nil {
 					// Try alternate path (in case it's in root)
@@ -133,21 +133,21 @@ func ReleaseTUIChangelogDirtyStateScenario() *harness.Scenario {
 			harness.NewStep("Launch TUI and generate changelog", func(ctx *harness.Context) error {
 				// Instead of using the real grove binary, we'll use a wrapper that includes our mock in PATH
 				mockDir := ctx.Get("mock_dir").(string)
-				
+
 				// Create a simple wrapper that sets PATH and exec's grove
 				wrapperContent := fmt.Sprintf(`#!/bin/bash
 export PATH="%s:$PATH"
 exec "%s" "$@"
 `, mockDir, ctx.GroveBinary)
-				
+
 				wrapperPath := filepath.Join(ctx.RootDir, "grove")
 				if err := fs.WriteString(wrapperPath, wrapperContent); err != nil {
 					return fmt.Errorf("failed to create grove wrapper: %w", err)
 				}
-				if err := os.Chmod(wrapperPath, 0755); err != nil {
+				if err := os.Chmod(wrapperPath, 0o755); err != nil {
 					return fmt.Errorf("failed to chmod grove wrapper: %w", err)
 				}
-				
+
 				session, err := ctx.StartTUI(wrapperPath, []string{"release", "tui", "--fresh"})
 				if err != nil {
 					return err
@@ -187,7 +187,7 @@ exec "%s" "$@"
 				session := ctx.Get("tui_session").(*tui.Session)
 				// The TUI might need a moment to detect the file change
 				time.Sleep(2 * time.Second)
-				
+
 				// Send key presses to potentially trigger a refresh
 				if err := session.SendKeys("down"); err != nil {
 					return err
@@ -196,7 +196,7 @@ exec "%s" "$@"
 				if err := session.SendKeys("up"); err != nil {
 					return err
 				}
-				
+
 				// Look for any indication that the file was modified
 				// The exact text might vary - could be "Modified", "Dirty", or show a different status
 				result, err := session.WaitForAnyText([]string{"Modified", "Dirty", "x", "Changed"}, 5*time.Second)
@@ -224,7 +224,7 @@ func setupTestRepoWithChangesStep(repoName string) harness.Step {
 	return harness.NewStep("Setup test repository with changes", func(ctx *harness.Context) error {
 		// Create ecosystem structure
 		ecosystemDir := ctx.RootDir
-		
+
 		// Initialize git for ecosystem
 		if err := git.Init(ecosystemDir); err != nil {
 			return fmt.Errorf("failed to init ecosystem git: %w", err)
@@ -232,13 +232,13 @@ func setupTestRepoWithChangesStep(repoName string) harness.Step {
 		if err := git.SetupTestConfig(ecosystemDir); err != nil {
 			return fmt.Errorf("failed to setup ecosystem git config: %w", err)
 		}
-		
+
 		// Create grove.yml for ecosystem
 		if err := fs.WriteString(filepath.Join(ecosystemDir, "grove.yml"),
 			"name: test-ecosystem\nworkspaces:\n  - \"*\"\n"); err != nil {
 			return err
 		}
-		
+
 		// Commit ecosystem root
 		if err := git.Add(ecosystemDir, "."); err != nil {
 			return err
@@ -246,25 +246,25 @@ func setupTestRepoWithChangesStep(repoName string) harness.Step {
 		if err := git.Commit(ecosystemDir, "Initial ecosystem setup"); err != nil {
 			return err
 		}
-		
+
 		// Create test repo subdirectory
 		repoDir := filepath.Join(ecosystemDir, repoName)
-		if err := os.Mkdir(repoDir, 0755); err != nil {
+		if err := os.Mkdir(repoDir, 0o755); err != nil {
 			return err
 		}
-		
+
 		// Create mock grove-gemini
 		mockDir := ctx.NewDir("mocks")
 		groveGeminiMockPath := filepath.Join(mockDir, "grove-gemini")
 		if err := fs.WriteString(groveGeminiMockPath, groveGeminiMockScript); err != nil {
 			return err
 		}
-		if err := os.Chmod(groveGeminiMockPath, 0755); err != nil {
+		if err := os.Chmod(groveGeminiMockPath, 0o755); err != nil {
 			return err
 		}
 		// Store the mock directory path in context for later use
 		ctx.Set("mock_dir", mockDir)
-		
+
 		// Init Git repo
 		if err := git.Init(repoDir); err != nil {
 			return err
@@ -272,17 +272,17 @@ func setupTestRepoWithChangesStep(repoName string) harness.Step {
 		if err := git.SetupTestConfig(repoDir); err != nil {
 			return err
 		}
-		
+
 		// Create files
-		if err := fs.WriteString(filepath.Join(repoDir, "grove.yml"), 
+		if err := fs.WriteString(filepath.Join(repoDir, "grove.yml"),
 			fmt.Sprintf("name: %s\ntype: go\n", repoName)); err != nil {
 			return err
 		}
-		if err := fs.WriteString(filepath.Join(repoDir, "go.mod"), 
+		if err := fs.WriteString(filepath.Join(repoDir, "go.mod"),
 			fmt.Sprintf("module %s\ngo 1.21", repoName)); err != nil {
 			return err
 		}
-		
+
 		// Initial commit and tag
 		if err := git.Add(repoDir, "."); err != nil {
 			return err
@@ -293,9 +293,9 @@ func setupTestRepoWithChangesStep(repoName string) harness.Step {
 		if result := command.New("git", "tag", "v0.1.0").Dir(repoDir).Run(); result.Error != nil {
 			return result.Error
 		}
-		
+
 		// Add a new commit to create changes for the release
-		if err := fs.WriteString(filepath.Join(repoDir, "main.go"), 
+		if err := fs.WriteString(filepath.Join(repoDir, "main.go"),
 			"package main\nfunc main() {}"); err != nil {
 			return err
 		}
@@ -305,7 +305,7 @@ func setupTestRepoWithChangesStep(repoName string) harness.Step {
 		if err := git.Commit(repoDir, "feat: add main function"); err != nil {
 			return err
 		}
-		
+
 		return nil
 	})
 }

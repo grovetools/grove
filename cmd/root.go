@@ -13,12 +13,13 @@ import (
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
+	"github.com/spf13/cobra"
+
 	"github.com/grovetools/grove/cmd/internal"
 	"github.com/grovetools/grove/pkg/delegation"
 	"github.com/grovetools/grove/pkg/overrides"
 	"github.com/grovetools/grove/pkg/sdk"
 	meta_workspace "github.com/grovetools/grove/pkg/workspace"
-	"github.com/spf13/cobra"
 )
 
 var rootCmd = cli.NewStandardCommand("grove", "Grove workspace orchestrator and tool manager")
@@ -62,7 +63,6 @@ func init() {
 
 // printAvailableTools prints the available ecosystem tools in table format
 func printAvailableTools(t *theme.Theme) {
-
 	// Get all tools and their info
 	type toolRow struct {
 		binary, description, repo string

@@ -89,7 +89,7 @@ func TestBuildCommand(t *testing.T) {
 		// Create a temporary project with a failing Makefile
 		tempDir := t.TempDir()
 		failingProject := filepath.Join(tempDir, "test-fail")
-		require.NoError(t, os.MkdirAll(failingProject, 0755))
+		require.NoError(t, os.MkdirAll(failingProject, 0o755))
 
 		// Create a Makefile that fails
 		makefile := filepath.Join(failingProject, "Makefile")
@@ -97,7 +97,7 @@ func TestBuildCommand(t *testing.T) {
 build:
 	@echo "This build will fail"
 	@exit 1
-`), 0644))
+`), 0o644))
 
 		// This test would need modification to the discovery logic
 		// to include the temp directory, so we'll skip the actual execution
@@ -132,19 +132,19 @@ build:
 		// Create a temporary project with a custom build_cmd
 		tempDir := t.TempDir()
 		testProject := filepath.Join(tempDir, "test-custom-build")
-		require.NoError(t, os.MkdirAll(testProject, 0755))
+		require.NoError(t, os.MkdirAll(testProject, 0o755))
 
 		// Create a grove.yml with custom build_cmd
 		groveYml := filepath.Join(testProject, "grove.yml")
 		require.NoError(t, os.WriteFile(groveYml, []byte(`name: test-custom-build
 version: "1.0"
 build_cmd: echo "Custom build command executed successfully"
-`), 0644))
+`), 0o644))
 
 		// Change to the test project directory
 		originalDir, err := os.Getwd()
 		require.NoError(t, err)
-		defer os.Chdir(originalDir)
+		defer func() { _ = os.Chdir(originalDir) }()
 
 		require.NoError(t, os.Chdir(testProject))
 
@@ -163,25 +163,25 @@ build_cmd: echo "Custom build command executed successfully"
 		// Create a temporary project without build_cmd (should fall back to 'make build')
 		tempDir := t.TempDir()
 		testProject := filepath.Join(tempDir, "test-fallback")
-		require.NoError(t, os.MkdirAll(testProject, 0755))
+		require.NoError(t, os.MkdirAll(testProject, 0o755))
 
 		// Create a grove.yml without build_cmd
 		groveYml := filepath.Join(testProject, "grove.yml")
 		require.NoError(t, os.WriteFile(groveYml, []byte(`name: test-fallback
 version: "1.0"
-`), 0644))
+`), 0o644))
 
 		// Create a Makefile with a build target
 		makefile := filepath.Join(testProject, "Makefile")
 		require.NoError(t, os.WriteFile(makefile, []byte(`
 build:
 	@echo "Using default make build"
-`), 0644))
+`), 0o644))
 
 		// Change to the test project directory
 		originalDir, err := os.Getwd()
 		require.NoError(t, err)
-		defer os.Chdir(originalDir)
+		defer func() { _ = os.Chdir(originalDir) }()
 
 		require.NoError(t, os.Chdir(testProject))
 

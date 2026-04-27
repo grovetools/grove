@@ -74,14 +74,14 @@ func runLLMChangelog(repoPath, newVersion string) error {
 	// 4. Prepend to CHANGELOG.md.
 	changelogPath := filepath.Join(repoPath, "CHANGELOG.md")
 	existingContent, _ := os.ReadFile(changelogPath)
-	
+
 	// Ensure proper spacing between entries
 	newContent := changelogContent
 	if len(existingContent) > 0 {
 		newContent = changelogContent + "\n" + string(existingContent)
 	}
 
-	return os.WriteFile(changelogPath, []byte(newContent), 0644)
+	return os.WriteFile(changelogPath, []byte(newContent), 0o600)
 }
 
 // getLastTag finds the most recent git tag in a repository.
@@ -108,10 +108,10 @@ func promptForRulesEdit(repoPath string, skipPrompt bool) error {
 		if os.IsNotExist(err) {
 			// Create .grove directory if it doesn't exist
 			groveDir := filepath.Join(repoPath, ".grove")
-			if err := os.MkdirAll(groveDir, 0755); err != nil {
+			if err := os.MkdirAll(groveDir, 0o755); err != nil {
 				return fmt.Errorf("failed to create .grove directory: %w", err)
 			}
-			
+
 			// Create empty rules file with helpful comments
 			content := `# Grove rules file for LLM context
 # Add file paths or patterns here, one per line
@@ -120,14 +120,14 @@ func promptForRulesEdit(repoPath string, skipPrompt bool) error {
 #   docs/*.md
 #   src/main.go
 `
-			if err := os.WriteFile(rulesPath, []byte(content), 0644); err != nil {
+			if err := os.WriteFile(rulesPath, []byte(content), 0o600); err != nil {
 				return fmt.Errorf("failed to create rules file: %w", err)
 			}
 			fmt.Printf("Created %s (edit to customize LLM context)\n", rulesPath)
 		}
 		return nil
 	}
-	
+
 	// Check if rules file exists
 	_, err := os.Stat(rulesPath)
 	if os.IsNotExist(err) {
@@ -138,11 +138,11 @@ func promptForRulesEdit(repoPath string, skipPrompt bool) error {
 		fmt.Print("  2) Create empty rules file and edit manually\n")
 		fmt.Print("  3) Skip (no additional context)\n")
 		fmt.Print("Choice [1/2/3]: ")
-		
+
 		reader := bufio.NewReader(os.Stdin)
 		response, _ := reader.ReadString('\n')
 		response = strings.TrimSpace(response)
-		
+
 		switch response {
 		case "1":
 			// Auto-populate using cx from-git since
@@ -175,15 +175,15 @@ func promptForRulesEdit(repoPath string, skipPrompt bool) error {
 		// Rules file exists, ask if user wants to edit it
 		fmt.Printf("\nFound .grove/rules file in %s\n", filepath.Base(repoPath))
 		fmt.Print("Would you like to:\n")
-		fmt.Print("  1) Update from files changed since last release\n") 
+		fmt.Print("  1) Update from files changed since last release\n")
 		fmt.Print("  2) Edit manually\n")
 		fmt.Print("  3) Use as-is\n")
 		fmt.Print("Choice [1/2/3]: ")
-		
+
 		reader := bufio.NewReader(os.Stdin)
 		response, _ := reader.ReadString('\n')
 		response = strings.TrimSpace(response)
-		
+
 		switch response {
 		case "1":
 			// Update using cx from-git since
@@ -206,7 +206,7 @@ func promptForRulesEdit(repoPath string, skipPrompt bool) error {
 			return nil
 		}
 	}
-	
+
 	return nil
 }
 
@@ -217,10 +217,10 @@ func createAndEditRules(repoPath string) error {
 
 	// Create parent directory if it doesn't exist
 	groveDir := filepath.Dir(rulesPath)
-	if err := os.MkdirAll(groveDir, 0755); err != nil {
+	if err := os.MkdirAll(groveDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create .grove directory: %w", err)
 	}
-	
+
 	// Create rules file with helpful comments
 	content := `# Grove rules file for LLM context
 # Add file paths or patterns here, one per line
@@ -229,10 +229,10 @@ func createAndEditRules(repoPath string) error {
 #   docs/*.md
 #   src/main.go
 `
-	if err := os.WriteFile(rulesPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(rulesPath, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("failed to create rules file: %w", err)
 	}
-	
+
 	fmt.Printf("Created %s\n", rulesPath)
 	return openInEditor(rulesPath)
 }
@@ -244,7 +244,7 @@ func autoPopulateRules(repoPath string) error {
 	if err != nil || lastTag == "" {
 		return fmt.Errorf("no previous tag found to use as reference")
 	}
-	
+
 	fmt.Printf("Auto-populating rules from files changed since %s...\n", lastTag)
 
 	// Run 'grove cx from-git' for workspace-awareness
@@ -256,7 +256,7 @@ func autoPopulateRules(repoPath string) error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to run grove cx from-git: %w", err)
 	}
-	
+
 	fmt.Printf("Successfully populated rules file with changed files\n")
 	return nil
 }
@@ -267,12 +267,12 @@ func openInEditor(filepath string) error {
 	if editor == "" {
 		editor = "vim" // Default to vim if EDITOR is not set
 	}
-	
+
 	cmd := exec.Command(editor, filepath)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	fmt.Printf("Opening %s in %s...\n", filepath, editor)
 	return cmd.Run()
 }

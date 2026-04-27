@@ -7,9 +7,10 @@ import (
 
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/paths"
+	"github.com/sirupsen/logrus"
+
 	"github.com/grovetools/grove/pkg/devlinks"
 	"github.com/grovetools/grove/pkg/sdk"
-	"github.com/sirupsen/logrus"
 )
 
 // Reconciler manages the intelligent layering of dev links over released versions
@@ -77,7 +78,7 @@ func (r *Reconciler) Reconcile(toolName string) error {
 	symlinkPath := filepath.Join(binDir, effectiveAlias)
 
 	// Check if a dev override is active - dev links are stored by tool alias
-	// Try both the effectiveAlias and repoName for backward compatibility  
+	// Try both the effectiveAlias and repoName for backward compatibility
 	checkNames := []string{effectiveAlias, repoName}
 	for _, checkName := range checkNames {
 		if binLinks, exists := r.devConfig.Binaries[checkName]; exists && binLinks.Current != "" {
@@ -147,7 +148,7 @@ func (r *Reconciler) GetEffectiveSource(toolName string) (source string, version
 // createOrUpdateSymlink creates or updates a symlink
 func createOrUpdateSymlink(symlinkPath, targetPath string) error {
 	// Ensure the directory exists
-	if err := os.MkdirAll(filepath.Dir(symlinkPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(symlinkPath), 0o755); err != nil {
 		return fmt.Errorf("failed to create bin directory: %w", err)
 	}
 

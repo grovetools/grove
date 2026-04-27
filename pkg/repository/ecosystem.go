@@ -10,8 +10,9 @@ import (
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/workspace"
-	"github.com/grovetools/grove/pkg/discovery"
 	"github.com/sirupsen/logrus"
+
+	"github.com/grovetools/grove/pkg/discovery"
 )
 
 // Ecosystem handles ecosystem-level operations
@@ -83,7 +84,7 @@ func (e *Ecosystem) removeFromGoWork(repoName string) error {
 	}
 
 	// Write the updated content back
-	if err := os.WriteFile(goWorkPath, []byte(strings.Join(newLines, "\n")), 0644); err != nil {
+	if err := os.WriteFile(goWorkPath, []byte(strings.Join(newLines, "\n")), 0o600); err != nil {
 		return fmt.Errorf("failed to write go.work: %w", err)
 	}
 
@@ -107,7 +108,7 @@ func updateGoWork(repoName string) error {
 			// Create a new go.work file with the current Go version
 			goVersion := "1.24.4" // Default Go version
 			newContent := fmt.Sprintf("go %s\n\nuse (\n\t./%s\n)\n", goVersion, repoName)
-			if err := os.WriteFile(workPath, []byte(newContent), 0644); err != nil {
+			if err := os.WriteFile(workPath, []byte(newContent), 0o600); err != nil {
 				return fmt.Errorf("failed to create go.work: %w", err)
 			}
 			return nil
@@ -199,7 +200,7 @@ func updateGoWork(repoName string) error {
 
 	// Write the updated go.work file
 	updatedContent := strings.Join(newLines, "\n")
-	if err := os.WriteFile(workPath, []byte(updatedContent), 0644); err != nil {
+	if err := os.WriteFile(workPath, []byte(updatedContent), 0o600); err != nil {
 		return fmt.Errorf("failed to write go.work: %w\nThe file may be read-only or you may lack permissions", err)
 	}
 
@@ -267,7 +268,6 @@ func checkBinaryAliasConflict(alias string) error {
 
 	return nil
 }
-
 
 // extractMakefileList extracts a space-separated list of items from Makefile lines
 // starting from the given index. It handles multi-line lists with backslashes.
@@ -441,7 +441,7 @@ func updateRootMakefile(repoName, binaryAlias string) error {
 
 	// Write the updated Makefile
 	updatedContent := strings.Join(lines, "\n")
-	if err := os.WriteFile(makefilePath, []byte(updatedContent), 0644); err != nil {
+	if err := os.WriteFile(makefilePath, []byte(updatedContent), 0o600); err != nil {
 		return fmt.Errorf("failed to write Makefile: %w", err)
 	}
 

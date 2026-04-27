@@ -12,8 +12,9 @@ import (
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/keybind"
 	"github.com/grovetools/core/tui/theme"
-	"github.com/grovetools/grove/pkg/keys"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/grove/pkg/keys"
 )
 
 func newKeysMatrixCmd() *cobra.Command {

@@ -295,9 +295,9 @@ func openDashboardCmd() tea.Cmd {
 // ---- state fetch ----
 
 type dashboardState struct {
-	GeneratedAt time.Time             `json:"generated_at"`
-	Ecosystems  []dashboardEcosystem  `json:"ecosystems"`
-	Errors      []string              `json:"errors,omitempty"`
+	GeneratedAt time.Time            `json:"generated_at"`
+	Ecosystems  []dashboardEcosystem `json:"ecosystems"`
+	Errors      []string             `json:"errors,omitempty"`
 }
 
 type dashboardEcosystem struct {

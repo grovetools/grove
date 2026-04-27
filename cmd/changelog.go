@@ -11,9 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	useLLM bool
-)
+var useLLM bool
 
 func newChangelogCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -79,7 +77,7 @@ With the --llm flag, it uses an LLM to generate the changelog based on the git h
 			existingContent, _ := os.ReadFile(changelogPath)
 			newContent := changelogContent + string(existingContent)
 
-			return os.WriteFile(changelogPath, []byte(newContent), 0644)
+			return os.WriteFile(changelogPath, []byte(newContent), 0o600)
 		},
 	}
 	cmd.Flags().String("version", "v0.0.0", "The new version for the changelog header")

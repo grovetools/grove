@@ -8,10 +8,11 @@ import (
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/tui/embed"
+	"github.com/spf13/cobra"
+
 	grovekeymap "github.com/grovetools/grove/pkg/keymap"
 	"github.com/grovetools/grove/pkg/setup"
 	configtui "github.com/grovetools/grove/pkg/tui/config"
-	"github.com/spf13/cobra"
 )
 
 // configKeys is the singleton instance of the config editor TUI keymap.

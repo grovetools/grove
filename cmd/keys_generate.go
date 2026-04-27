@@ -14,8 +14,9 @@ import (
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/tmux/keygen"
 	"github.com/grovetools/core/tui/theme"
-	"github.com/grovetools/grove/pkg/keys"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/grove/pkg/keys"
 )
 
 // newKeysGenerateCmd creates the 'grove keys generate' command.
@@ -272,12 +273,12 @@ size = { width = "100%", height = "98%" }`))
 
 	// Create directory if needed
 	outDir := filepath.Dir(outputPath)
-	if err := os.MkdirAll(outDir, 0755); err != nil {
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", outDir, err)
 	}
 
 	// Write the file
-	if err := os.WriteFile(outputPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(outputPath, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("failed to write %s: %w", outputPath, err)
 	}
 
@@ -330,4 +331,3 @@ func parseInterfaceToStringSlice(val interface{}) []string {
 		return nil
 	}
 }
-

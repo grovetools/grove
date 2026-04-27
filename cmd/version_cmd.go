@@ -13,10 +13,11 @@ import (
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/version"
+	"github.com/spf13/cobra"
+
 	"github.com/grovetools/grove/pkg/devlinks"
 	"github.com/grovetools/grove/pkg/reconciler"
 	"github.com/grovetools/grove/pkg/sdk"
-	"github.com/spf13/cobra"
 )
 
 func init() {

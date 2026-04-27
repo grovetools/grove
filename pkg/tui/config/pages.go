@@ -14,13 +14,16 @@ import (
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/tui/components/pager"
 	"github.com/grovetools/core/tui/theme"
+
 	"github.com/grovetools/grove/pkg/configui"
 	"github.com/grovetools/grove/pkg/setup"
 )
 
 // Messages to communicate from Page to outer Model.
-type editNodeMsg struct{ node *configui.ConfigNode }
-type infoNodeMsg struct{ node *configui.ConfigNode }
+type (
+	editNodeMsg struct{ node *configui.ConfigNode }
+	infoNodeMsg struct{ node *configui.ConfigNode }
+)
 
 // FilterState holds the shared filter/display preferences across all pages.
 // It is shared by pointer so that toggling a filter in the outer model is
@@ -54,8 +57,10 @@ type LayerPage struct {
 }
 
 // Compile-time checks.
-var _ pager.Page = (*LayerPage)(nil)
-var _ pager.PageWithTitle = (*LayerPage)(nil)
+var (
+	_ pager.Page          = (*LayerPage)(nil)
+	_ pager.PageWithTitle = (*LayerPage)(nil)
+)
 
 // Title implements pager.PageWithTitle. Shows the config file path for this layer.
 func (p *LayerPage) Title() string {
@@ -81,7 +86,7 @@ func NewLayerPage(name string, layer config.ConfigSource, layered *config.Layere
 	return p
 }
 
-func (p *LayerPage) Name() string              { return p.name }
+func (p *LayerPage) Name() string               { return p.name }
 func (p *LayerPage) Layer() config.ConfigSource { return p.layer }
 
 func (p *LayerPage) Init() tea.Cmd { return nil }

@@ -10,7 +10,7 @@ func TestRenderer_Render(t *testing.T) {
 	// Create test template directory
 	tempDir := t.TempDir()
 	templateDir := filepath.Join(tempDir, "template")
-	if err := os.MkdirAll(templateDir, 0755); err != nil {
+	if err := os.MkdirAll(templateDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -21,13 +21,13 @@ Description: {{.Description}}
 Binary Alias: {{.BinaryAlias}}
 `
 	templateFile := filepath.Join(templateDir, "README.md.tmpl")
-	if err := os.WriteFile(templateFile, []byte(templateContent), 0644); err != nil {
+	if err := os.WriteFile(templateFile, []byte(templateContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create a non-template file
 	normalFile := filepath.Join(templateDir, "LICENSE")
-	if err := os.WriteFile(normalFile, []byte("MIT License"), 0644); err != nil {
+	if err := os.WriteFile(normalFile, []byte("MIT License"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

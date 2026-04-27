@@ -72,7 +72,7 @@ func AllScenarios() []*harness.Scenario {
 // to make the discovery service aware of the test's ecosystem directory.
 func setupGlobalGroveConfig(ctx *harness.Context, searchPath string) error {
 	globalConfigDir := filepath.Join(ctx.ConfigDir(), "grove")
-	if err := os.MkdirAll(globalConfigDir, 0755); err != nil {
+	if err := os.MkdirAll(globalConfigDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create global config dir: %w", err)
 	}
 
@@ -89,7 +89,7 @@ func setupGlobalGroveConfig(ctx *harness.Context, searchPath string) error {
 		return fmt.Errorf("failed to marshal global config: %w", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(globalConfigDir, "grove.yml"), yamlData, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(globalConfigDir, "grove.yml"), yamlData, 0o600); err != nil {
 		return fmt.Errorf("failed to write global grove.yml: %w", err)
 	}
 	return nil

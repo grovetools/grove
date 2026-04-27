@@ -146,7 +146,7 @@ func updateGlobalConfig(groveName, grovePath, notebook string) (string, error) {
 
 	// Ensure the config directory exists
 	configDir := filepath.Dir(targetPath)
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		return "", fmt.Errorf("failed to create config directory: %w", err)
 	}
 
@@ -194,7 +194,7 @@ func updateGlobalConfig(groveName, grovePath, notebook string) (string, error) {
 		return "", fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(targetPath, data, 0644); err != nil {
+	if err := os.WriteFile(targetPath, data, 0o600); err != nil {
 		return "", fmt.Errorf("failed to write config: %w", err)
 	}
 

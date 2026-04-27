@@ -13,6 +13,7 @@ import (
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
+
 	"github.com/grovetools/grove/pkg/depsgraph"
 	"github.com/grovetools/grove/pkg/discovery"
 	"github.com/grovetools/grove/pkg/release"
@@ -96,7 +97,7 @@ func runReleasePlan(ctx context.Context, isRC bool) (*release.ReleasePlan, error
 		for dep := range autoDependencies {
 			if !hasChanges[dep] {
 				hasChanges[dep] = true
-				commitsSinceTag[dep] = 0  // Mark as included but no commits
+				commitsSinceTag[dep] = 0 // Mark as included but no commits
 				logger.WithField("repo", dep).Info("Force including dependency without changes")
 			}
 		}
@@ -161,7 +162,7 @@ func runReleasePlan(ctx context.Context, isRC bool) (*release.ReleasePlan, error
 	if err != nil {
 		return nil, fmt.Errorf("failed to get staging directory: %w", err)
 	}
-	if err := os.MkdirAll(stagingDir, 0755); err != nil {
+	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create staging directory: %w", err)
 	}
 
@@ -260,10 +261,10 @@ func runReleasePlan(ctx context.Context, isRC bool) (*release.ReleasePlan, error
 		changelogPath := ""
 		if changelogContent != "" {
 			changelogPath = filepath.Join(stagingDir, repo, "CHANGELOG.md")
-			if err := os.MkdirAll(filepath.Dir(changelogPath), 0755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(changelogPath), 0o755); err != nil {
 				logger.WithField("repo", repo).WithError(err).Warn("Failed to create changelog directory")
 			} else {
-				if err := os.WriteFile(changelogPath, []byte(changelogContent), 0644); err != nil {
+				if err := os.WriteFile(changelogPath, []byte(changelogContent), 0o600); err != nil {
 					logger.WithField("repo", repo).WithError(err).Warn("Failed to write staged changelog")
 				}
 			}
@@ -274,7 +275,7 @@ func runReleasePlan(ctx context.Context, isRC bool) (*release.ReleasePlan, error
 		if !hasRepoChanges {
 			status = "-" // No changes, no review needed
 		}
-		
+
 		// For repos without changes, nextVersion should be same as current
 		if !hasRepoChanges {
 			nextVersion = currentVersion
@@ -430,7 +431,7 @@ func runReleaseApply(ctx context.Context) error {
 			currentVersions[repo] = repoPlan.CurrentVersion
 		}
 	}
-	
+
 	// Display selected repos summary
 	if len(selectedRepos) > 0 {
 		displayInfo(fmt.Sprintf("%s Releasing %d selected repositories: %s", theme.IconArchive, len(selectedRepos), strings.Join(selectedRepos, ", ")))
@@ -457,7 +458,6 @@ func runReleaseApply(ctx context.Context) error {
 	if err := checkForOutdatedDependencies(ctx, plan.RootDir, workspaces, logger); err != nil {
 		displayWarning("Failed to check for outdated dependencies: " + err.Error())
 	}
-
 
 	// Note: Changelogs are already written to repositories by the 'w' command in the TUI
 	// The orchestrateRelease function will detect and commit these existing changelogs

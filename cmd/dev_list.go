@@ -5,8 +5,9 @@ import (
 	"sort"
 
 	"github.com/grovetools/core/cli"
-	"github.com/grovetools/grove/pkg/devlinks"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/grove/pkg/devlinks"
 )
 
 func newDevListCmd() *cobra.Command {

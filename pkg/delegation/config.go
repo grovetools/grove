@@ -67,7 +67,7 @@ func SaveConfig(config *Config) error {
 	}
 
 	// Ensure the state directory exists
-	if err := os.MkdirAll(paths.StateDir(), 0755); err != nil {
+	if err := os.MkdirAll(paths.StateDir(), 0o755); err != nil {
 		return err
 	}
 
@@ -76,7 +76,7 @@ func SaveConfig(config *Config) error {
 		return err
 	}
 
-	return os.WriteFile(configPath, data, 0644)
+	return os.WriteFile(configPath, data, 0o600)
 }
 
 // GetMode returns the current delegation mode

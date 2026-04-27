@@ -21,7 +21,7 @@ func setupMockEcosystemStep() harness.Step {
 		}
 
 		// Ensure the directory exists
-		if err := os.MkdirAll(ecosystemDir, 0755); err != nil {
+		if err := os.MkdirAll(ecosystemDir, 0o755); err != nil {
 			return fmt.Errorf("failed to create ecosystem dir: %w", err)
 		}
 
@@ -38,7 +38,7 @@ func setupMockEcosystemStep() harness.Step {
 
 		// Create ecosystem grove.yml
 		groveYmlContent := "name: grove-ecosystem\nworkspaces:\n  - \"*\"\n"
-		if err := os.WriteFile(filepath.Join(ecosystemDir, "grove.yml"), []byte(groveYmlContent), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(ecosystemDir, "grove.yml"), []byte(groveYmlContent), 0o600); err != nil {
 			return err
 		}
 
@@ -58,25 +58,27 @@ func setupMockEcosystemStep() harness.Step {
 		for name, goModRequire := range repos {
 			repoDir := filepath.Join(ecosystemDir, name)
 			ctx.Set(name+"_dir", repoDir)
-			os.MkdirAll(repoDir, 0755)
+			if err := os.MkdirAll(repoDir, 0o755); err != nil {
+				return err
+			}
 
 			// Create files
 			groveContent := fmt.Sprintf("name: %s\n", name)
-			if err := os.WriteFile(filepath.Join(repoDir, "grove.yml"), []byte(groveContent), 0644); err != nil {
+			if err := os.WriteFile(filepath.Join(repoDir, "grove.yml"), []byte(groveContent), 0o600); err != nil {
 				return err
 			}
 
 			goModContent := fmt.Sprintf("module github.com/test/%s\n\ngo 1.21\n\n%s", name, goModRequire)
-			if err := os.WriteFile(filepath.Join(repoDir, "go.mod"), []byte(goModContent), 0644); err != nil {
+			if err := os.WriteFile(filepath.Join(repoDir, "go.mod"), []byte(goModContent), 0o600); err != nil {
 				return err
 			}
 
-			if err := os.MkdirAll(filepath.Join(repoDir, ".github/workflows"), 0755); err != nil {
+			if err := os.MkdirAll(filepath.Join(repoDir, ".github/workflows"), 0o755); err != nil {
 				return err
 			}
 
 			releaseYaml := "name: Release\non:\n  push:\n    tags: ['v*']"
-			if err := os.WriteFile(filepath.Join(repoDir, ".github/workflows/release.yml"), []byte(releaseYaml), 0644); err != nil {
+			if err := os.WriteFile(filepath.Join(repoDir, ".github/workflows/release.yml"), []byte(releaseYaml), 0o600); err != nil {
 				return err
 			}
 
@@ -102,7 +104,7 @@ func setupMockEcosystemStep() harness.Step {
 
 			// Add a new commit to make the repo "dirty" for release
 			mainGoContent := "package main\n\nfunc main() {}"
-			if err := os.WriteFile(filepath.Join(repoDir, "main.go"), []byte(mainGoContent), 0644); err != nil {
+			if err := os.WriteFile(filepath.Join(repoDir, "main.go"), []byte(mainGoContent), 0o600); err != nil {
 				return err
 			}
 			if err := git("add", "."); err != nil {
@@ -160,12 +162,12 @@ func StreamlinedFullReleaseScenario() *harness.Scenario {
 			setupMockEcosystemStep(),
 			harness.NewStep("Run 'grove release plan'", func(ctx *harness.Context) error {
 				ecosystemDir := ctx.Get("ecosystem_dir").(string)
-				
+
 				// Change to ecosystem directory for the command
 				cmd := ctx.Command("grove", "release", "plan", "--llm-changelog").
 					Dir(ecosystemDir).
 					Env("HOME", ctx.RootDir)
-				
+
 				res := cmd.Run()
 				if res.Error != nil {
 					return fmt.Errorf("grove release plan failed: %v\nOutput: %s", res.Error, res.Stdout)
@@ -230,13 +232,13 @@ func StreamlinedFullReleaseScenario() *harness.Scenario {
 				for _, repo := range []string{"lib-a", "app-b"} {
 					stagedChangelog := filepath.Join(stagingDir, repo, "CHANGELOG.md")
 					repoChangelog := filepath.Join(ecosystemDir, repo, "CHANGELOG.md")
-					
+
 					content, err := os.ReadFile(stagedChangelog)
 					if err != nil {
 						return fmt.Errorf("failed to read staged changelog: %v", err)
 					}
-					
-					if err := os.WriteFile(repoChangelog, content, 0644); err != nil {
+
+					if err := os.WriteFile(repoChangelog, content, 0o600); err != nil {
 						return fmt.Errorf("failed to write changelog: %v", err)
 					}
 
@@ -262,7 +264,7 @@ func StreamlinedFullReleaseScenario() *harness.Scenario {
 					return fmt.Errorf("failed to marshal modified plan: %v", err)
 				}
 
-				if err := os.WriteFile(planPath, modifiedPlanData, 0644); err != nil {
+				if err := os.WriteFile(planPath, modifiedPlanData, 0o600); err != nil {
 					return fmt.Errorf("failed to save modified plan: %v", err)
 				}
 
@@ -277,7 +279,7 @@ func StreamlinedFullReleaseScenario() *harness.Scenario {
 					Dir(ecosystemDir).
 					Env("HOME", ctx.RootDir).
 					Env("GH_MOCK_CI_STATUS", "success")
-				
+
 				res := cmd.Run()
 				if res.Error != nil {
 					return fmt.Errorf("grove release apply failed: %v\nOutput: %s", res.Error, res.Stdout)
@@ -322,11 +324,11 @@ func StreamlinedRCReleaseScenario() *harness.Scenario {
 			setupMockEcosystemStep(),
 			harness.NewStep("Run 'grove release plan --rc'", func(ctx *harness.Context) error {
 				ecosystemDir := ctx.Get("ecosystem_dir").(string)
-				
+
 				cmd := ctx.Command("grove", "release", "plan", "--rc").
 					Dir(ecosystemDir).
 					Env("HOME", ctx.RootDir)
-				
+
 				res := cmd.Run()
 				if res.Error != nil {
 					return fmt.Errorf("grove release plan --rc failed: %v\nOutput: %s", res.Error, res.Stdout)
@@ -388,7 +390,7 @@ func StreamlinedRCReleaseScenario() *harness.Scenario {
 					return fmt.Errorf("failed to marshal modified plan: %v", err)
 				}
 
-				if err := os.WriteFile(planPath, modifiedPlanData, 0644); err != nil {
+				if err := os.WriteFile(planPath, modifiedPlanData, 0o600); err != nil {
 					return fmt.Errorf("failed to save modified plan: %v", err)
 				}
 
@@ -402,7 +404,7 @@ func StreamlinedRCReleaseScenario() *harness.Scenario {
 					Dir(ecosystemDir).
 					Env("HOME", ctx.RootDir).
 					Env("GH_MOCK_CI_STATUS", "success")
-				
+
 				res := cmd.Run()
 				if res.Error != nil {
 					return fmt.Errorf("grove release apply failed: %v\nOutput: %s", res.Error, res.Stdout)
@@ -445,11 +447,11 @@ func StreamlinedFailureScenario() *harness.Scenario {
 			setupMockEcosystemStep(),
 			harness.NewStep("Run 'grove release plan'", func(ctx *harness.Context) error {
 				ecosystemDir := ctx.Get("ecosystem_dir").(string)
-				
+
 				cmd := ctx.Command("grove", "release", "plan", "--llm-changelog").
 					Dir(ecosystemDir).
 					Env("HOME", ctx.RootDir)
-				
+
 				res := cmd.Run()
 				if res.Error != nil {
 					return fmt.Errorf("grove release plan failed: %v\nOutput: %s", res.Error, res.Stdout)
@@ -484,13 +486,13 @@ func StreamlinedFailureScenario() *harness.Scenario {
 				for _, repo := range []string{"lib-a", "app-b"} {
 					stagedChangelog := filepath.Join(stagingDir, repo, "CHANGELOG.md")
 					repoChangelog := filepath.Join(ecosystemDir, repo, "CHANGELOG.md")
-					
+
 					content, err := os.ReadFile(stagedChangelog)
 					if err != nil {
 						return err
 					}
-					
-					if err := os.WriteFile(repoChangelog, content, 0644); err != nil {
+
+					if err := os.WriteFile(repoChangelog, content, 0o600); err != nil {
 						return err
 					}
 
@@ -514,7 +516,7 @@ func StreamlinedFailureScenario() *harness.Scenario {
 					return err
 				}
 
-				return os.WriteFile(planPath, modifiedPlanData, 0644)
+				return os.WriteFile(planPath, modifiedPlanData, 0o600)
 			}),
 			harness.NewStep("Run 'grove release apply' with failing CI", func(ctx *harness.Context) error {
 				ecosystemDir := ctx.Get("ecosystem_dir").(string)
@@ -524,7 +526,7 @@ func StreamlinedFailureScenario() *harness.Scenario {
 					Dir(ecosystemDir).
 					Env("HOME", ctx.RootDir).
 					Env("GH_MOCK_CI_STATUS", "failure")
-				
+
 				res := cmd.Run()
 				// We expect this to fail
 				if res.Error == nil {
@@ -539,7 +541,7 @@ func StreamlinedFailureScenario() *harness.Scenario {
 				cmd := ctx.Command("grove", "release", "undo-tag").
 					Dir(ecosystemDir).
 					Env("HOME", ctx.RootDir)
-				
+
 				res := cmd.Run()
 				if res.Error != nil {
 					return fmt.Errorf("grove release undo-tag failed: %v\nOutput: %s", res.Error, res.Stdout)
@@ -547,7 +549,7 @@ func StreamlinedFailureScenario() *harness.Scenario {
 
 				// Verify tags were removed
 				// In the real implementation, we'd check the .mock-git/TAGS file
-				
+
 				return nil
 			}),
 			harness.NewStep("Run 'grove release clear-plan'", func(ctx *harness.Context) error {
@@ -557,7 +559,7 @@ func StreamlinedFailureScenario() *harness.Scenario {
 				cmd := ctx.Command("grove", "release", "clear-plan").
 					Dir(ecosystemDir).
 					Env("HOME", ctx.RootDir)
-				
+
 				res := cmd.Run()
 				if res.Error != nil {
 					return fmt.Errorf("grove release clear-plan failed: %v\nOutput: %s", res.Error, res.Stdout)

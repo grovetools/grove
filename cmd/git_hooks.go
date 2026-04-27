@@ -6,9 +6,10 @@ import (
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/spf13/cobra"
+
 	"github.com/grovetools/grove/pkg/discovery"
 	"github.com/grovetools/grove/pkg/githooks"
-	"github.com/spf13/cobra"
 )
 
 func newGitHooksCmd() *cobra.Command {

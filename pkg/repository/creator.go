@@ -10,9 +10,10 @@ import (
 
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/util/delegation"
+	"github.com/sirupsen/logrus"
+
 	"github.com/grovetools/grove/pkg/gh"
 	"github.com/grovetools/grove/pkg/templates"
-	"github.com/sirupsen/logrus"
 )
 
 type Creator struct {
@@ -40,8 +41,8 @@ type GitHubInitOptions struct {
 }
 
 type creationState struct {
-	localRepoCreated     bool
-	githubRepoCreated    bool
+	localRepoCreated      bool
+	githubRepoCreated     bool
 	originalGoWorkContent []byte
 }
 
@@ -111,7 +112,7 @@ func (c *Creator) Create(opts CreateOptions) error {
 				state.originalGoWorkContent = content
 			}
 		}
-		
+
 		if err := c.updateGoWork(opts); err != nil {
 			c.rollback(state, opts, targetPath)
 			return fmt.Errorf("failed to update go.work: %w", err)
@@ -390,7 +391,7 @@ func (c *Creator) validateGitHubPrereqs(repoName string, isPublic bool) error {
 	}
 
 	// Check if repo already exists on GitHub
-	checkCmd := exec.Command("gh", "repo", "view", fmt.Sprintf("grovetools/%s", repoName))
+	checkCmd := exec.Command("gh", "repo", "view", fmt.Sprintf("grovetools/%s", repoName)) //nolint:gosec // repoName from trusted input
 	if err := checkCmd.Run(); err == nil {
 		return fmt.Errorf("repository grovetools/%s already exists on GitHub", repoName)
 	}
@@ -408,7 +409,7 @@ func (c *Creator) addToEcosystemLocal(opts CreateOptions) error {
 	c.logger.Info("Adding repository to grove-ecosystem...")
 
 	// Check if submodule already exists
-	checkCmd := exec.Command("git", "submodule", "status", opts.Name)
+	checkCmd := exec.Command("git", "submodule", "status", opts.Name) //nolint:gosec // opts from trusted input
 	if err := checkCmd.Run(); err == nil {
 		c.logger.Warnf("Submodule %s already exists", opts.Name)
 		return nil
@@ -511,7 +512,7 @@ func (c *Creator) createGitHubRepoFromCwd(repoName string, isPublic bool) error 
 	}
 
 	// Ensure the remote URL is clean
-	setUrlCmd := exec.Command("git", "remote", "set-url", "origin",
+	setUrlCmd := exec.Command("git", "remote", "set-url", "origin", //nolint:gosec // repoName from trusted input
 		fmt.Sprintf("https://github.com/grovetools/%s.git", repoName))
 	if err := setUrlCmd.Run(); err != nil {
 		c.logger.Warnf("Failed to set clean remote URL: %v", err)
@@ -563,7 +564,7 @@ func (c *Creator) waitForCIFromCwd(repoName string) error {
 	time.Sleep(2 * time.Second)
 
 	// Get the workflow run ID
-	cmd := exec.Command("gh", "run", "list",
+	cmd := exec.Command("gh", "run", "list", //nolint:gosec // args from trusted config
 		"--repo", fmt.Sprintf("grovetools/%s", repoName),
 		"--workflow", "release.yml",
 		"--limit", "1",
@@ -637,7 +638,7 @@ func (c *Creator) validate(opts CreateOptions) error {
 		}
 
 		// Check if repo already exists on GitHub
-		checkCmd := exec.Command("gh", "repo", "view", fmt.Sprintf("grovetools/%s", opts.Name))
+		checkCmd := exec.Command("gh", "repo", "view", fmt.Sprintf("grovetools/%s", opts.Name)) //nolint:gosec // opts from trusted input
 		if err := checkCmd.Run(); err == nil {
 			return fmt.Errorf("repository grovetools/%s already exists on GitHub", opts.Name)
 		}
@@ -695,13 +696,13 @@ func (c *Creator) generateMinimalSkeleton(opts CreateOptions, targetPath string)
 	c.logger.Info("Creating minimal repository...")
 
 	// Create directory
-	if err := os.MkdirAll(targetPath, 0755); err != nil {
+	if err := os.MkdirAll(targetPath, 0o755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
 	// Create README.md
 	readmeContent := fmt.Sprintf("# %s\n\n%s\n", opts.Name, opts.Description)
-	if err := os.WriteFile(filepath.Join(targetPath, "README.md"), []byte(readmeContent), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(targetPath, "README.md"), []byte(readmeContent), 0o600); err != nil {
 		return fmt.Errorf("failed to create README.md: %w", err)
 	}
 
@@ -709,7 +710,7 @@ func (c *Creator) generateMinimalSkeleton(opts CreateOptions, targetPath string)
 	groveYmlContent := fmt.Sprintf(`name: %s
 description: %s
 `, opts.Name, opts.Description)
-	if err := os.WriteFile(filepath.Join(targetPath, "grove.yml"), []byte(groveYmlContent), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(targetPath, "grove.yml"), []byte(groveYmlContent), 0o600); err != nil {
 		return fmt.Errorf("failed to create grove.yml: %w", err)
 	}
 
@@ -832,19 +833,19 @@ func (c *Creator) generateFromExternalTemplate(opts CreateOptions, data template
 	// Create .grove directory and workspace file
 	c.logger.Info("Creating workspace marker file...")
 	groveDir := filepath.Join(targetPath, ".grove")
-	if err := os.MkdirAll(groveDir, 0755); err != nil {
+	if err := os.MkdirAll(groveDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create .grove directory: %w", err)
 	}
-	
+
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 	workspaceContent := fmt.Sprintf(`branch: main
 plan: %s-main-repo
 created_at: %s
 ecosystem: false
 `, opts.Name, timestamp)
-	
+
 	workspaceFile := filepath.Join(groveDir, "workspace")
-	if err := os.WriteFile(workspaceFile, []byte(workspaceContent), 0644); err != nil {
+	if err := os.WriteFile(workspaceFile, []byte(workspaceContent), 0o600); err != nil {
 		return fmt.Errorf("failed to create .grove/workspace: %w", err)
 	}
 
@@ -1002,7 +1003,7 @@ func (c *Creator) createGitHubRepo(opts CreateOptions, targetPath string) error 
 
 	// Ensure the remote URL is clean (no embedded tokens)
 	c.logger.Info("Ensuring clean remote URL...")
-	setUrlCmd := exec.Command("git", "remote", "set-url", "origin",
+	setUrlCmd := exec.Command("git", "remote", "set-url", "origin", //nolint:gosec // opts from trusted input
 		fmt.Sprintf("https://github.com/grovetools/%s.git", opts.Name))
 	setUrlCmd.Dir = targetPath
 	if err := setUrlCmd.Run(); err != nil {
@@ -1077,7 +1078,7 @@ func (c *Creator) waitForCI(opts CreateOptions) error {
 	time.Sleep(2 * time.Second)
 
 	// Get the workflow run ID
-	cmd := exec.Command("gh", "run", "list",
+	cmd := exec.Command("gh", "run", "list", //nolint:gosec // opts from trusted input
 		"--repo", fmt.Sprintf("grovetools/%s", opts.Name),
 		"--workflow", "release.yml",
 		"--limit", "1",
@@ -1114,13 +1115,13 @@ func (c *Creator) addToEcosystem(opts CreateOptions) error {
 
 	// Always add as submodule in ecosystem mode
 	// Check if submodule already exists
-	checkCmd := exec.Command("git", "submodule", "status", opts.Name)
+	checkCmd := exec.Command("git", "submodule", "status", opts.Name) //nolint:gosec // opts from trusted input
 	if err := checkCmd.Run(); err == nil {
 		c.logger.Warnf("Submodule %s already exists, updating it...", opts.Name)
 
 		// Update the submodule URL in case it changed (only if GitHub is enabled)
 		if !opts.SkipGitHub {
-			updateUrlCmd := exec.Command("git", "submodule", "set-url", opts.Name,
+			updateUrlCmd := exec.Command("git", "submodule", "set-url", opts.Name, //nolint:gosec // opts from trusted input
 				fmt.Sprintf("git@github.com:grovetools/%s.git", opts.Name))
 			if err := updateUrlCmd.Run(); err != nil {
 				c.logger.Warnf("Failed to update submodule URL: %v", err)
@@ -1135,7 +1136,7 @@ func (c *Creator) addToEcosystem(opts CreateOptions) error {
 		} else {
 			submoduleUrl = fmt.Sprintf("git@github.com:grovetools/%s.git", opts.Name)
 		}
-		
+
 		submoduleCmd := exec.Command("git", "submodule", "add", submoduleUrl, opts.Name)
 
 		if output, err := submoduleCmd.CombinedOutput(); err != nil {
@@ -1237,7 +1238,7 @@ func (c *Creator) rollback(state *creationState, opts CreateOptions, targetPath 
 			rootDir, err := workspace.FindEcosystemRoot("")
 			if err == nil {
 				goWorkPath := filepath.Join(rootDir, "go.work")
-				if err := os.WriteFile(goWorkPath, state.originalGoWorkContent, 0644); err != nil {
+				if err := os.WriteFile(goWorkPath, state.originalGoWorkContent, 0o600); err != nil {
 					c.logger.Errorf("Failed to restore go.work: %v", err)
 				}
 			}
@@ -1253,7 +1254,7 @@ func (c *Creator) rollback(state *creationState, opts CreateOptions, targetPath 
 		// Try to remove from git index if it was added as submodule (only in ecosystem mode)
 		if opts.Ecosystem {
 			c.logger.Info("Cleaning up git submodule...")
-			rmCmd := exec.Command("git", "rm", "--cached", "-f", opts.Name)
+			rmCmd := exec.Command("git", "rm", "--cached", "-f", opts.Name) //nolint:gosec // opts from trusted input
 			if err := rmCmd.Run(); err != nil {
 				// This is okay if it wasn't added
 				c.logger.Debugf("Submodule cleanup: %v", err)
@@ -1317,4 +1318,3 @@ func (c *Creator) getLatestVersion(repo string) string {
 	}
 	return strings.TrimSpace(string(output))
 }
-

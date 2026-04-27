@@ -69,15 +69,15 @@ type initPromptResult struct {
 
 // initPromptModel is the Bubble Tea model for the init prompt.
 type initPromptModel struct {
-	state            initPromptState
-	parentPath       string
-	groveName        string
-	notebooks        []string // available notebook keys
-	cursor           int      // cursor for current state's selection
-	confirmCursor    int      // 0 = Yes, 1 = No
-	result           initPromptResult
-	width            int
-	height           int
+	state         initPromptState
+	parentPath    string
+	groveName     string
+	notebooks     []string // available notebook keys
+	cursor        int      // cursor for current state's selection
+	confirmCursor int      // 0 = Yes, 1 = No
+	result        initPromptResult
+	width         int
+	height        int
 }
 
 // newInitPromptModel creates a new init prompt model.

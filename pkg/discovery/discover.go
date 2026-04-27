@@ -76,8 +76,8 @@ func DiscoverProjectsInEcosystem(ecosystemRoot string, includeWorktrees bool) ([
 		// 2. The project path itself starts with the ecosystem root, OR
 		// 3. The project IS the ecosystem root
 		if parentPathLower == ecosystemRootLower ||
-		   strings.HasPrefix(projectPathLower, ecosystemRootLower) ||
-		   projectPathLower == ecosystemRootLower {
+			strings.HasPrefix(projectPathLower, ecosystemRootLower) ||
+			projectPathLower == ecosystemRootLower {
 
 			// If not including worktrees, skip:
 			// - Nodes marked as worktrees

@@ -214,13 +214,13 @@ func setupProxyMacOSInstall(out io.Writer, dryRun bool) error {
 		return nil
 	}
 
-	if err := writeFileOwned(pfAnchorPath, []byte(pfAnchorRule), 0644); err != nil {
+	if err := writeFileOwned(pfAnchorPath, []byte(pfAnchorRule), 0o644); err != nil {
 		return fmt.Errorf("write pf anchor: %w", err)
 	}
-	if err := writeFileOwned(pfLaunchDaemonPath, []byte(daemonPlist), 0644); err != nil {
+	if err := writeFileOwned(pfLaunchDaemonPath, []byte(daemonPlist), 0o644); err != nil {
 		return fmt.Errorf("write launchd plist: %w", err)
 	}
-	if err := writeFileOwned(agentPath, []byte(agentPlist), 0644); err != nil {
+	if err := writeFileOwned(agentPath, []byte(agentPlist), 0o644); err != nil {
 		return fmt.Errorf("write launchagent plist: %w", err)
 	}
 	if err := exec.Command("launchctl", "load", "-w", pfLaunchDaemonPath).Run(); err != nil {
@@ -282,10 +282,10 @@ func setupProxyLinuxInstall(out io.Writer, dryRun bool) error {
 	if err := persistIptables(); err != nil {
 		fmt.Fprintf(out, "warning: persisting iptables rules failed (distro may not use iptables-persistent): %v\n", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(unitPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(unitPath), 0o755); err != nil {
 		return fmt.Errorf("mkdir systemd unit dir: %w", err)
 	}
-	if err := os.WriteFile(unitPath, []byte(unit), 0644); err != nil {
+	if err := os.WriteFile(unitPath, []byte(unit), 0o600); err != nil {
 		return fmt.Errorf("write systemd unit: %w", err)
 	}
 	if err := exec.Command("systemctl", "--user", "enable", "--now", "groved").Run(); err != nil {
@@ -329,7 +329,7 @@ func runIptables(argStr string) error {
 // directory may not exist on distros that don't use iptables-persistent —
 // callers treat the error as a warning.
 func persistIptables() error {
-	if err := os.MkdirAll("/etc/iptables", 0755); err != nil {
+	if err := os.MkdirAll("/etc/iptables", 0o755); err != nil {
 		return err
 	}
 	cmd := exec.Command("iptables-save")
@@ -337,13 +337,13 @@ func persistIptables() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile("/etc/iptables/rules.v4", out, 0644)
+	return os.WriteFile("/etc/iptables/rules.v4", out, 0o600)
 }
 
 // writeFileOwned mkdirs the parent and writes the payload. Used for paths
 // under /etc and /Library/LaunchDaemons that require root.
 func writeFileOwned(path string, data []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	return os.WriteFile(path, data, mode)

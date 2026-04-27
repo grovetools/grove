@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/grovetools/tend/pkg/harness"
 	"github.com/grovetools/tend/pkg/command"
 	"github.com/grovetools/tend/pkg/fs"
 	"github.com/grovetools/tend/pkg/git"
+	"github.com/grovetools/tend/pkg/harness"
 )
 
 // ConventionalCommitsScenario tests the full lifecycle of conventional commits and changelog generation
@@ -24,21 +24,21 @@ func ConventionalCommitsScenario() *harness.Scenario {
 				Description: "Creates a new Git repository with initial files",
 				Func: func(ctx *harness.Context) error {
 					repoDir := ctx.NewDir("test-repo")
-					
+
 					// Ensure the directory exists before git init
-					if err := os.MkdirAll(repoDir, 0755); err != nil {
+					if err := os.MkdirAll(repoDir, 0o755); err != nil {
 						return fmt.Errorf("failed to create directory %s: %w", repoDir, err)
 					}
-					
+
 					if err := git.Init(repoDir); err != nil {
 						return fmt.Errorf("failed to initialize git repository: %w", err)
 					}
-					
+
 					// Configure Git for testing
 					if err := git.SetupTestConfig(repoDir); err != nil {
 						return fmt.Errorf("failed to setup git config: %w", err)
 					}
-					
+
 					// Create initial files
 					if err := fs.WriteString(filepath.Join(repoDir, "README.md"), "# Test Repository\n\nTesting conventional commits."); err != nil {
 						return err
@@ -46,7 +46,7 @@ func ConventionalCommitsScenario() *harness.Scenario {
 					if err := fs.WriteString(filepath.Join(repoDir, "go.mod"), "module test\n\ngo 1.21"); err != nil {
 						return err
 					}
-					
+
 					// Initial commit
 					if err := git.Add(repoDir, "."); err != nil {
 						return err
@@ -54,7 +54,7 @@ func ConventionalCommitsScenario() *harness.Scenario {
 					if err := git.Commit(repoDir, "Initial commit"); err != nil {
 						return err
 					}
-					
+
 					ctx.Set("repo_dir", repoDir)
 					return nil
 				},
@@ -64,19 +64,19 @@ func ConventionalCommitsScenario() *harness.Scenario {
 				Description: "Installs conventional commit hooks in the repository",
 				Func: func(ctx *harness.Context) error {
 					repoDir := ctx.Get("repo_dir").(string)
-					
+
 					cmd := command.New(ctx.GroveBinary, "setup", "git-hooks", "install").Dir(repoDir)
 					result := cmd.Run()
-					
+
 					if result.Error != nil {
 						return fmt.Errorf("failed to install hooks: %w\nStderr: %s", result.Error, result.Stderr)
 					}
-					
+
 					hookPath := filepath.Join(repoDir, ".git", "hooks", "commit-msg")
 					if !fs.Exists(hookPath) {
 						return fmt.Errorf("commit-msg hook was not created at %s", hookPath)
 					}
-					
+
 					ctx.ShowCommandOutput("grove setup git-hooks install", result.Stdout, result.Stderr)
 					ctx.Set("hook_path", hookPath)
 					return nil
@@ -87,27 +87,27 @@ func ConventionalCommitsScenario() *harness.Scenario {
 				Description: "Verifies that non-conventional commits are rejected",
 				Func: func(ctx *harness.Context) error {
 					repoDir := ctx.Get("repo_dir").(string)
-					
+
 					// Create a file to commit
 					if err := fs.WriteString(filepath.Join(repoDir, "main.go"), "package main\n\nfunc main() {}"); err != nil {
 						return err
 					}
-					
+
 					if err := git.Add(repoDir, "main.go"); err != nil {
 						return err
 					}
-					
+
 					// Attempt invalid commit
 					err := git.Commit(repoDir, "This is not a conventional commit")
 					if err == nil {
 						return fmt.Errorf("expected commit to fail with invalid message, but it succeeded")
 					}
-					
+
 					// Verify error message contains expected text
 					if !strings.Contains(err.Error(), "INVALID COMMIT MESSAGE") {
 						return fmt.Errorf("expected error to contain 'INVALID COMMIT MESSAGE', got: %v", err)
 					}
-					
+
 					return nil
 				},
 			},
@@ -116,7 +116,7 @@ func ConventionalCommitsScenario() *harness.Scenario {
 				Description: "Creates various types of conventional commits",
 				Func: func(ctx *harness.Context) error {
 					repoDir := ctx.Get("repo_dir").(string)
-					
+
 					// Series of commits to test
 					commits := []struct {
 						file    string
@@ -154,29 +154,29 @@ func ConventionalCommitsScenario() *harness.Scenario {
 							message: "chore: add .gitignore file",
 						},
 					}
-					
+
 					// Make each commit
 					for _, c := range commits {
 						if err := fs.WriteString(filepath.Join(repoDir, c.file), c.content); err != nil {
 							return fmt.Errorf("failed to write %s: %w", c.file, err)
 						}
-						
+
 						if err := git.Add(repoDir, c.file); err != nil {
 							return fmt.Errorf("failed to add %s: %w", c.file, err)
 						}
-						
+
 						if err := git.Commit(repoDir, c.message); err != nil {
 							return fmt.Errorf("failed to commit '%s': %w", c.message, err)
 						}
 					}
-					
+
 					// Add one more empty commit for performance
 					cmd := command.New("git", "commit", "--allow-empty", "-m", "perf: optimize string concatenation").Dir(repoDir)
 					result := cmd.Run()
 					if result.Error != nil {
 						return fmt.Errorf("failed to make empty commit: %w", result.Error)
 					}
-					
+
 					return nil
 				},
 			},
@@ -185,23 +185,23 @@ func ConventionalCommitsScenario() *harness.Scenario {
 				Description: "Tags the first commit as v0.1.0",
 				Func: func(ctx *harness.Context) error {
 					repoDir := ctx.Get("repo_dir").(string)
-					
+
 					// Get the first commit hash
 					cmd := command.New("git", "rev-list", "--max-parents=0", "HEAD").Dir(repoDir)
 					result := cmd.Run()
 					if result.Error != nil {
 						return fmt.Errorf("failed to get first commit: %w", result.Error)
 					}
-					
+
 					firstCommit := strings.TrimSpace(result.Stdout)
-					
+
 					// Tag it
 					cmd = command.New("git", "tag", "-a", "v0.1.0", firstCommit, "-m", "Initial release").Dir(repoDir)
 					result = cmd.Run()
 					if result.Error != nil {
 						return fmt.Errorf("failed to tag initial release: %w", result.Error)
 					}
-					
+
 					return nil
 				},
 			},
@@ -210,26 +210,26 @@ func ConventionalCommitsScenario() *harness.Scenario {
 				Description: "Uses grove changelog to generate a changelog",
 				Func: func(ctx *harness.Context) error {
 					repoDir := ctx.Get("repo_dir").(string)
-					
+
 					cmd := command.New(ctx.GroveBinary, "release", "changelog", ".", "--version", "v0.2.0").Dir(repoDir)
 					result := cmd.Run()
-					
+
 					if result.Error != nil {
 						return fmt.Errorf("changelog generation failed: %w\nStderr: %s", result.Error, result.Stderr)
 					}
-					
+
 					// Verify CHANGELOG.md was created
 					changelogPath := filepath.Join(repoDir, "CHANGELOG.md")
 					if !fs.Exists(changelogPath) {
 						return fmt.Errorf("CHANGELOG.md was not created")
 					}
-					
+
 					// Read and verify content
 					content, err := fs.ReadString(changelogPath)
 					if err != nil {
 						return fmt.Errorf("failed to read changelog: %w", err)
 					}
-					
+
 					// Check for expected sections
 					expectedSections := []string{
 						"## v0.2.0",
@@ -242,13 +242,13 @@ func ConventionalCommitsScenario() *harness.Scenario {
 						"**utils:**", // Scoped commit
 						"add prefix parameter to FormatName function", // Breaking change
 					}
-					
+
 					for _, expected := range expectedSections {
 						if !strings.Contains(content, expected) {
 							return fmt.Errorf("changelog missing expected content: %s", expected)
 						}
 					}
-					
+
 					ctx.ShowCommandOutput("Changelog content", content, "")
 					return nil
 				},
@@ -258,21 +258,21 @@ func ConventionalCommitsScenario() *harness.Scenario {
 				Description: "Commits the changelog and creates release tag",
 				Func: func(ctx *harness.Context) error {
 					repoDir := ctx.Get("repo_dir").(string)
-					
+
 					if err := git.Add(repoDir, "CHANGELOG.md"); err != nil {
 						return err
 					}
-					
+
 					if err := git.Commit(repoDir, "docs(changelog): update CHANGELOG.md for v0.2.0"); err != nil {
 						return err
 					}
-					
+
 					cmd := command.New("git", "tag", "-a", "v0.2.0", "-m", "Release v0.2.0").Dir(repoDir)
 					result := cmd.Run()
 					if result.Error != nil {
 						return fmt.Errorf("failed to tag v0.2.0: %w", result.Error)
 					}
-					
+
 					return nil
 				},
 			},
@@ -281,34 +281,34 @@ func ConventionalCommitsScenario() *harness.Scenario {
 				Description: "Tests changelog prepending for multiple releases",
 				Func: func(ctx *harness.Context) error {
 					repoDir := ctx.Get("repo_dir").(string)
-					
+
 					// Add another commit
 					if err := fs.WriteString(filepath.Join(repoDir, "config.go"), "package main\n\ntype Config struct {\n\tPrefix string\n}"); err != nil {
 						return err
 					}
-					
+
 					if err := git.Add(repoDir, "config.go"); err != nil {
 						return err
 					}
-					
+
 					if err := git.Commit(repoDir, "feat(config): add configuration struct"); err != nil {
 						return err
 					}
-					
+
 					// Generate changelog for v0.3.0
 					cmd := command.New(ctx.GroveBinary, "release", "changelog", ".", "--version", "v0.3.0").Dir(repoDir)
 					result := cmd.Run()
-					
+
 					if result.Error != nil {
 						return fmt.Errorf("changelog generation for v0.3.0 failed: %w", result.Error)
 					}
-					
+
 					// Read and verify content
 					content, err := fs.ReadString(filepath.Join(repoDir, "CHANGELOG.md"))
 					if err != nil {
 						return fmt.Errorf("failed to read updated changelog: %w", err)
 					}
-					
+
 					// Verify both versions are present
 					if !strings.Contains(content, "## v0.3.0") {
 						return fmt.Errorf("changelog missing v0.3.0 section")
@@ -316,14 +316,14 @@ func ConventionalCommitsScenario() *harness.Scenario {
 					if !strings.Contains(content, "## v0.2.0") {
 						return fmt.Errorf("changelog missing v0.2.0 section")
 					}
-					
+
 					// Verify v0.3.0 comes before v0.2.0 (prepended)
 					idx1 := strings.Index(content, "## v0.3.0")
 					idx2 := strings.Index(content, "## v0.2.0")
 					if idx1 > idx2 {
 						return fmt.Errorf("v0.3.0 should be prepended before v0.2.0")
 					}
-					
+
 					return nil
 				},
 			},
@@ -333,19 +333,19 @@ func ConventionalCommitsScenario() *harness.Scenario {
 				Func: func(ctx *harness.Context) error {
 					repoDir := ctx.Get("repo_dir").(string)
 					hookPath := ctx.Get("hook_path").(string)
-					
+
 					cmd := command.New(ctx.GroveBinary, "setup", "git-hooks", "uninstall").Dir(repoDir)
 					result := cmd.Run()
-					
+
 					if result.Error != nil {
 						return fmt.Errorf("failed to uninstall hooks: %w", result.Error)
 					}
-					
+
 					// Verify hook was removed
 					if fs.Exists(hookPath) {
 						return fmt.Errorf("commit-msg hook still exists after uninstall")
 					}
-					
+
 					ctx.ShowCommandOutput("grove setup git-hooks uninstall", result.Stdout, result.Stderr)
 					return nil
 				},
@@ -355,15 +355,15 @@ func ConventionalCommitsScenario() *harness.Scenario {
 				Description: "Verifies hooks are no longer enforced",
 				Func: func(ctx *harness.Context) error {
 					repoDir := ctx.Get("repo_dir").(string)
-					
+
 					// Should be able to make non-conventional commit now
 					cmd := command.New("git", "commit", "--allow-empty", "-m", "This is not conventional but should work now").Dir(repoDir)
 					result := cmd.Run()
-					
+
 					if result.Error != nil {
 						return fmt.Errorf("commit should succeed after hook uninstall: %w", result.Error)
 					}
-					
+
 					return nil
 				},
 			},

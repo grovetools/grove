@@ -137,12 +137,12 @@ func (m *Manager) AddToPath(dir string) error {
 
 	// Ensure parent directory exists (for fish config)
 	parentDir := filepath.Dir(rcFile)
-	if err := os.MkdirAll(parentDir, 0755); err != nil {
+	if err := os.MkdirAll(parentDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", parentDir, err)
 	}
 
 	// Append to the rc file
-	f, err := os.OpenFile(rcFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(rcFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("failed to open %s: %w", rcFile, err)
 	}
