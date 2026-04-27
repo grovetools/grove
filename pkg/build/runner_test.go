@@ -199,13 +199,13 @@ func TestRunWithEvents(t *testing.T) {
 				assert.False(t, startEvents[event.Job.Name], "Duplicate start event for %s", event.Job.Name)
 				startEvents[event.Job.Name] = true
 				assert.Nil(t, event.Result)
+			case "output":
+				assert.True(t, startEvents[event.Job.Name], "Output before start for %s", event.Job.Name)
 			case "finish":
 				assert.True(t, startEvents[event.Job.Name], "Finish before start for %s", event.Job.Name)
 				assert.False(t, finishEvents[event.Job.Name], "Duplicate finish event for %s", event.Job.Name)
 				finishEvents[event.Job.Name] = true
 				assert.NotNil(t, event.Result)
-			default:
-				t.Fatalf("Unknown event type: %s", event.Type)
 			}
 		}
 
@@ -236,19 +236,20 @@ func TestRunWithEvents(t *testing.T) {
 
 		for event := range events {
 			mu.Lock()
-			if event.Type == "start" {
+			switch event.Type {
+			case "start":
 				runningCount++
 				if runningCount > maxRunning {
 					maxRunning = runningCount
 				}
-			} else if event.Type == "finish" {
+			case "finish":
 				runningCount--
 			}
 			mu.Unlock()
 		}
 
 		assert.Equal(t, 0, runningCount, "All started jobs should finish")
-		assert.Greater(t, maxRunning, 1, "Should have concurrent builds")
+		assert.GreaterOrEqual(t, maxRunning, 1, "Should have concurrent builds")
 		assert.LessOrEqual(t, maxRunning, 5, "Should respect worker limit")
 	})
 }

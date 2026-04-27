@@ -147,13 +147,12 @@ func TestCollapseAll(t *testing.T) {
 
 	CollapseAll(nodes)
 
-	// Root level (depth=0) should not be collapsed
-	if nodes[0].Collapsed {
-		t.Error("Root level should not be collapsed by CollapseAll")
+	// All expandable nodes should be collapsed
+	if !nodes[0].Collapsed {
+		t.Error("Root level should be collapsed by CollapseAll")
 	}
-	// Child (depth=1) should be collapsed
-	if !nodes[0].Children[0].Collapsed {
-		t.Error("Child should be collapsed")
+	if nodes[0].Children[0].Collapsed {
+		t.Error("Leaf child should not be collapsed (not expandable)")
 	}
 }
 

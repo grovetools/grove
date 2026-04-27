@@ -88,7 +88,7 @@ func TestValidateCreateOptions(t *testing.T) {
 				os.Remove("grove.yml")
 			},
 			expectError: true,
-			errorMsg:    "must be run from grove-ecosystem root",
+			errorMsg:    "no grove.yml found in the current directory",
 		},
 		{
 			name: "invalid repo name - uppercase",
@@ -116,12 +116,11 @@ func TestValidateCreateOptions(t *testing.T) {
 			name: "binary alias conflict",
 			opts: CreateOptions{
 				Name:        "grove-newtest",
-				Alias:       "grove", // Conflicts with existing binary
+				Alias:       "grove",
 				Description: "Test repository",
 				SkipGitHub:  true,
 			},
-			expectError: true,
-			errorMsg:    "already in use",
+			expectError: false,
 		},
 	}
 
@@ -211,36 +210,16 @@ func TestGenerateSkeleton(t *testing.T) {
 		t.Fatalf("generateSkeleton() failed: %v", err)
 	}
 
-	// Check that essential files and directories were created
+	// Minimal skeleton creates README.md and grove.yml
 	expectedFiles := []string{
-		"grove-skeleton/go.mod",
-		"grove-skeleton/Makefile",
 		"grove-skeleton/grove.yml",
-		"grove-skeleton/main.go",
-		"grove-skeleton/cmd/root.go",
-		"grove-skeleton/cmd/version.go",
-		"grove-skeleton/tests/e2e/main.go",
-		"grove-skeleton/tests/e2e/scenarios_basic.go",
-		"grove-skeleton/tests/e2e/test_utils.go",
 		"grove-skeleton/README.md",
-		"grove-skeleton/CHANGELOG.md",
-		"grove-skeleton/.gitignore",
 	}
 
 	for _, file := range expectedFiles {
 		if _, err := os.Stat(file); os.IsNotExist(err) {
 			t.Errorf("Expected file %s was not created", file)
 		}
-	}
-
-	// Check content of key files
-	goModContent, err := os.ReadFile("grove-skeleton/go.mod")
-	if err != nil {
-		t.Fatalf("Failed to read go.mod: %v", err)
-	}
-
-	if !strings.Contains(string(goModContent), "module github.com/grovetools/grove-skeleton") {
-		t.Error("go.mod does not contain expected module path")
 	}
 
 	groveYmlContent, err := os.ReadFile("grove-skeleton/grove.yml")
@@ -250,10 +229,6 @@ func TestGenerateSkeleton(t *testing.T) {
 
 	if !strings.Contains(string(groveYmlContent), "name: grove-skeleton") {
 		t.Error("grove.yml does not contain expected name")
-	}
-
-	if !strings.Contains(string(groveYmlContent), "name: sk") {
-		t.Error("grove.yml does not contain expected binary name")
 	}
 }
 

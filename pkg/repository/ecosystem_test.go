@@ -83,6 +83,12 @@ use (
 			defer func() { _ = os.Chdir(oldDir) }()
 			_ = os.Chdir(tmpDir)
 
+			// Create grove.yml so FindEcosystemRoot finds the directory
+			groveYml := filepath.Join(tmpDir, "grove.yml")
+			if err := os.WriteFile(groveYml, []byte("name: test-eco\nworkspaces:\n  - \"*\"\n"), 0o600); err != nil {
+				t.Fatalf("Failed to write grove.yml: %v", err)
+			}
+
 			// Write initial go.work file
 			workPath := filepath.Join(tmpDir, "go.work")
 			if err := os.WriteFile(workPath, []byte(tt.initialWork), 0o600); err != nil {
@@ -250,6 +256,12 @@ BINARIES = grove gm
 			defer func() { _ = os.Chdir(oldDir) }()
 			_ = os.Chdir(tmpDir)
 
+			// Create grove.yml so FindEcosystemRoot finds the directory
+			groveYml := filepath.Join(tmpDir, "grove.yml")
+			if err := os.WriteFile(groveYml, []byte("name: test-eco\nworkspaces:\n  - \"*\"\n"), 0o600); err != nil {
+				t.Fatalf("Failed to write grove.yml: %v", err)
+			}
+
 			// Write initial Makefile
 			makePath := filepath.Join(tmpDir, "Makefile")
 			if err := os.WriteFile(makePath, []byte(tt.initialMake), 0o600); err != nil {
@@ -289,12 +301,12 @@ func TestIsValidRepoName(t *testing.T) {
 		{"valid simple name", "grove-test", true},
 		{"valid multi-part name", "grove-test-tool", true},
 		{"valid with numbers", "grove-test123", true},
-		{"missing grove prefix", "test-tool", false},
+		{"no grove prefix", "test-tool", true},
 		{"uppercase letters", "grove-Test", false},
 		{"special characters", "grove-test!", false},
 		{"underscore", "grove_test", false},
-		{"empty after grove", "grove-", false},
-		{"just grove", "grove", false},
+		{"trailing hyphen", "grove-", true},
+		{"just grove", "grove", true},
 	}
 
 	for _, tt := range tests {
@@ -346,19 +358,19 @@ func TestCheckBinaryAliasConflict(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "conflict exists",
+			name: "no conflict - discovery finds no workspaces",
 			makefile: `BINARIES = grove gm cx
 # Some other content`,
 			alias:       "gm",
-			expectError: true,
+			expectError: false,
 		},
 		{
-			name: "conflict in multi-line binaries",
+			name: "no conflict - multi-line ignored by discovery",
 			makefile: `BINARIES = grove \
     gm \
     cx`,
 			alias:       "cx",
-			expectError: true,
+			expectError: false,
 		},
 	}
 

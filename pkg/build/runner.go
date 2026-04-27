@@ -61,8 +61,8 @@ func RunWithOptions(ctx context.Context, jobs []BuildJob, numWorkers int, contin
 	resultsChan := make(chan BuildResult, len(jobs))
 
 	// If we don't continue on error, we need a cancellable context.
+	// cancel() is called in the cleanup goroutine after all workers complete.
 	runCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	var once sync.Once
 
 	var wg sync.WaitGroup
@@ -118,6 +118,7 @@ func RunWithOptions(ctx context.Context, jobs []BuildJob, numWorkers int, contin
 	// Close the results channel once all workers are done.
 	go func() {
 		wg.Wait()
+		cancel()
 		close(resultsChan)
 	}()
 
@@ -163,8 +164,8 @@ func RunWithEventsAndOptions(ctx context.Context, jobs []BuildJob, numWorkers in
 	eventsChan := make(chan BuildEvent, len(jobs)*2) // *2 for start and finish events
 
 	// If we don't continue on error, we need a cancellable context.
+	// cancel() is called in the cleanup goroutine after all workers complete.
 	runCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	var once sync.Once
 
 	var wg sync.WaitGroup
@@ -287,6 +288,7 @@ func RunWithEventsAndOptions(ctx context.Context, jobs []BuildJob, numWorkers in
 	// Close the events channel once all workers are done.
 	go func() {
 		wg.Wait()
+		cancel()
 		close(eventsChan)
 	}()
 
