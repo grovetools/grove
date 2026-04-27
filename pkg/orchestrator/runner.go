@@ -48,7 +48,7 @@ func (o *Orchestrator) reportTask(ctx context.Context, job TaskJob, exitCode int
 	if o.DaemonClient == nil || !o.DaemonClient.IsRunning() {
 		return
 	}
-	_ = o.DaemonClient.ReportTask(ctx, job.Name, o.Options.Verb, exitCode, commitHash, durationMs)
+	_ = o.DaemonClient.ReportTask(ctx, job.Path, o.Options.Verb, exitCode, commitHash, durationMs)
 }
 
 // RunWithResults runs tasks and returns all results. Convenience wrapper for non-TUI callers.
