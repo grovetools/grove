@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -198,7 +199,7 @@ func (o *Orchestrator) executeJobs(ctx context.Context, jobs []TaskJob, numWorke
 					cmd = exec.CommandContext(runCtx, job.Command[0], job.Command[1:]...) //nolint:gosec // commands from trusted build config
 				}
 				cmd.Dir = job.Path
-				cmd.Env = env
+				cmd.Env = prependJobBinDir(env, job.Path)
 
 				stdoutPipe, _ := cmd.StdoutPipe()
 				stderrPipe, _ := cmd.StderrPipe()
@@ -285,6 +286,24 @@ func buildEnv(opts *RunOptions) []string {
 	}
 
 	return env
+}
+
+// prependJobBinDir returns a copy of env with the job's own bin/ directory
+// prepended to PATH so that project-local binaries (e.g. tend, the project
+// binary under test) are found before identically-named binaries from other
+// workspaces that may also appear in ExtraPathDirs.
+func prependJobBinDir(env []string, jobPath string) []string {
+	binDir := filepath.Join(jobPath, "bin")
+	out := make([]string, len(env))
+	copy(out, env)
+	for i, e := range out {
+		if strings.HasPrefix(e, "PATH=") {
+			out[i] = "PATH=" + binDir + string(os.PathListSeparator) + e[5:]
+			return out
+		}
+	}
+	out = append(out, "PATH="+binDir)
+	return out
 }
 
 func jobPaths(jobs []TaskJob) []string {
