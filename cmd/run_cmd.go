@@ -61,14 +61,17 @@ Use -- to separate grove run flags from the command and its arguments.`,
 	cmd.Flags().Bool("fail-fast", false, "Stop immediately when one task fails")
 	cmd.Flags().Bool("dry-run", false, "Show what would run without executing")
 	cmd.Flags().BoolP("interactive", "i", false, "Keep TUI open after completion")
+	cmd.Flags().String("verb", "", "Override the verb name reported to the daemon for status tracking")
 
 	return cmd
 }
 
 func runCommand(cmd *cobra.Command, args []string) error {
 	if runParallel {
-		// Parallel mode: use the orchestrator with the raw command
-		verb := strings.Join(args, " ")
+		verb, _ := cmd.Flags().GetString("verb")
+		if verb == "" {
+			verb = strings.Join(args, " ")
+		}
 		return executeTaskWithCommand(cmd, verb, args)
 	}
 

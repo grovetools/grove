@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,11 +45,19 @@ func (o *Orchestrator) isCacheHit(job TaskJob, states map[string]WorkspaceState)
 	return tr.ExitCode == 0 && tr.CommitHash == s.CommitHash
 }
 
-func (o *Orchestrator) reportTask(ctx context.Context, job TaskJob, exitCode int, commitHash string, durationMs int64) {
-	if o.DaemonClient == nil || !o.DaemonClient.IsRunning() {
-		return
+func (o *Orchestrator) isCacheHitForVerb(job TaskJob, verb string, states map[string]WorkspaceState) bool {
+	if o.Options.NoCache {
+		return false
 	}
-	_ = o.DaemonClient.ReportTask(ctx, job.Path, o.Options.Verb, exitCode, commitHash, durationMs)
+	s, ok := states[job.Name]
+	if !ok || s.IsDirty || s.TaskResults == nil {
+		return false
+	}
+	tr, ok := s.TaskResults[verb]
+	if !ok || tr == nil {
+		return false
+	}
+	return tr.ExitCode == 0 && tr.CommitHash == s.CommitHash
 }
 
 // RunWithResults runs tasks and returns all results. Convenience wrapper for non-TUI callers.
@@ -162,11 +171,23 @@ func (o *Orchestrator) runWaves(ctx context.Context, jobs []TaskJob, states map[
 	return eventsChan
 }
 
+// pipelineVerbs returns the list of verbs to execute for a job.
+// If Pipeline is set, returns it; otherwise returns a single-element slice of Verb.
+func (o *Orchestrator) pipelineVerbs() []string {
+	if len(o.Options.Pipeline) > 0 {
+		return o.Options.Pipeline
+	}
+	return []string{o.Options.Verb}
+}
+
 func (o *Orchestrator) executeJobs(ctx context.Context, jobs []TaskJob, numWorkers int, env []string, states map[string]WorkspaceState, eventsChan chan<- TaskEvent) {
 	jobsChan := make(chan TaskJob, len(jobs))
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var once sync.Once
+
+	verbs := o.pipelineVerbs()
+	isPipeline := len(o.Options.Pipeline) > 0
 
 	var wg sync.WaitGroup
 	for i := 0; i < numWorkers; i++ {
@@ -178,96 +199,19 @@ func (o *Orchestrator) executeJobs(ctx context.Context, jobs []TaskJob, numWorke
 				case <-runCtx.Done():
 					eventsChan <- TaskEvent{
 						Job:  job,
+						Verb: verbs[0],
 						Type: "finish",
 						Result: &TaskResult{
-							Job: job,
-							Err: runCtx.Err(),
+							Job:  job,
+							Verb: verbs[0],
+							Err:  runCtx.Err(),
 						},
 					}
 					continue
 				default:
 				}
 
-				eventsChan <- TaskEvent{Job: job, Type: "start"}
-				start := time.Now()
-
-				var cmd *exec.Cmd
-				if len(job.Command) == 0 {
-					cmd = exec.CommandContext(runCtx, "make", o.Options.Verb)
-				} else {
-					cmd = exec.CommandContext(runCtx, job.Command[0], job.Command[1:]...) //nolint:gosec // commands from trusted build config
-				}
-				cmd.Dir = job.Path
-				cmd.Env = prependJobBinDir(env, job.Path)
-
-				stdoutPipe, _ := cmd.StdoutPipe()
-				cmd.Stderr = cmd.Stdout
-
-				var outputBuf bytes.Buffer
-				scanner := bufio.NewScanner(stdoutPipe)
-
-				var streamWg sync.WaitGroup
-				streamWg.Add(1)
-				go func() {
-					defer streamWg.Done()
-					for scanner.Scan() {
-						line := scanner.Text()
-						outputBuf.WriteString(line + "\n")
-						eventsChan <- TaskEvent{
-							Job:        job,
-							Type:       "output",
-							OutputLine: line,
-						}
-					}
-				}()
-
-				err := cmd.Start()
-				if err != nil {
-					eventsChan <- TaskEvent{
-						Job:  job,
-						Type: "finish",
-						Result: &TaskResult{
-							Job:      job,
-							Err:      err,
-							Duration: time.Since(start),
-						},
-					}
-					if o.Options.FailFast {
-						once.Do(cancel)
-					}
-					continue
-				}
-
-				streamWg.Wait()
-				err = cmd.Wait()
-				duration := time.Since(start)
-
-				skipped := false
-				if err != nil && isMakeTargetMissing(job.Command, outputBuf.String()) {
-					err = nil
-					skipped = true
-				}
-
-				result := TaskResult{
-					Job:      job,
-					Output:   outputBuf.Bytes(),
-					Err:      err,
-					Duration: duration,
-					Skipped:  skipped,
-				}
-				eventsChan <- TaskEvent{Job: job, Type: "finish", Result: &result}
-
-				exitCode := 0
-				if err != nil {
-					exitCode = 1
-					if o.Options.FailFast {
-						once.Do(cancel)
-					}
-				}
-
-				if s, ok := states[job.Name]; ok {
-					o.reportTask(runCtx, job, exitCode, s.CommitHash, duration.Milliseconds())
-				}
+				o.executeJobVerbs(runCtx, job, verbs, isPipeline, env, states, eventsChan, &once, cancel)
 			}
 		}()
 	}
@@ -277,6 +221,149 @@ func (o *Orchestrator) executeJobs(ctx context.Context, jobs []TaskJob, numWorke
 	}
 	close(jobsChan)
 	wg.Wait()
+}
+
+func (o *Orchestrator) executeJobVerbs(ctx context.Context, job TaskJob, verbs []string, isPipeline bool, env []string, states map[string]WorkspaceState, eventsChan chan<- TaskEvent, once *sync.Once, cancel context.CancelFunc) {
+	for vi, verb := range verbs {
+		select {
+		case <-ctx.Done():
+			for _, remaining := range verbs[vi:] {
+				eventsChan <- TaskEvent{
+					Job: job, Verb: remaining, Type: "finish",
+					Result: &TaskResult{Job: job, Verb: remaining, Err: ctx.Err()},
+				}
+			}
+			return
+		default:
+		}
+
+		// Per-verb cache check in pipeline mode
+		if isPipeline && o.isCacheHitForVerb(job, verb, states) {
+			eventsChan <- TaskEvent{
+				Job: job, Verb: verb, Type: "cached",
+				Result: &TaskResult{Job: job, Verb: verb, Cached: true},
+			}
+			continue
+		}
+
+		// Resolve command for this verb
+		var command []string
+		if isPipeline {
+			cfg := o.Configs[job.Name]
+			command = ResolveCommand(cfg, verb)
+		} else {
+			command = job.Command
+		}
+
+		eventsChan <- TaskEvent{Job: job, Verb: verb, Type: "start"}
+		start := time.Now()
+
+		var cmd *exec.Cmd
+		if len(command) == 0 {
+			cmd = exec.CommandContext(ctx, "make", verb)
+		} else {
+			cmd = exec.CommandContext(ctx, command[0], command[1:]...) //nolint:gosec // commands from trusted build config
+		}
+		cmd.Dir = job.Path
+		cmd.Env = prependJobBinDir(env, job.Path)
+
+		stdoutPipe, _ := cmd.StdoutPipe()
+		cmd.Stderr = cmd.Stdout
+
+		var outputBuf bytes.Buffer
+		scanner := bufio.NewScanner(stdoutPipe)
+
+		var streamWg sync.WaitGroup
+		streamWg.Add(1)
+		go func() {
+			defer streamWg.Done()
+			for scanner.Scan() {
+				line := scanner.Text()
+				outputBuf.WriteString(line + "\n")
+				eventsChan <- TaskEvent{
+					Job:        job,
+					Verb:       verb,
+					Type:       "output",
+					OutputLine: line,
+				}
+			}
+		}()
+
+		err := cmd.Start()
+		if err != nil {
+			eventsChan <- TaskEvent{
+				Job: job, Verb: verb, Type: "finish",
+				Result: &TaskResult{Job: job, Verb: verb, Err: err, Duration: time.Since(start)},
+			}
+			if o.Options.FailFast {
+				once.Do(cancel)
+			}
+			if isPipeline {
+				o.emitSkippedVerbs(job, verbs[vi+1:], verb, eventsChan)
+			}
+			return
+		}
+
+		streamWg.Wait()
+		err = cmd.Wait()
+		duration := time.Since(start)
+
+		skipped := false
+		if err != nil && isMakeTargetMissing(command, outputBuf.String()) {
+			err = nil
+			skipped = true
+		}
+
+		result := TaskResult{
+			Job:      job,
+			Verb:     verb,
+			Output:   outputBuf.Bytes(),
+			Err:      err,
+			Duration: duration,
+			Skipped:  skipped,
+		}
+		eventsChan <- TaskEvent{Job: job, Verb: verb, Type: "finish", Result: &result}
+
+		exitCode := 0
+		errSummary := ""
+		if err != nil {
+			exitCode = 1
+			errSummary = extractErrorSummary(outputBuf.String())
+			if o.Options.FailFast {
+				once.Do(cancel)
+			}
+		}
+
+		if s, ok := states[job.Name]; ok {
+			o.reportTaskVerb(ctx, job, verb, exitCode, s.CommitHash, duration.Milliseconds(), errSummary)
+		}
+
+		if err != nil && isPipeline {
+			o.emitSkippedVerbs(job, verbs[vi+1:], verb, eventsChan)
+			return
+		}
+	}
+}
+
+func (o *Orchestrator) emitSkippedVerbs(job TaskJob, remaining []string, failedVerb string, eventsChan chan<- TaskEvent) {
+	for _, v := range remaining {
+		eventsChan <- TaskEvent{
+			Job: job, Verb: v, Type: "finish",
+			Result: &TaskResult{
+				Job:     job,
+				Verb:    v,
+				Skipped: true,
+				Err:     fmt.Errorf("skipped: %s failed", failedVerb),
+			},
+		}
+	}
+}
+
+func (o *Orchestrator) reportTaskVerb(ctx context.Context, job TaskJob, verb string, exitCode int, commitHash string, durationMs int64, errorSummary string) {
+	if o.DaemonClient == nil || !o.DaemonClient.IsRunning() {
+		return
+	}
+	_ = o.DaemonClient.ReportTask(ctx, job.Path, verb, exitCode, commitHash, durationMs, errorSummary)
 }
 
 func isMakeTargetMissing(command []string, output string) bool {
@@ -322,6 +409,28 @@ func prependJobBinDir(env []string, jobPath string) []string {
 	}
 	out = append(out, "PATH="+binDir)
 	return out
+}
+
+func extractErrorSummary(output string) string {
+	const maxLen = 200
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return ""
+	}
+	lines := strings.Split(output, "\n")
+	// Take last few non-empty lines
+	var tail []string
+	for i := len(lines) - 1; i >= 0 && len(tail) < 5; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line != "" {
+			tail = append([]string{line}, tail...)
+		}
+	}
+	summary := strings.Join(tail, "\n")
+	if len(summary) > maxLen {
+		summary = summary[len(summary)-maxLen:]
+	}
+	return summary
 }
 
 func jobPaths(jobs []TaskJob) []string {

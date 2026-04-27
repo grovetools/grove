@@ -49,7 +49,7 @@ func newTaskReportCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			return client.ReportTask(ctx, workspace, verb, exitCode, commitHash, durationMs)
+			return client.ReportTask(ctx, workspace, verb, exitCode, commitHash, durationMs, "")
 		},
 	}
 

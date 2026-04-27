@@ -98,7 +98,7 @@ func newTestSmartCmd() *cobra.Command {
 			if client.IsRunning() {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				_ = client.ReportTask(ctx, workspace, "test-smart", exitCode, commitHash, 0)
+				_ = client.ReportTask(ctx, workspace, "test-smart", exitCode, commitHash, 0, "")
 			}
 
 			os.Exit(exitCode)

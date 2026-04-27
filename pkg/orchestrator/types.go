@@ -11,6 +11,7 @@ const (
 
 type OrchestratorOptions struct {
 	Verb         string
+	Pipeline     []string
 	Strategy     ConcurrencyStrategy
 	AffectedOnly bool
 	NoCache      bool
@@ -27,6 +28,7 @@ type TaskJob struct {
 
 type TaskResult struct {
 	Job      TaskJob
+	Verb     string
 	Output   []byte
 	Err      error
 	Duration time.Duration
@@ -36,6 +38,7 @@ type TaskResult struct {
 
 type TaskEvent struct {
 	Job        TaskJob
+	Verb       string
 	Type       string // "start", "finish", "output", "cached"
 	Result     *TaskResult
 	OutputLine string
