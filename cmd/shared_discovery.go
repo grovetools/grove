@@ -70,22 +70,11 @@ func DiscoverTargetProjects() ([]*workspace.WorkspaceNode, string, error) {
 		}
 
 	case workspace.KindEcosystemWorktreeSubProject, workspace.KindEcosystemWorktreeSubProjectWorktree:
-		// We're in a sub-project within an EcosystemWorktree
-		// Find the parent EcosystemWorktree and use it as scope
-		scopeRoot = currentNode.ParentEcosystemPath
-		scopeRootLower := strings.ToLower(scopeRoot)
-
-		// Don't include the ecosystem worktree itself - it's a meta-project
-
-		// Filter to include both regular sub-projects and linked worktrees
-		for _, p := range allProjects {
-			parentPathLower := strings.ToLower(p.ParentEcosystemPath)
-			if parentPathLower == scopeRootLower &&
-				(p.Kind == workspace.KindEcosystemWorktreeSubProject ||
-					p.Kind == workspace.KindEcosystemWorktreeSubProjectWorktree) {
-				filteredProjects = append(filteredProjects, p)
-			}
-		}
+		// We're in a sub-project within an EcosystemWorktree.
+		// Scope the command to only this project.
+		// To operate on all projects, run the command from the worktree root.
+		filteredProjects = []*workspace.WorkspaceNode{currentNode}
+		scopeRoot = currentNode.Path
 
 	case workspace.KindEcosystemRoot:
 		// We're in an ecosystem root, only include its direct children (not the root itself)
