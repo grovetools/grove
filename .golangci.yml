@@ -27,7 +27,8 @@ linters-settings:
     # This matches the gopls configuration where we disabled ST1000
 
 run:
-  allow-parallel-runners: true  timeout: 5m
+  allow-parallel-runners: true
+  timeout: 5m
   build-tags:
     - integration
 
