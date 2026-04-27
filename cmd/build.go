@@ -86,6 +86,7 @@ func (p projectStatus) Description() string { return p.status }
 func (p projectStatus) FilterValue() string { return p.name }
 
 type tuiModel struct {
+	verb          string
 	projects      []projectStatus
 	orchestrator  *orch.Orchestrator
 	jobs          []orch.TaskJob
@@ -100,6 +101,7 @@ type tuiModel struct {
 	interactive   bool
 	successCount  int
 	failCount     int
+	skipCount     int
 	runningCount  int
 	eventsChan    <-chan orch.TaskEvent
 	jobIndexMap   map[string]int
@@ -111,7 +113,7 @@ type buildsStartedMsg struct {
 	jobIndexMap map[string]int
 }
 
-func runTuiBuild(o *orch.Orchestrator, jobs []orch.TaskJob) error {
+func runTuiBuild(o *orch.Orchestrator, verb string, jobs []orch.TaskJob) error {
 	var projects []projectStatus
 	for _, job := range jobs {
 		projects = append(projects, projectStatus{name: job.Name, status: "pending"})
@@ -137,6 +139,7 @@ func runTuiBuild(o *orch.Orchestrator, jobs []orch.TaskJob) error {
 	logViewport.SetContent("Waiting for build output...")
 
 	m := tuiModel{
+		verb:         verb,
 		projects:     projects,
 		orchestrator: o,
 		jobs:         jobs,
@@ -157,13 +160,14 @@ func runTuiBuild(o *orch.Orchestrator, jobs []orch.TaskJob) error {
 	if fm, ok := finalModel.(tuiModel); ok && fm.failCount > 0 {
 		if !buildInteractive {
 			pretty := logging.NewPrettyLogger()
+			label := strings.ToUpper(fm.verb[:1]) + fm.verb[1:]
 
 			pretty.Blank()
 			buildUlog.Info("Build summary separator").
 				Pretty(strings.Repeat("=", 60)).
 				PrettyOnly().
 				Emit()
-			pretty.ErrorPretty(fmt.Sprintf("Build failed: %d/%d projects failed", fm.failCount, len(fm.projects)), nil)
+			pretty.ErrorPretty(fmt.Sprintf("%s failed: %d/%d projects failed", label, fm.failCount, len(fm.projects)), nil)
 			buildUlog.Info("Build summary separator").
 				Pretty(strings.Repeat("=", 60)).
 				PrettyOnly().
@@ -182,7 +186,7 @@ func runTuiBuild(o *orch.Orchestrator, jobs []orch.TaskJob) error {
 				}
 			}
 		}
-		return fmt.Errorf("%d builds failed", fm.failCount)
+		return fmt.Errorf("%d %s tasks failed", fm.failCount, fm.verb)
 	}
 
 	return nil
@@ -307,7 +311,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				items[index] = m.projects[index]
 				cmds = append(cmds, m.list.SetItems(items))
 
-				if m.successCount+m.failCount == len(m.projects) {
+				if m.successCount+m.failCount+m.skipCount == len(m.projects) {
 					m.finished = true
 					if !m.interactive {
 						cmds = append(cmds, tea.Quit)
@@ -321,7 +325,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.projects[index].duration = result.Duration
 				m.projects[index].output = string(result.Output)
 				m.runningCount--
-				if result.Err != nil {
+				if result.Skipped {
+					m.projects[index].status = "skipped"
+					m.skipCount++
+				} else if result.Err != nil {
 					m.projects[index].status = "failed"
 					m.failCount++
 				} else {
@@ -332,7 +339,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				items[index] = m.projects[index]
 				cmds = append(cmds, m.list.SetItems(items))
 
-				if m.successCount+m.failCount == len(m.projects) {
+				if m.successCount+m.failCount+m.skipCount == len(m.projects) {
 					m.finished = true
 					if !m.interactive {
 						cmds = append(cmds, tea.Quit)
@@ -382,13 +389,14 @@ func (m tuiModel) View() string {
 		interactive:   m.interactive,
 	})
 
-	header := fmt.Sprintf("Building %d projects... Running: %d, Success: %d, Failed: %d",
-		len(m.projects), m.runningCount, m.successCount, m.failCount)
+	label := strings.ToUpper(m.verb[:1]) + m.verb[1:]
+	header := fmt.Sprintf("Running %s on %d projects... Running: %d, Success: %d, Skipped: %d, Failed: %d",
+		m.verb, len(m.projects), m.runningCount, m.successCount, m.skipCount, m.failCount)
 	if m.finished {
 		if m.interactive {
-			header = fmt.Sprintf("Build finished! Success: %d, Failed: %d (Press 'q' to quit, 'enter' to view logs)", m.successCount, m.failCount)
+			header = fmt.Sprintf("%s finished! Success: %d, Skipped: %d, Failed: %d (Press 'q' to quit, 'enter' to view logs)", label, m.successCount, m.skipCount, m.failCount)
 		} else {
-			header = fmt.Sprintf("Build finished! Success: %d, Failed: %d", m.successCount, m.failCount)
+			header = fmt.Sprintf("%s finished! Success: %d, Skipped: %d, Failed: %d", label, m.successCount, m.skipCount, m.failCount)
 		}
 	}
 
@@ -459,6 +467,9 @@ func (d projectDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	case "cached":
 		statusIcon = theme.DefaultTheme.Success.Render(theme.IconSuccess)
 		durationStr = theme.DefaultTheme.Muted.Render("(cached)")
+	case "skipped":
+		statusIcon = theme.DefaultTheme.Warning.Render("⊘")
+		durationStr = theme.DefaultTheme.Warning.Render("(skipped)")
 	case "failed":
 		statusIcon = theme.DefaultTheme.Error.Render(theme.IconError)
 		durationStr = theme.DefaultTheme.Muted.Render(fmt.Sprintf("(%v)", p.duration.Round(time.Millisecond)))

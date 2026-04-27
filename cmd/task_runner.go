@@ -15,6 +15,7 @@ import (
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	orch "github.com/grovetools/grove/pkg/orchestrator"
 
@@ -115,6 +116,7 @@ func executeTaskWithCommand(cmd *cobra.Command, verb string, rawCommand []string
 			AffectedOnly: affected,
 			NoCache:      noCache,
 			Jobs:         jobs,
+			FailFast:     failFast,
 		},
 		RunOpts:       runOpts,
 		StateProvider: stateProvider,
@@ -125,6 +127,10 @@ func executeTaskWithCommand(cmd *cobra.Command, verb string, rawCommand []string
 	buildFailFast = failFast
 	buildInteractive = interactive
 	buildJobs = jobs
+
+	if !term.IsTerminal(int(os.Stdout.Fd())) {
+		verbose = true
+	}
 
 	if dryRun {
 		return runTaskDryRun(opts, verb, taskJobs, waves, configMap, hasWaves)
@@ -224,6 +230,7 @@ func executeTask(cmd *cobra.Command, verb string, strategy orch.ConcurrencyStrat
 			AffectedOnly: affected,
 			NoCache:      noCache,
 			Jobs:         jobs,
+			FailFast:     failFast,
 		},
 		RunOpts:       runOpts,
 		StateProvider: stateProvider,
@@ -235,6 +242,10 @@ func executeTask(cmd *cobra.Command, verb string, strategy orch.ConcurrencyStrat
 	buildFailFast = failFast
 	buildInteractive = interactive
 	buildJobs = jobs
+
+	if !term.IsTerminal(int(os.Stdout.Fd())) {
+		verbose = true
+	}
 
 	if dryRun {
 		return runTaskDryRun(opts, verb, taskJobs, waves, configMap, hasWaves)
@@ -337,6 +348,7 @@ func runJSONTaskWaves(o *orch.Orchestrator, verb string, waves [][]orch.TaskJob)
 		Path     string `json:"path"`
 		Wave     int    `json:"wave"`
 		Success  bool   `json:"success"`
+		Skipped  bool   `json:"skipped,omitempty"`
 		Duration string `json:"duration"`
 		Error    string `json:"error,omitempty"`
 		Output   string `json:"output,omitempty"`
@@ -344,7 +356,7 @@ func runJSONTaskWaves(o *orch.Orchestrator, verb string, waves [][]orch.TaskJob)
 	}
 
 	var results []JSONResult
-	var successCount, failCount int
+	var successCount, failCount, skipCount int
 
 	for waveIdx, waveJobs := range waves {
 		ctx := context.Background()
@@ -366,7 +378,11 @@ func runJSONTaskWaves(o *orch.Orchestrator, verb string, waves [][]orch.TaskJob)
 				Cached:   r.Cached,
 			}
 
-			if r.Err != nil {
+			if r.Skipped {
+				skipCount++
+				jr.Skipped = true
+				jr.Success = true
+			} else if r.Err != nil {
 				failCount++
 				jr.Success = false
 				jr.Error = r.Err.Error()
@@ -413,7 +429,7 @@ func outputTaskJSONResults[T any](results []T, verb string, successCount, failCo
 }
 
 func runVerboseTaskWaves(o *orch.Orchestrator, verb string, waves [][]orch.TaskJob) error {
-	var successCount, failCount int
+	var successCount, failCount, skipCount int
 	totalJobs := 0
 	for _, wave := range waves {
 		totalJobs += len(wave)
@@ -466,7 +482,10 @@ func runVerboseTaskWaves(o *orch.Orchestrator, verb string, waves [][]orch.TaskJ
 					os.Stdout.Write(result.Output)
 				}
 
-				if result.Err != nil {
+				if result.Skipped {
+					skipCount++
+					pretty.Status("warning", fmt.Sprintf("Skipped (%v)", result.Duration.Round(time.Millisecond)))
+				} else if result.Err != nil {
 					failCount++
 					pretty.Status("error", fmt.Sprintf("Failed (%v)", result.Duration.Round(time.Millisecond)))
 					if result.Err.Error() != "exit status 1" && result.Err.Error() != "exit status 2" {
@@ -475,7 +494,7 @@ func runVerboseTaskWaves(o *orch.Orchestrator, verb string, waves [][]orch.TaskJ
 					if buildFailFast {
 						pretty.Blank()
 						pretty.Divider()
-						pretty.InfoPretty(fmt.Sprintf("%s stopped (fail-fast). Success: %d, Failed: %d", verb, successCount, failCount))
+						pretty.InfoPretty(fmt.Sprintf("%s stopped (fail-fast). Success: %d, Skipped: %d, Failed: %d", verb, successCount, skipCount, failCount))
 						return fmt.Errorf("%d %s tasks failed", failCount, verb)
 					}
 				} else {
@@ -489,13 +508,13 @@ func runVerboseTaskWaves(o *orch.Orchestrator, verb string, waves [][]orch.TaskJ
 	pretty.Blank()
 	pretty.Divider()
 	label := strings.ToUpper(verb[:1]) + verb[1:]
-	pretty.InfoPretty(fmt.Sprintf("%s finished. Success: %d, Failed: %d", label, successCount, failCount))
+	pretty.InfoPretty(fmt.Sprintf("%s finished. Success: %d, Skipped: %d, Failed: %d", label, successCount, skipCount, failCount))
 	if failCount > 0 {
 		return fmt.Errorf("%d %s tasks failed", failCount, verb)
 	}
 	return nil
 }
 
-func runTuiTask(o *orch.Orchestrator, _ string, jobs []orch.TaskJob) error {
-	return runTuiBuild(o, jobs)
+func runTuiTask(o *orch.Orchestrator, verb string, jobs []orch.TaskJob) error {
+	return runTuiBuild(o, verb, jobs)
 }

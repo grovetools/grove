@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -202,11 +201,10 @@ func (o *Orchestrator) executeJobs(ctx context.Context, jobs []TaskJob, numWorke
 				cmd.Env = prependJobBinDir(env, job.Path)
 
 				stdoutPipe, _ := cmd.StdoutPipe()
-				stderrPipe, _ := cmd.StderrPipe()
+				cmd.Stderr = cmd.Stdout
 
 				var outputBuf bytes.Buffer
-				multiReader := io.MultiReader(stdoutPipe, stderrPipe)
-				scanner := bufio.NewScanner(multiReader)
+				scanner := bufio.NewScanner(stdoutPipe)
 
 				var streamWg sync.WaitGroup
 				streamWg.Add(1)
@@ -234,7 +232,9 @@ func (o *Orchestrator) executeJobs(ctx context.Context, jobs []TaskJob, numWorke
 							Duration: time.Since(start),
 						},
 					}
-					once.Do(cancel)
+					if o.Options.FailFast {
+						once.Do(cancel)
+					}
 					continue
 				}
 
@@ -242,18 +242,27 @@ func (o *Orchestrator) executeJobs(ctx context.Context, jobs []TaskJob, numWorke
 				err = cmd.Wait()
 				duration := time.Since(start)
 
+				skipped := false
+				if err != nil && isMakeTargetMissing(job.Command, outputBuf.String()) {
+					err = nil
+					skipped = true
+				}
+
 				result := TaskResult{
 					Job:      job,
 					Output:   outputBuf.Bytes(),
 					Err:      err,
 					Duration: duration,
+					Skipped:  skipped,
 				}
 				eventsChan <- TaskEvent{Job: job, Type: "finish", Result: &result}
 
 				exitCode := 0
 				if err != nil {
 					exitCode = 1
-					once.Do(cancel)
+					if o.Options.FailFast {
+						once.Do(cancel)
+					}
 				}
 
 				if s, ok := states[job.Name]; ok {
@@ -268,6 +277,15 @@ func (o *Orchestrator) executeJobs(ctx context.Context, jobs []TaskJob, numWorke
 	}
 	close(jobsChan)
 	wg.Wait()
+}
+
+func isMakeTargetMissing(command []string, output string) bool {
+	isMake := len(command) == 0 || command[0] == "make"
+	if !isMake {
+		return false
+	}
+	return strings.Contains(output, "No rule to make target") ||
+		strings.Contains(output, "no rule to make target")
 }
 
 func buildEnv(opts *RunOptions) []string {

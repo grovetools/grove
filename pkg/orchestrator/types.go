@@ -16,6 +16,7 @@ type OrchestratorOptions struct {
 	NoCache      bool
 	Jobs         int
 	JSONOutput   bool
+	FailFast     bool
 }
 
 type TaskJob struct {
@@ -30,6 +31,7 @@ type TaskResult struct {
 	Err      error
 	Duration time.Duration
 	Cached   bool
+	Skipped  bool
 }
 
 type TaskEvent struct {

@@ -47,8 +47,9 @@ Use -- to separate grove run flags from the command and its arguments.`,
 
   # Parallel with affected detection
   grove run -p --affected -- make test-e2e`,
-		Args: cobra.MinimumNArgs(1),
-		RunE: runCommand,
+		Args:         cobra.MinimumNArgs(1),
+		RunE:         runCommand,
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().BoolVarP(&runParallel, "parallel", "p", false, "Run in parallel with TUI (uses the orchestrator engine)")
