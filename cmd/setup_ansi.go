@@ -15,7 +15,7 @@ import (
 // renderNavPreview renders a preview of the ecosystem structure in nav
 // Shows just Workspace and Path columns with proper alignment
 // The ecosystemPath and optional newProjectName are used to generate the preview
-func renderNavPreview(ecosystemPath string, newProjectName string, width int) string {
+func renderNavPreview(ecosystemPath, newProjectName string, width int) string {
 	t := theme.DefaultTheme
 
 	// Resolve root info from path

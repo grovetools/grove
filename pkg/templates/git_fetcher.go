@@ -52,7 +52,7 @@ func (f *GitFetcher) Fetch(url string) (string, error) {
 }
 
 // fetchWithGH tries to clone using gh CLI
-func (f *GitFetcher) fetchWithGH(repo string, cloneDir string) error {
+func (f *GitFetcher) fetchWithGH(repo, cloneDir string) error {
 	cmd := exec.Command("gh", "repo", "clone", repo, cloneDir, "--", "--depth", "1")
 	output, err := cmd.CombinedOutput()
 	if err != nil {

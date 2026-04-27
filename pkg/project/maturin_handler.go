@@ -141,7 +141,7 @@ func (h *MaturinHandler) GetVersion(workspacePath string) (string, error) {
 	return "", fmt.Errorf("version not found in pyproject.toml")
 }
 
-func (h *MaturinHandler) SetVersion(workspacePath string, version string) error {
+func (h *MaturinHandler) SetVersion(workspacePath, version string) error {
 	pyprojectPath := filepath.Join(workspacePath, "pyproject.toml")
 
 	data, err := os.ReadFile(pyprojectPath)

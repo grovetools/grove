@@ -60,7 +60,7 @@ func (s *Service) Actions() []Action {
 }
 
 // logAction adds an action to the action log
-func (s *Service) logAction(actionType ActionType, description string, path string, success bool, err error) {
+func (s *Service) logAction(actionType ActionType, description, path string, success bool, err error) {
 	s.actions = append(s.actions, Action{
 		Type:        actionType,
 		Description: description,
@@ -101,7 +101,7 @@ func (s *Service) WriteFile(path string, content []byte, perm os.FileMode) error
 
 // AppendToFile appends content to a file, respecting dry-run mode.
 // If the file doesn't exist, it creates it.
-func (s *Service) AppendToFile(path string, content string) error {
+func (s *Service) AppendToFile(path, content string) error {
 	expandedPath := expandPath(path)
 
 	description := fmt.Sprintf("Append to %s", AbbreviatePath(expandedPath))
@@ -202,7 +202,7 @@ func (s *Service) ReadFile(path string) ([]byte, error) {
 }
 
 // FileContains checks if a file contains the given substring
-func (s *Service) FileContains(path string, substr string) (bool, error) {
+func (s *Service) FileContains(path, substr string) (bool, error) {
 	content, err := s.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

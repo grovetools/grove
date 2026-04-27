@@ -226,7 +226,7 @@ func (h *GoHandler) GetVersion(workspacePath string) (string, error) {
 	return "", fmt.Errorf("version management not implemented for Go projects")
 }
 
-func (h *GoHandler) SetVersion(workspacePath string, version string) error {
+func (h *GoHandler) SetVersion(workspacePath, version string) error {
 	// For Go modules, the version is typically managed through git tags
 	// This could be enhanced to write to a version file if needed
 	return fmt.Errorf("version management not implemented for Go projects")

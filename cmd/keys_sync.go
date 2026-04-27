@@ -481,7 +481,7 @@ func importBindingsToConfig(bindings []keybind.Binding) error {
 }
 
 // mapBindingToConfig determines where a binding should go in grove.toml.
-func mapBindingToConfig(b keybind.Binding) (section string, key string, value string) {
+func mapBindingToConfig(b keybind.Binding) (section, key, value string) {
 	// Determine section based on source/layer
 	switch b.Layer {
 	case keybind.LayerTmuxRoot, keybind.LayerTmuxPrefix, keybind.LayerTmuxCustomTable:

@@ -47,7 +47,7 @@ Examples:
 	return cmd
 }
 
-func runKeysAvailable(layersFlag string, inTable string) error {
+func runKeysAvailable(layersFlag, inTable string) error {
 	ctx := context.Background()
 	t := theme.DefaultTheme
 

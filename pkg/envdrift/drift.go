@@ -209,7 +209,7 @@ func RunEnvDrift(ctx context.Context, profile string) (*DriftSummary, error) {
 
 // runTerraformPlan executes `terraform plan -detailed-exitcode -json` and
 // parses the streamed JSON events into a drift summary.
-func runTerraformPlan(ctx context.Context, dir string, env []string, args []string) (*DriftSummary, error) {
+func runTerraformPlan(ctx context.Context, dir string, env, args []string) (*DriftSummary, error) {
 	cmd := exec.CommandContext(ctx, "terraform", args...)
 	cmd.Dir = dir
 	cmd.Env = env

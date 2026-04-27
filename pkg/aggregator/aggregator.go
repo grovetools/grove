@@ -8,7 +8,7 @@ import (
 )
 
 // CollectorFunc is a function that collects data for a single workspace
-type CollectorFunc[T any] func(workspacePath string, workspaceName string) (T, error)
+type CollectorFunc[T any] func(workspacePath, workspaceName string) (T, error)
 
 // RendererFunc is a function that renders the aggregated results
 type RendererFunc[T any] func(results map[string]T) error

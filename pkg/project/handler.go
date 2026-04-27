@@ -17,7 +17,7 @@ type ProjectHandler interface {
 
 	// Version management
 	GetVersion(workspacePath string) (string, error)
-	SetVersion(workspacePath string, version string) error
+	SetVersion(workspacePath, version string) error
 
 	// Build commands (leverage Makefile contract)
 	GetBuildCommand() string

@@ -31,7 +31,7 @@ func (h *TemplateHandler) GetVersion(workspacePath string) (string, error) {
 	return "", fmt.Errorf("version management not applicable for template projects")
 }
 
-func (h *TemplateHandler) SetVersion(workspacePath string, version string) error {
+func (h *TemplateHandler) SetVersion(workspacePath, version string) error {
 	return fmt.Errorf("version management not applicable for template projects")
 }
 

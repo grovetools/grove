@@ -448,7 +448,7 @@ func expandReposWithDependencies(repos []string, graph *depsgraph.Graph) ([]stri
 	return result, autoDeps
 }
 
-func calculateNextVersions(ctx context.Context, rootDir string, workspaces []string, major, minor, patch []string, isRC bool, logger *logrus.Logger) (map[string]string, map[string]string, map[string]int, error) {
+func calculateNextVersions(ctx context.Context, rootDir string, workspaces, major, minor, patch []string, isRC bool, logger *logrus.Logger) (map[string]string, map[string]string, map[string]int, error) {
 	versions := make(map[string]string)
 	currentVersions := make(map[string]string)
 	commitsSinceTag := make(map[string]int)
@@ -662,7 +662,7 @@ func calculateNextVersions(ctx context.Context, rootDir string, workspaces []str
 	return versions, currentVersions, commitsSinceTag, nil
 }
 
-func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]string, versions map[string]string, currentVersions map[string]string, hasChanges map[string]bool, graph *depsgraph.Graph, logger *logrus.Logger, useLLMChangelog bool, plan *release.ReleasePlan) error {
+func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]string, versions, currentVersions map[string]string, hasChanges map[string]bool, graph *depsgraph.Graph, logger *logrus.Logger, useLLMChangelog bool, plan *release.ReleasePlan) error {
 	displaySection(theme.IconBullet + " Release Orchestration")
 
 	// Process each level of dependencies

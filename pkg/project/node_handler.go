@@ -27,7 +27,7 @@ func (h *NodeHandler) GetVersion(workspacePath string) (string, error) {
 	return "", fmt.Errorf("Node.js handler not implemented yet")
 }
 
-func (h *NodeHandler) SetVersion(workspacePath string, version string) error {
+func (h *NodeHandler) SetVersion(workspacePath, version string) error {
 	return fmt.Errorf("Node.js handler not implemented yet")
 }
 

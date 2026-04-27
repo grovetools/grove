@@ -113,7 +113,7 @@ func (r *Reconciler) Reconcile(toolName string) error {
 }
 
 // GetEffectiveSource returns the effective source (dev or release) for a tool
-func (r *Reconciler) GetEffectiveSource(toolName string) (source string, version string, path string) {
+func (r *Reconciler) GetEffectiveSource(toolName string) (source, version, path string) {
 	// Get tool info using FindTool
 	repoName, _, effectiveAlias, found := sdk.FindTool(toolName)
 	if !found {

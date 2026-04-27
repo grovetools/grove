@@ -20,7 +20,7 @@ func nbCreateGitRepo(repoPath string) error {
 }
 
 // nbCreateEcosystemDir creates a directory with a grove.toml ecosystem marker.
-func nbCreateEcosystemDir(path string, name string) error {
+func nbCreateEcosystemDir(path, name string) error {
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		return err
 	}
