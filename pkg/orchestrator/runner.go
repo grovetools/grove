@@ -334,9 +334,11 @@ func (o *Orchestrator) executeJobVerbs(ctx context.Context, job TaskJob, verbs [
 			}
 		}
 
+		commitHash := ""
 		if s, ok := states[job.Name]; ok {
-			o.reportTaskVerb(ctx, job, verb, exitCode, s.CommitHash, duration.Milliseconds(), errSummary)
+			commitHash = s.CommitHash
 		}
+		o.reportTaskVerb(ctx, job, verb, exitCode, commitHash, duration.Milliseconds(), errSummary)
 
 		if err != nil && isPipeline {
 			o.emitSkippedVerbs(job, verbs[vi+1:], verb, eventsChan)
