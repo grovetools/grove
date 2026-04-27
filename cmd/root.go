@@ -31,10 +31,16 @@ func init() {
 	// Add subcommands
 	rootCmd.AddCommand(newBootstrapCmd())
 	rootCmd.AddCommand(newBuildCmd())
+	rootCmd.AddCommand(newCheckCmd())
 	rootCmd.AddCommand(newDepsCmd())
+	rootCmd.AddCommand(newFmtCmd())
 	rootCmd.AddCommand(newKeysCmd())
+	rootCmd.AddCommand(newLintCmd())
 	rootCmd.AddCommand(newSchemaCmd())
 	rootCmd.AddCommand(newSetupCmd())
+	rootCmd.AddCommand(newStatusCmd())
+	rootCmd.AddCommand(newTestCmd())
+	rootCmd.AddCommand(newVetCmd())
 	rootCmd.AddCommand(internal.NewInternalCmd())
 
 	// Register deprecated command shims for backwards compatibility
