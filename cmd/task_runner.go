@@ -67,7 +67,7 @@ func executeTaskWithCommand(cmd *cobra.Command, verb string, rawCommand []string
 	if len(workspaces) == 0 {
 		taskUlog.Info("No projects to run").
 			Field("verb", verb).
-			Pretty(fmt.Sprintf("No projects to run after filtering.")).
+			Pretty("No projects to run after filtering.").
 			Emit()
 		return nil
 	}
@@ -402,93 +402,6 @@ func outputTaskJSONResults[T any](results []T, verb string, successCount, failCo
 		return err
 	}
 
-	if failCount > 0 {
-		return fmt.Errorf("%d %s tasks failed", failCount, verb)
-	}
-	return nil
-}
-
-func runVerboseTaskWaves(o *orch.Orchestrator, verb string, waves [][]orch.TaskJob) error {
-	var successCount, failCount, skipCount int
-	totalJobs := 0
-	for _, wave := range waves {
-		totalJobs += len(wave)
-	}
-
-	pretty := logging.NewPrettyLogger()
-	pretty.Progress(fmt.Sprintf("Running %s on %d projects in %d wave(s) (using %d workers)", verb, totalJobs, len(waves), buildJobs))
-	pretty.Blank()
-
-	completedJobs := 0
-	for waveIdx, waveJobs := range waves {
-		if len(waves) > 1 {
-			pretty.Progress(fmt.Sprintf("Wave %d/%d (%d projects)", waveIdx+1, len(waves), len(waveJobs)))
-		}
-
-		ctx := context.Background()
-		events := o.RunWithEvents(ctx, waveJobs)
-
-		for event := range events {
-			switch event.Type {
-			case "cached":
-				if event.Result != nil {
-					completedJobs++
-					successCount++
-					progress := fmt.Sprintf("[%d/%d]", completedJobs, totalJobs)
-					taskUlog.Progress("Cached project").
-						Field("name", event.Result.Job.Name).
-						Field("completed", completedJobs).
-						Field("total", totalJobs).
-						Pretty(fmt.Sprintf("\n%s %s (cached)", progress, event.Result.Job.Name)).
-						Emit()
-				}
-			case "finish":
-				if event.Result == nil {
-					continue
-				}
-				result := event.Result
-				completedJobs++
-				progress := fmt.Sprintf("[%d/%d]", completedJobs, totalJobs)
-
-				taskUlog.Progress("Running task").
-					Field("name", result.Job.Name).
-					Field("completed", completedJobs).
-					Field("total", totalJobs).
-					Pretty(fmt.Sprintf("\n%s %s %s...", progress, verb, result.Job.Name)).
-					Emit()
-				pretty.Divider()
-
-				if len(result.Output) > 0 {
-					os.Stdout.Write(result.Output)
-				}
-
-				if result.Skipped {
-					skipCount++
-					pretty.Status("warning", fmt.Sprintf("Skipped (%v)", result.Duration.Round(time.Millisecond)))
-				} else if result.Err != nil {
-					failCount++
-					pretty.Status("error", fmt.Sprintf("Failed (%v)", result.Duration.Round(time.Millisecond)))
-					if result.Err.Error() != "exit status 1" && result.Err.Error() != "exit status 2" {
-						pretty.ErrorPretty("Error", result.Err)
-					}
-					if buildFailFast {
-						pretty.Blank()
-						pretty.Divider()
-						pretty.InfoPretty(fmt.Sprintf("%s stopped (fail-fast). Success: %d, Skipped: %d, Failed: %d", verb, successCount, skipCount, failCount))
-						return fmt.Errorf("%d %s tasks failed", failCount, verb)
-					}
-				} else {
-					successCount++
-					pretty.Status("success", fmt.Sprintf("Success (%v)", result.Duration.Round(time.Millisecond)))
-				}
-			}
-		}
-	}
-
-	pretty.Blank()
-	pretty.Divider()
-	label := strings.ToUpper(verb[:1]) + verb[1:]
-	pretty.InfoPretty(fmt.Sprintf("%s finished. Success: %d, Skipped: %d, Failed: %d", label, successCount, skipCount, failCount))
 	if failCount > 0 {
 		return fmt.Errorf("%d %s tasks failed", failCount, verb)
 	}
