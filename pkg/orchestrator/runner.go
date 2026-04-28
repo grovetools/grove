@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/grovetools/core/config"
@@ -264,6 +265,13 @@ func (o *Orchestrator) executeJobVerbs(ctx context.Context, job TaskJob, verbs [
 		} else {
 			cmd = exec.CommandContext(ctx, command[0], command[1:]...) //nolint:gosec // commands from trusted build config
 		}
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Cancel = func() error {
+			// Kill the entire process group so make's children (tend run -p, etc.)
+			// also receive SIGTERM and can run their cleanup.
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		}
+		cmd.WaitDelay = 10 * time.Second
 		cmd.Dir = job.Path
 		cmd.Env = prependJobBinDir(env, job.Path)
 
