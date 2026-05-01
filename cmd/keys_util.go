@@ -6,6 +6,7 @@ import (
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/keybind"
+	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/tui/theme"
 )
 
@@ -31,7 +32,7 @@ func buildKeybindCollectors(ctx context.Context, cfg *config.Config) []keybind.C
 	}
 
 	// L3-L5: Tmux collectors
-	if keybind.IsTmuxAvailable() {
+	if mux.IsAvailable(ctx) {
 		collectors = append(collectors, keybind.NewTmuxRootCollector())
 		collectors = append(collectors, keybind.NewTmuxPrefixCollector())
 		collectors = append(collectors, keybind.NewTmuxCustomCollector())
