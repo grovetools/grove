@@ -14,6 +14,7 @@ import (
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/keybind"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -36,6 +37,7 @@ that are not managed by Grove through grove.toml.`
 	cmd.AddCommand(newKeysSyncDetectCmd())
 	cmd.AddCommand(newKeysSyncStatusCmd())
 	cmd.AddCommand(newKeysSyncImportCmd())
+	cmd.AddCommand(newKeysSyncTuimuxCmd())
 
 	return cmd
 }
@@ -244,6 +246,8 @@ func runKeysSyncStatus() error {
 		keybind.LayerTmuxRoot,
 		keybind.LayerTmuxPrefix,
 		keybind.LayerTmuxCustomTable,
+		keybind.LayerTuimuxGlobal,
+		keybind.LayerTuimuxLeader,
 	}
 
 	for _, layer := range layers {
@@ -478,6 +482,59 @@ func importBindingsToConfig(bindings []keybind.Binding) error {
 
 	// Write back
 	return writeConfig(configPath, fullConfig, isTOML)
+}
+
+// newKeysSyncTuimuxCmd creates the 'grove keys sync tuimux' command.
+func newKeysSyncTuimuxCmd() *cobra.Command {
+	cmd := cli.NewStandardCommand("tuimux", "Write generated keybindings to tuimux config")
+
+	cmd.Long = `Generate tuimux keybinding config and write it to ~/.config/tuimux/config.toml.
+
+This generates keybindings from [keys.tmux.popups] in grove.toml and writes
+the [keys.global.*] sections to the tuimux config file on disk.`
+
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		return runKeysSyncTuimux()
+	}
+
+	return cmd
+}
+
+func runKeysSyncTuimux() error {
+	t := theme.DefaultTheme
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	configPath := filepath.Join(home, ".config", "tuimux", "config.toml")
+
+	// Generate to the cache first, then copy to config
+	if err := runKeysGenerateTuimux("", false); err != nil {
+		return err
+	}
+
+	// Read the generated content from cache
+	cachePath := filepath.Join(paths.CacheDir(), "tuimux", "keybindings.toml")
+	content, err := os.ReadFile(cachePath)
+	if err != nil {
+		return fmt.Errorf("failed to read generated config: %w", err)
+	}
+
+	// Write to tuimux config location
+	outDir := filepath.Dir(configPath)
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", outDir, err)
+	}
+
+	if err := os.WriteFile(configPath, content, 0o600); err != nil {
+		return fmt.Errorf("failed to write %s: %w", configPath, err)
+	}
+
+	fmt.Printf("%s Synced tuimux config: %s\n", t.Success.Render(theme.IconSuccess), configPath)
+
+	return nil
 }
 
 // mapBindingToConfig determines where a binding should go in grove.toml.

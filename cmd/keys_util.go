@@ -38,6 +38,9 @@ func buildKeybindCollectors(ctx context.Context, cfg *config.Config) []keybind.C
 		collectors = append(collectors, keybind.NewTmuxCustomCollector())
 	}
 
+	// L5t: Tuimux collector
+	collectors = append(collectors, keybind.NewTuimuxCollector())
+
 	// L5: Grove collector
 	collectors = append(collectors, keybind.NewGroveCollectorWithConfig(cfg))
 

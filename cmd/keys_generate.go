@@ -11,6 +11,7 @@ import (
 
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/config"
+	tuimuxkeygen "github.com/grovetools/core/pkg/keygen"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/tmux/keygen"
 	"github.com/grovetools/core/tui/theme"
@@ -29,6 +30,7 @@ func newKeysGenerateCmd() *cobra.Command {
 
 Supported generators:
   tmux    Generate ~/.cache/grove/tmux/popups.conf for tmux popup bindings
+  tuimux  Generate ~/.cache/grove/tuimux/keybindings.toml for tuimux bindings
   shell   Generate shell keybinding configs (fish, bash, zsh)
   nvim    Generate ~/.cache/grove/nvim/grove-keymaps.lua for Neovim bindings
 
@@ -58,6 +60,7 @@ Use --all to regenerate all configurations at once.`
 	cmd.Flags().BoolVar(&all, "all", false, "Generate all configurations (tmux + shell)")
 
 	cmd.AddCommand(newKeysGenerateTmuxCmd())
+	cmd.AddCommand(newKeysGenerateTuimuxCmd())
 	cmd.AddCommand(newKeysGenerateShellCmd())
 	cmd.AddCommand(newKeysGenerateNvimCmd())
 
@@ -74,6 +77,13 @@ func runKeysGenerateAll() error {
 	// Generate tmux config
 	if err := runKeysGenerateTmux("", false); err != nil {
 		fmt.Printf("%s tmux: %v\n", t.Error.Render(theme.IconError), err)
+	}
+
+	fmt.Println()
+
+	// Generate tuimux config
+	if err := runKeysGenerateTuimux("", false); err != nil {
+		fmt.Printf("%s tuimux: %v\n", t.Error.Render(theme.IconError), err)
 	}
 
 	fmt.Println()
@@ -308,6 +318,129 @@ size = { width = "100%", height = "98%" }`))
 	fmt.Printf("  %s\n", t.Code.Render(fmt.Sprintf("source-file %s", outputPath)))
 	fmt.Println()
 	fmt.Println(t.Muted.Render("Tmux configuration auto-reloaded."))
+
+	return nil
+}
+
+// newKeysGenerateTuimuxCmd creates the 'grove keys generate tuimux' command.
+func newKeysGenerateTuimuxCmd() *cobra.Command {
+	var outputPath string
+	var dryRun bool
+
+	cmd := &cobra.Command{
+		Use:   "tuimux",
+		Short: "Generate tuimux keybinding configuration",
+		Long: `Generate ~/.cache/grove/tuimux/keybindings.toml from [keys.tmux.popups] config.
+
+The generated file contains tuimux global keybinding definitions.
+Copy or merge the contents into ~/.config/tuimux/config.toml to apply.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runKeysGenerateTuimux(outputPath, dryRun)
+		},
+	}
+
+	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "Output file path (default: ~/.cache/grove/tuimux/keybindings.toml)")
+	cmd.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "Print output without writing to file")
+
+	return cmd
+}
+
+func runKeysGenerateTuimux(outputPath string, dryRun bool) error {
+	cfg, err := config.LoadDefault()
+	if err != nil {
+		cfg = &config.Config{}
+	}
+
+	t := theme.DefaultTheme
+
+	var keysExt keys.KeysExtension
+	if cfg != nil {
+		_ = cfg.UnmarshalExtension("keys", &keysExt)
+	}
+
+	if len(keysExt.Tmux.Popups) == 0 {
+		fmt.Println(t.Warning.Render(theme.IconWarning + " No [keys.tmux.popups] defined in grove.toml"))
+		return nil
+	}
+
+	tuimuxCfg := tuimuxkeygen.TuimuxConfig{}
+
+	var actions []string
+	for action := range keysExt.Tmux.Popups {
+		actions = append(actions, action)
+	}
+	sort.Strings(actions)
+
+	for _, action := range actions {
+		popup := keysExt.Tmux.Popups[action]
+		keySlice := parseInterfaceToStringSlice(popup.Key)
+
+		cmdStr := popup.Command
+		if cmdStr == "" {
+			cmdStr = keys.TmuxCommandMap[action]
+			if cmdStr == "" {
+				cmdStr = action
+			}
+		}
+
+		style := popup.Style
+		if style == "" {
+			style = "popup"
+		}
+
+		for _, k := range keySlice {
+			b := tuimuxkeygen.TuimuxBinding{
+				Key:            k,
+				Command:        cmdStr,
+				Style:          style,
+				ExitOnComplete: popup.ExitOnComplete,
+			}
+			if popup.Size != nil {
+				b.Width = popup.Size.Width
+				b.Height = popup.Size.Height
+			}
+			if popup.Position != nil {
+				b.X = popup.Position.X
+				b.Y = popup.Position.Y
+			}
+			// Default popup dimensions
+			if style == "popup" {
+				if b.Width == "" {
+					b.Width = "100%"
+				}
+				if b.Height == "" {
+					b.Height = "98%"
+				}
+			}
+			tuimuxCfg.Bindings = append(tuimuxCfg.Bindings, b)
+		}
+	}
+
+	content := tuimuxCfg.GenerateTOML()
+
+	if dryRun {
+		fmt.Println(t.Header.Render(theme.IconShell + " Generated tuimux configuration:"))
+		fmt.Println()
+		fmt.Println(content)
+		return nil
+	}
+
+	if outputPath == "" {
+		outputPath = filepath.Join(paths.CacheDir(), "tuimux", "keybindings.toml")
+	}
+
+	outDir := filepath.Dir(outputPath)
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", outDir, err)
+	}
+
+	if err := os.WriteFile(outputPath, []byte(content), 0o600); err != nil {
+		return fmt.Errorf("failed to write %s: %w", outputPath, err)
+	}
+
+	fmt.Printf("%s Generated: %s\n", t.Success.Render(theme.IconSuccess), outputPath)
+	fmt.Println()
+	fmt.Println(t.Muted.Render("Merge the contents into ~/.config/tuimux/config.toml to apply."))
 
 	return nil
 }
