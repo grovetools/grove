@@ -44,7 +44,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "search", Keys: []string{"/"}, Description: "search", Enabled: true, ConfigKey: "search"},
 					{Name: "next match", Keys: []string{"n"}, Description: "next match", Enabled: true, ConfigKey: "search_next"},
 					{Name: "prev match", Keys: []string{"N"}, Description: "prev match", Enabled: true, ConfigKey: "search_prev"},
-					{Name: "clear search", Keys: []string{"ctrl+l"}, Description: "clear search", Enabled: true, ConfigKey: "clear"},
+					{Name: "clear search", Keys: []string{"ctrl+l"}, Description: "clear search", Enabled: true, ConfigKey: "clear_search"},
 				},
 			},
 			{
