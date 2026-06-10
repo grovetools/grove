@@ -13,6 +13,7 @@ import (
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/core/version"
 	"github.com/spf13/cobra"
 
 	"github.com/grovetools/grove/cmd/internal"
@@ -27,6 +28,16 @@ var rootCmd = cli.NewStandardCommand("grove", "Grove workspace orchestrator and 
 func init() {
 	// Set long description (don't repeat Short - grove-core help shows both)
 	rootCmd.Long = `Run 'grove <tool>' to delegate to installed tools, or use subcommands below.`
+
+	// Support --version on the root command (same pattern as nav)
+	vInfo := version.GetInfo()
+	rootCmd.Version = vInfo.Version
+	cli.SetVersionTemplate(rootCmd, cli.VersionInfo{
+		Version:   vInfo.Version,
+		Commit:    vInfo.Commit,
+		BuildDate: vInfo.BuildDate,
+		BuildArch: vInfo.Platform,
+	})
 
 	// Add subcommands
 	rootCmd.AddCommand(newBootstrapCmd())
