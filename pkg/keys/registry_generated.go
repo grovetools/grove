@@ -360,6 +360,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "memory search", Keys: []string{"M"}, Description: "memory search", Enabled: true, ConfigKey: "view_memory"},
 					{Name: "preview agent pane", Keys: []string{"p"}, Description: "preview agent pane", Enabled: true, ConfigKey: "view_native_agent"},
 					{Name: "skills", Keys: []string{"F"}, Description: "skills", Enabled: true, ConfigKey: "view_skill_pane"},
+					{Name: "workflows", Keys: []string{"W"}, Description: "workflows", Enabled: true, ConfigKey: "view_workflows"},
 					{Name: "preview", Keys: []string{"v"}, Description: "preview", Enabled: true, ConfigKey: "toggle_preview"},
 					{Name: "close detail pane", Keys: []string{"esc"}, Description: "close detail pane", Enabled: true, ConfigKey: "close_detail_pane"},
 					{Name: "switch focus", Keys: []string{"tab", "shift+tab"}, Description: "switch focus", Enabled: true, ConfigKey: "switch_focus"},
