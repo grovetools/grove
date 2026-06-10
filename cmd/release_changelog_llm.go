@@ -292,7 +292,7 @@ func generateChangelogWithLLMInteractive(gitContext, newVersion, repoPath string
 		// Continue anyway - rules file is optional
 	}
 	// Determine the model to use
-	model := "gemini-1.5-flash-latest" // Default model
+	model := "gemini-2.5-flash" // Default model
 
 	// Try to load model from grove.yml configuration
 	coreCfg, err := config.LoadFrom(repoPath)

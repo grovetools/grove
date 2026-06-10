@@ -91,7 +91,7 @@ func initialReleaseModel(plan *release.ReleasePlan) releaseTuiModel {
 	}
 
 	// Determine LLM model from config (supports both grove.yml and grove.toml)
-	llmModel := "gemini-1.5-flash-latest" // Default
+	llmModel := "gemini-2.5-flash" // Default
 	if cfg, err := config.LoadFrom(plan.RootDir); err == nil {
 		var llmCfg struct {
 			DefaultModel string `yaml:"default_model"`
