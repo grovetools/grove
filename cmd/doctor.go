@@ -11,6 +11,8 @@ import (
 	"github.com/grovetools/core/pkg/doctor"
 	_ "github.com/grovetools/core/pkg/doctor/checks" // register built-in checks
 	"github.com/spf13/cobra"
+
+	_ "github.com/grovetools/grove/pkg/doctorchecks" // register grove-specific checks
 )
 
 func init() {
@@ -68,7 +70,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	if doctorJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
-		if err := enc.Encode(results); err != nil {
+		if err := enc.Encode(toDoctorJSON(results)); err != nil {
 			return err
 		}
 	} else {
@@ -79,6 +81,36 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		os.Exit(1)
 	}
 	return nil
+}
+
+// doctorJSONResult is the machine-readable post-install contract for
+// `grove doctor --json`: [{check, status: pass|warn|fail, detail}].
+type doctorJSONResult struct {
+	Check      string `json:"check"`
+	Status     string `json:"status"`
+	Detail     string `json:"detail"`
+	Resolution string `json:"resolution,omitempty"`
+	Error      string `json:"error,omitempty"`
+	FixApplied bool   `json:"fix_applied,omitempty"`
+}
+
+func toDoctorJSON(results []doctor.CheckResult) []doctorJSONResult {
+	out := make([]doctorJSONResult, 0, len(results))
+	for _, r := range results {
+		status := string(r.Status)
+		if r.Status == doctor.StatusOK {
+			status = "pass"
+		}
+		out = append(out, doctorJSONResult{
+			Check:      r.ID,
+			Status:     status,
+			Detail:     r.Message,
+			Resolution: r.Resolution,
+			Error:      r.Error,
+			FixApplied: r.FixApplied,
+		})
+	}
+	return out
 }
 
 func hasFailure(results []doctor.CheckResult) bool {
