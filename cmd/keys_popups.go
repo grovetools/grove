@@ -62,13 +62,13 @@ func runKeysPopupsList() error {
 		_ = cfg.UnmarshalExtension("keys", &keysExt)
 	}
 
-	if len(keysExt.Tmux.Popups) == 0 {
-		fmt.Println(t.Muted.Render("No popup bindings defined."))
-		fmt.Println(t.Muted.Render("Use 'grove keys popups add' to create one."))
-		return nil
-	}
+	usingDefaults := keysExt.ApplyTmuxPopupDefaults()
 
 	fmt.Println(t.Header.Render(" Tmux Popup Bindings "))
+	if usingDefaults {
+		fmt.Println("  " + t.Muted.Render("Using built-in defaults (no [keys.tmux.popups] in grove.toml)."))
+		fmt.Println("  " + t.Muted.Render("Use 'grove keys popups add' or define [keys.tmux.popups] to override."))
+	}
 	if keysExt.Tmux.Prefix != "" {
 		fmt.Printf("  %s %s\n", t.Muted.Render("Active Prefix:"), t.Highlight.Render(keysExt.Tmux.Prefix))
 	}

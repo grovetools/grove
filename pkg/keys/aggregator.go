@@ -23,6 +23,13 @@ func Aggregate(cfg *config.Config) ([]KeyBinding, error) {
 		_ = cfg.UnmarshalExtension("keys", &keysExt)
 	}
 
+	// Fall back to the built-in popup bindings when the user config defines
+	// none, so analysis/listing reflects what 'grove keys generate tmux' emits.
+	popupSource := "grove.toml [keys.tmux.popups]"
+	if keysExt.ApplyTmuxPopupDefaults() {
+		popupSource = "built-in defaults (no [keys.tmux.popups] in grove.toml)"
+	}
+
 	// 2. Tmux Popup Bindings
 	for action, popupCfg := range keysExt.Tmux.Popups {
 		rawKeys := parseStringOrSlice(popupCfg.Key)
@@ -49,7 +56,7 @@ func Aggregate(cfg *config.Config) ([]KeyBinding, error) {
 			Action:      action,
 			Keys:        popupKeys,
 			Description: desc,
-			Source:      "grove.toml [keys.tmux.popups]",
+			Source:      popupSource,
 		})
 	}
 
