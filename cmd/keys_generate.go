@@ -146,9 +146,11 @@ func runKeysGenerateTmux(outputPath string, dryRun bool) error {
 		_ = cfg.UnmarshalExtension("keys", &keysExt)
 	}
 
-	if len(keysExt.Tmux.Popups) == 0 {
-		fmt.Println(t.Warning.Render(theme.IconWarning + " No [keys.tmux.popups] defined in grove.toml"))
-		fmt.Println(t.Muted.Render("Add popup bindings to your grove.toml:"))
+	// Fall back to the built-in popup bindings when the user config defines
+	// none. User-defined [keys.tmux.popups] entries always take precedence.
+	if keysExt.ApplyTmuxPopupDefaults() {
+		fmt.Println(t.Muted.Render("No [keys.tmux.popups] defined in grove.toml; using built-in defaults (prefix " + keysExt.Tmux.Prefix + ")."))
+		fmt.Println(t.Muted.Render("Define [keys.tmux.popups] entries in grove.toml to override them, e.g.:"))
 		fmt.Println()
 		fmt.Println(t.Code.Render(`[keys.tmux.popups.flow_status]
 key = "C-p"
@@ -160,7 +162,7 @@ key = ["C-f", "M-f"]
 command = "nav sz"
 style = "popup"
 size = { width = "100%", height = "98%" }`))
-		return nil
+		fmt.Println()
 	}
 
 	// Build the configuration content
