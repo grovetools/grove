@@ -49,6 +49,7 @@ const (
 	stepFirstProject
 	stepNotebook
 	stepGeminiKey
+	stepAnthropicKey
 	stepFlowSettings
 	stepTmuxBindings
 	stepAgentSettings
@@ -148,12 +149,12 @@ const (
 	inputValue  // for actual input value
 )
 
-// geminiKeyMethod represents how the Gemini API key is provided
-type geminiKeyMethod int
+// apiKeyMethod represents how a provider API key is provided
+type apiKeyMethod int
 
 const (
-	geminiMethodCommand geminiKeyMethod = iota
-	geminiMethodDirect
+	apiKeyMethodCommand apiKeyMethod = iota
+	apiKeyMethodDirect
 )
 
 // setupModel is the main TUI model for the setup wizard
@@ -188,9 +189,13 @@ type setupModel struct {
 	notebookPath string
 
 	// Gemini key step state
-	geminiMethod geminiKeyMethod
+	geminiMethod apiKeyMethod
 	geminiValue  string
 	methodList   list.Model
+
+	// Anthropic key step state
+	anthropicMethod apiKeyMethod
+	anthropicValue  string
 
 	// Flow settings step state
 	flowOneshotModel string
@@ -247,6 +252,7 @@ func newSetupModel(service *setup.Service, selectedOnly map[string]bool) *setupM
 		{id: "ecosystem", title: "Ecosystem Directory", description: "Configure a Grove ecosystem directory", selected: true},
 		{id: "notebook", title: "Notebook Directory", description: "Set up a notebook directory for notes and plans", selected: true},
 		{id: "gemini", title: "Gemini API Key", description: "Configure Gemini API access for LLM features", selected: true},
+		{id: "anthropic", title: "Anthropic API Key", description: "Configure Anthropic API access for Claude LLM features", selected: true},
 		{id: "flow", title: "Flow Settings", description: "Configure default model for LLM jobs", selected: true},
 		{id: "tmux", title: "tmux Popup Bindings", description: "Add tmux popup bindings for Grove tools", selected: false},
 		{id: "agent", title: "Agent Settings", description: "Configure Claude agent arguments", selected: false},
@@ -325,7 +331,7 @@ func newSetupModel(service *setup.Service, selectedOnly map[string]bool) *setupM
 
 	// Set default paths
 	homeDir, _ := os.UserHomeDir()
-	defaultEcosystemPath := filepath.Join(homeDir, "Code", "my-projects")
+	defaultEcosystemPath := filepath.Join(homeDir, "Code")
 	defaultNotebookPath := filepath.Join(homeDir, "notebooks")
 
 	// Initialize agent argument items
@@ -347,10 +353,12 @@ func newSetupModel(service *setup.Service, selectedOnly map[string]bool) *setupM
 		tuiTheme:          "terminal",
 		themeList:         themeList,
 		ecosystemPath:     defaultEcosystemPath,
-		ecosystemName:     "my-projects",
+		ecosystemName:     filepath.Base(defaultEcosystemPath),
 		notebookPath:      defaultNotebookPath,
-		geminiMethod:      geminiMethodCommand,
+		geminiMethod:      apiKeyMethodCommand,
 		geminiValue:       "op read 'op://Private/Gemini API Key/credential' --no-newline",
+		anthropicMethod:   apiKeyMethodCommand,
+		anthropicValue:    "op read 'op://Private/Anthropic API Key/credential' --no-newline",
 		methodList:        methodList,
 		flowOneshotModel:  "gemini-3-pro-preview",
 		claudeArgs:        []string{"--dangerously-skip-permissions", "--chrome"},
@@ -392,6 +400,8 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateNotebookStep(msg)
 		case stepGeminiKey:
 			return m.updateGeminiKeyStep(msg)
+		case stepAnthropicKey:
+			return m.updateAnthropicKeyStep(msg)
 		case stepFlowSettings:
 			return m.updateFlowSettingsStep(msg)
 		case stepTmuxBindings:
@@ -533,6 +543,8 @@ func (m *setupModel) buildOrderedSteps() {
 				m.orderedSteps = append(m.orderedSteps, stepNotebook)
 			case "gemini":
 				m.orderedSteps = append(m.orderedSteps, stepGeminiKey)
+			case "anthropic":
+				m.orderedSteps = append(m.orderedSteps, stepAnthropicKey)
 			case "flow":
 				m.orderedSteps = append(m.orderedSteps, stepFlowSettings)
 			case "tmux":
@@ -567,6 +579,8 @@ func (m *setupModel) prepareStepInput() {
 		m.textInput.SetValue(m.notebookPath)
 		m.textInput.Placeholder = "Path to notebook directory"
 	case stepGeminiKey:
+		m.currentInput = inputMethod
+	case stepAnthropicKey:
 		m.currentInput = inputMethod
 	case stepFlowSettings:
 		m.currentInput = inputValue
@@ -678,11 +692,11 @@ func (m *setupModel) updateGeminiKeyStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.currentInput == inputMethod {
 			idx := m.methodList.Index()
 			if idx == 0 {
-				m.geminiMethod = geminiMethodCommand
+				m.geminiMethod = apiKeyMethodCommand
 				m.textInput.SetValue("op read 'op://Private/Gemini API Key/credential' --no-newline")
 				m.textInput.Placeholder = "Command to retrieve API key"
 			} else {
-				m.geminiMethod = geminiMethodDirect
+				m.geminiMethod = apiKeyMethodDirect
 				m.textInput.SetValue("")
 				m.textInput.Placeholder = "Gemini API key"
 				m.textInput.EchoMode = textinput.EchoPassword
@@ -690,6 +704,50 @@ func (m *setupModel) updateGeminiKeyStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.currentInput = inputValue
 		} else {
 			m.geminiValue = m.textInput.Value()
+			m.textInput.EchoMode = textinput.EchoNormal
+			m.nextStep()
+		}
+		return m, nil
+	}
+
+	if m.currentInput == inputMethod {
+		var cmd tea.Cmd
+		m.methodList, cmd = m.methodList.Update(msg)
+		return m, cmd
+	}
+
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}
+
+func (m *setupModel) updateAnthropicKeyStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keys.Base.Quit):
+		return m, tea.Quit
+	case key.Matches(msg, m.keys.Back):
+		if m.currentInput == inputValue {
+			m.currentInput = inputMethod
+		} else {
+			m.prevStep()
+		}
+		return m, nil
+	case key.Matches(msg, m.keys.Confirm):
+		if m.currentInput == inputMethod {
+			idx := m.methodList.Index()
+			if idx == 0 {
+				m.anthropicMethod = apiKeyMethodCommand
+				m.textInput.SetValue("op read 'op://Private/Anthropic API Key/credential' --no-newline")
+				m.textInput.Placeholder = "Command to retrieve API key"
+			} else {
+				m.anthropicMethod = apiKeyMethodDirect
+				m.textInput.SetValue("")
+				m.textInput.Placeholder = "Anthropic API key"
+				m.textInput.EchoMode = textinput.EchoPassword
+			}
+			m.currentInput = inputValue
+		} else {
+			m.anthropicValue = m.textInput.Value()
 			m.textInput.EchoMode = textinput.EchoNormal
 			m.nextStep()
 		}
@@ -944,11 +1002,20 @@ func (m *setupModel) generateTOMLConfig() ([]byte, string) {
 		}
 	}
 
-	// Flow settings
+	// Flow settings (oneshot model and agent provider args both live under [flow])
+	flowConfig := make(map[string]interface{})
 	if m.selectedSteps["flow"] {
-		config["flow"] = map[string]interface{}{
-			"oneshot_model": m.flowOneshotModel,
+		flowConfig["oneshot_model"] = m.flowOneshotModel
+	}
+	if m.selectedSteps["agent"] {
+		flowConfig["providers"] = map[string]interface{}{
+			"claude": map[string]interface{}{
+				"args": m.claudeArgs,
+			},
 		}
+	}
+	if len(flowConfig) > 0 {
+		config["flow"] = flowConfig
 	}
 
 	// Tmux settings (available keys)
@@ -970,23 +1037,16 @@ func (m *setupModel) generateTOMLConfig() ([]byte, string) {
 		}
 	}
 
-	// Notebook
+	// Notebook: define a named notebook and point the default rule at it
 	if m.selectedSteps["notebook"] {
 		config["notebooks"] = map[string]interface{}{
-			"path": m.notebookPath,
+			"definitions": map[string]interface{}{
+				"personal": map[string]interface{}{
+					"root_dir": m.notebookPath,
+				},
+			},
 			"rules": map[string]interface{}{
 				"default": "personal",
-			},
-		}
-	}
-
-	// Agent settings
-	if m.selectedSteps["agent"] {
-		config["agent"] = map[string]interface{}{
-			"providers": map[string]interface{}{
-				"claude": map[string]interface{}{
-					"args": m.claudeArgs,
-				},
 			},
 		}
 	}
@@ -994,12 +1054,23 @@ func (m *setupModel) generateTOMLConfig() ([]byte, string) {
 	// Gemini settings
 	if m.selectedSteps["gemini"] {
 		geminiConfig := make(map[string]interface{})
-		if m.geminiMethod == geminiMethodCommand {
+		if m.geminiMethod == apiKeyMethodCommand {
 			geminiConfig["api_key_command"] = m.geminiValue
 		} else {
 			geminiConfig["api_key"] = m.geminiValue
 		}
 		config["gemini"] = geminiConfig
+	}
+
+	// Anthropic settings
+	if m.selectedSteps["anthropic"] {
+		anthropicConfig := make(map[string]interface{})
+		if m.anthropicMethod == apiKeyMethodCommand {
+			anthropicConfig["api_key_command"] = m.anthropicValue
+		} else {
+			anthropicConfig["api_key"] = m.anthropicValue
+		}
+		config["anthropic"] = anthropicConfig
 	}
 
 	// Hooks / plan preservation
@@ -1057,23 +1128,32 @@ func (m *setupModel) generateYAMLConfig() ([]byte, string) {
 		}, "groves", m.ecosystemName)
 	}
 
-	// Notebook
+	// Notebook: define a named notebook and point the default rule at it
 	if m.selectedSteps["notebook"] {
-		_ = setup.SetValue(root, m.notebookPath, "notebooks", "path")
+		_ = setup.SetValue(root, m.notebookPath, "notebooks", "definitions", "personal", "root_dir")
 		_ = setup.SetValue(root, "personal", "notebooks", "rules", "default")
 	}
 
-	// Agent settings
+	// Agent settings (flow reads provider args from flow.providers.*)
 	if m.selectedSteps["agent"] {
-		_ = setup.SetValue(root, m.claudeArgs, "agent", "providers", "claude", "args")
+		_ = setup.SetValue(root, m.claudeArgs, "flow", "providers", "claude", "args")
 	}
 
 	// Gemini settings
 	if m.selectedSteps["gemini"] {
-		if m.geminiMethod == geminiMethodCommand {
+		if m.geminiMethod == apiKeyMethodCommand {
 			_ = setup.SetValue(root, m.geminiValue, "gemini", "api_key_command")
 		} else {
 			_ = setup.SetValue(root, m.geminiValue, "gemini", "api_key")
+		}
+	}
+
+	// Anthropic settings
+	if m.selectedSteps["anthropic"] {
+		if m.anthropicMethod == apiKeyMethodCommand {
+			_ = setup.SetValue(root, m.anthropicValue, "anthropic", "api_key_command")
+		} else {
+			_ = setup.SetValue(root, m.anthropicValue, "anthropic", "api_key")
 		}
 	}
 
@@ -1272,6 +1352,8 @@ func (m *setupModel) View() string {
 		title = theme.DefaultTheme.Highlight.Render(theme.IconNotebook) + " Notebook Directory"
 	case stepGeminiKey:
 		title = theme.DefaultTheme.Info.Render(theme.IconRobot) + " Gemini API Key"
+	case stepAnthropicKey:
+		title = theme.DefaultTheme.Info.Render(theme.IconRobot) + " Anthropic API Key"
 	case stepFlowSettings:
 		title = theme.DefaultTheme.Info.Render(theme.IconRunning) + " Flow Settings"
 	case stepTmuxBindings:
@@ -1308,6 +1390,8 @@ func (m *setupModel) View() string {
 		content.WriteString(m.viewNotebookStep())
 	case stepGeminiKey:
 		content.WriteString(m.viewGeminiKeyStep())
+	case stepAnthropicKey:
+		content.WriteString(m.viewAnthropicKeyStep())
 	case stepFlowSettings:
 		content.WriteString(m.viewFlowSettingsStep())
 	case stepTmuxBindings:
@@ -1557,12 +1641,48 @@ This step is optional. You can skip it and configure the key later.`
 		boxContent.WriteString(theme.DefaultTheme.Bold.Render("How would you like to provide your Gemini API key?") + "\n\n")
 		boxContent.WriteString(m.methodList.View())
 	} else {
-		if m.geminiMethod == geminiMethodCommand {
+		if m.geminiMethod == apiKeyMethodCommand {
 			boxContent.WriteString(theme.DefaultTheme.Bold.Render("Enter the command to retrieve your API key:") + "\n\n")
 			boxContent.WriteString(m.textInput.View() + "\n\n")
 			boxContent.WriteString(theme.DefaultTheme.Muted.Render("Example: op read 'op://Private/Gemini API Key/credential' --no-newline"))
 		} else {
 			boxContent.WriteString(theme.DefaultTheme.Bold.Render("Enter your Gemini API key:") + "\n\n")
+			boxContent.WriteString(m.textInput.View() + "\n\n")
+			boxContent.WriteString(theme.DefaultTheme.Muted.Render("The key will be stored in your global grove config."))
+		}
+	}
+
+	content.WriteString(boxStyle.Render(boxContent.String()))
+	return content.String()
+}
+
+func (m *setupModel) viewAnthropicKeyStep() string {
+	var content strings.Builder
+
+	// Explanation
+	explanation := `An Anthropic API key enables Claude-powered features in Grove:
+  - Oneshot jobs: Submit code and prompts to Claude models for analysis and planning
+  - Chat sessions: Interactive conversations with Claude using codebase context
+
+This step is optional. You can skip it and set the ANTHROPIC_API_KEY
+environment variable instead, or configure the key later.`
+	content.WriteString(theme.DefaultTheme.Muted.Render(explanation))
+	content.WriteString("\n\n")
+
+	// Box using theme
+	boxStyle := theme.DefaultTheme.Box.Width(m.width - 8)
+
+	var boxContent strings.Builder
+	if m.currentInput == inputMethod {
+		boxContent.WriteString(theme.DefaultTheme.Bold.Render("How would you like to provide your Anthropic API key?") + "\n\n")
+		boxContent.WriteString(m.methodList.View())
+	} else {
+		if m.anthropicMethod == apiKeyMethodCommand {
+			boxContent.WriteString(theme.DefaultTheme.Bold.Render("Enter the command to retrieve your API key:") + "\n\n")
+			boxContent.WriteString(m.textInput.View() + "\n\n")
+			boxContent.WriteString(theme.DefaultTheme.Muted.Render("Example: op read 'op://Private/Anthropic API Key/credential' --no-newline"))
+		} else {
+			boxContent.WriteString(theme.DefaultTheme.Bold.Render("Enter your Anthropic API key:") + "\n\n")
 			boxContent.WriteString(m.textInput.View() + "\n\n")
 			boxContent.WriteString(theme.DefaultTheme.Muted.Render("The key will be stored in your global grove config."))
 		}
@@ -1845,6 +1965,7 @@ The setup wizard guides you through configuring:
 - Ecosystem directory: Where your Grove projects live
 - Notebook directory: For notes and development plans
 - Gemini API key: For LLM-powered features
+- Anthropic API key: For Claude-powered features (ANTHROPIC_API_KEY)
 - tmux popup bindings: Quick access to Grove tools
 - Neovim plugin: IDE integration
 
@@ -1864,7 +1985,7 @@ Examples:
 	cmd.RunE = runSetup
 	cmd.SilenceUsage = true
 
-	cmd.Flags().StringSliceVar(&setupOnlySteps, "only", nil, "Run only specific setup steps (ecosystem,notebook,gemini,tmux,nvim)")
+	cmd.Flags().StringSliceVar(&setupOnlySteps, "only", nil, "Run only specific setup steps (ecosystem,notebook,gemini,anthropic,flow,tmux,agent,nvim,hooks)")
 	cmd.Flags().BoolVar(&setupDefaults, "defaults", false, "Use default values without interactive prompts")
 	cmd.Flags().BoolVar(&setupDryRun, "dry-run", false, "Preview changes without making them")
 
@@ -1926,19 +2047,23 @@ func runSetupDefaults(service *setup.Service, selectedOnly map[string]bool, logg
 
 	if runAll || selectedOnly["ecosystem"] {
 		pretty.InfoPretty("Setting up ecosystem directory...")
-		ecosystemPath := filepath.Join(homeDir, "Code", "my-projects")
-		ecosystemName := "my-projects"
+		ecosystemPath := filepath.Join(homeDir, "Code")
+		ecosystemName := filepath.Base(ecosystemPath)
 
-		_ = service.MkdirAll(ecosystemPath, 0o755)
+		// Only scaffold the directory when it doesn't exist yet; an existing
+		// directory (e.g. ~/Code full of repos) is registered as-is, never
+		// overwritten or git-initialized.
+		if _, err := os.Stat(ecosystemPath); os.IsNotExist(err) {
+			_ = service.MkdirAll(ecosystemPath, 0o755)
 
-		groveYMLContent := fmt.Sprintf(`name: %s
+			groveYMLContent := fmt.Sprintf(`name: %s
 description: A Grove ecosystem
 workspaces:
   - "*"
 `, ecosystemName)
-		_ = service.WriteFile(filepath.Join(ecosystemPath, "grove.yml"), []byte(groveYMLContent), 0o600)
+			_ = service.WriteFile(filepath.Join(ecosystemPath, "grove.yml"), []byte(groveYMLContent), 0o600)
 
-		gitignoreContent := `# OS files
+			gitignoreContent := `# OS files
 .DS_Store
 Thumbs.db
 
@@ -1947,9 +2072,9 @@ Thumbs.db
 *.swo
 *~
 `
-		_ = service.WriteFile(filepath.Join(ecosystemPath, ".gitignore"), []byte(gitignoreContent), 0o600)
+			_ = service.WriteFile(filepath.Join(ecosystemPath, ".gitignore"), []byte(gitignoreContent), 0o600)
 
-		readmeContent := fmt.Sprintf(`# %s
+			readmeContent := fmt.Sprintf(`# %s
 
 A Grove ecosystem for managing related projects.
 
@@ -1957,9 +2082,12 @@ A Grove ecosystem for managing related projects.
 
 Add projects to this directory and they will be automatically discovered by Grove tools.
 `, ecosystemName)
-		_ = service.WriteFile(filepath.Join(ecosystemPath, "README.md"), []byte(readmeContent), 0o600)
+			_ = service.WriteFile(filepath.Join(ecosystemPath, "README.md"), []byte(readmeContent), 0o600)
 
-		_ = service.RunGitInit(ecosystemPath)
+			_ = service.RunGitInit(ecosystemPath)
+		} else {
+			pretty.InfoPretty(fmt.Sprintf("Directory %s already exists; registering it without modifying its contents", ecosystemPath))
+		}
 
 		root, _ := yamlHandler.LoadGlobalConfig()
 		_ = setup.SetValue(root, map[string]interface{}{
@@ -1975,12 +2103,17 @@ Add projects to this directory and they will be automatically discovered by Grov
 		_ = service.MkdirAll(notebookPath, 0o755)
 
 		root, _ := yamlHandler.LoadGlobalConfig()
-		_ = setup.SetValue(root, notebookPath, "notebooks", "path")
+		_ = setup.SetValue(root, notebookPath, "notebooks", "definitions", "personal", "root_dir")
+		_ = setup.SetValue(root, "personal", "notebooks", "rules", "default")
 		_ = yamlHandler.SaveGlobalConfig(root)
 	}
 
 	if selectedOnly["gemini"] {
 		pretty.InfoPretty("Skipping Gemini API key (requires interactive input)...")
+	}
+
+	if selectedOnly["anthropic"] {
+		pretty.InfoPretty("Skipping Anthropic API key (requires interactive input; you can also set ANTHROPIC_API_KEY)...")
 	}
 
 	if selectedOnly["tmux"] {
@@ -2001,16 +2134,18 @@ Add projects to this directory and they will be automatically discovered by Grov
 
 	if selectedOnly["nvim"] {
 		pretty.InfoPretty("Setting up Neovim plugin...")
-		nvimPluginContent := `return {
+		nvimPluginDir := filepath.Join(paths.DataDir(), "nvim-plugins", "grove-nvim")
+		nvimPluginPath := strings.ReplaceAll(setup.AbbreviatePath(nvimPluginDir), "\\", "/")
+		nvimPluginContent := fmt.Sprintf(`return {
   {
-    dir = "~/.grove/nvim-plugins/grove-nvim",
+    dir = "%s",
     name = "grove-nvim",
     config = function()
       require("grove-nvim").setup({})
     end,
   },
 }
-`
+`, nvimPluginPath)
 		_ = service.WriteFile("~/.config/nvim/lua/plugins/grove.lua", []byte(nvimPluginContent), 0o600)
 	}
 
