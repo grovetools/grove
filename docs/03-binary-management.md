@@ -15,7 +15,7 @@ Grove uses two primary patterns to provide a unified interface: command delegati
 For certain high-level tasks, `grove` acts as an aggregator, providing a facade that orchestrates operations across multiple tools or workspaces.
 
 *   **`grove logs`**: Discovers all workspaces in an ecosystem, finds their structured log files, and tails them into a single, aggregated stream.
-*   **`grove llm`**: Provides a consistent set of flags for making requests to different Large Language Models, delegating the request to the correct provider-specific tool (`grove-gemini`, `grove-openai`, etc.) based on the specified model.
+*   **`grove llm`**: Provides a consistent set of flags for making requests to different Large Language Models, delegating the request to the correct provider-specific tool (`grove-anthropic`, `grove-gemini`, etc.) based on the specified model.
 
 ## Binary Resolution Precedence
 

@@ -504,7 +504,7 @@ General-purpose helper commands.
 **Syntax**: `grove llm [subcommand]`
 
 **Description**:
-Provides a single, consistent entry point for all LLM interactions, intelligently delegating to the appropriate provider-specific tool (e.g., `grove-gemini`, `grove-openai`) based on the model name.
+Provides a single, consistent entry point for all LLM interactions, intelligently delegating to the appropriate provider-specific tool (e.g., `grove-anthropic`, `grove-gemini`) based on the model name.
 
 **Subcommands**:
 -   `request [prompt...]`: Makes a request to an LLM provider. This command accepts a superset of flags from the underlying tools. Use `grove llm request --help` for a full list of options.
@@ -514,8 +514,8 @@ Provides a single, consistent entry point for all LLM interactions, intelligentl
 # Make a request using the default model configured in grove.yml
 grove llm request "Explain the reconciler pattern in grove-meta"
 
-# Make a request to a specific GPT model
-grove llm request --model gpt-4o-mini "Summarize the changes in the last commit"
+# Make a request to a specific Claude model
+grove llm request --model claude-opus-4-8 "Summarize the changes in the last commit"
 ```
 
 ---

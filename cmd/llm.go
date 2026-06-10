@@ -23,7 +23,7 @@ func init() {
 
 func newLlmCmd() *cobra.Command {
 	cmd := cli.NewStandardCommand("llm", "Unified interface for LLM providers")
-	cmd.Long = `The 'grove llm' command provides a single, consistent entry point for all LLM interactions, regardless of the underlying provider (OpenAI, Gemini, etc.).
+	cmd.Long = `The 'grove llm' command provides a single, consistent entry point for all LLM interactions, regardless of the underlying provider (Anthropic, Gemini, etc.).
 
 It intelligently delegates to the appropriate provider-specific tool based on the model name.`
 
@@ -35,7 +35,7 @@ func newLlmRequestCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "request [prompt...]",
 		Short: "Make a request to an LLM provider",
-		Long: `Acts as a facade, delegating to the appropriate tool (grove-gemini, grove-openai) based on the model.
+		Long: `Acts as a facade, delegating to the appropriate tool (grove-anthropic, grove-gemini) based on the model.
 
 Model determination precedence:
 1. --model flag
@@ -44,8 +44,8 @@ Model determination precedence:
 		RunE: runLlmRequest,
 	}
 
-	// Superset of flags from grove-gemini and grove-openai
-	cmd.Flags().StringP("model", "m", "", "LLM model to use (e.g., gpt-4o-mini, gemini-2.0-flash)")
+	// Superset of flags from grove-anthropic and grove-gemini
+	cmd.Flags().StringP("model", "m", "", "LLM model to use (e.g., claude-opus-4-8, gemini-2.5-pro)")
 	cmd.Flags().StringP("prompt", "p", "", "Prompt text")
 	cmd.Flags().StringP("file", "f", "", "Read prompt from file")
 	cmd.Flags().StringP("workdir", "w", "", "Working directory (defaults to current)")
@@ -92,15 +92,12 @@ func runLlmRequest(cmd *cobra.Command, args []string) error {
 
 	// 2. Determine target binary
 	var targetBinary string
-	if strings.HasPrefix(model, "gpt-") || strings.HasPrefix(model, "o1-") || strings.HasPrefix(model, "o3-") {
-		targetBinary = "grove-openai"
+	if strings.HasPrefix(model, "claude-") {
+		targetBinary = "grove-anthropic"
 	} else if strings.HasPrefix(model, "gemini-") {
 		targetBinary = "grove-gemini"
-	} else if strings.HasPrefix(model, "claude-") {
-		// For future Claude support
-		return fmt.Errorf("Claude models are not yet supported. Model must start with 'gpt-', 'o1-', 'o3-', or 'gemini-'")
 	} else {
-		return fmt.Errorf("unrecognized model provider for '%s'. Model must start with 'gpt-', 'o1-', 'o3-', or 'gemini-'", model)
+		return fmt.Errorf("unrecognized model provider for '%s'. Model must start with 'claude-' or 'gemini-'", model)
 	}
 
 	// Log delegation decision (debug-level to avoid polluting stdout when piping)
@@ -115,6 +112,14 @@ func runLlmRequest(cmd *cobra.Command, args []string) error {
 	var delegateArgs []string
 	delegateArgs = append(delegateArgs, "request") // All tools use the 'request' subcommand
 
+	// grove-anthropic supports a narrower flag set than grove-gemini; drop
+	// flags it doesn't understand and translate the max-tokens flag name.
+	anthropicUnsupported := map[string]bool{
+		"stream": true, "yes": true,
+		"temperature": true, "top-p": true, "top-k": true,
+		"cache-ttl": true, "no-cache": true, "recache": true, "use-cache": true,
+	}
+
 	// Add all flags that were explicitly set by the user
 	cmd.Flags().Visit(func(f *pflag.Flag) {
 		// Handle special cases
@@ -123,14 +128,25 @@ func runLlmRequest(cmd *cobra.Command, args []string) error {
 			return
 		}
 
+		name := f.Name
+		if targetBinary == "grove-anthropic" {
+			if anthropicUnsupported[name] {
+				log.WithField("flag", name).Debug("Dropping flag not supported by grove-anthropic")
+				return
+			}
+			if name == "max-output-tokens" {
+				name = "max-tokens"
+			}
+		}
+
 		// For slice flags, we need to append them correctly
 		if f.Value.Type() == "stringSlice" {
 			slice, _ := cmd.Flags().GetStringSlice(f.Name)
 			for _, val := range slice {
-				delegateArgs = append(delegateArgs, fmt.Sprintf("--%s", f.Name), val)
+				delegateArgs = append(delegateArgs, fmt.Sprintf("--%s", name), val)
 			}
 		} else {
-			delegateArgs = append(delegateArgs, fmt.Sprintf("--%s", f.Name), f.Value.String())
+			delegateArgs = append(delegateArgs, fmt.Sprintf("--%s", name), f.Value.String())
 		}
 	})
 
