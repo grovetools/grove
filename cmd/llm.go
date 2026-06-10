@@ -51,7 +51,6 @@ Model determination precedence:
 	cmd.Flags().StringP("workdir", "w", "", "Working directory (defaults to current)")
 	cmd.Flags().StringP("output", "o", "", "Write response to file instead of stdout")
 	cmd.Flags().Bool("regenerate", false, "Regenerate context before request")
-	cmd.Flags().Bool("stream", false, "Stream the response (if supported by provider)")
 	cmd.Flags().StringSlice("context", nil, "Additional context files or directories to include")
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompts")
 
@@ -115,7 +114,7 @@ func runLlmRequest(cmd *cobra.Command, args []string) error {
 	// grove-anthropic supports a narrower flag set than grove-gemini; drop
 	// flags it doesn't understand and translate the max-tokens flag name.
 	anthropicUnsupported := map[string]bool{
-		"stream": true, "yes": true,
+		"yes": true,
 		"temperature": true, "top-p": true, "top-k": true,
 		"cache-ttl": true, "no-cache": true, "recache": true, "use-cache": true,
 	}
