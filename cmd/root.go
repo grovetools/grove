@@ -76,6 +76,7 @@ func printAvailableTools(t *theme.Theme) {
 	}
 	var tools []toolRow
 	maxBinaryLen := len("BINARY")
+	maxDescLen := len("DESCRIPTION")
 	for repo, info := range sdk.GetToolRegistry() {
 		// Skip grove itself - it's self-referential
 		if info.Alias == "grove" {
@@ -85,13 +86,12 @@ func printAvailableTools(t *theme.Theme) {
 		if desc == "" {
 			desc = "-"
 		}
-		// Truncate long descriptions
-		if len(desc) > 30 {
-			desc = desc[:27] + "..."
-		}
 		tools = append(tools, toolRow{info.Alias, desc, repo})
 		if len(info.Alias) > maxBinaryLen {
 			maxBinaryLen = len(info.Alias)
+		}
+		if len(desc) > maxDescLen {
+			maxDescLen = len(desc)
 		}
 	}
 	sort.Slice(tools, func(i, j int) bool {
@@ -112,12 +112,12 @@ func printAvailableTools(t *theme.Theme) {
 	fmt.Println("\n " + t.Bold.Render("AVAILABLE TOOLS"))
 	fmt.Printf(" %s  %s  %s\n",
 		t.Muted.Render(pad("BINARY", maxBinaryLen)),
-		t.Muted.Render(pad("DESCRIPTION", 32)),
+		t.Muted.Render(pad("DESCRIPTION", maxDescLen)),
 		t.Muted.Render("REPO"))
 	for _, row := range tools {
 		fmt.Printf(" %s  %s  %s\n",
 			blue.Render(pad(row.binary, maxBinaryLen)),
-			pad(row.description, 32),
+			pad(row.description, maxDescLen),
 			t.Muted.Render(row.repo))
 	}
 
