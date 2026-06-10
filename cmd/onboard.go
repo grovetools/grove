@@ -59,14 +59,15 @@ type toolItem struct {
 
 // Default tools to pre-select during onboarding
 var defaultSelectedTools = map[string]bool{
-	"nav":    true,
-	"flow":   true,
-	"nb":     true,
-	"cx":     true,
-	"hooks":  true,
-	"core":   true,
-	"aglogs": true,
-	"skills": true,
+	"nav":     true,
+	"flow":    true,
+	"nb":      true,
+	"cx":      true,
+	"hooks":   true,
+	"core":    true,
+	"aglogs":  true,
+	"skills":  true,
+	"treemux": true,
 }
 
 // onboardModel is the TUI model for onboarding
