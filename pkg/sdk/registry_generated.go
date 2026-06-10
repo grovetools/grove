@@ -6,6 +6,7 @@ var toolRegistry = map[string]ToolInfo{
 	"agentlogs":       {Alias: "aglogs", Description: "Agent transcript log parsing and monitoring"},
 	"core":            {Alias: "core", Description: "Core libraries and debugging tools for the Grove ecosystem"},
 	"cx":              {Alias: "cx", Description: "LLM context management"},
+	"daemon":          {Alias: "groved", Description: "Grove ecosystem background daemon"},
 	"docgen":          {Alias: "docgen", Description: "LLM-powered, workspace-aware documentation generator."},
 	"flow":            {Alias: "flow", Description: "Job orchestration and workflows"},
 	"grove":           {Alias: "grove", Description: "Grove package manager and command delegator"},
@@ -18,4 +19,5 @@ var toolRegistry = map[string]ToolInfo{
 	"notify":          {Alias: "notify", Description: "Notification system for Grove ecosystem"},
 	"skills":          {Alias: "skills", Description: "Agent Skill Integrations"},
 	"tend":            {Alias: "tend", Description: "Scenario-based testing"},
+	"treemux":         {Alias: "treemux", Description: "Grove treemux — unified TUI for the grove workflow"},
 }
