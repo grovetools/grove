@@ -241,7 +241,8 @@ func getWorkspaceNode() *workspace.WorkspaceNode {
 }
 
 // worktreeRootFromPath returns the absolute path to the nearest ancestor that
-// lives directly under a `.grove-worktrees` directory, or "" if there is none.
+// lives directly under a grove worktree base (per workspace.WorktreeBases),
+// or "" if there is none.
 func worktreeRootFromPath(cwd string) string {
 	cur, err := filepath.Abs(cwd)
 	if err != nil {
@@ -252,8 +253,12 @@ func worktreeRootFromPath(cwd string) string {
 		if parent == cur {
 			return ""
 		}
-		if filepath.Base(parent) == ".grove-worktrees" {
-			return cur
+		if owner, ok := workspace.WorktreeOwner(cur); ok {
+			for _, base := range workspace.WorktreeBases(owner) {
+				if parent == base {
+					return cur
+				}
+			}
 		}
 		cur = parent
 	}
