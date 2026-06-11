@@ -18,6 +18,7 @@ var toolRegistry = map[string]ToolInfo{
 	"nb":              {Alias: "nb", Description: "Notebook and documentation management"},
 	"notify":          {Alias: "notify", Description: "Notification system for Grove ecosystem"},
 	"skills":          {Alias: "skills", Description: "Agent Skill Integrations"},
+	"sync":            {Alias: "grove-syncd", Description: "Self-hostable notebook sync server (grove-syncd)"},
 	"tend":            {Alias: "tend", Description: "Scenario-based testing"},
 	"treemux":         {Alias: "treemux", Description: "Grove treemux — unified TUI for the grove workflow"},
 }
