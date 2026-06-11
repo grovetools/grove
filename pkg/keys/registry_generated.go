@@ -365,7 +365,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "switch focus", Keys: []string{"tab", "shift+tab"}, Description: "switch focus", Enabled: true, ConfigKey: "switch_focus"},
 					{Name: "focus left", Keys: []string{"left"}, Description: "focus left", Enabled: true, ConfigKey: "focus_left"},
 					{Name: "focus right", Keys: []string{"right"}, Description: "focus right", Enabled: true, ConfigKey: "focus_right"},
-					{Name: "toggle layout", Keys: []string{"V"}, Description: "toggle layout", Enabled: true, ConfigKey: "toggle_layout"},
+					{Name: "toggle h/v split", Keys: []string{"V"}, Description: "toggle h/v split", Enabled: true, ConfigKey: "toggle_layout"},
 					{Name: "fullscreen logs", Keys: []string{"z"}, Description: "fullscreen logs", Enabled: true, ConfigKey: "toggle_fullscreen"},
 				},
 			},
