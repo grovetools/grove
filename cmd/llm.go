@@ -114,7 +114,7 @@ func runLlmRequest(cmd *cobra.Command, args []string) error {
 	// grove-anthropic supports a narrower flag set than grove-gemini; drop
 	// flags it doesn't understand and translate the max-tokens flag name.
 	anthropicUnsupported := map[string]bool{
-		"yes": true,
+		"yes":         true,
 		"temperature": true, "top-p": true, "top-k": true,
 		"cache-ttl": true, "no-cache": true, "recache": true, "use-cache": true,
 	}
