@@ -28,6 +28,10 @@ Overrides are stored in .grove/overrides.json within the current workspace.`
   cd ~/myproject
   grove dev point /path/to/grove-flow/.grove-worktrees/feature
 
+  # The worktree path may use either layout — legacy in-repo (above) or a
+  # sibling-workspace (XDG) worktree under the grove data dir:
+  grove dev point ~/.local/share/grove/worktrees/grove-flow-1a2b3c4d/feature
+
   # Point a specific binary to a workspace
   grove dev point flow /path/to/grove-flow/.grove-worktrees/feature
 

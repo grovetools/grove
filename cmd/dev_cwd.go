@@ -25,7 +25,12 @@ specific version built from a local worktree.`
 
 	cmd.Example = `  # The binaries from your current worktree will now be the default
   # when you run 'grove <tool>' from anywhere on your system.
+  # Works from either worktree layout — legacy in-repo:
   cd ~/grove-ecosystem/.grove-worktrees/my-feature
+  grove dev cwd
+
+  # ...or a sibling-workspace (XDG) worktree under the grove data dir:
+  cd ~/.local/share/grove/worktrees/grove-ecosystem-1a2b3c4d/my-feature
   grove dev cwd`
 
 	cmd.Args = cobra.NoArgs

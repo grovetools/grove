@@ -17,23 +17,29 @@ func newEnvTUICmd() *cobra.Command {
 		Short: "Open the interactive environment panel",
 		Long: `Open the interactive environment panel.
 
-The TUI picks a mode at launch from the current working directory:
+The TUI is a single-screen, live-refreshing grid that mirrors the web
+dashboard served by the global grove daemon. It shows the current ecosystem's
+worktrees with their running state, shared infra, and orphaned environments.
+Launch it from an ecosystem root or from any worktree — the grid renders the
+whole ecosystem and highlights the worktree you launched from.
 
-  Ecosystem mode — launched from an ecosystem root. Shows the cross-worktree
-    Deployments matrix, Shared Infra detail, Profiles catalog, Orphans, and
-    ecosystem-wide actions. Press W to jump into any worktree's panel.
+Keys: q quit · r refresh · d open the browser dashboard.
 
-  Worktree mode — launched from any worktree (ecosystem or standalone). Shows
-    Overview, Summary, Config & Provenance, Runtime, Drift, and Actions
-    scoped to a single profile. Press P to switch profiles.
+To use the CLI companion without opening a TUI, run
+'grove env ecosystem [--json]' from the same directory.
 
-To use the CLI companion for ecosystem mode without opening a TUI, run
-'grove env ecosystem [--json]' from the same directory.`,
-		Example: `  # From an ecosystem root → ecosystem mode
+Worktrees appear regardless of layout. The legacy layout nests them under
+'.grove-worktrees/' inside the repo; sibling-workspace (ecosystem) worktrees
+created with 'flow plan init --sibling-workspaces' live under the grove data
+dir (~/.local/share/grove/worktrees/<repo>-<hash>/<name>).`,
+		Example: `  # From an ecosystem root
   cd ~/code/my-ecosystem && grove env tui
 
-  # From a worktree → worktree mode
-  cd ~/code/my-ecosystem/.grove-worktrees/my-branch && grove env tui`,
+  # From a legacy in-repo worktree
+  cd ~/code/my-ecosystem/.grove-worktrees/my-branch && grove env tui
+
+  # From a sibling-workspace (XDG) worktree
+  cd ~/.local/share/grove/worktrees/my-ecosystem-1a2b3c4d/my-branch && grove env tui`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runEnvTUI()
 		},
