@@ -172,8 +172,8 @@ func FormatWorktreeStateSummary(state WorktreeState) string {
 }
 
 // DetectLocalOrphans returns a WorktreeState for every .grove/env/state.json
-// under the ecosystem's .grove-worktrees/ directory that isn't owned by a
-// known worktree. Each returned state has Workspace == nil and
+// under the ecosystem's worktree bases (workspace.WorktreeBases) that isn't
+// owned by a known worktree. Each returned state has Workspace == nil and
 // OrphanStatePath set to the state.json path, so the Deployments page can
 // render an inline orphan row. EnvState + Drift are parsed best-effort from
 // disk, matching how real worktree states are loaded.
@@ -182,9 +182,15 @@ func FormatWorktreeStateSummary(state WorktreeState) string {
 // as the TUI's Orphans page without importing rendering code.
 func DetectLocalOrphans(ecosystemRoot string, worktrees []WorktreeState) []WorktreeState {
 	orphans := []WorktreeState{}
-	pattern := filepath.Join(ecosystemRoot, ".grove-worktrees", "*", ".grove", "env", "state.json")
-	matches, err := filepath.Glob(pattern)
-	if err != nil || len(matches) == 0 {
+	var matches []string
+	for _, base := range workspace.WorktreeBases(ecosystemRoot) {
+		ms, err := filepath.Glob(filepath.Join(base, "*", ".grove", "env", "state.json"))
+		if err != nil {
+			continue
+		}
+		matches = append(matches, ms...)
+	}
+	if len(matches) == 0 {
 		return orphans
 	}
 	// Lowercase both sides of the comparison: ecosystemRoot is normalized via
@@ -199,8 +205,8 @@ func DetectLocalOrphans(ecosystemRoot string, worktrees []WorktreeState) []Workt
 	}
 	sort.Strings(matches)
 	for _, m := range matches {
-		// m == <root>/.grove-worktrees/<wt-name>/.grove/env/state.json
-		// → worktree path = <root>/.grove-worktrees/<wt-name>
+		// m == <base>/<wt-name>/.grove/env/state.json
+		// → worktree path = <base>/<wt-name>
 		wtDir := filepath.Dir(filepath.Dir(filepath.Dir(m)))
 		if _, ok := known[strings.ToLower(filepath.Clean(wtDir))]; ok {
 			continue

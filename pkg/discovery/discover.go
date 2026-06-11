@@ -75,15 +75,20 @@ func DiscoverProjectsInEcosystem(ecosystemRoot string, includeWorktrees bool) ([
 		// 1. The project's ParentEcosystemPath matches our ecosystem root, OR
 		// 2. The project path itself starts with the ecosystem root, OR
 		// 3. The project IS the ecosystem root
+		//
+		// NOTE: the prefix check in (2) only scopes worktrees that live
+		// UNDER the ecosystem root (legacy layout). XDG-located worktrees
+		// rely on core discovery setting ParentEcosystemPath so they match
+		// via (1).
 		if parentPathLower == ecosystemRootLower ||
 			strings.HasPrefix(projectPathLower, ecosystemRootLower) ||
 			projectPathLower == ecosystemRootLower {
 
 			// If not including worktrees, skip:
 			// - Nodes marked as worktrees
-			// - Nodes whose path contains /.grove-worktrees/ (inside a worktree)
+			// - Nodes whose path is inside a worktree location
 			if !includeWorktrees {
-				if p.IsWorktree() || strings.Contains(p.Path, "/.grove-worktrees/") {
+				if p.IsWorktree() || workspace.IsWorktreePath(p.Path) {
 					continue
 				}
 			}

@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/prune"
+	"github.com/grovetools/core/pkg/workspace"
 	"github.com/spf13/cobra"
 
 	envtui "github.com/grovetools/grove/pkg/tui/env"
@@ -70,12 +70,13 @@ func runEnvPrune(yes, includeCloud bool, worktreeOpt string, jsonOutput bool) er
 	cloud := buildCloudConfig(cfg, root.Name)
 
 	in := prune.Inputs{
-		GitRoot:      root.Path,
-		Active:       active,
-		Inactive:     inactive,
-		Cloud:        cloud,
-		DockerRunner: prune.ExecRunner{},
-		GcloudRunner: prune.ExecRunner{},
+		GitRoot:       root.Path,
+		WorktreeBases: workspace.WorktreeBases(root.Path),
+		Active:        active,
+		Inactive:      inactive,
+		Cloud:         cloud,
+		DockerRunner:  prune.ExecRunner{},
+		GcloudRunner:  prune.ExecRunner{},
 	}
 	opts := prune.Options{
 		DryRun:       !yes,
@@ -97,7 +98,7 @@ func runEnvPrune(yes, includeCloud bool, worktreeOpt string, jsonOutput bool) er
 }
 
 // collectSlugs returns (active, inactive) slug lists. Active comes from
-// the workspace discovery. Inactive comes from `.grove-worktrees/` dirs
+// the workspace discovery. Inactive comes from worktree-base dirs
 // that aren't in the active set — same heuristic used by the TUI's
 // Orphans page, reused here so a slug that exists only as a stale
 // directory still registers in the ExtractSlug dictionary.
@@ -114,17 +115,20 @@ func collectSlugs(ecosystemRoot string, states []envtui.WorktreeState) (active, 
 		seen[name] = struct{}{}
 		active = append(active, name)
 	}
-	// Any directory under .grove-worktrees/ that isn't already active
+	// Any directory under a worktree base that isn't already active
 	// counts as a known-inactive slug for dictionary purposes.
-	entries, _ := os.ReadDir(filepath.Join(ecosystemRoot, ".grove-worktrees"))
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
+	for _, base := range workspace.WorktreeBases(ecosystemRoot) {
+		entries, _ := os.ReadDir(base)
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			if _, ok := seen[e.Name()]; ok {
+				continue
+			}
+			seen[e.Name()] = struct{}{}
+			inactive = append(inactive, e.Name())
 		}
-		if _, ok := seen[e.Name()]; ok {
-			continue
-		}
-		inactive = append(inactive, e.Name())
 	}
 	sort.Strings(active)
 	sort.Strings(inactive)
