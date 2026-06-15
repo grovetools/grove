@@ -49,7 +49,18 @@ func DiscoverProjectsInEcosystem(ecosystemRoot string, includeWorktrees bool) ([
 		// This handles the case where we're in a worktree
 		for _, p := range allProjects {
 			if strings.ToLower(p.Path) == currentRootLower && p.ParentEcosystemPath != "" {
-				// We're in a sub-project that has a parent ecosystem
+				// If the current root is itself an ecosystem worktree, its own
+				// path is the correct scope — keep it. Rewriting to the owner
+				// repo breaks XDG-located worktrees, whose children live outside
+				// the owner dir and carry ParentEcosystemPath == this worktree;
+				// the owner-prefix filter below would then drop all of them.
+				// (Legacy .grove-worktrees worktrees self-scope identically here.)
+				if p.Kind == workspace.KindEcosystemWorktree {
+					ecosystemRoot = currentRoot
+					break
+				}
+				// Otherwise we're in a sub-project that has a parent ecosystem;
+				// scope to the whole ecosystem.
 				ecosystemRoot = p.ParentEcosystemPath
 				break
 			}
