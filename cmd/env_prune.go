@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/prune"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/pkg/worktreeregistry"
 	"github.com/spf13/cobra"
 
 	envtui "github.com/grovetools/grove/pkg/tui/env"
@@ -98,10 +100,15 @@ func runEnvPrune(yes, includeCloud bool, worktreeOpt string, jsonOutput bool) er
 }
 
 // collectSlugs returns (active, inactive) slug lists. Active comes from
-// the workspace discovery. Inactive comes from worktree-base dirs
-// that aren't in the active set — same heuristic used by the TUI's
-// Orphans page, reused here so a slug that exists only as a stale
-// directory still registers in the ExtractSlug dictionary.
+// workspace discovery and the worktree registry. Inactive comes from
+// worktree-base dirs that aren't in the active set — same heuristic used
+// by the TUI's Orphans page, reused here so a slug that exists only as a
+// stale directory still registers in the ExtractSlug dictionary.
+//
+// The registry-based active entries fix the orphan bug where a worktree
+// with an intact registry entry but no FS-visible state (e.g. an XDG
+// worktree not yet discovered by workspace.Bases) was falsely treated as
+// inactive and flagged for deletion.
 func collectSlugs(ecosystemRoot string, states []envtui.WorktreeState) (active, inactive []string) {
 	seen := make(map[string]struct{})
 	for _, s := range states {
@@ -115,6 +122,24 @@ func collectSlugs(ecosystemRoot string, states []envtui.WorktreeState) (active, 
 		seen[name] = struct{}{}
 		active = append(active, name)
 	}
+
+	// Include registry entries owned by this ecosystem as active so that
+	// stateless XDG dirs (no matching .grove/workspace marker) are not
+	// falsely flagged as orphans.
+	if regEntries, _ := worktreeregistry.ListAll(); len(regEntries) > 0 {
+		for _, entry := range regEntries {
+			if entry.Owner != ecosystemRoot {
+				continue
+			}
+			name := filepath.Base(entry.AbsPath)
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			active = append(active, name)
+		}
+	}
+
 	// Any directory under a worktree base that isn't already active
 	// counts as a known-inactive slug for dictionary purposes.
 	for _, base := range workspace.WorktreeBases(ecosystemRoot) {
