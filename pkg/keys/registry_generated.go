@@ -1172,6 +1172,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "go to cwd mapping", Keys: []string{"<"}, Description: "go to cwd mapping", Enabled: true, ConfigKey: "go_to_mapping_cwd"},
 					{Name: "clear ecosystem focus", Keys: []string{"0"}, Description: "clear ecosystem focus", Enabled: true, ConfigKey: "clear_focus"},
 					{Name: "toggle worktrees", Keys: []string{"w"}, Description: "toggle worktrees", Enabled: true, ConfigKey: "toggle_worktrees"},
+					{Name: "all anchor groups: summary/full", Keys: []string{"A"}, Description: "all anchor groups: summary/full", Enabled: true, ConfigKey: "toggle_scaffold"},
 					{Name: "filter dirty", Keys: []string{"D"}, Description: "filter dirty", Enabled: true, ConfigKey: "filter_dirty"},
 					{Name: "toggle context", Keys: []string{"C"}, Description: "toggle context", Enabled: true, ConfigKey: "toggle_hot_context"},
 				},
@@ -1320,7 +1321,9 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "focus parent (disabled)", Keys: []string{""}, Description: "focus parent (disabled)", Enabled: true, ConfigKey: "focus_parent"},
 					{Name: "focus selected", Keys: []string{"."}, Description: "focus selected", Enabled: true, ConfigKey: "focus_selected"},
 					{Name: "focus recent", Keys: []string{"f"}, Description: "focus recent", Enabled: true, ConfigKey: "focus_recent"},
+					{Name: "archive view (.archive/.closed)", Keys: []string{","}, Description: "archive view (.archive/.closed)", Enabled: true, ConfigKey: "focus_archive"},
 					{Name: "jump to workspace", Keys: []string{"1", "2", "3", "4", "5", "6", "7", "8", "9"}, Description: "jump to workspace", Enabled: true, ConfigKey: "jump_to_workspace"},
+					{Name: "jump to job artifacts", Keys: []string{";"}, Description: "jump to job artifacts", Enabled: true, ConfigKey: "jump_to_artifacts"},
 				},
 			},
 			{
@@ -1329,6 +1332,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "filter by tag", Keys: []string{"&"}, Description: "filter by tag", Enabled: true, ConfigKey: "filter_by_tag"},
 					{Name: "git changes", Keys: []string{"<", ">"}, Description: "git changes", Enabled: true, ConfigKey: "toggle_git_changes"},
 					{Name: "toggle sort order", Keys: []string{"s"}, Description: "toggle sort order", Enabled: true, ConfigKey: "sort"},
+					{Name: "cycle group-by (none/date/status/tag/priority)", Keys: []string{"o"}, Description: "cycle group-by (none/date/status/tag/priority)", Enabled: true, ConfigKey: "cycle_grouping"},
 				},
 			},
 			{
@@ -1350,6 +1354,8 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "promote note to plan", Keys: []string{"P"}, Description: "promote note to plan", Enabled: true, ConfigKey: "create_plan"},
 					{Name: "promote note to job", Keys: []string{"J"}, Description: "promote note to job", Enabled: true, ConfigKey: "promote_to_job"},
 					{Name: "rename note", Keys: []string{"R"}, Description: "rename note", Enabled: true, ConfigKey: "rename"},
+					{Name: "bump priority more critical", Keys: []string{"{"}, Description: "bump priority more critical", Enabled: true, ConfigKey: "priority_up"},
+					{Name: "bump priority less critical", Keys: []string{"}"}, Description: "bump priority less critical", Enabled: true, ConfigKey: "priority_down"},
 				},
 			},
 			{
@@ -1377,6 +1383,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "toggle preview focus", Keys: []string{"tab"}, Description: "toggle preview focus", Enabled: true, ConfigKey: "preview"},
 					{Name: "refresh", Keys: []string{"ctrl+r"}, Description: "refresh", Enabled: true, ConfigKey: "refresh"},
 					{Name: "sync with remotes", Keys: []string{"S"}, Description: "sync with remotes", Enabled: true, ConfigKey: "sync"},
+					{Name: "auto-archive notes older than 30 days", Keys: []string{"Z"}, Description: "auto-archive notes older than 30 days", Enabled: true, ConfigKey: "auto_archive"},
 				},
 			},
 			{
