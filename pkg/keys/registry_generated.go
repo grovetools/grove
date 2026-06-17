@@ -1349,7 +1349,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "Notes",
 				Bindings: []BindingEntry{
 					{Name: "create note at cursor", Keys: []string{"n"}, Description: "create note at cursor", Enabled: true, ConfigKey: "create_note"},
-					{Name: "inbox note (quick capture)", Keys: []string{"i"}, Description: "inbox note (quick capture)", Enabled: true, ConfigKey: "create_note_inbox"},
+					{Name: "inbox note (quick capture)", Keys: []string{"a"}, Description: "inbox note (quick capture)", Enabled: true, ConfigKey: "create_note_inbox"},
 					{Name: "global note", Keys: []string{"I"}, Description: "global note", Enabled: true, ConfigKey: "create_note_global"},
 					{Name: "promote note to plan", Keys: []string{"P"}, Description: "promote note to plan", Enabled: true, ConfigKey: "create_plan"},
 					{Name: "promote note to job", Keys: []string{"J"}, Description: "promote note to job", Enabled: true, ConfigKey: "promote_to_job"},
