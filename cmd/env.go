@@ -54,6 +54,18 @@ func envStateDir() string {
 	return filepath.Join(".", ".grove", "env")
 }
 
+// coreStateDir returns the directory whose ecosystem owns the core sticky-state
+// (e.g. the "environment" key). core/state resolves it to its ecosystem/worktree
+// root, so reads from outside any ecosystem are graceful-empty and writes are
+// refused (never a home-global ~/.grove/state.yml).
+func coreStateDir() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return cwd
+}
+
 // envStatePath returns the path to .grove/env/state.json in the current working directory.
 func envStatePath() string {
 	return filepath.Join(envStateDir(), "state.json")
@@ -192,7 +204,7 @@ func resolveEnvConfig(envProfile string) (*config.EnvironmentConfig, string, err
 
 	profile := envProfile
 	if profile == "" {
-		profile, _ = state.GetString("environment")
+		profile, _ = state.GetString(coreStateDir(), "environment")
 	}
 
 	resolved, err := config.ResolveEnvironment(cfg, profile)
@@ -570,7 +582,7 @@ func runEnvStatusLocal(jsonOutput bool) error {
 		return err
 	}
 
-	sticky, _ := state.GetString("environment")
+	sticky, _ := state.GetString(coreStateDir(), "environment")
 	cfg, _ := config.LoadDefault()
 	configDefault := ""
 	if cfg != nil && cfg.Environment != nil {
@@ -875,7 +887,7 @@ func newEnvListCmd() *cobra.Command {
 				return err
 			}
 
-			sticky, _ := state.GetString("environment")
+			sticky, _ := state.GetString(coreStateDir(), "environment")
 
 			// Determine currently running profile by reading local state.
 			// Treat an empty Environment field as "default" for tagging.
@@ -1109,7 +1121,7 @@ func newEnvDefaultCmd() *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if clear {
-				if err := state.Delete("environment"); err != nil {
+				if err := state.Delete(coreStateDir(), "environment"); err != nil {
 					return err
 				}
 				fmt.Println("Cleared default environment")
@@ -1117,14 +1129,14 @@ func newEnvDefaultCmd() *cobra.Command {
 			}
 
 			if len(args) == 1 {
-				if err := state.Set("environment", args[0]); err != nil {
+				if err := state.Set(coreStateDir(), "environment", args[0]); err != nil {
 					return err
 				}
 				fmt.Printf("Set default environment to: %s\n", args[0])
 				return nil
 			}
 
-			active, _ := state.GetString("environment")
+			active, _ := state.GetString(coreStateDir(), "environment")
 			if active == "" {
 				fmt.Println("default")
 			} else {

@@ -403,7 +403,8 @@ func resolveEnvConfig(envProfile string) (*config.EnvironmentConfig, string, *co
 
 	profile := envProfile
 	if profile == "" {
-		profile, _ = state.GetString("environment")
+		cwd, _ := os.Getwd()
+		profile, _ = state.GetString(cwd, "environment")
 	}
 
 	resolved, err := config.ResolveEnvironment(cfg, profile)
