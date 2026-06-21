@@ -90,6 +90,7 @@ func executeTaskWithCommand(cmd *cobra.Command, verb string, rawCommand []string
 		}
 	}
 
+	orch.DeriveNativeBuildAfter(taskJobs, configMap)
 	waves := orch.SortIntoWaves(taskJobs, configMap)
 	hasWaves := len(waves) > 1
 
@@ -197,6 +198,7 @@ func executeTask(cmd *cobra.Command, verb string, strategy orch.ConcurrencyStrat
 		}
 	}
 
+	orch.DeriveNativeBuildAfter(taskJobs, configMap)
 	waves := orch.SortIntoWaves(taskJobs, configMap)
 	hasWaves := len(waves) > 1
 

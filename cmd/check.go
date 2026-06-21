@@ -80,6 +80,8 @@ func executePipeline(cmd *cobra.Command, pipeline []string) error {
 		}
 	}
 
+	orch.DeriveNativeBuildAfter(taskJobs, configMap)
+
 	var binDirs []string
 	for _, wsPath := range workspaces {
 		binDirs = append(binDirs, filepath.Join(wsPath, "bin"))
