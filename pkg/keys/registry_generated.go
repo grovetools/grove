@@ -1200,8 +1200,6 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "toggle cx column", Keys: []string{"c"}, Description: "toggle cx column", Enabled: true, ConfigKey: "toggle_cx"},
 					{Name: "toggle git status", Keys: []string{"s"}, Description: "toggle git status", Enabled: true, ConfigKey: "toggle_git_status"},
-					{Name: "browse git changes", Keys: []string{"S"}, Description: "browse git changes", Enabled: true, ConfigKey: "toggle_git_changes"},
-					{Name: "browse changes since main", Keys: []string{"m"}, Description: "browse changes since main", Enabled: true, ConfigKey: "toggle_git_changes_main"},
 					{Name: "toggle branch names", Keys: []string{"b"}, Description: "toggle branch names", Enabled: true, ConfigKey: "toggle_branch"},
 					{Name: "toggle note counts", Keys: []string{"n"}, Description: "toggle note counts", Enabled: true, ConfigKey: "toggle_note_counts"},
 					{Name: "toggle flow plans", Keys: []string{"f"}, Description: "toggle flow plans", Enabled: true, ConfigKey: "toggle_plan_stats"},
