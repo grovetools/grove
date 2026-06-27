@@ -356,6 +356,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "view frontmatter", Keys: []string{"t"}, Description: "view frontmatter", Enabled: true, ConfigKey: "view_frontmatter"},
 					{Name: "view briefing", Keys: []string{"b"}, Description: "view briefing", Enabled: true, ConfigKey: "view_briefing"},
 					{Name: "preview job file", Keys: []string{"v"}, Description: "preview job file", Enabled: true, ConfigKey: "view_edit"},
+					{Name: "view token usage", Keys: []string{"O"}, Description: "view token usage", Enabled: true, ConfigKey: "view_tokens"},
 					{Name: "view context", Keys: []string{"w"}, Description: "view context", Enabled: true, ConfigKey: "view_context"},
 					{Name: "memory search", Keys: []string{"M"}, Description: "memory search", Enabled: true, ConfigKey: "view_memory"},
 					{Name: "preview agent pane", Keys: []string{"p"}, Description: "preview agent pane", Enabled: true, ConfigKey: "view_native_agent"},
