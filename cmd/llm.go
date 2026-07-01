@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/flow/pkg/model"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -74,36 +74,41 @@ func runLlmRequest(cmd *cobra.Command, args []string) error {
 	requestID := os.Getenv("GROVE_REQUEST_ID")
 
 	// 1. Determine model
-	model, _ := cmd.Flags().GetString("model")
-	if model == "" {
+	modelVar, _ := cmd.Flags().GetString("model")
+	if modelVar == "" {
 		// Try to load from grove.yml
 		cfg, err := config.LoadDefault()
 		if err == nil {
 			var llmCfg LLMConfig
 			if cfg.UnmarshalExtension("llm", &llmCfg) == nil && llmCfg.DefaultModel != "" {
-				model = llmCfg.DefaultModel
+				modelVar = llmCfg.DefaultModel
 			}
 		}
 	}
-	if model == "" {
+	if modelVar == "" {
 		return fmt.Errorf("no model specified. Use --model or set 'llm.default_model' in grove.yml")
 	}
 
-	// 2. Determine target binary
+	// 2. Determine target binary from the canonical model->provider registry.
+	provider, ok := model.LookupModelProvider(modelVar)
+	if !ok {
+		return fmt.Errorf("unrecognized model provider for '%s'. Model must start with 'claude-' or 'gemini-'", modelVar)
+	}
 	var targetBinary string
-	if strings.HasPrefix(model, "claude-") {
+	switch provider {
+	case model.ProviderAnthropic:
 		targetBinary = "grove-anthropic"
-	} else if strings.HasPrefix(model, "gemini-") {
+	case model.ProviderGoogle:
 		targetBinary = "grove-gemini"
-	} else {
-		return fmt.Errorf("unrecognized model provider for '%s'. Model must start with 'claude-' or 'gemini-'", model)
+	default:
+		return fmt.Errorf("unrecognized model provider %q for '%s'", provider, modelVar)
 	}
 
 	// Log delegation decision (debug-level to avoid polluting stdout when piping)
 	log := cli.GetLogger(cmd)
 	log.WithFields(logrus.Fields{
 		"request_id":   requestID,
-		"model":        model,
+		"model":        modelVar,
 		"delegated_to": targetBinary,
 	}).Debug("Delegating LLM request to provider")
 
@@ -123,7 +128,7 @@ func runLlmRequest(cmd *cobra.Command, args []string) error {
 	cmd.Flags().Visit(func(f *pflag.Flag) {
 		// Handle special cases
 		if f.Name == "model" { // Pass the resolved model
-			delegateArgs = append(delegateArgs, "--model", model)
+			delegateArgs = append(delegateArgs, "--model", modelVar)
 			return
 		}
 
