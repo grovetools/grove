@@ -80,7 +80,7 @@ func executePipeline(cmd *cobra.Command, pipeline []string) error {
 		}
 	}
 
-	orch.DeriveNativeBuildAfter(taskJobs, configMap)
+	depGraph := orch.DeriveWorkspaceBuildAfter(taskJobs, configMap)
 
 	var binDirs []string
 	for _, wsPath := range workspaces {
@@ -109,6 +109,7 @@ func executePipeline(cmd *cobra.Command, pipeline []string) error {
 		StateProvider: stateProvider,
 		DaemonClient:  client,
 		Configs:       configMap,
+		DepGraph:      depGraph,
 	}
 
 	buildFailFast = failFast
@@ -116,6 +117,9 @@ func executePipeline(cmd *cobra.Command, pipeline []string) error {
 	buildJobs = jobs
 
 	if dryRun {
+		if affected {
+			taskJobs = o.AffectedJobs(context.Background(), taskJobs)
+		}
 		waves := orch.SortIntoWaves(taskJobs, configMap)
 		return runTaskDryRun(opts, "check", taskJobs, waves, configMap, len(waves) > 1)
 	}

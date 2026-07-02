@@ -17,22 +17,36 @@ func BuildReverseGraph(configs map[string]*config.Config) map[string][]string {
 	return reverse
 }
 
-// FilterAffected returns only the jobs whose workspaces are dirty or transitively
-// depended upon by a dirty workspace (wave-sorted strategy only).
-func FilterAffected(jobs []TaskJob, states map[string]WorkspaceState, configs map[string]*config.Config, strategy ConcurrencyStrategy) []TaskJob {
-	dirty := make(map[string]bool)
+// FilterAffected returns only the jobs whose workspaces are changed — dirty or
+// divergent from main (committed-but-unmerged) — plus, for the wave-sorted
+// strategy, the jobs that transitively depend on a changed workspace.
+//
+// Dependents are found through the union of the declared build_after edges
+// (configs) and the full derived import graph (graph, may be nil). The full
+// graph matters: the scheduling edges written into configs have import-cycle
+// edges condensed away (see buildAfterEdges), but a cycle partner of a changed
+// member is still affected by it.
+func FilterAffected(jobs []TaskJob, states map[string]WorkspaceState, configs map[string]*config.Config, graph *DepGraph, strategy ConcurrencyStrategy) []TaskJob {
+	changed := make(map[string]bool)
 	for _, job := range jobs {
-		if s, ok := states[job.Name]; ok && s.IsDirty {
-			dirty[job.Name] = true
+		if s, ok := states[job.Name]; ok && (s.IsDirty || s.DivergesFromMain) {
+			changed[job.Name] = true
 		}
 	}
 
 	if strategy == StrategyFlat {
-		return filterBySet(jobs, dirty)
+		return filterBySet(jobs, changed)
 	}
 
-	// Wave-sorted: expand dirty set through reverse dependency graph
+	// Wave-sorted: expand changed set through reverse dependency graph
 	reverse := BuildReverseGraph(configs)
+	if graph != nil {
+		for member, deps := range graph.deps {
+			for _, dep := range deps {
+				reverse[dep] = append(reverse[dep], member)
+			}
+		}
+	}
 	affected := make(map[string]bool)
 	var walk func(name string)
 	walk = func(name string) {
@@ -44,7 +58,7 @@ func FilterAffected(jobs []TaskJob, states map[string]WorkspaceState, configs ma
 			walk(dep)
 		}
 	}
-	for name := range dirty {
+	for name := range changed {
 		walk(name)
 	}
 

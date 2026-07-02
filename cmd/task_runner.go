@@ -23,7 +23,7 @@ import (
 )
 
 func addTaskFlags(cmd *cobra.Command) {
-	cmd.Flags().Bool("affected", false, "Only run on workspaces with uncommitted changes")
+	cmd.Flags().Bool("affected", false, "Only run on workspaces that are dirty or diverge from main, plus their dependents")
 	cmd.Flags().Bool("no-cache", false, "Ignore cached task results")
 	cmd.Flags().IntP("jobs", "j", runtime.NumCPU(), "Number of parallel workers")
 	cmd.Flags().String("filter", "", "Glob pattern to include only matching projects")
@@ -90,7 +90,7 @@ func executeTaskWithCommand(cmd *cobra.Command, verb string, rawCommand []string
 		}
 	}
 
-	orch.DeriveNativeBuildAfter(taskJobs, configMap)
+	depGraph := orch.DeriveWorkspaceBuildAfter(taskJobs, configMap)
 	waves := orch.SortIntoWaves(taskJobs, configMap)
 	hasWaves := len(waves) > 1
 
@@ -126,6 +126,7 @@ func executeTaskWithCommand(cmd *cobra.Command, verb string, rawCommand []string
 		DaemonClient:  client,
 		BuildClient:   client,
 		Configs:       configMap,
+		DepGraph:      depGraph,
 	}
 
 	buildFailFast = failFast
@@ -135,6 +136,11 @@ func executeTaskWithCommand(cmd *cobra.Command, verb string, rawCommand []string
 	isTTY := term.IsTerminal(int(os.Stdout.Fd()))
 
 	if dryRun {
+		if affected {
+			taskJobs = o.AffectedJobs(context.Background(), taskJobs)
+			waves = orch.SortIntoWaves(taskJobs, configMap)
+			hasWaves = len(waves) > 1
+		}
 		return runTaskDryRun(opts, verb, taskJobs, waves, configMap, hasWaves)
 	}
 
@@ -203,7 +209,7 @@ func executeTask(cmd *cobra.Command, verb string, strategy orch.ConcurrencyStrat
 		}
 	}
 
-	orch.DeriveNativeBuildAfter(taskJobs, configMap)
+	depGraph := orch.DeriveWorkspaceBuildAfter(taskJobs, configMap)
 	waves := orch.SortIntoWaves(taskJobs, configMap)
 	hasWaves := len(waves) > 1
 
@@ -239,6 +245,7 @@ func executeTask(cmd *cobra.Command, verb string, strategy orch.ConcurrencyStrat
 		DaemonClient:  client,
 		BuildClient:   client,
 		Configs:       configMap,
+		DepGraph:      depGraph,
 	}
 
 	// Store flags in package vars for TUI/verbose callbacks
@@ -249,6 +256,11 @@ func executeTask(cmd *cobra.Command, verb string, strategy orch.ConcurrencyStrat
 	isTTY := term.IsTerminal(int(os.Stdout.Fd()))
 
 	if dryRun {
+		if affected {
+			taskJobs = o.AffectedJobs(context.Background(), taskJobs)
+			waves = orch.SortIntoWaves(taskJobs, configMap)
+			hasWaves = len(waves) > 1
+		}
 		return runTaskDryRun(opts, verb, taskJobs, waves, configMap, hasWaves)
 	}
 

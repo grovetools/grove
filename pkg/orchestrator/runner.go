@@ -32,6 +32,10 @@ type Orchestrator struct {
 	// falls back to the local pool.
 	BuildClient BuildClient
 	Configs     map[string]*config.Config
+	// DepGraph is the full derived import graph (DeriveWorkspaceBuildAfter).
+	// --affected expansion uses it alongside the declared/scheduling edges in
+	// Configs so import-cycle partners of a changed member are still selected.
+	DepGraph *DepGraph
 
 	// Remote-exec state: one submission group per orchestrator run, plus
 	// a latch that disables remote exec after the first failed submit.
@@ -93,20 +97,40 @@ func (o *Orchestrator) RunWithEvents(ctx context.Context, jobs []TaskJob) <-chan
 	}
 
 	if o.Options.AffectedOnly {
-		if len(states) == 0 {
-			// Fallback to local git if daemon returned nothing
-			local := &LocalStateProvider{}
-			states, _ = local.GetState(ctx, jobPaths(jobs))
-		}
-		if states != nil {
-			jobs = FilterAffected(jobs, states, o.Configs, o.Options.Strategy)
-		}
+		jobs, states = o.filterAffected(ctx, jobs, states)
 	}
 
 	if o.Options.Strategy == StrategyWaveSorted {
 		return o.runWaves(ctx, jobs, states)
 	}
 	return o.runFlat(ctx, jobs, states)
+}
+
+// filterAffected reduces jobs to the --affected selection (dirty or divergent
+// from main, plus dependents under the wave-sorted strategy), falling back to
+// local git state when the daemon returned nothing. It returns the (possibly
+// freshly fetched) states so callers keep using them for cache-hit checks.
+func (o *Orchestrator) filterAffected(ctx context.Context, jobs []TaskJob, states map[string]WorkspaceState) ([]TaskJob, map[string]WorkspaceState) {
+	if len(states) == 0 {
+		local := &LocalStateProvider{}
+		states, _ = local.GetState(ctx, jobPaths(jobs))
+	}
+	if states == nil {
+		return jobs, nil
+	}
+	return FilterAffected(jobs, states, o.Configs, o.DepGraph, o.Options.Strategy), states
+}
+
+// AffectedJobs returns the subset of jobs that --affected would run, using the
+// orchestrator's state provider (with local-git fallback). Used by dry-run so
+// the reported selection matches what a real run would execute.
+func (o *Orchestrator) AffectedJobs(ctx context.Context, jobs []TaskJob) []TaskJob {
+	var states map[string]WorkspaceState
+	if o.StateProvider != nil {
+		states, _ = o.StateProvider.GetState(ctx, jobPaths(jobs))
+	}
+	jobs, _ = o.filterAffected(ctx, jobs, states)
+	return jobs
 }
 
 func (o *Orchestrator) runFlat(ctx context.Context, jobs []TaskJob, states map[string]WorkspaceState) <-chan TaskEvent {
