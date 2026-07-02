@@ -312,6 +312,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "toggle git log", Keys: []string{"g"}, Description: "toggle git log", Enabled: true, ConfigKey: "toggle_git_log"},
 					{Name: "toggle on-hold", Keys: []string{"H"}, Description: "toggle on-hold", Enabled: true, ConfigKey: "toggle_hold"},
+					{Name: "toggle archived", Keys: []string{"A"}, Description: "toggle archived", Enabled: true, ConfigKey: "toggle_archived"},
 				},
 			},
 			{

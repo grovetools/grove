@@ -131,6 +131,11 @@ func collectSlugs(ecosystemRoot string, states []envtui.WorktreeState) (active, 
 			if entry.Owner != ecosystemRoot {
 				continue
 			}
+			// Archived worktrees are not active; keeping them out of the
+			// active set means a same-named stale dir can still be pruned.
+			if entry.IsArchived() {
+				continue
+			}
 			name := filepath.Base(entry.AbsPath)
 			if _, ok := seen[name]; ok {
 				continue
