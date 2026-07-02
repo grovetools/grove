@@ -84,7 +84,13 @@ type Model struct {
 
 	// layerPages keeps typed references to the pages so we can call
 	// LayerPage-specific methods (Refresh, IsZChordPending, etc.).
+	// NOTE: this slice is intentionally NOT index-aligned with the pager's
+	// page list (the Themes page is a non-LayerPage tab); resolve the
+	// active layer page via activeLayerPage(), never by pager index.
 	layerPages []*LayerPage
+
+	// themesPage is the bespoke theme-gallery page (5th tab).
+	themesPage *ThemesPage
 
 	input textinput.Model
 
@@ -144,11 +150,14 @@ func New(
 		NewLayerPage("Project", config.SourceProject, layered, filters, width, height),
 	}
 
-	// Build pager.Page slice from the typed pages
-	pages := make([]pager.Page, len(layerPages))
-	for i, lp := range layerPages {
-		pages[i] = lp
+	themesPage := NewThemesPage(layered, width, height)
+
+	// Build pager.Page slice from the typed pages, plus the Themes page.
+	pages := make([]pager.Page, 0, len(layerPages)+1)
+	for _, lp := range layerPages {
+		pages = append(pages, lp)
 	}
+	pages = append(pages, themesPage)
 
 	pagerKeys := pager.KeyMap{
 		Tab1:    keys.Base.Tab1,
@@ -180,6 +189,7 @@ func New(
 	m := Model{
 		pager:       pgr,
 		layerPages:  layerPages,
+		themesPage:  themesPage,
 		input:       ti,
 		layered:     layered,
 		yamlHandler: yamlHandler,
@@ -249,6 +259,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.editNode = msg.node
 		return m, nil
 
+	case applyThemeMsg:
+		// Persist the selected theme to the global layer. tui.theme is
+		// x-layer=global, so the Themes page always saves there.
+		if err := m.saveToLayer([]string{"tui", "theme"}, msg.name, config.SourceGlobal); err != nil {
+			m.statusMsg = fmt.Sprintf("Error: %v", err)
+			return m, nil
+		}
+		if m.themesPage != nil {
+			m.themesPage.MarkSaved(msg.name)
+		}
+		if err := m.reloadConfig(); err != nil {
+			m.statusMsg = fmt.Sprintf("Error reloading: %v", err)
+			return m, nil
+		}
+		m.statusMsg = fmt.Sprintf("Theme %q saved to %s!", msg.name, LayerDisplayName(config.SourceGlobal))
+		return m, nil
+
 	case tea.KeyMsg:
 		// If help is showing, pass messages to help component
 		if m.help.ShowAll {
@@ -277,8 +304,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Quit -> emit CloseRequestMsg instead of tea.Quit
+	// Quit -> emit CloseRequestMsg instead of tea.Quit. When embedded the
+	// host process keeps running, so drop any live theme preview first.
 	if key.Matches(msg, m.keys.Base.Quit) {
+		if m.themesPage != nil {
+			m.themesPage.RevertPreview()
+		}
 		return m, func() tea.Msg { return embed.CloseRequestMsg{} }
 	}
 
@@ -287,62 +318,67 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Toggle preview mode
-	if key.Matches(msg, m.keys.Preview) {
-		m.filters.ShowPreview = !m.filters.ShowPreview
-		m.saveUIState()
-		m.refreshAllPages()
-		return m, nil
-	}
-
-	// Toggle view mode (configured/all)
-	if key.Matches(msg, m.keys.ViewMode) {
-		m.filters.ViewMode = configui.CycleViewMode(m.filters.ViewMode)
-		m.saveUIState()
-		m.refreshAllPages()
-		return m, nil
-	}
-
-	// Cycle maturity filter
-	if key.Matches(msg, m.keys.MaturityFilter) {
-		m.filters.MaturityFilter = configui.CycleMaturityFilter(m.filters.MaturityFilter)
-		m.saveUIState()
-		m.refreshAllPages()
-		return m, nil
-	}
-
-	// Cycle sort mode
-	if key.Matches(msg, m.keys.SortMode) {
-		m.filters.SortMode = configui.CycleSortMode(m.filters.SortMode)
-		m.saveUIState()
-		m.refreshAllPages()
-		return m, nil
-	}
-
-	// Show config sources - but don't intercept if z-chord is pending
-	if key.Matches(msg, m.keys.Sources) {
-		activePage := m.activeLayerPage()
-		if activePage == nil || !activePage.IsZChordPending() {
-			m.state = viewSources
+	// Filter/sort/preview toggles only apply to LayerPages. On other pages
+	// (e.g. Themes) let the keys fall through to the page itself.
+	onLayerPage := m.activeLayerPage() != nil
+	if onLayerPage {
+		// Toggle preview mode
+		if key.Matches(msg, m.keys.Preview) {
+			m.filters.ShowPreview = !m.filters.ShowPreview
+			m.saveUIState()
+			m.refreshAllPages()
 			return m, nil
 		}
-		// Let it fall through to pager delegation
-	}
 
-	// Shift+M: cycle maturity filter backward
-	if msg.String() == "M" {
-		m.filters.MaturityFilter = configui.CycleMaturityFilterReverse(m.filters.MaturityFilter)
-		m.saveUIState()
-		m.refreshAllPages()
-		return m, nil
-	}
+		// Toggle view mode (configured/all)
+		if key.Matches(msg, m.keys.ViewMode) {
+			m.filters.ViewMode = configui.CycleViewMode(m.filters.ViewMode)
+			m.saveUIState()
+			m.refreshAllPages()
+			return m, nil
+		}
 
-	// Shift+S: cycle sort mode backward
-	if msg.String() == "S" {
-		m.filters.SortMode = configui.CycleSortModeReverse(m.filters.SortMode)
-		m.saveUIState()
-		m.refreshAllPages()
-		return m, nil
+		// Cycle maturity filter
+		if key.Matches(msg, m.keys.MaturityFilter) {
+			m.filters.MaturityFilter = configui.CycleMaturityFilter(m.filters.MaturityFilter)
+			m.saveUIState()
+			m.refreshAllPages()
+			return m, nil
+		}
+
+		// Cycle sort mode
+		if key.Matches(msg, m.keys.SortMode) {
+			m.filters.SortMode = configui.CycleSortMode(m.filters.SortMode)
+			m.saveUIState()
+			m.refreshAllPages()
+			return m, nil
+		}
+
+		// Show config sources - but don't intercept if z-chord is pending
+		if key.Matches(msg, m.keys.Sources) {
+			activePage := m.activeLayerPage()
+			if activePage == nil || !activePage.IsZChordPending() {
+				m.state = viewSources
+				return m, nil
+			}
+			// Let it fall through to pager delegation
+		}
+
+		// Shift+M: cycle maturity filter backward
+		if msg.String() == "M" {
+			m.filters.MaturityFilter = configui.CycleMaturityFilterReverse(m.filters.MaturityFilter)
+			m.saveUIState()
+			m.refreshAllPages()
+			return m, nil
+		}
+
+		// Shift+S: cycle sort mode backward
+		if msg.String() == "S" {
+			m.filters.SortMode = configui.CycleSortModeReverse(m.filters.SortMode)
+			m.saveUIState()
+			m.refreshAllPages()
+			return m, nil
+		}
 	}
 
 	// Delegate to pager (handles tab switching + active page Update)
@@ -659,10 +695,15 @@ func (m *Model) saveUIState() {
 	})
 }
 
-// refreshAllPages refreshes all pages to apply new filters/sorting.
+// refreshAllPages refreshes all pages to apply new filters/sorting and the
+// reloaded config. It intentionally iterates the typed page references (not
+// the pager's index space) so non-LayerPage tabs are handled explicitly.
 func (m *Model) refreshAllPages() {
 	for _, page := range m.layerPages {
 		page.Refresh(m.layered)
+	}
+	if m.themesPage != nil {
+		m.themesPage.Refresh(m.layered)
 	}
 }
 
@@ -683,13 +724,13 @@ func (m *Model) reloadConfig() error {
 	return nil
 }
 
-// activeLayerPage returns the active LayerPage (typed), or nil.
+// activeLayerPage returns the active LayerPage (typed), or nil when the
+// active tab is not a layer page (e.g. the Themes page). Resolved by type
+// assertion on the pager's active page rather than by index so the pager's
+// page list and m.layerPages never need to stay index-aligned.
 func (m *Model) activeLayerPage() *LayerPage {
-	idx := m.pager.ActiveIndex()
-	if idx >= 0 && idx < len(m.layerPages) {
-		return m.layerPages[idx]
-	}
-	return nil
+	lp, _ := m.pager.Active().(*LayerPage)
+	return lp
 }
 
 // GetLayerFilePath returns the file path for a given layer.
