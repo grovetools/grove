@@ -7,6 +7,7 @@ import (
 
 	"github.com/grovetools/core/pkg/prune"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/pkg/worktreeregistry"
 
 	envtui "github.com/grovetools/grove/pkg/tui/env"
 )
@@ -53,6 +54,57 @@ func TestCollectSlugs_SeesXDGBaseDirs(t *testing.T) {
 	}
 	if !containsSlug(inactive, "dead-xdg") {
 		t.Errorf("inactive = %v, want it to contain the XDG-base dir 'dead-xdg'", inactive)
+	}
+}
+
+// TestCollectSlugs_SkipsArchivedRegistryEntries verifies the archive guard: a
+// registry entry that has been Archived (worktree moved under
+// paths.WorktreeArchiveDir()) is excluded from the active slug set, while a
+// live registry entry with the same owner still counts as active.
+func TestCollectSlugs_SkipsArchivedRegistryEntries(t *testing.T) {
+	sandboxXDG(t)
+	// The registry lives under StateDir(); sandbox it separately from the
+	// data dir so ListAll reads only this test's entries.
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	ecoRoot := t.TempDir()
+
+	// A live registry-only worktree (no FS-visible state) — counts as active.
+	liveDir := filepath.Join(t.TempDir(), "live-slug")
+	if err := os.MkdirAll(liveDir, 0o755); err != nil {
+		t.Fatalf("mkdir live worktree: %v", err)
+	}
+	if err := worktreeregistry.Save(&worktreeregistry.Entry{
+		AbsPath: liveDir,
+		Owner:   ecoRoot,
+	}); err != nil {
+		t.Fatalf("save live registry entry: %v", err)
+	}
+
+	// An archived worktree owned by the same ecosystem — must NOT be active.
+	oldDir := filepath.Join(t.TempDir(), "archived-slug")
+	archiveDir := filepath.Join(t.TempDir(), "archived-slug")
+	for _, d := range []string{oldDir, archiveDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+	if err := worktreeregistry.Save(&worktreeregistry.Entry{
+		AbsPath: oldDir,
+		Owner:   ecoRoot,
+	}); err != nil {
+		t.Fatalf("save registry entry: %v", err)
+	}
+	if err := worktreeregistry.Archive(oldDir, archiveDir); err != nil {
+		t.Fatalf("archive registry entry: %v", err)
+	}
+
+	active, _ := collectSlugs(ecoRoot, nil)
+	if !containsSlug(active, "live-slug") {
+		t.Errorf("active = %v, want it to contain the live registry entry 'live-slug'", active)
+	}
+	if containsSlug(active, "archived-slug") {
+		t.Errorf("active = %v, must not contain the archived entry 'archived-slug'", active)
 	}
 }
 
