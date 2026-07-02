@@ -173,15 +173,12 @@ func renderNotebookPreview(notebookPath string, width int) string {
 
 // renderTmuxConfig shows the exact tmux configuration that will be created
 func renderTmuxConfig(width int) string {
+	t := theme.DefaultTheme
 	var content strings.Builder
 
-	commentStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240"))
-	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("214")).
-		Bold(true)
-	cmdStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("39"))
+	commentStyle := t.Muted
+	keyStyle := t.Highlight
+	cmdStyle := t.InfoLight
 
 	content.WriteString(commentStyle.Render("# Key bindings added:\n"))
 	content.WriteString("\n")
@@ -209,7 +206,7 @@ func renderTmuxConfig(width int) string {
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
+		BorderForeground(t.Colors.Border).
 		Padding(0, 1).
 		Width(min(width-12, 45))
 

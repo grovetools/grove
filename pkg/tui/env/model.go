@@ -17,10 +17,10 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/tui/theme"
 )
 
 // Config is the TUI factory for worktree-mode callers. The fields match the
@@ -146,11 +146,12 @@ func (m model) View() string {
 }
 
 func (m model) renderGrid() string {
+	t := theme.DefaultTheme
 	var b strings.Builder
 
-	b.WriteString(headerStyle.Render("grove env tui"))
+	b.WriteString(t.Info.Render("grove env tui"))
 	b.WriteString("  ")
-	b.WriteString(mutedStyle.Render(fmt.Sprintf("updated %s", m.lastFetch.Format("15:04:05"))))
+	b.WriteString(t.Muted.Render(fmt.Sprintf("updated %s", m.lastFetch.Format("15:04:05"))))
 	b.WriteString("\n\n")
 
 	eco := m.selectedEcosystem()
@@ -166,7 +167,7 @@ func (m model) renderGrid() string {
 		}
 	}
 	b.WriteString(fmt.Sprintf("ecosystem: %s    %d/%d running\n",
-		boldStyle.Render(eco.Name), running, len(eco.Worktrees)))
+		t.Bold.Render(eco.Name), running, len(eco.Worktrees)))
 	b.WriteString(strings.Repeat("─", 64) + "\n")
 
 	for _, wt := range eco.Worktrees {
@@ -175,30 +176,31 @@ func (m model) renderGrid() string {
 	}
 
 	if len(eco.Worktrees) == 0 {
-		b.WriteString(mutedStyle.Render("  (no worktrees)") + "\n")
+		b.WriteString(t.Muted.Render("  (no worktrees)") + "\n")
 	}
 
 	// Shared infra + orphans
 	if eco.SharedInfra != nil {
 		b.WriteString("\n")
-		b.WriteString(mutedStyle.Render("shared infra:"))
+		b.WriteString(t.Muted.Render("shared infra:"))
 		b.WriteString(fmt.Sprintf(" %s (%s)\n", eco.SharedInfra.Profile, eco.SharedInfra.Provider))
 	}
 	if len(eco.Orphans) > 0 {
-		b.WriteString("\n" + mutedStyle.Render(fmt.Sprintf("orphans (%d):", len(eco.Orphans))) + "\n")
+		b.WriteString("\n" + t.Muted.Render(fmt.Sprintf("orphans (%d):", len(eco.Orphans))) + "\n")
 		for _, o := range eco.Orphans {
-			b.WriteString(fmt.Sprintf("  %s  %s\n", o.Name, mutedStyle.Render(o.Category)))
+			b.WriteString(fmt.Sprintf("  %s  %s\n", o.Name, t.Muted.Render(o.Category)))
 		}
 	}
 
-	b.WriteString("\n" + mutedStyle.Render("q quit · r refresh · d open browser dashboard"))
+	b.WriteString("\n" + t.Muted.Render("q quit · r refresh · d open browser dashboard"))
 	return b.String()
 }
 
 func (m model) renderWorktreeRow(wt dashboardWorktree) string {
+	t := theme.DefaultTheme
 	name := wt.Name
 	if wt.Name == m.focus {
-		name = focusStyle.Render("▸ " + name)
+		name = t.InfoLight.Render("▸ " + name)
 	} else {
 		name = "  " + name
 	}
@@ -219,7 +221,7 @@ func (m model) renderWorktreeRow(wt dashboardWorktree) string {
 		eps += e.Name
 	}
 	return fmt.Sprintf("%-32s  %s %-9s  %-16s  %-10s  %s",
-		name, dot, wt.State, profile, svcs, mutedStyle.Render(eps))
+		name, dot, wt.State, profile, svcs, t.Muted.Render(eps))
 }
 
 func (m model) selectedEcosystem() *dashboardEcosystem {
@@ -235,36 +237,31 @@ func (m model) selectedEcosystem() *dashboardEcosystem {
 }
 
 // ---- styling ----
-
-var (
-	headerStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#58a6ff"))
-	mutedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#8b949e"))
-	boldStyle   = lipgloss.NewStyle().Bold(true)
-	focusStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#58a6ff"))
-	greenStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#3fb950"))
-	redStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#f85149"))
-	greyStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#6e7681"))
-)
+//
+// Styles are read from theme.DefaultTheme at render time (never captured in
+// package vars) so theme swaps via GROVE_THEME/config are respected.
 
 func stateDot(state string) string {
+	t := theme.DefaultTheme
 	switch state {
 	case "running":
-		return greenStyle.Render("●")
+		return t.SuccessLight.Render("●")
 	case "error":
-		return redStyle.Render("●")
+		return t.ErrorLight.Render("●")
 	default:
-		return greyStyle.Render("●")
+		return t.Muted.Render("●")
 	}
 }
 
 func serviceDot(status string) string {
+	t := theme.DefaultTheme
 	switch status {
 	case "running":
-		return greenStyle.Render("●")
+		return t.SuccessLight.Render("●")
 	case "error":
-		return redStyle.Render("●")
+		return t.ErrorLight.Render("●")
 	default:
-		return greyStyle.Render("●")
+		return t.Muted.Render("●")
 	}
 }
 

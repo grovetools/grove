@@ -378,7 +378,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m tuiModel) View() string {
 	if m.viewMode == "logs" {
-		header := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Press ESC to return to list")
+		header := theme.DefaultTheme.Muted.Render("Press ESC to return to list")
 		return fmt.Sprintf("%s\n%s", header, m.viewport.View())
 	}
 
