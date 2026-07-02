@@ -41,6 +41,11 @@ With --json, the fully merged configuration is printed to stdout
 instead of opening the TUI (no terminal required).`
 
 	cmd.RunE = runConfigEdit
+
+	// Subcommands. The parent's RunE still handles the bare `grove config`
+	// invocation (cobra falls back to it when no subcommand matches).
+	cmd.AddCommand(newConfigAuditCmd())
+
 	return cmd
 }
 
