@@ -80,6 +80,36 @@ func (h *TOMLHandler) LoadTOML(path string) (map[string]interface{}, error) {
 	return result, nil
 }
 
+// DeleteTOMLValue removes the key at the given path from a nested TOML map —
+// the delete counterpart of the set-style helpers. Parent tables left empty
+// by the deletion are removed as well. Returns false (a no-op) if the path
+// does not exist.
+func DeleteTOMLValue(data map[string]interface{}, path ...string) bool {
+	if len(path) == 0 {
+		return false
+	}
+
+	if len(path) == 1 {
+		if _, ok := data[path[0]]; !ok {
+			return false
+		}
+		delete(data, path[0])
+		return true
+	}
+
+	nested, ok := data[path[0]].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	if !DeleteTOMLValue(nested, path[1:]...) {
+		return false
+	}
+	if len(nested) == 0 {
+		delete(data, path[0])
+	}
+	return true
+}
+
 // GlobalTOMLConfigPath returns the path to the global grove TOML configuration file.
 func GlobalTOMLConfigPath() string {
 	configDir := configDir()

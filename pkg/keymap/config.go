@@ -11,6 +11,7 @@ import (
 type ConfigKeyMap struct {
 	keymap.Base
 	Edit           key.Binding
+	Delete         key.Binding // Delete key from its layer file
 	Info           key.Binding
 	Sources        key.Binding // Show config source files
 	Confirm        key.Binding
@@ -36,6 +37,10 @@ func NewConfigKeyMap(cfg *config.Config) ConfigKeyMap {
 		Edit: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "edit value"),
+		),
+		Delete: key.NewBinding(
+			key.WithKeys("D"),
+			key.WithHelp("D", "delete from layer"),
 		),
 		Info: key.NewBinding(
 			key.WithKeys("i"),
@@ -116,7 +121,7 @@ func (k ConfigKeyMap) FullHelp() [][]key.Binding {
 		// Tree navigation
 		{k.Toggle, k.Expand, k.Collapse},
 		// Actions
-		{k.Edit, k.Info, k.Sources, k.Preview},
+		{k.Edit, k.Delete, k.Info, k.Sources, k.Preview},
 		// Filtering/Sorting
 		{k.ViewMode, k.MaturityFilter, k.SortMode},
 		// Exit

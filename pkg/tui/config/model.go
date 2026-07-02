@@ -29,6 +29,7 @@ const (
 	viewEdit
 	viewInfo
 	viewSources
+	viewConfirmDelete
 )
 
 // uiState holds persisted UI preferences for the config editor.
@@ -110,6 +111,12 @@ type Model struct {
 	selectIndex int
 	targetLayer config.ConfigSource
 	boolValue   bool
+
+	// Delete-confirm state (viewConfirmDelete)
+	deleteNode  *configui.ConfigNode
+	deletePath  []string
+	deleteLayer config.ConfigSource
+	deleteFile  string
 
 	statusMsg string
 	keys      grovekeymap.ConfigKeyMap
@@ -276,6 +283,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMsg = fmt.Sprintf("Theme %q saved to %s!", msg.name, LayerDisplayName(config.SourceGlobal))
 		return m, nil
 
+	case deleteNodeMsg:
+		m.startDeleteFromNode(msg.node)
+		return m, nil
+
 	case tea.KeyMsg:
 		// If help is showing, pass messages to help component
 		if m.help.ShowAll {
@@ -290,6 +301,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateInfo(msg)
 		case viewSources:
 			return m.updateSources(msg)
+		case viewConfirmDelete:
+			return m.updateConfirmDelete(msg)
 		default:
 			return m.updateList(msg)
 		}
@@ -547,6 +560,123 @@ func (m Model) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
+}
+
+// startDeleteFromNode prepares the delete-confirm overlay for a node.
+// Audit rows ("keys nothing reads") carry their own layer/file provenance;
+// schema rows delete from the layer that currently provides the value.
+func (m *Model) startDeleteFromNode(node *configui.ConfigNode) {
+	m.statusMsg = ""
+
+	if node.IsAuditSection() {
+		return
+	}
+
+	if node.Audit != nil {
+		if strings.Contains(node.Audit.Key, "[") {
+			m.statusMsg = "Cannot delete array elements"
+			return
+		}
+		m.deleteNode = node
+		m.deletePath = strings.Split(node.Audit.Key, ".")
+		m.deleteLayer = node.Audit.Layer
+		m.deleteFile = node.Audit.File
+		m.state = viewConfirmDelete
+		return
+	}
+
+	path := node.Field.Path
+	if node.Field.Namespace != "" {
+		path = append([]string{node.Field.Namespace}, node.Field.Path...)
+	}
+	if node.IsDynamic && node.Parent != nil {
+		path = buildFullPath(node)
+	}
+	if len(path) == 0 {
+		return
+	}
+
+	layer := node.ActiveSource
+	if layer == "" || layer == config.SourceDefault {
+		m.statusMsg = "Not set in any config file"
+		return
+	}
+
+	file := m.layered.FilePaths[layer]
+	if file == "" && layer == config.SourceGlobal {
+		file = setup.GlobalTOMLConfigPath()
+	}
+	if file == "" {
+		m.statusMsg = fmt.Sprintf("No config file for %s layer", LayerDisplayName(layer))
+		return
+	}
+
+	m.deleteNode = node
+	m.deletePath = path
+	m.deleteLayer = layer
+	m.deleteFile = file
+	m.state = viewConfirmDelete
+}
+
+// updateConfirmDelete handles keys in the delete-confirm overlay.
+// NOTE: value receiver, like every Update path on Model — host panels
+// (treemux) assert the value type after each update, so the modified copy
+// must be returned (see updateEdit / commit 6a315e4).
+func (m Model) updateConfirmDelete(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key.Matches(msg, m.keys.Cancel) || key.Matches(msg, m.keys.Base.Quit) {
+		m.state = viewList
+		return m, nil
+	}
+
+	if msg.Type == tea.KeyEnter {
+		keyName := strings.Join(m.deletePath, ".")
+		layer := m.deleteLayer
+		m.state = viewList
+
+		if err := m.deleteFromLayer(m.deleteFile, m.deletePath); err != nil {
+			m.statusMsg = fmt.Sprintf("Error: %v", err)
+			return m, nil
+		}
+		if err := m.reloadConfig(); err != nil {
+			m.statusMsg = fmt.Sprintf("Error reloading: %v", err)
+			return m, nil
+		}
+		m.statusMsg = fmt.Sprintf("Deleted %s from %s", keyName, LayerDisplayName(layer))
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// deleteFromLayer removes a key path from one layer's config file — the
+// delete counterpart of saveToLayer. It takes the resolved file path
+// directly (rather than a ConfigSource) because audit rows carry exact file
+// provenance, including fragment/override files that FilePaths does not map.
+func (m *Model) deleteFromLayer(filePath string, path []string) error {
+	if filePath == "" {
+		return fmt.Errorf("no config file to delete from")
+	}
+
+	ext := strings.ToLower(filepath.Ext(filePath))
+	if ext == ".toml" {
+		data, err := m.tomlHandler.LoadTOML(filePath)
+		if err != nil {
+			return err
+		}
+		if !setup.DeleteTOMLValue(data, path...) {
+			return fmt.Errorf("key %s not found in %s", strings.Join(path, "."), filePath)
+		}
+		return m.tomlHandler.SaveTOML(filePath, data)
+	}
+
+	root, err := m.yamlHandler.LoadYAML(filePath)
+	if err != nil {
+		return err
+	}
+	if !setup.DeleteValue(root, path...) {
+		return fmt.Errorf("key %s not found in %s", strings.Join(path, "."), filePath)
+	}
+	return m.yamlHandler.SaveYAML(filePath, root)
 }
 
 // buildFullPath constructs the full config path for a node, including parent keys.

@@ -21,8 +21,9 @@ import (
 
 // Messages to communicate from Page to outer Model.
 type (
-	editNodeMsg struct{ node *configui.ConfigNode }
-	infoNodeMsg struct{ node *configui.ConfigNode }
+	editNodeMsg   struct{ node *configui.ConfigNode }
+	infoNodeMsg   struct{ node *configui.ConfigNode }
+	deleteNodeMsg struct{ node *configui.ConfigNode }
 )
 
 // FilterState holds the shared filter/display preferences across all pages.
@@ -38,18 +39,19 @@ type FilterState struct {
 // LayerPage implements pager.Page for a specific config layer.
 // Uses viewport for smooth scrolling instead of bubbles/list pagination.
 type LayerPage struct {
-	layer     config.ConfigSource
-	name      string
-	viewport  viewport.Model
-	treeRoots []*configui.ConfigNode
-	nodes     []*configui.ConfigNode // Flattened visible nodes
-	cursor    int                    // Current selected index
-	config    *config.LayeredConfig
-	width     int
-	height    int
-	active    bool
-	ready     bool // Viewport is initialized
-	filters   *FilterState
+	layer      config.ConfigSource
+	name       string
+	viewport   viewport.Model
+	treeRoots  []*configui.ConfigNode
+	auditRoots []*configui.ConfigNode // "keys nothing reads" section (orphan/unknown-nested)
+	nodes      []*configui.ConfigNode // Flattened visible nodes
+	cursor     int                    // Current selected index
+	config     *config.LayeredConfig
+	width      int
+	height     int
+	active     bool
+	ready      bool // Viewport is initialized
+	filters    *FilterState
 
 	// Vim chord state
 	lastZPress time.Time // For zR/zM/zo/zc
@@ -103,7 +105,15 @@ func (p *LayerPage) Refresh(layered *config.LayeredConfig) {
 	// 3. Sort tree at each level (before flattening to preserve hierarchy)
 	configui.SortTree(p.treeRoots, p.filters.SortMode)
 
-	// 4. Flatten and apply filters
+	// 4. Audit this layer's files for keys nothing reads (orphan /
+	// unknown-nested). Best-effort: on audit failure the schema tree
+	// renders as before, without the audit section.
+	p.auditRoots = nil
+	if findings, err := config.AuditLayered(layered); err == nil {
+		p.auditRoots = configui.BuildAuditNodes(findings, layered, p.layer)
+	}
+
+	// 5. Flatten and apply filters
 	p.rebuildNodeList()
 
 	// Reset cursor if out of bounds
@@ -276,6 +286,14 @@ func (p *LayerPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 				return p, func() tea.Msg { return infoNodeMsg{node: node} }
 			}
 
+		case "D", "shift+d":
+			// Delete key from its layer file (confirmed by the outer model).
+			if p.cursor >= 0 && p.cursor < len(p.nodes) {
+				node := p.nodes[p.cursor]
+				return p, func() tea.Msg { return deleteNodeMsg{node: node} }
+			}
+			return p, nil
+
 		// Tree navigation - expand
 		case "right", "l":
 			if p.cursor >= 0 && p.cursor < len(p.nodes) {
@@ -406,6 +424,8 @@ func (p *LayerPage) renderRow(node *configui.ConfigNode, isSelected bool) string
 		title = theme.DefaultTheme.Muted.Render("α ") + title
 	} else if node.Field.Status == configui.StatusBeta {
 		title = theme.DefaultTheme.Highlight.Render("β ") + title
+	} else if node.IsAuditSection() {
+		title = theme.DefaultTheme.Warning.Render("⚠ " + titleRaw)
 	}
 	if isSelected {
 		title = theme.DefaultTheme.Bold.Render(title)
@@ -424,10 +444,17 @@ func (p *LayerPage) renderRow(node *configui.ConfigNode, isSelected bool) string
 
 	// Value display - use preview for collapsed containers if enabled
 	var val string
-	if node.IsContainer() && node.Collapsed && p.filters.ShowPreview {
+	if node.IsAuditSection() {
+		val = fmt.Sprintf("(%d)", len(node.Children))
+	} else if node.IsContainer() && node.Collapsed && p.filters.ShowPreview {
 		val = configui.FormatValuePreview(node.Value, availableWidth)
 	} else {
 		val = configui.FormatValue(node.Value)
+	}
+
+	// Audit rows without a decodable value are still set in the file.
+	if node.Audit != nil && (val == "(unset)" || val == "(empty)") {
+		val = "(set in file)"
 	}
 
 	// Mask sensitive fields for display
@@ -451,9 +478,16 @@ func (p *LayerPage) renderRow(node *configui.ConfigNode, isSelected bool) string
 		overrideMark = theme.DefaultTheme.Muted.Render(" *")
 	}
 
-	// Status badge (alpha, beta, deprecated)
+	// Status badge (alpha, beta, deprecated, or audit class)
 	statusBadge := ""
-	if node.Field.IsNonStable() {
+	if node.Audit != nil {
+		badge := configui.AuditBadge(node.Audit.Class)
+		if node.Audit.Class == config.AuditOrphan {
+			statusBadge = "  " + theme.DefaultTheme.Error.Render(badge)
+		} else {
+			statusBadge = "  " + theme.DefaultTheme.Warning.Render(badge)
+		}
+	} else if node.Field.IsNonStable() {
 		badge := node.Field.StatusBadge()
 		switch node.Field.Status {
 		case configui.StatusAlpha:
@@ -562,6 +596,10 @@ func (p *LayerPage) renderFilterState() string {
 func (p *LayerPage) rebuildNodeList() {
 	allNodes := configui.Flatten(p.treeRoots)
 	p.nodes = configui.FilterNodes(allNodes, p.filters.ViewMode, p.filters.MaturityFilter)
+	// Audit rows ("keys nothing reads") bypass the view/maturity filters:
+	// they are appended as a distinct, always-visible section so stale keys
+	// can be reviewed and deleted regardless of filter state.
+	p.nodes = append(p.nodes, configui.Flatten(p.auditRoots)...)
 }
 
 func (p *LayerPage) Focus() tea.Cmd {
