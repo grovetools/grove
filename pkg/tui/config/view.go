@@ -26,6 +26,8 @@ func (m Model) View() string {
 		return m.renderInfoView()
 	case viewSources:
 		return m.renderSourcesView()
+	case viewConfirmDelete:
+		return m.renderConfirmDeleteView()
 	default:
 		return m.renderListView()
 	}
@@ -130,6 +132,50 @@ func (m Model) renderEditView() string {
 		parts = append(parts, recommendation)
 	}
 	parts = append(parts, "", helpText)
+
+	ui := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	dialog := boxStyle.Render(ui)
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
+}
+
+func (m Model) renderConfirmDeleteView() string {
+	if m.deleteNode == nil {
+		return "No node selected for deletion"
+	}
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.DefaultTheme.Colors.Red).
+		Padding(1, 2).
+		Width(65)
+
+	keyName := strings.Join(m.deletePath, ".")
+	title := theme.DefaultTheme.Bold.Render("Delete: " + keyName)
+
+	currentValue := configui.FormatValue(m.deleteNode.Value)
+	valueInfo := theme.DefaultTheme.Muted.Render("Current: " + currentValue)
+
+	var auditNote string
+	if m.deleteNode.Audit != nil {
+		auditNote = theme.DefaultTheme.Warning.Render(
+			configui.AuditBadge(m.deleteNode.Audit.Class) + " — no known reader consumes this key",
+		)
+	}
+
+	layerBadge := RenderLayerBadge(m.deleteLayer)
+	fileInfo := fmt.Sprintf("Delete from: %s %s", layerBadge, theme.DefaultTheme.Path.Render(setup.AbbreviatePath(m.deleteFile)))
+
+	warning := theme.DefaultTheme.Error.Render("This removes the key from the file above.")
+
+	separator := theme.DefaultTheme.Muted.Render(strings.Repeat("─", 55))
+	helpText := theme.DefaultTheme.Muted.Render("enter: delete • esc: cancel")
+
+	parts := []string{title, "", valueInfo}
+	if auditNote != "" {
+		parts = append(parts, auditNote)
+	}
+	parts = append(parts, "", separator, fileInfo, warning, "", helpText)
 
 	ui := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	dialog := boxStyle.Render(ui)

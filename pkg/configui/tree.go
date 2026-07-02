@@ -29,6 +29,15 @@ type ConfigNode struct {
 	// IsDynamic indicates if this node was dynamically created from map keys
 	// rather than defined in the schema.
 	IsDynamic bool
+
+	// Audit is set on rows sourced from the config audit (orphan or
+	// unknown-nested keys found in a layer file) rather than the schema.
+	// It carries the key's classification plus layer/file provenance.
+	Audit *config.AuditFinding
+
+	// auditSection marks the synthetic header node that groups audit rows
+	// (the "keys nothing reads" section).
+	auditSection bool
 }
 
 // LayeredValue holds the values for a node across all config layers.
@@ -56,6 +65,12 @@ func (n *ConfigNode) IsContainer() bool {
 // IsExpandable returns true if the node has children and can be expanded/collapsed.
 func (n *ConfigNode) IsExpandable() bool {
 	return len(n.Children) > 0
+}
+
+// IsAuditSection reports whether the node is the synthetic header that
+// groups audit rows ("keys nothing reads").
+func (n *ConfigNode) IsAuditSection() bool {
+	return n.auditSection
 }
 
 // DisplayKey returns the appropriate key/label for display.

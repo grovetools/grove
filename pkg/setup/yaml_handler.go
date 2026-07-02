@@ -211,6 +211,57 @@ func SetValue(root *yaml.Node, value interface{}, path ...string) error {
 	return nil
 }
 
+// DeleteValue removes the key at the specified path from the YAML tree —
+// the delete counterpart of SetValue. Parent mappings left empty by the
+// deletion are removed as well. Returns false (a no-op) if the path does
+// not exist.
+func DeleteValue(root *yaml.Node, path ...string) bool {
+	if root == nil || len(path) == 0 {
+		return false
+	}
+
+	current := root
+	if current.Kind == yaml.DocumentNode {
+		if len(current.Content) == 0 {
+			return false
+		}
+		current = current.Content[0]
+	}
+
+	return deleteFromMapping(current, path)
+}
+
+// deleteFromMapping removes path from a mapping node, pruning intermediate
+// mappings that become empty.
+func deleteFromMapping(node *yaml.Node, path []string) bool {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return false
+	}
+
+	for i := 0; i < len(node.Content)-1; i += 2 {
+		if node.Content[i].Value != path[0] {
+			continue
+		}
+
+		if len(path) == 1 {
+			node.Content = append(node.Content[:i], node.Content[i+2:]...)
+			return true
+		}
+
+		child := node.Content[i+1]
+		if !deleteFromMapping(child, path[1:]) {
+			return false
+		}
+		if len(child.Content) == 0 {
+			// Remove the now-empty mapping along with its key.
+			node.Content = append(node.Content[:i], node.Content[i+2:]...)
+		}
+		return true
+	}
+
+	return false
+}
+
 // createValueNode creates a yaml.Node from a Go value
 func createValueNode(value interface{}) (*yaml.Node, error) {
 	switch v := value.(type) {
