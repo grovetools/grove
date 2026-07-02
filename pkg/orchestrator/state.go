@@ -10,9 +10,14 @@ import (
 )
 
 type WorkspaceState struct {
-	IsDirty     bool
-	CommitHash  string
-	TaskResults map[string]*models.TaskResult
+	IsDirty bool
+	// DivergesFromMain reports whether the workspace has commits not yet on
+	// the local main/master branch (AheadMainCount > 0; zero when already on
+	// main). Together with IsDirty it seeds --affected selection: a clean but
+	// unmerged worktree repo still differs from what main would build.
+	DivergesFromMain bool
+	CommitHash       string
+	TaskResults      map[string]*models.TaskResult
 }
 
 type StateProvider interface {
@@ -47,6 +52,7 @@ func (d *DaemonStateProvider) GetState(ctx context.Context, workspaces []string)
 		}
 		if ew.GitStatus != nil && ew.GitStatus.StatusInfo != nil {
 			s.IsDirty = ew.GitStatus.IsDirty
+			s.DivergesFromMain = ew.GitStatus.AheadMainCount > 0
 		}
 		if hash, err := git.GetHeadCommit(ew.Path); err == nil {
 			s.CommitHash = hash
@@ -65,6 +71,7 @@ func (l *LocalStateProvider) GetState(ctx context.Context, workspaces []string) 
 		s := WorkspaceState{}
 		if status, err := git.GetExtendedStatus(wsPath); err == nil && status.StatusInfo != nil {
 			s.IsDirty = status.IsDirty
+			s.DivergesFromMain = status.AheadMainCount > 0
 		}
 		if hash, err := git.GetHeadCommit(wsPath); err == nil {
 			s.CommitHash = hash

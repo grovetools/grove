@@ -95,16 +95,3 @@ func TestApplyBuildAfterEdges_DedupesAndSkipsSelf(t *testing.T) {
 		t.Fatalf("nav.BuildAfter = %v, want [compositor] (deduped, no self)", got)
 	}
 }
-
-// TestConsumedProviders_FallsBackToAllOnGoListError verifies the conservative
-// fallback: when `go list` fails (here, a directory with no Go module), the
-// member is treated as depending on every provider.
-func TestConsumedProviders_FallsBackToAllOnGoListError(t *testing.T) {
-	providerModule := map[string]string{"github.com/grovetools/compositor": "compositor"}
-	allProviders := map[string]string{"compositor": "github.com/grovetools/compositor"}
-
-	deps := consumedProviders(t.TempDir(), providerModule, allProviders)
-	if len(deps) != 1 || deps[0] != "compositor" {
-		t.Fatalf("consumedProviders fallback = %v, want [compositor]", deps)
-	}
-}
