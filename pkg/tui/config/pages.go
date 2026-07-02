@@ -566,6 +566,10 @@ func (p *LayerPage) rebuildNodeList() {
 
 func (p *LayerPage) Focus() tea.Cmd {
 	p.active = true
+	// Re-render cached viewport content: the active theme may have changed
+	// since this page last rendered (e.g. a live preview or save on the
+	// Themes page rebuilt theme.DefaultTheme).
+	p.updateContent()
 	return nil
 }
 
