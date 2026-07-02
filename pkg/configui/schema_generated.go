@@ -96,6 +96,72 @@ var SchemaFields = []FieldMeta{
 		Priority:    21,
 	},
 	{
+		Path:        []string{"commands"},
+		Type:        FieldMap,
+		Description: "Command overrides per verb (e.g. build check fmt lint)",
+		Layer:       config.SourceProject,
+		Priority:    22,
+	},
+	{
+		Path:        []string{"test_scopes"},
+		Type:        FieldArray,
+		Description: "Smart test triggering scopes",
+		Layer:       config.SourceProject,
+		Priority:    23,
+	},
+	{
+		Path:        []string{"environment"},
+		Type:        FieldObject,
+		Description: "Default environment provider configuration",
+		Layer:       config.SourceProject,
+		Priority:    25,
+		RefType:     "EnvironmentConfig",
+		Children: []FieldMeta{
+			{
+				Path:        []string{"environment", "command"},
+				Type:        FieldString,
+				Description: "Path to provider binary (exec plugins only). If empty, searches PATH for grove-env-<provider>.",
+			},
+			{
+				Path:        []string{"environment", "commands"},
+				Type:        FieldObject,
+				Description: "Named commands that run in the context of this environment. Each entry is either a shell-string (e.g. build = \"make build\") or a table with command/startup keys (startup=true auto-runs the command after env up)",
+			},
+			{
+				Path:        []string{"environment", "config"},
+				Type:        FieldObject,
+				Description: "Provider-specific configuration",
+			},
+			{
+				Path:        []string{"environment", "display_endpoints"},
+				Type:        FieldArray,
+				Description: "Env var names whose values should surface as endpoints in the TUI. If unset, any http(s) value is treated as an endpoint.",
+			},
+			{
+				Path:        []string{"environment", "display_resources"},
+				Type:        FieldArray,
+				Description: "Human-readable resource labels shown on the Shared Infra page (e.g. 'Cloud SQL (myproject:us-central1:db)'). Purely cosmetic; no schema constraint.",
+			},
+			{
+				Path:        []string{"environment", "provider"},
+				Type:        FieldString,
+				Description: "Provider type (native, docker, cloud, or custom exec plugin name)",
+			},
+			{
+				Path:        []string{"environment", "shared"},
+				Type:        FieldBool,
+				Description: "Whether this profile represents shared ecosystem infrastructure consumed by other profiles via shared_env.",
+			},
+		},
+	},
+	{
+		Path:        []string{"environments"},
+		Type:        FieldMap,
+		Description: "Named environment profiles selected via --env flag",
+		Layer:       config.SourceProject,
+		Priority:    26,
+	},
+	{
 		Path:        []string{"tui"},
 		Type:        FieldObject,
 		Description: "TUI appearance and behavior settings",
@@ -103,6 +169,40 @@ var SchemaFields = []FieldMeta{
 		Priority:    50,
 		RefType:     "TUISchemaConfig",
 		Children: []FieldMeta{
+			{
+				Path:        []string{"tui", "focus"},
+				Type:        FieldObject,
+				Description: "BSP pane focus indicator configuration",
+				RefType:     "FocusConfig",
+				Children: []FieldMeta{
+					{
+						Path:        []string{"tui", "focus", "active_color"},
+						Type:        FieldString,
+						Description: "Color for focused pane indicator",
+					},
+					{
+						Path:        []string{"tui", "focus", "dim_inactive"},
+						Type:        FieldBool,
+						Description: "Dim unfocused panes (requires compositor support)",
+					},
+					{
+						Path:        []string{"tui", "focus", "inactive_color"},
+						Type:        FieldString,
+						Description: "Color for unfocused pane indicator",
+					},
+					{
+						Path:        []string{"tui", "focus", "style"},
+						Type:        FieldSelect,
+						Description: "Focus indicator style",
+						Options:     []string{"border", "gutter", "title"},
+					},
+					{
+						Path:        []string{"tui", "focus", "thickness"},
+						Type:        FieldInt,
+						Description: "Indicator thickness in cells",
+					},
+				},
+			},
 			{
 				Path:        []string{"tui", "icons"},
 				Type:        FieldSelect,
@@ -180,6 +280,29 @@ var SchemaFields = []FieldMeta{
 				},
 			},
 			{
+				Path:        []string{"tui", "panels"},
+				Type:        FieldObject,
+				Description: "User-defined ephemeral panel keybindings",
+				RefType:     "PanelConfig",
+				Children: []FieldMeta{
+					{
+						Path:        []string{"tui", "panels", "bindings"},
+						Type:        FieldMap,
+						Description: "Named panel keybindings",
+					},
+					{
+						Path:        []string{"tui", "panels", "command"},
+						Type:        FieldString,
+						Description: "Default command binary (falls back to $EDITOR or vi)",
+					},
+					{
+						Path:        []string{"tui", "panels", "singleton"},
+						Type:        FieldBool,
+						Description: "Default singleton setting for all bindings (focus a single reusable pane instead of spawning a new one)",
+					},
+				},
+			},
+			{
 				Path:        []string{"tui", "preset"},
 				Type:        FieldSelect,
 				Description: "Keybinding preset: vim (default) emacs or arrows",
@@ -187,10 +310,15 @@ var SchemaFields = []FieldMeta{
 				Important:   true,
 			},
 			{
+				Path:        []string{"tui", "sidebar_expanded"},
+				Type:        FieldBool,
+				Description: "Start terminal sidebar expanded (icon + label) instead of icon-only",
+			},
+			{
 				Path:        []string{"tui", "theme"},
 				Type:        FieldSelect,
 				Description: "Color theme for terminal interfaces",
-				Options:     []string{"kanagawa", "gruvbox", "terminal"},
+				Options:     []string{"ayu", "ayu-dark", "ayu-light", "ayu-mirage", "branded", "catppuccin", "catppuccin-frappe", "catppuccin-latte", "catppuccin-macchiato", "catppuccin-mocha", "floraverse", "floraverse-dawn", "floraverse-day", "floraverse-main", "floraverse-midnight", "floraverse-twilight", "github", "github-dark", "github-dark-colorblind", "github-dark-dimmed", "github-dark-high-contrast", "github-light", "github-light-colorblind", "github-light-high-contrast", "gruvbox", "gruvbox-dark", "gruvbox-light", "kanagawa", "kanagawa-dark", "kanagawa-dragon", "kanagawa-light", "kanagawa-wave", "nord", "nord-dark", "onedark", "onedark-cool", "onedark-dark", "onedark-darker", "onedark-deep", "onedark-light", "onedark-warm", "onedark-warmer", "oxocarbon", "oxocarbon-dark", "oxocarbon-light", "terminal", "tokyonight", "tokyonight-day", "tokyonight-moon", "tokyonight-night", "tokyonight-storm"},
 				Important:   true,
 			},
 		},
@@ -253,7 +381,7 @@ var SchemaFields = []FieldMeta{
 			{
 				Path:        []string{"context", "repos_dir"},
 				Type:        FieldString,
-				Description: "Directory where cx repo stores bare repositories (default: ~/.grove/cx)",
+				Description: "Directory where cx repo stores bare repositories (default: ~/.local/share/grove/cx)",
 				Layer:       config.SourceGlobal,
 				Priority:    80,
 			},
@@ -270,6 +398,27 @@ var SchemaFields = []FieldMeta{
 				Description: "Name of the default rules preset to use",
 				Layer:       config.SourceProject,
 				Priority:    82,
+			},
+			{
+				Path:        []string{"context", "included_workspaces"},
+				Type:        FieldArray,
+				Description: "Allowlist of workspace names to include in context scanning",
+				Layer:       config.SourceProject,
+				Priority:    83,
+			},
+			{
+				Path:        []string{"context", "excluded_workspaces"},
+				Type:        FieldArray,
+				Description: "Denylist of workspace names to exclude from context scanning",
+				Layer:       config.SourceProject,
+				Priority:    84,
+			},
+			{
+				Path:        []string{"context", "allowed_paths"},
+				Type:        FieldArray,
+				Description: "Additional paths allowed for context inclusion regardless of workspace boundaries",
+				Layer:       config.SourceProject,
+				Priority:    85,
 			},
 		},
 	},
@@ -314,19 +463,23 @@ var FieldsByPath = map[string]*FieldMeta{
 	"workspaces":             &SchemaFields[4],
 	"build_cmd":              &SchemaFields[5],
 	"build_after":            &SchemaFields[6],
-	"tui":                    &SchemaFields[7],
-	"logging":                &SchemaFields[8],
-	"gemini.api_key_command": &SchemaFields[9],
-	"context":                &SchemaFields[10],
-	"version":                &SchemaFields[11],
-	"gemini.api_key":         &SchemaFields[12],
-	"search_paths":           &SchemaFields[13],
+	"commands":               &SchemaFields[7],
+	"test_scopes":            &SchemaFields[8],
+	"environment":            &SchemaFields[9],
+	"environments":           &SchemaFields[10],
+	"tui":                    &SchemaFields[11],
+	"logging":                &SchemaFields[12],
+	"gemini.api_key_command": &SchemaFields[13],
+	"context":                &SchemaFields[14],
+	"version":                &SchemaFields[15],
+	"gemini.api_key":         &SchemaFields[16],
+	"search_paths":           &SchemaFields[17],
 }
 
 // ImportantFields contains only fields marked as important/key configuration options.
 var ImportantFields = []*FieldMeta{
 	&SchemaFields[0],
 	&SchemaFields[1],
-	&SchemaFields[9],
-	&SchemaFields[12],
+	&SchemaFields[13],
+	&SchemaFields[16],
 }
