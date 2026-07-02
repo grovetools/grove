@@ -296,19 +296,22 @@ func newSetupModel(service *setup.Service, selectedOnly map[string]bool) *setupM
 	formatList.SetFilteringEnabled(false)
 	formatList.DisableQuitKeybindings()
 
-	// Create theme list
-	themeItems := []list.Item{
-		methodItem{id: "terminal", title: "Terminal", desc: "Uses your terminal's default colors"},
-		methodItem{id: "gruvbox", title: "Gruvbox", desc: "Warm, retro color scheme"},
-		methodItem{id: "kanagawa", title: "Kanagawa", desc: "Dark theme inspired by Japanese art"},
-	}
+	// Create theme list from core's theme registry (one entry per family).
+	themeItems := themeFamilyItems()
 	themeList := list.New(themeItems, list.NewDefaultDelegate(), 0, 0)
 	themeList.Title = "TUI Theme"
 	themeList.SetShowStatusBar(false)
 	themeList.SetShowHelp(false)
-	themeList.SetShowPagination(false)
+	themeList.SetShowPagination(true)
 	themeList.SetFilteringEnabled(false)
 	themeList.DisableQuitKeybindings()
+	// Preselect the wizard's default theme.
+	for i, it := range themeItems {
+		if mi, ok := it.(methodItem); ok && mi.id == "terminal" {
+			themeList.Select(i)
+			break
+		}
+	}
 
 	// Create gemini method list
 	methodItems := []list.Item{
@@ -424,7 +427,7 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.componentList.SetSize(msg.Width-4, msg.Height-8)
 		m.methodList.SetSize(msg.Width-4, 6)
 		m.formatList.SetSize(msg.Width-4, 6)
-		m.themeList.SetSize(msg.Width-4, 8)
+		m.themeList.SetSize(msg.Width-4, msg.Height-8)
 		// Account for box border (2) + padding (4) + some margin
 		m.textInput.Width = msg.Width - 12
 		// Review viewport: account for header, status message, and footer
@@ -506,14 +509,8 @@ func (m *setupModel) updateTUIThemeStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.prevStep()
 		return m, nil
 	case key.Matches(msg, m.keys.Confirm):
-		idx := m.themeList.Index()
-		switch idx {
-		case 0:
-			m.tuiTheme = "terminal"
-		case 1:
-			m.tuiTheme = "gruvbox"
-		case 2:
-			m.tuiTheme = "kanagawa"
+		if item, ok := m.themeList.SelectedItem().(methodItem); ok {
+			m.tuiTheme = item.id
 		}
 		m.nextStep()
 		return m, nil
@@ -522,6 +519,51 @@ func (m *setupModel) updateTUIThemeStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.themeList, cmd = m.themeList.Update(msg)
 	return m, cmd
+}
+
+// themeFamilyItems builds the setup wizard's theme roster from core's theme
+// registry. It shows one entry per theme family (not per variant) to keep
+// the list scannable; selecting a family persists the family name, which
+// core resolves to the family's default variant per appearance. Individual
+// variants remain selectable via tui.theme in grove config.
+func themeFamilyItems() []list.Item {
+	type familyInfo struct {
+		variants    int
+		appearances map[string]bool
+	}
+	var order []string
+	families := make(map[string]*familyInfo)
+	for _, meta := range theme.List() {
+		fi := families[meta.Family]
+		if fi == nil {
+			fi = &familyInfo{appearances: make(map[string]bool)}
+			families[meta.Family] = fi
+			order = append(order, meta.Family)
+		}
+		fi.variants++
+		fi.appearances[meta.Appearance] = true
+	}
+
+	items := make([]list.Item, 0, len(order))
+	for _, name := range order {
+		fi := families[name]
+		var desc string
+		switch {
+		case name == "terminal":
+			desc = "Uses your terminal's default colors"
+		case fi.appearances["dark"] && fi.appearances["light"]:
+			desc = "Dark & light"
+		case fi.appearances["light"]:
+			desc = "Light"
+		default:
+			desc = "Dark"
+		}
+		if fi.variants > 1 {
+			desc = fmt.Sprintf("%s · %d variants", desc, fi.variants)
+		}
+		items = append(items, methodItem{id: name, title: name, desc: desc})
+	}
+	return items
 }
 
 func (m *setupModel) buildOrderedSteps() {
