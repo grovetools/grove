@@ -100,7 +100,10 @@ func executeTaskWithCommand(cmd *cobra.Command, verb string, rawCommand []string
 	}
 	runOpts := &orch.RunOptions{ExtraPathDirs: binDirs}
 
-	client := daemon.New()
+	// Global daemon client: the global daemon is the single owner of
+	// TaskResults and the machine-wide build queue. Auto-starts groved;
+	// when that fails we still degrade to LocalStateProvider + local pool.
+	client := daemon.NewGlobalClient()
 	var stateProvider orch.StateProvider
 	if client.IsRunning() {
 		stateProvider = &orch.DaemonStateProvider{Client: client}
@@ -116,10 +119,12 @@ func executeTaskWithCommand(cmd *cobra.Command, verb string, rawCommand []string
 			NoCache:      noCache,
 			Jobs:         jobs,
 			FailFast:     failFast,
+			RemoteExec:   true,
 		},
 		RunOpts:       runOpts,
 		StateProvider: stateProvider,
 		DaemonClient:  client,
+		BuildClient:   client,
 		Configs:       configMap,
 	}
 
@@ -208,7 +213,10 @@ func executeTask(cmd *cobra.Command, verb string, strategy orch.ConcurrencyStrat
 	}
 	runOpts := &orch.RunOptions{ExtraPathDirs: binDirs}
 
-	client := daemon.New()
+	// Global daemon client: the global daemon is the single owner of
+	// TaskResults and the machine-wide build queue. Auto-starts groved;
+	// when that fails we still degrade to LocalStateProvider + local pool.
+	client := daemon.NewGlobalClient()
 	var stateProvider orch.StateProvider
 	if client.IsRunning() {
 		stateProvider = &orch.DaemonStateProvider{Client: client}
@@ -224,10 +232,12 @@ func executeTask(cmd *cobra.Command, verb string, strategy orch.ConcurrencyStrat
 			NoCache:      noCache,
 			Jobs:         jobs,
 			FailFast:     failFast,
+			RemoteExec:   true,
 		},
 		RunOpts:       runOpts,
 		StateProvider: stateProvider,
 		DaemonClient:  client,
+		BuildClient:   client,
 		Configs:       configMap,
 	}
 
