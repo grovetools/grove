@@ -7,9 +7,9 @@ import (
 	"io"
 	"os"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/pkg/doctor"
 	_ "github.com/grovetools/core/pkg/doctor/checks" // register built-in checks
+	"github.com/grovetools/core/tui/theme"
 	"github.com/spf13/cobra"
 
 	_ "github.com/grovetools/grove/pkg/doctorchecks" // register grove-specific checks
@@ -122,41 +122,35 @@ func hasFailure(results []doctor.CheckResult) bool {
 	return false
 }
 
-var (
-	doctorOKStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true)
-	doctorWarnStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Bold(true)
-	doctorFailStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
-	doctorHintStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-)
-
 func renderDoctorResults(out io.Writer, results []doctor.CheckResult) {
+	t := theme.DefaultTheme
 	var fails, warns int
 	for _, r := range results {
 		var glyph string
 		switch r.Status {
 		case doctor.StatusOK:
-			glyph = doctorOKStyle.Render("✓")
+			glyph = t.Success.Render("✓")
 		case doctor.StatusWarn:
-			glyph = doctorWarnStyle.Render("⚠")
+			glyph = t.Warning.Render("⚠")
 			warns++
 		case doctor.StatusFail:
-			glyph = doctorFailStyle.Render("✗")
+			glyph = t.Error.Render("✗")
 			fails++
 		default:
 			glyph = "?"
 		}
 		fmt.Fprintf(out, "%s %s: %s\n", glyph, r.ID, r.Message)
 		if r.FixApplied {
-			fmt.Fprintf(out, "  %s\n", doctorHintStyle.Render("→ fix applied"))
+			fmt.Fprintf(out, "  %s\n", t.Muted.Render("→ fix applied"))
 		} else if r.Resolution != "" {
-			fmt.Fprintf(out, "  %s\n", doctorHintStyle.Render("→ "+r.Resolution))
+			fmt.Fprintf(out, "  %s\n", t.Muted.Render("→ "+r.Resolution))
 		}
 		if r.Error != "" {
-			fmt.Fprintf(out, "  %s\n", doctorHintStyle.Render("error: "+r.Error))
+			fmt.Fprintf(out, "  %s\n", t.Muted.Render("error: "+r.Error))
 		}
 	}
 	if fails+warns == 0 {
-		fmt.Fprintln(out, doctorOKStyle.Render("all checks passed"))
+		fmt.Fprintln(out, t.Success.Render("all checks passed"))
 		return
 	}
 	fmt.Fprintf(out, "\n%d failure(s), %d warning(s). Run 'grove doctor --fix' to apply safe fixits.\n", fails, warns)
