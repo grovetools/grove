@@ -18,6 +18,13 @@ type OrchestratorOptions struct {
 	Jobs         int
 	JSONOutput   bool
 	FailFast     bool
+	// RemoteExec routes job execution through the global daemon's
+	// machine-wide build queue (requires a BuildClient on the
+	// Orchestrator). With remote exec, Jobs caps this invocation's
+	// in-flight submissions while the daemon's max_parallel remains the
+	// authoritative host-wide cap. Falls back to the local worker pool
+	// when the daemon is unreachable or predates the build queue.
+	RemoteExec bool
 }
 
 type TaskJob struct {

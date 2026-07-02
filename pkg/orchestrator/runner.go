@@ -1,22 +1,19 @@
 package orchestrator
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/core/pkg/taskexec"
 )
 
 type RunOptions struct {
@@ -28,7 +25,20 @@ type Orchestrator struct {
 	RunOpts       *RunOptions
 	StateProvider StateProvider
 	DaemonClient  daemon.Client
-	Configs       map[string]*config.Config
+	// BuildClient, together with Options.RemoteExec, routes job execution
+	// through the global daemon's machine-wide build queue instead of the
+	// local worker pool. daemon.Client satisfies it. When the daemon is
+	// unreachable (or predates the build queue) execution transparently
+	// falls back to the local pool.
+	BuildClient BuildClient
+	Configs     map[string]*config.Config
+
+	// Remote-exec state: one submission group per orchestrator run, plus
+	// a latch that disables remote exec after the first failed submit.
+	remoteMu        sync.Mutex
+	remoteDisabled  bool
+	remoteSubmitted bool
+	groupID         string
 }
 
 func (o *Orchestrator) isCacheHit(job TaskJob, states map[string]WorkspaceState) bool {
@@ -222,6 +232,13 @@ func (o *Orchestrator) executeJobs(ctx context.Context, jobs []TaskJob, numWorke
 	}
 	close(jobsChan)
 	wg.Wait()
+
+	// Remote exec: if this run was aborted (Ctrl+C or fail-fast), tell the
+	// daemon to kill this group's running process groups and drain its
+	// queued jobs — dropping the SSE streams alone leaves them running.
+	if runCtx.Err() != nil {
+		o.cancelRemoteGroup()
+	}
 }
 
 func (o *Orchestrator) executeJobVerbs(ctx context.Context, job TaskJob, verbs []string, isPipeline bool, env []string, states map[string]WorkspaceState, eventsChan chan<- TaskEvent, once *sync.Once, cancel context.CancelFunc) {
@@ -256,52 +273,14 @@ func (o *Orchestrator) executeJobVerbs(ctx context.Context, job TaskJob, verbs [
 			command = job.Command
 		}
 
-		eventsChan <- TaskEvent{Job: job, Verb: verb, Type: "start"}
-		start := time.Now()
-
-		var cmd *exec.Cmd
-		if len(command) == 0 {
-			cmd = exec.CommandContext(ctx, "make", verb)
-		} else {
-			cmd = exec.CommandContext(ctx, command[0], command[1:]...) //nolint:gosec // commands from trusted build config
-		}
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		cmd.Cancel = func() error {
-			// Kill the entire process group so make's children (tend run -p, etc.)
-			// also receive SIGTERM and can run their cleanup.
-			return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-		}
-		cmd.WaitDelay = 10 * time.Second
-		cmd.Dir = job.Path
-		cmd.Env = prependJobBinDir(env, job.Path)
-
-		stdoutPipe, _ := cmd.StdoutPipe()
-		cmd.Stderr = cmd.Stdout
-
-		var outputBuf bytes.Buffer
-		scanner := bufio.NewScanner(stdoutPipe)
-
-		var streamWg sync.WaitGroup
-		streamWg.Add(1)
-		go func() {
-			defer streamWg.Done()
-			for scanner.Scan() {
-				line := scanner.Text()
-				outputBuf.WriteString(line + "\n")
-				eventsChan <- TaskEvent{
-					Job:        job,
-					Verb:       verb,
-					Type:       "output",
-					OutputLine: line,
-				}
-			}
-		}()
-
-		err := cmd.Start()
-		if err != nil {
+		output, duration, err, started := o.runProcess(ctx, job, verb, command, env, eventsChan)
+		if !started {
+			// The process (or remote submission) never ran — report the
+			// failure without a task-result report, mirroring the local
+			// start-error path.
 			eventsChan <- TaskEvent{
 				Job: job, Verb: verb, Type: "finish",
-				Result: &TaskResult{Job: job, Verb: verb, Err: err, Duration: time.Since(start)},
+				Result: &TaskResult{Job: job, Verb: verb, Err: err, Duration: duration},
 			}
 			if o.Options.FailFast {
 				once.Do(cancel)
@@ -312,12 +291,8 @@ func (o *Orchestrator) executeJobVerbs(ctx context.Context, job TaskJob, verbs [
 			return
 		}
 
-		streamWg.Wait()
-		err = cmd.Wait()
-		duration := time.Since(start)
-
 		skipped := false
-		if err != nil && isMakeTargetMissing(command, outputBuf.String()) {
+		if err != nil && taskexec.IsMakeTargetMissing(command, string(output)) {
 			err = nil
 			skipped = true
 		}
@@ -325,7 +300,7 @@ func (o *Orchestrator) executeJobVerbs(ctx context.Context, job TaskJob, verbs [
 		result := TaskResult{
 			Job:      job,
 			Verb:     verb,
-			Output:   outputBuf.Bytes(),
+			Output:   output,
 			Err:      err,
 			Duration: duration,
 			Skipped:  skipped,
@@ -336,7 +311,7 @@ func (o *Orchestrator) executeJobVerbs(ctx context.Context, job TaskJob, verbs [
 		errSummary := ""
 		if err != nil {
 			exitCode = 1
-			errSummary = extractErrorSummary(outputBuf.String())
+			errSummary = extractErrorSummary(string(output))
 			if o.Options.FailFast {
 				once.Do(cancel)
 			}
@@ -376,13 +351,49 @@ func (o *Orchestrator) reportTaskVerb(ctx context.Context, job TaskJob, verb str
 	_ = o.DaemonClient.ReportTask(ctx, job.Path, verb, exitCode, commitHash, durationMs, errorSummary)
 }
 
-func isMakeTargetMissing(command []string, output string) bool {
-	isMake := len(command) == 0 || command[0] == "make"
-	if !isMake {
-		return false
+// runProcess executes a single verb for a job, preferring the daemon's
+// machine-wide build queue when remote exec is enabled and falling back to
+// the local process path when it is not available. The returned bool is
+// false when the process (or remote submission) never started.
+func (o *Orchestrator) runProcess(ctx context.Context, job TaskJob, verb string, command, env []string, eventsChan chan<- TaskEvent) ([]byte, time.Duration, error, bool) {
+	if o.remoteExecEnabled() {
+		output, duration, err, started := o.runRemoteProcess(ctx, job, verb, command, env, eventsChan)
+		if err == nil || !isRemoteUnavailable(err) {
+			return output, duration, err, started
+		}
+		// Daemon unreachable, LocalClient, or a daemon that predates the
+		// build queue — run everything locally from here on.
+		o.disableRemoteExec()
 	}
-	return strings.Contains(output, "No rule to make target") ||
-		strings.Contains(output, "no rule to make target")
+	return o.runLocalProcess(ctx, job, verb, command, env, eventsChan)
+}
+
+// runLocalProcess runs one verb in-process through the shared taskexec
+// helper (the daemon's build queue executes through the same helper, so
+// behavior is identical whichever side runs the job).
+func (o *Orchestrator) runLocalProcess(ctx context.Context, job TaskJob, verb string, command, env []string, eventsChan chan<- TaskEvent) ([]byte, time.Duration, error, bool) {
+	eventsChan <- TaskEvent{Job: job, Verb: verb, Type: "start"}
+	start := time.Now()
+
+	task := taskexec.New(ctx, taskexec.Options{
+		Command: command,
+		Verb:    verb,
+		Dir:     job.Path,
+		Env:     prependJobBinDir(env, job.Path),
+		OnOutput: func(line string) {
+			eventsChan <- TaskEvent{
+				Job:        job,
+				Verb:       verb,
+				Type:       "output",
+				OutputLine: line,
+			}
+		},
+	})
+	if err := task.Start(); err != nil {
+		return nil, time.Since(start), err, false
+	}
+	output, err := task.Wait()
+	return output, time.Since(start), err, true
 }
 
 func buildEnv(opts *RunOptions) []string {

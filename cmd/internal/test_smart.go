@@ -93,7 +93,10 @@ func newTestSmartCmd() *cobra.Command {
 				commitHash = "unknown"
 			}
 			workspace := filepath.Base(absDir)
-			client := daemon.New(absDir)
+			// Report to the GLOBAL daemon — the single owner of TaskResults.
+			// A dir-scoped client here would split task state across daemons
+			// (grove build reports globally; see core/pkg/daemon/factory.go).
+			client := daemon.NewGlobalClient()
 			defer client.Close()
 			if client.IsRunning() {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
