@@ -460,7 +460,7 @@ func (m *Model) startEditFromNode(node *configui.ConfigNode) {
 	}
 }
 
-func (m *Model) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.editNode == nil {
 		m.state = viewList
 		return m, nil
