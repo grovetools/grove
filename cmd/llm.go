@@ -121,7 +121,7 @@ func runLlmRequest(cmd *cobra.Command, args []string) error {
 	anthropicUnsupported := map[string]bool{
 		"yes":         true,
 		"temperature": true, "top-p": true, "top-k": true,
-		"cache-ttl": true, "no-cache": true, "recache": true, "use-cache": true,
+		"cache-ttl": true, "recache": true, "use-cache": true,
 	}
 
 	// Add all flags that were explicitly set by the user
