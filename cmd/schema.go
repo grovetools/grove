@@ -69,10 +69,11 @@ func runSchemaGenerate(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Found ecosystem root: %s\n", ecosystemRoot)
 
-	// 2. Find grove-core's base schema
-	baseSchemaPath := filepath.Join(ecosystemRoot, "grove-core", "schema", "definitions", "base.schema.json")
+	// 2. Find core's base schema. The workspace dir is "core" (the module is
+	// github.com/grovetools/core); "grove-core" was a stale historical name.
+	baseSchemaPath := filepath.Join(ecosystemRoot, "core", "schema", "definitions", "base.schema.json")
 	if _, err := os.Stat(baseSchemaPath); err != nil {
-		return fmt.Errorf("base schema not found at %s. Run 'make schema' in grove-core first", baseSchemaPath)
+		return fmt.Errorf("base schema not found at %s. Run 'make schema' in core first", baseSchemaPath)
 	}
 
 	baseBytes, err := os.ReadFile(baseSchemaPath)
@@ -129,7 +130,15 @@ func runSchemaGenerate(cmd *cobra.Command, args []string) error {
 		fmt.Println("  -> No extension schemas found in workspaces")
 	}
 
-	// 4. Finalize and write the composed schema
+	// 4. Finalize and write the composed schema.
+	//
+	// additionalProperties stays true until every common extension namespace
+	// ships a *.schema.json fragment (only a handful do today: gemini, nav,
+	// flow, logging, llm, notifications). Flipping it to false lets the
+	// doctor's config_schema check flag orphan keys — but until hooks, skills,
+	// binary, anthropic, claude, keys, and aglogs are modeled, false would
+	// warn on every one of those legitimate namespaces. Flip it once coverage
+	// is broad enough.
 	schema["additionalProperties"] = true
 	schema["title"] = "Grove Local Development Schema"
 	schema["description"] = "Composed schema for the local ecosystem."

@@ -58,7 +58,53 @@ type JSONSchema struct {
 // SchemaSource represents a schema file to process.
 type SchemaSource struct {
 	Path      string // Absolute path to the schema file
-	Namespace string // Namespace prefix (e.g., "gemini", "tmux", empty for core)
+	Namespace string // Namespace prefix (e.g., "gemini", "flow", empty for core)
+}
+
+// SchemaManifest is the checked-in list of schema fragments composed into the
+// config-TUI metadata table. Adding a namespace is a data change to
+// fragments.json, not a code change to this generator.
+type SchemaManifest struct {
+	Fragments []ManifestEntry `json:"fragments"`
+}
+
+// ManifestEntry names one schema fragment: the top-level config key it
+// describes (empty for the core base schema) and its path relative to the
+// ecosystem root.
+type ManifestEntry struct {
+	Namespace string `json:"namespace"`
+	Path      string `json:"path"`
+}
+
+// defaultManifest is the fallback fragment list used when no fragments.json is
+// found next to the generator. It mirrors the checked-in manifest so the tool
+// still works from an arbitrary working directory.
+var defaultManifest = SchemaManifest{Fragments: []ManifestEntry{
+	{Namespace: "", Path: "core/schema/definitions/base.schema.json"},
+	{Namespace: "gemini", Path: "grove-gemini/gemini.schema.json"},
+	{Namespace: "flow", Path: "flow/flow.schema.json"},
+	{Namespace: "logging", Path: "core/logging.schema.json"},
+}}
+
+// loadManifest reads the fragment manifest sitting next to the generator,
+// falling back to the built-in default list when it is absent or unreadable.
+func loadManifest(cwd string) SchemaManifest {
+	manifestPath := filepath.Join(cwd, "tools", "config-schema-generator", "fragments.json")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		log.Printf("No fragment manifest at %s (%v); using built-in default list", manifestPath, err)
+		return defaultManifest
+	}
+	var m SchemaManifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		log.Printf("Failed to parse manifest %s: %v; using built-in default list", manifestPath, err)
+		return defaultManifest
+	}
+	if len(m.Fragments) == 0 {
+		log.Printf("Manifest %s has no fragments; using built-in default list", manifestPath)
+		return defaultManifest
+	}
+	return m
 }
 
 // FieldInfo holds parsed field metadata for code generation.
@@ -99,17 +145,27 @@ func main() {
 	}
 	log.Printf("Found ecosystem root: %s", ecosystemRoot)
 
-	// Define schema sources to process
-	sources := []SchemaSource{
-		{Path: filepath.Join(ecosystemRoot, "core", "schema", "definitions", "base.schema.json"), Namespace: ""},
-		{Path: filepath.Join(ecosystemRoot, "grove-gemini", "gemini.schema.json"), Namespace: "gemini"},
-		{Path: filepath.Join(ecosystemRoot, "nav", "tmux.schema.json"), Namespace: "tmux"},
+	// Resolve the schema sources from the manifest.
+	manifest := loadManifest(cwd)
+
+	// Namespaces claimed by fragments. The base schema defers any top-level key
+	// that a fragment also provides (e.g. logging), so the fragment's richer,
+	// more current definition wins instead of the generator emitting both.
+	claimed := make(map[string]bool)
+	for _, e := range manifest.Fragments {
+		if e.Namespace != "" {
+			claimed[e.Namespace] = true
+		}
 	}
 
 	var allFields []FieldInfo
 
-	for _, source := range sources {
-		fields, err := processSchema(source)
+	for _, e := range manifest.Fragments {
+		source := SchemaSource{
+			Path:      filepath.Join(ecosystemRoot, filepath.FromSlash(e.Path)),
+			Namespace: e.Namespace,
+		}
+		fields, err := processSchema(source, claimed)
 		if err != nil {
 			log.Printf("Warning: failed to process %s: %v", source.Path, err)
 			continue
@@ -137,8 +193,11 @@ func main() {
 	log.Printf("Successfully generated config schema with %d fields at %s", len(allFields), outputPath)
 }
 
-// processSchema loads and parses a JSON Schema file.
-func processSchema(source SchemaSource) ([]FieldInfo, error) {
+// processSchema loads and parses a JSON Schema file. claimed lists the
+// top-level keys owned by namespaced fragments; the base schema (empty
+// namespace) skips those so the fragment definition is the single source of
+// truth for that key.
+func processSchema(source SchemaSource, claimed map[string]bool) ([]FieldInfo, error) {
 	data, err := os.ReadFile(source.Path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read schema: %w", err)
@@ -163,6 +222,11 @@ func processSchema(source SchemaSource) ([]FieldInfo, error) {
 	sort.Strings(propNames)
 
 	for _, name := range propNames {
+		// Base schema defers a top-level key to its fragment when one exists.
+		if source.Namespace == "" && claimed[name] {
+			log.Printf("  base schema: deferring '%s' to its fragment", name)
+			continue
+		}
 		prop := schema.Properties[name]
 		field := extractField(name, prop, []string{name}, source.Namespace, &schema, requiredSet[name])
 		if field.Priority == 0 {

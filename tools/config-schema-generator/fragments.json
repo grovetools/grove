@@ -1,0 +1,9 @@
+{
+  "_comment": "Manifest of JSON Schema fragments the config-schema-generator composes into pkg/configui/schema_generated.go. Adding a namespace is a data change here, not a code change. 'namespace' is the top-level config key the fragment describes (empty for the core base schema); 'path' is relative to the ecosystem root. When a fragment namespace matches a top-level key in the base schema (e.g. logging), the fragment wins and the base copy is deferred.",
+  "fragments": [
+    { "namespace": "",        "path": "core/schema/definitions/base.schema.json" },
+    { "namespace": "gemini",  "path": "grove-gemini/gemini.schema.json" },
+    { "namespace": "flow",    "path": "flow/flow.schema.json" },
+    { "namespace": "logging", "path": "core/logging.schema.json" }
+  ]
+}
