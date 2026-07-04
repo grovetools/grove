@@ -8,14 +8,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/tui/components/pager"
+	corekeymap "github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
 
 	"github.com/grovetools/grove/pkg/configui"
+	grovekeymap "github.com/grovetools/grove/pkg/keymap"
 	"github.com/grovetools/grove/pkg/setup"
 )
 
@@ -52,6 +55,7 @@ type LayerPage struct {
 	active     bool
 	ready      bool // Viewport is initialized
 	filters    *FilterState
+	keys       grovekeymap.ConfigKeyMap
 
 	// Vim chord state
 	lastZPress time.Time // For zR/zM/zo/zc
@@ -70,7 +74,7 @@ func (p *LayerPage) Title() string {
 }
 
 // NewLayerPage creates a page for a specific layer with viewport-based scrolling.
-func NewLayerPage(name string, layer config.ConfigSource, layered *config.LayeredConfig, filters *FilterState, width, height int) *LayerPage {
+func NewLayerPage(name string, layer config.ConfigSource, layered *config.LayeredConfig, filters *FilterState, keys grovekeymap.ConfigKeyMap, width, height int) *LayerPage {
 	p := &LayerPage{
 		layer:   layer,
 		name:    name,
@@ -78,6 +82,7 @@ func NewLayerPage(name string, layer config.ConfigSource, layered *config.Layere
 		width:   width,
 		height:  height,
 		filters: filters,
+		keys:    keys,
 	}
 
 	// Initialize viewport
@@ -135,29 +140,32 @@ func (p *LayerPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 	case tea.KeyMsg:
 		keyStr := msg.String()
 
-		// === Vim Chords ===
-
-		// Handle zR/zM/zo/zc chords
+		// === Vim fold chords: zR / zM / zo / zc / za ===
+		//
+		// A lone "z" arms the chord; the next key is reconstructed into the
+		// full sequence ("z"+key) and matched against Base's fold bindings via
+		// keymap.Matches, so [tui.keybindings] fold overrides are honored and
+		// the keys registry (which declares zR/zM/zo/zc/za) tells the truth.
 		if keyStr == "z" {
 			p.lastZPress = time.Now()
 			return p, nil
 		}
 		if time.Since(p.lastZPress) < 500*time.Millisecond {
-			switch keyStr {
-			case "R", "shift+r": // Expand all
+			chord := "z" + keyStr
+			p.lastZPress = time.Time{}
+			switch {
+			case corekeymap.Matches(chord, p.keys.FoldOpenAll): // zR — expand all
 				configui.ExpandAll(p.treeRoots)
 				p.rebuildNodeList()
 				p.updateContent()
-				p.lastZPress = time.Time{}
 				return p, nil
-			case "M", "shift+m": // Collapse all
+			case corekeymap.Matches(chord, p.keys.FoldCloseAll): // zM — collapse all
 				configui.CollapseAll(p.treeRoots)
 				p.rebuildNodeList()
 				p.cursor = 0
 				p.updateContent()
-				p.lastZPress = time.Time{}
 				return p, nil
-			case "o": // Open fold
+			case corekeymap.Matches(chord, p.keys.FoldOpen): // zo — open fold
 				if p.cursor < len(p.nodes) {
 					node := p.nodes[p.cursor]
 					if node.IsExpandable() && node.Collapsed {
@@ -166,9 +174,8 @@ func (p *LayerPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 						p.updateContent()
 					}
 				}
-				p.lastZPress = time.Time{}
 				return p, nil
-			case "c": // Close fold
+			case corekeymap.Matches(chord, p.keys.FoldClose): // zc — close fold
 				if p.cursor < len(p.nodes) {
 					node := p.nodes[p.cursor]
 					if node.IsExpandable() && !node.Collapsed {
@@ -186,12 +193,22 @@ func (p *LayerPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 						}
 					}
 				}
-				p.lastZPress = time.Time{}
+				return p, nil
+			case corekeymap.Matches(chord, p.keys.FoldToggle): // za — toggle fold
+				if p.cursor >= 0 && p.cursor < len(p.nodes) {
+					node := p.nodes[p.cursor]
+					if node.IsExpandable() {
+						configui.ToggleNode(node)
+						p.rebuildNodeList()
+						p.updateContent()
+					}
+				}
 				return p, nil
 			}
 		}
 
-		// Handle gg chord (go to top)
+		// Handle gg chord (go to top). Base declares "gg", so keeping the
+		// hand-rolled timer here is not a registry lie.
 		if keyStr == "g" {
 			if time.Since(p.lastGPress) < 500*time.Millisecond {
 				p.cursor = 0
@@ -204,7 +221,7 @@ func (p *LayerPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 		}
 
 		// G (Shift+g) - go to end
-		if keyStr == "G" {
+		if key.Matches(msg, p.keys.Bottom) {
 			if len(p.nodes) > 0 {
 				p.cursor = len(p.nodes) - 1
 				p.updateContent()
@@ -213,22 +230,22 @@ func (p *LayerPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 		}
 
 		// === Standard Navigation ===
-		switch keyStr {
-		case "up", "k":
+		switch {
+		case key.Matches(msg, p.keys.Up):
 			if p.cursor > 0 {
 				p.cursor--
 				p.updateContent()
 			}
 			return p, nil
 
-		case "down", "j":
+		case key.Matches(msg, p.keys.Down):
 			if p.cursor < len(p.nodes)-1 {
 				p.cursor++
 				p.updateContent()
 			}
 			return p, nil
 
-		case "ctrl+u": // Half page up
+		case keyStr == "ctrl+u": // Half page up
 			p.cursor -= p.height / 2
 			if p.cursor < 0 {
 				p.cursor = 0
@@ -236,7 +253,7 @@ func (p *LayerPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 			p.updateContent()
 			return p, nil
 
-		case "ctrl+d": // Half page down
+		case keyStr == "ctrl+d": // Half page down
 			p.cursor += p.height / 2
 			if p.cursor >= len(p.nodes) {
 				p.cursor = len(p.nodes) - 1
@@ -247,7 +264,7 @@ func (p *LayerPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 			p.updateContent()
 			return p, nil
 
-		case "pgup", "ctrl+b": // Full page up
+		case keyStr == "pgup" || keyStr == "ctrl+b": // Full page up
 			p.cursor -= p.height
 			if p.cursor < 0 {
 				p.cursor = 0
@@ -255,7 +272,7 @@ func (p *LayerPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 			p.updateContent()
 			return p, nil
 
-		case "pgdown", "ctrl+f": // Full page down
+		case keyStr == "pgdown" || keyStr == "ctrl+f": // Full page down
 			p.cursor += p.height
 			if p.cursor >= len(p.nodes) {
 				p.cursor = len(p.nodes) - 1
@@ -266,7 +283,7 @@ func (p *LayerPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 			p.updateContent()
 			return p, nil
 
-		case "enter":
+		case key.Matches(msg, p.keys.Edit): // enter
 			// Handle selection
 			if p.cursor >= 0 && p.cursor < len(p.nodes) {
 				node := p.nodes[p.cursor]
@@ -280,13 +297,13 @@ func (p *LayerPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 				return p, func() tea.Msg { return editNodeMsg{node: node} }
 			}
 
-		case "i":
+		case key.Matches(msg, p.keys.Info): // i
 			if p.cursor >= 0 && p.cursor < len(p.nodes) {
 				node := p.nodes[p.cursor]
 				return p, func() tea.Msg { return infoNodeMsg{node: node} }
 			}
 
-		case "D", "shift+d":
+		case key.Matches(msg, p.keys.Delete): // D / shift+d
 			// Delete key from its layer file (confirmed by the outer model).
 			if p.cursor >= 0 && p.cursor < len(p.nodes) {
 				node := p.nodes[p.cursor]
@@ -295,7 +312,7 @@ func (p *LayerPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 			return p, nil
 
 		// Tree navigation - expand
-		case "right", "l":
+		case key.Matches(msg, p.keys.Expand): // right / l
 			if p.cursor >= 0 && p.cursor < len(p.nodes) {
 				node := p.nodes[p.cursor]
 				if node.IsExpandable() && node.Collapsed {
@@ -307,7 +324,7 @@ func (p *LayerPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 			return p, nil
 
 		// Tree navigation - collapse or go to parent
-		case "left", "h":
+		case key.Matches(msg, p.keys.Collapse): // left / h
 			if p.cursor >= 0 && p.cursor < len(p.nodes) {
 				node := p.nodes[p.cursor]
 				if node.IsExpandable() && !node.Collapsed {
@@ -326,7 +343,7 @@ func (p *LayerPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 			return p, nil
 
 		// Space to toggle
-		case " ":
+		case key.Matches(msg, p.keys.Toggle): // space
 			if p.cursor >= 0 && p.cursor < len(p.nodes) {
 				node := p.nodes[p.cursor]
 				if node.IsExpandable() {

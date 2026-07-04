@@ -37,3 +37,9 @@ func SetupKeymapInfo() keymap.TUIInfo {
 func OnboardKeymapInfo() keymap.TUIInfo {
 	return grovekeymap.OnboardKeymapInfo()
 }
+
+// EnvKeymapInfo re-exports the env dashboard TUI keymap info for the registry
+// generator. Generator allowlist wiring is deferred to Job F.
+func EnvKeymapInfo() keymap.TUIInfo {
+	return grovekeymap.EnvKeymapInfo()
+}

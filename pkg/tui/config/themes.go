@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -13,6 +14,7 @@ import (
 	"github.com/grovetools/core/tui/components/pager"
 	"github.com/grovetools/core/tui/theme"
 
+	grovekeymap "github.com/grovetools/grove/pkg/keymap"
 	"github.com/grovetools/grove/pkg/setup"
 )
 
@@ -49,6 +51,7 @@ type ThemesPage struct {
 
 	viewport viewport.Model
 	layered  *config.LayeredConfig
+	keys     grovekeymap.ConfigKeyMap
 	width    int
 	height   int
 	active   bool
@@ -64,10 +67,11 @@ var (
 )
 
 // NewThemesPage builds the Themes page from the core palette registry.
-func NewThemesPage(layered *config.LayeredConfig, width, height int) *ThemesPage {
+func NewThemesPage(layered *config.LayeredConfig, keys grovekeymap.ConfigKeyMap, width, height int) *ThemesPage {
 	p := &ThemesPage{
 		items:   buildThemeItems(),
 		layered: layered,
+		keys:    keys,
 		width:   width,
 		height:  height,
 		saved:   theme.DefaultTheme.Name,
@@ -293,35 +297,36 @@ func (p *ThemesPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 		return p, nil
 	}
 
-	switch keyStr := keyMsg.String(); keyStr {
-	case "up", "k":
+	keyStr := keyMsg.String()
+	switch {
+	case key.Matches(keyMsg, p.keys.Up):
 		p.moveCursor(-1)
-	case "down", "j":
+	case key.Matches(keyMsg, p.keys.Down):
 		p.moveCursor(1)
-	case "ctrl+u", "pgup", "ctrl+b":
+	case keyStr == "ctrl+u" || keyStr == "pgup" || keyStr == "ctrl+b":
 		p.moveCursorBy(-p.viewport.Height / 2)
-	case "ctrl+d", "pgdown", "ctrl+f":
+	case keyStr == "ctrl+d" || keyStr == "pgdown" || keyStr == "ctrl+f":
 		p.moveCursorBy(p.viewport.Height / 2)
-	case "g":
+	case keyStr == "g":
 		if time.Since(p.lastGPress) < 500*time.Millisecond {
 			p.lastGPress = time.Time{}
 			p.setCursor(p.firstSelectable())
 		} else {
 			p.lastGPress = time.Now()
 		}
-	case "G":
+	case key.Matches(keyMsg, p.keys.Bottom): // G
 		for i := len(p.items) - 1; i >= 0; i-- {
 			if p.items[i].value != "" {
 				p.setCursor(i)
 				break
 			}
 		}
-	case "enter":
+	case key.Matches(keyMsg, p.keys.Edit): // enter — apply & save
 		if it := p.currentItem(); it != nil {
 			name := it.value
 			return p, func() tea.Msg { return applyThemeMsg{name: name} }
 		}
-	case "esc":
+	case key.Matches(keyMsg, p.keys.Cancel): // esc — revert preview
 		p.RevertPreview()
 		if idx := p.savedItemIndex(); idx >= 0 {
 			p.cursor = idx
