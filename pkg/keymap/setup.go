@@ -35,6 +35,13 @@ func NewSetupKeyMap(cfg *config.Config) SetupKeyMap {
 		),
 	}
 
+	// The setup wizard drives bubbles/list widgets and step forms. It only
+	// handles vertical navigation (in the agent-args step), plus its own
+	// Select/Confirm/Back and quit. It never wires the "?" help overlay, so
+	// Base.Help stays disabled too. Disable the rest of the Base vocabulary.
+	disableAllBase(&km.Base)
+	enableBindings(&km.Up, &km.Down, &km.Quit)
+
 	// Apply TUI-specific overrides from config
 	keymap.ApplyTUIOverrides(cfg, "grove", "setup", &km)
 
@@ -51,6 +58,17 @@ func (k SetupKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Base.Up, k.Base.Down, k.Select},
 		{k.Confirm, k.Back, k.Base.Quit},
+	}
+}
+
+// Sections returns grouped sections of key bindings for the full help view.
+// Only includes bindings the setup wizard actually implements.
+func (k SetupKeyMap) Sections() []keymap.Section {
+	return []keymap.Section{
+		keymap.NavigationSection(k.Up, k.Down),
+		keymap.SelectionSection(k.Select),
+		keymap.ActionsSection(k.Confirm, k.Back),
+		keymap.SystemSection(k.Quit),
 	}
 }
 

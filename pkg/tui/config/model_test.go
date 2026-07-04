@@ -58,7 +58,7 @@ func TestLayerPageShowsAuditRows(t *testing.T) {
 		SortMode:       configui.SortConfiguredFirst,
 	}
 
-	p := NewLayerPage("Project", config.SourceProject, layered, filters, 80, 24)
+	p := NewLayerPage("Project", config.SourceProject, layered, filters, grovekeymap.NewConfigKeyMap(nil), 80, 24)
 
 	node := findAuditNode(p)
 	if node == nil {

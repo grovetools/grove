@@ -40,6 +40,13 @@ func NewOnboardKeyMap(cfg *config.Config) OnboardKeyMap {
 		),
 	}
 
+	// The onboard wizard only handles vertical navigation (tool-select step),
+	// its own Confirm/Skip/Yes/No, and quit. It never wires the "?" help
+	// overlay, so Base.Help stays disabled. Disable the rest of the Base
+	// vocabulary so help/registry stay truthful.
+	disableAllBase(&km.Base)
+	enableBindings(&km.Up, &km.Down, &km.Quit)
+
 	// Apply TUI-specific overrides from config
 	keymap.ApplyTUIOverrides(cfg, "grove", "onboard", &km)
 
@@ -57,6 +64,16 @@ func (k OnboardKeyMap) FullHelp() [][]key.Binding {
 		{k.Base.Up, k.Base.Down},
 		{k.Confirm, k.Skip, k.Yes, k.No},
 		{k.Base.Quit},
+	}
+}
+
+// Sections returns grouped sections of key bindings for the full help view.
+// Only includes bindings the onboard wizard actually implements.
+func (k OnboardKeyMap) Sections() []keymap.Section {
+	return []keymap.Section{
+		keymap.NavigationSection(k.Up, k.Down),
+		keymap.ActionsSection(k.Confirm, k.Skip, k.Yes, k.No),
+		keymap.SystemSection(k.Quit),
 	}
 }
 

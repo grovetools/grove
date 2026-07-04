@@ -151,13 +151,13 @@ func New(
 	width, height := 80, 24 // Initial dummy size
 
 	layerPages := []*LayerPage{
-		NewLayerPage("Global", config.SourceGlobal, layered, filters, width, height),
-		NewLayerPage("Ecosystem", config.SourceEcosystem, layered, filters, width, height),
-		NewLayerPage("Notebook", config.SourceProjectNotebook, layered, filters, width, height),
-		NewLayerPage("Project", config.SourceProject, layered, filters, width, height),
+		NewLayerPage("Global", config.SourceGlobal, layered, filters, keys, width, height),
+		NewLayerPage("Ecosystem", config.SourceEcosystem, layered, filters, keys, width, height),
+		NewLayerPage("Notebook", config.SourceProjectNotebook, layered, filters, keys, width, height),
+		NewLayerPage("Project", config.SourceProject, layered, filters, keys, width, height),
 	}
 
-	themesPage := NewThemesPage(layered, width, height)
+	themesPage := NewThemesPage(layered, keys, width, height)
 
 	// Build pager.Page slice from the typed pages, plus the Themes page.
 	pages := make([]pager.Page, 0, len(layerPages)+1)
@@ -377,20 +377,30 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Let it fall through to pager delegation
 		}
 
-		// Shift+M: cycle maturity filter backward
-		if msg.String() == "M" {
-			m.filters.MaturityFilter = configui.CycleMaturityFilterReverse(m.filters.MaturityFilter)
-			m.saveUIState()
-			m.refreshAllPages()
-			return m, nil
+		// Shift+M: cycle maturity filter backward — but don't intercept when a
+		// z-chord is pending, so "zM" (collapse-all) reaches the page instead
+		// of being shadowed by maturity-backward.
+		if key.Matches(msg, m.keys.MaturityFilterBack) {
+			activePage := m.activeLayerPage()
+			if activePage == nil || !activePage.IsZChordPending() {
+				m.filters.MaturityFilter = configui.CycleMaturityFilterReverse(m.filters.MaturityFilter)
+				m.saveUIState()
+				m.refreshAllPages()
+				return m, nil
+			}
+			// z-chord pending: fall through to the pager so the page sees "M".
 		}
 
-		// Shift+S: cycle sort mode backward
-		if msg.String() == "S" {
-			m.filters.SortMode = configui.CycleSortModeReverse(m.filters.SortMode)
-			m.saveUIState()
-			m.refreshAllPages()
-			return m, nil
+		// Shift+S: cycle sort mode backward — same z-chord guard as above.
+		if key.Matches(msg, m.keys.SortModeBack) {
+			activePage := m.activeLayerPage()
+			if activePage == nil || !activePage.IsZChordPending() {
+				m.filters.SortMode = configui.CycleSortModeReverse(m.filters.SortMode)
+				m.saveUIState()
+				m.refreshAllPages()
+				return m, nil
+			}
+			// z-chord pending: fall through to the pager so the page sees "S".
 		}
 	}
 
@@ -489,17 +499,20 @@ func (m Model) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		path = buildFullPath(node)
 	}
 
-	switch msg.Type {
-	case tea.KeyEsc:
+	// Route the modal control keys through the keymap. All three are
+	// non-printable, so the textinput fall-through below never swallows a
+	// typed character.
+	switch {
+	case key.Matches(msg, m.keys.Cancel):
 		m.state = viewList
 		m.input.Blur()
 		return m, nil
 
-	case tea.KeyTab:
+	case key.Matches(msg, m.keys.SwitchLayer):
 		m.targetLayer = m.cycleLayer(m.targetLayer)
 		return m, nil
 
-	case tea.KeyEnter:
+	case key.Matches(msg, m.keys.Confirm):
 		var newValue string
 		switch node.Field.Type {
 		case configui.FieldString, configui.FieldArray, configui.FieldInt:
@@ -628,7 +641,7 @@ func (m Model) updateConfirmDelete(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if msg.Type == tea.KeyEnter {
+	if key.Matches(msg, m.keys.Confirm) {
 		keyName := strings.Join(m.deletePath, ".")
 		layer := m.deleteLayer
 		m.state = viewList

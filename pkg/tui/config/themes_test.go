@@ -169,7 +169,7 @@ func TestPreviewRevertsOnBlur(t *testing.T) {
 	setBaselineTheme(t)
 
 	layered := &config.LayeredConfig{Final: &config.Config{}, FilePaths: map[config.ConfigSource]string{}}
-	p := NewThemesPage(layered, 100, 30)
+	p := NewThemesPage(layered, grovekeymap.NewConfigKeyMap(nil), 100, 30)
 	_ = p.Focus()
 
 	orig := theme.DefaultTheme.Name
@@ -196,7 +196,7 @@ func TestPreviewRevertsOnEsc(t *testing.T) {
 	setBaselineTheme(t)
 
 	layered := &config.LayeredConfig{Final: &config.Config{}, FilePaths: map[config.ConfigSource]string{}}
-	p := NewThemesPage(layered, 100, 30)
+	p := NewThemesPage(layered, grovekeymap.NewConfigKeyMap(nil), 100, 30)
 	_ = p.Focus()
 
 	orig := theme.DefaultTheme.Name
@@ -217,7 +217,7 @@ func TestPreviewSkippedWhenPinned(t *testing.T) {
 	t.Setenv("GROVE_THEME", theme.DefaultTheme.Name)
 
 	layered := &config.LayeredConfig{Final: &config.Config{}, FilePaths: map[config.ConfigSource]string{}}
-	p := NewThemesPage(layered, 100, 30)
+	p := NewThemesPage(layered, grovekeymap.NewConfigKeyMap(nil), 100, 30)
 	_ = p.Focus()
 
 	before := theme.DefaultTheme.Name
@@ -238,7 +238,7 @@ func TestThemesPageViewRenders(t *testing.T) {
 	setBaselineTheme(t)
 
 	layered := &config.LayeredConfig{Final: &config.Config{}, FilePaths: map[config.ConfigSource]string{}}
-	p := NewThemesPage(layered, 100, 30)
+	p := NewThemesPage(layered, grovekeymap.NewConfigKeyMap(nil), 100, 30)
 	_ = p.Focus()
 	p.SetSize(100, 30)
 
@@ -260,7 +260,7 @@ func TestEnterEmitsApplyThemeMsg(t *testing.T) {
 	setBaselineTheme(t)
 
 	layered := &config.LayeredConfig{Final: &config.Config{}, FilePaths: map[config.ConfigSource]string{}}
-	p := NewThemesPage(layered, 100, 30)
+	p := NewThemesPage(layered, grovekeymap.NewConfigKeyMap(nil), 100, 30)
 	_ = p.Focus()
 
 	target := previewTargetFor(t, p)

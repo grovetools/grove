@@ -16,11 +16,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/theme"
+
+	grovekeymap "github.com/grovetools/grove/pkg/keymap"
 )
 
 // Config is the TUI factory for worktree-mode callers. The fields match the
@@ -61,7 +65,7 @@ func New(cfg Config) Model {
 	if cfg.InitialFocus != nil {
 		focus = cfg.InitialFocus.Name
 	}
-	return newModel(focus)
+	return newModel(focus, cfg.Cfg)
 }
 
 // NewEcosystem returns a tea.Model for ecosystem-mode launches. Identical
@@ -71,7 +75,7 @@ func NewEcosystem(cfg EcosystemConfig) Model {
 	if cfg.Root != nil {
 		focus = cfg.Root.Name
 	}
-	return newModel(focus)
+	return newModel(focus, cfg.Cfg)
 }
 
 // ---- internal model ----
@@ -91,10 +95,17 @@ type model struct {
 	quitting  bool
 	width     int
 	height    int
+	keys      grovekeymap.EnvKeyMap
+	help      help.Model
 }
 
-func newModel(focus string) model {
-	return model{focus: focus}
+func newModel(focus string, cfg *config.Config) model {
+	keys := grovekeymap.NewEnvKeyMap(cfg)
+	return model{
+		focus: focus,
+		keys:  keys,
+		help:  help.NewBuilder().WithKeys(keys).WithTitle("Environment").Build(),
+	}
 }
 
 func (m model) Init() tea.Cmd {
@@ -105,15 +116,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.help.Width = msg.Width
+		m.help.Height = msg.Height
 		return m, nil
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "q", "ctrl+c", "esc":
+		// While the help overlay is open, forward keys to it (scroll + close).
+		if m.help.ShowAll {
+			var cmd tea.Cmd
+			m.help, cmd = m.help.Update(msg)
+			return m, cmd
+		}
+		switch {
+		case key.Matches(msg, m.keys.Base.Help):
+			m.help.Toggle()
+			return m, nil
+		case key.Matches(msg, m.keys.Base.Quit):
 			m.quitting = true
 			return m, tea.Quit
-		case "r":
+		case key.Matches(msg, m.keys.Base.Back):
+			// esc: standalone model, nothing to go back to — quit, but
+			// categorized as Back per Base convention.
+			m.quitting = true
+			return m, tea.Quit
+		case key.Matches(msg, m.keys.Refresh):
 			return m, fetchCmd()
-		case "d":
+		case key.Matches(msg, m.keys.OpenDashboard):
 			return m, openDashboardCmd()
 		}
 	case refreshMsg:
@@ -136,11 +163,14 @@ func (m model) View() string {
 	if m.quitting {
 		return ""
 	}
+	if m.help.ShowAll {
+		return m.help.View()
+	}
 	if m.state == nil && m.err == nil {
-		return "loading…  (q quit · r refresh · d open browser)"
+		return "loading…  (? help · q quit · r refresh · d open browser)"
 	}
 	if m.err != nil {
-		return fmt.Sprintf("error: %v\n\n(q quit · r retry · d open browser)", m.err)
+		return fmt.Sprintf("error: %v\n\n(? help · q quit · r retry · d open browser)", m.err)
 	}
 	return m.renderGrid()
 }
@@ -192,7 +222,7 @@ func (m model) renderGrid() string {
 		}
 	}
 
-	b.WriteString("\n" + t.Muted.Render("q quit · r refresh · d open browser dashboard"))
+	b.WriteString("\n" + t.Muted.Render("? help · q quit · r refresh · d open browser dashboard"))
 	return b.String()
 }
 
