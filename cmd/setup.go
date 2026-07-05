@@ -1755,7 +1755,7 @@ This model will be used for oneshot and chat API submissions.`
 	// Common models with theme styling
 	content.WriteString(theme.DefaultTheme.Muted.Render("  Common models:"))
 	content.WriteString("\n")
-	models := []string{"claude-opus-4-8", "claude-sonnet-4-6", "gemini-3-pro-preview"}
+	models := []string{"claude-opus-4-8", "claude-sonnet-5", "claude-sonnet-4-6", "gemini-3-pro-preview"}
 	for _, model := range models {
 		content.WriteString(fmt.Sprintf("    %s %s\n",
 			theme.DefaultTheme.Muted.Render(theme.IconBullet),
