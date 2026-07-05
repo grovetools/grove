@@ -23,7 +23,7 @@ func init() {
 
 func newLlmCmd() *cobra.Command {
 	cmd := cli.NewStandardCommand("llm", "Unified interface for LLM providers")
-	cmd.Long = `The 'grove llm' command provides a single, consistent entry point for all LLM interactions, regardless of the underlying provider (Anthropic, Gemini, etc.).
+	cmd.Long = `The 'grove llm' command provides a single, consistent entry point for all LLM interactions, regardless of the underlying provider (Anthropic, Gemini, OpenRouter, etc.).
 
 It intelligently delegates to the appropriate provider-specific tool based on the model name.`
 
@@ -35,17 +35,19 @@ func newLlmRequestCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "request [prompt...]",
 		Short: "Make a request to an LLM provider",
-		Long: `Acts as a facade, delegating to the appropriate tool (grove-anthropic, grove-gemini) based on the model.
+		Long: `Acts as a facade, delegating to the appropriate tool (grove-anthropic, grove-gemini, grove-openrouter) based on the model.
 
 Model determination precedence:
 1. --model flag
 2. 'llm.default_model' in grove.yml
+
+Supported model families: claude-*, gemini-*, openrouter/* (run 'flow models' for the full list).
 `,
 		RunE: runLlmRequest,
 	}
 
 	// Superset of flags from grove-anthropic and grove-gemini
-	cmd.Flags().StringP("model", "m", "", "LLM model to use (e.g., claude-opus-4-8, gemini-2.5-pro)")
+	cmd.Flags().StringP("model", "m", "", "LLM model to use (e.g., claude-opus-4-8, gemini-2.5-pro, openrouter/openai/gpt-5.2)")
 	cmd.Flags().StringP("prompt", "p", "", "Prompt text")
 	cmd.Flags().StringP("file", "f", "", "Read prompt from file")
 	cmd.Flags().StringP("workdir", "w", "", "Working directory (defaults to current)")
@@ -92,7 +94,7 @@ func runLlmRequest(cmd *cobra.Command, args []string) error {
 	// 2. Determine target binary from the canonical model->provider registry.
 	provider, ok := model.LookupModelProvider(modelVar)
 	if !ok {
-		return fmt.Errorf("unrecognized model provider for '%s'. Model must start with 'claude-' or 'gemini-'", modelVar)
+		return fmt.Errorf("unrecognized model %q; run 'flow models' for supported models (claude-*, gemini-*, openrouter/*)", modelVar)
 	}
 	var targetBinary string
 	switch provider {
@@ -100,6 +102,8 @@ func runLlmRequest(cmd *cobra.Command, args []string) error {
 		targetBinary = "grove-anthropic"
 	case model.ProviderGoogle:
 		targetBinary = "grove-gemini"
+	case model.ProviderOpenRouter:
+		targetBinary = "grove-openrouter"
 	default:
 		return fmt.Errorf("unrecognized model provider %q for '%s'", provider, modelVar)
 	}
@@ -116,12 +120,35 @@ func runLlmRequest(cmd *cobra.Command, args []string) error {
 	var delegateArgs []string
 	delegateArgs = append(delegateArgs, "request") // All tools use the 'request' subcommand
 
-	// grove-anthropic supports a narrower flag set than grove-gemini; drop
-	// flags it doesn't understand and translate the max-tokens flag name.
+	// grove-anthropic and grove-openrouter support narrower flag sets than
+	// grove-gemini; drop flags they don't understand and translate the
+	// max-tokens flag name. grove-openrouter additionally has no --no-cache
+	// flag (its request supports model/prompt/file/workdir/output/context/
+	// regenerate/max-tokens/system).
 	anthropicUnsupported := map[string]bool{
 		"yes":         true,
 		"temperature": true, "top-p": true, "top-k": true,
 		"cache-ttl": true, "recache": true, "use-cache": true,
+	}
+	openrouterUnsupported := map[string]bool{
+		"yes":         true,
+		"temperature": true, "top-p": true, "top-k": true,
+		"cache-ttl": true, "recache": true, "use-cache": true,
+		"no-cache": true,
+	}
+
+	// Select the drop-map for the target binary. grove-gemini accepts the
+	// full flag superset, so it has no drop-map. Both grove-anthropic and
+	// grove-openrouter want the max-output-tokens -> max-tokens rename.
+	var dropFlags map[string]bool
+	renameMaxTokens := false
+	switch targetBinary {
+	case "grove-anthropic":
+		dropFlags = anthropicUnsupported
+		renameMaxTokens = true
+	case "grove-openrouter":
+		dropFlags = openrouterUnsupported
+		renameMaxTokens = true
 	}
 
 	// Add all flags that were explicitly set by the user
@@ -133,14 +160,12 @@ func runLlmRequest(cmd *cobra.Command, args []string) error {
 		}
 
 		name := f.Name
-		if targetBinary == "grove-anthropic" {
-			if anthropicUnsupported[name] {
-				log.WithField("flag", name).Debug("Dropping flag not supported by grove-anthropic")
-				return
-			}
-			if name == "max-output-tokens" {
-				name = "max-tokens"
-			}
+		if dropFlags[name] {
+			log.WithField("flag", name).WithField("binary", targetBinary).Debug("Dropping flag not supported by target binary")
+			return
+		}
+		if renameMaxTokens && name == "max-output-tokens" {
+			name = "max-tokens"
 		}
 
 		// For slice flags, we need to append them correctly
