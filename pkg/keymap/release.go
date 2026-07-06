@@ -14,7 +14,7 @@ type ReleaseKeyMap struct {
 	Toggle            key.Binding
 	Tab               key.Binding
 	SelectAll         key.Binding
-	DeselectAll       key.Binding
+	SelectNone        key.Binding
 	SelectMajor       key.Binding
 	SelectMinor       key.Binding
 	SelectPatch       key.Binding
@@ -52,9 +52,9 @@ func NewReleaseKeyMap(cfg *config.Config) ReleaseKeyMap {
 			key.WithKeys("ctrl+a"),
 			key.WithHelp("ctrl+a", "select all"),
 		),
-		DeselectAll: key.NewBinding(
-			key.WithKeys("ctrl+d"),
-			key.WithHelp("ctrl+d", "deselect all"),
+		SelectNone: key.NewBinding(
+			key.WithKeys("-"),
+			key.WithHelp("-", "deselect all"),
 		),
 		SelectMajor: key.NewBinding(
 			key.WithKeys("m"),
@@ -89,8 +89,8 @@ func NewReleaseKeyMap(cfg *config.Config) ReleaseKeyMap {
 			key.WithHelp("g", "generate changelog (LLM)"),
 		),
 		GenerateAll: key.NewBinding(
-			key.WithKeys("G"),
-			key.WithHelp("G", "generate all changelogs"),
+			key.WithKeys("L"),
+			key.WithHelp("L", "generate all changelogs"),
 		),
 		WriteChangelog: key.NewBinding(
 			key.WithKeys("w"),
@@ -145,7 +145,7 @@ func (k ReleaseKeyMap) FullHelp() [][]key.Binding {
 		// Navigation
 		{k.Base.Up, k.Base.Down, k.Tab},
 		// Selection
-		{k.Toggle, k.SelectAll, k.DeselectAll},
+		{k.Toggle, k.SelectAll, k.SelectNone},
 		// Version bumps
 		{k.SelectMajor, k.SelectMinor, k.SelectPatch, k.ApplySuggestion},
 		// Changelog
@@ -169,7 +169,7 @@ func (k ReleaseKeyMap) Sections() []keymap.Section {
 
 	return []keymap.Section{
 		nav,
-		keymap.SelectionSection(k.Toggle, k.SelectAll, k.DeselectAll),
+		keymap.SelectionSection(k.Toggle, k.SelectAll, k.SelectNone),
 		keymap.NewSectionWithIcon("Version Bumps", theme.IconArrowUpBold,
 			k.SelectMajor, k.SelectMinor, k.SelectPatch, k.ApplySuggestion,
 		),

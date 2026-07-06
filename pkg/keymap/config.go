@@ -41,8 +41,8 @@ func NewConfigKeyMap(cfg *config.Config) ConfigKeyMap {
 			key.WithHelp("enter", "edit value"),
 		),
 		Delete: key.NewBinding(
-			key.WithKeys("D", "shift+d"),
-			key.WithHelp("D", "delete from layer"),
+			key.WithKeys("dd"),
+			key.WithHelp("dd", "delete from layer"),
 		),
 		Info: key.NewBinding(
 			key.WithKeys("i"),

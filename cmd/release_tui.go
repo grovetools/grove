@@ -313,7 +313,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case key.Matches(msg, m.keys.DeselectAll):
+	case key.Matches(msg, m.keys.SelectNone):
 		// Deselect all repositories
 		deselectedCount := 0
 		for _, repoName := range m.repoNames {

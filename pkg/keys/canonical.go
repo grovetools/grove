@@ -310,6 +310,7 @@ func NormalizeAction(name string) string {
 		"view plan":           "confirm", // flow-plan-list enter=view_plan (ConfigKey form)
 		"open in editor":      "confirm", // memory-view enter=open_in_editor
 		"select session":      "confirm", // nav-sessionize enter=select_session
+		"select rules":        "confirm", // cx-view s=select_rules (activate a rule preset; NOT the space-select action — the " rules" suffix-strip would otherwise collapse it to bare "select")
 		// Directional/navigational synonyms surfaced post-regen as ConfigKeys.
 		// The KEY is already the reserved one; these name the same direction per
 		// context, so they are true aliases (not deviations).
@@ -331,6 +332,11 @@ func NormalizeAction(name string) string {
 		// Edit-of-a-thing → edit
 		"edit changelog": "edit", // grove-release e=edit_changelog
 		"edit key":       "edit", // nav-sessionize e=edit_key
+		// Refresh-of-a-thing → refresh: nav-sessionize moved refresh_projects
+		// onto the canonical refresh key (ctrl+r) in Phase 2; "refresh projects"
+		// has no strippable suffix, so this alias makes the canonical binding
+		// land clean (it IS a refresh).
+		"refresh projects": "refresh", // nav-sessionize ctrl+r=refresh_projects
 		// Search-in-place / list-nav context reuse (memory-view, nav-*). These
 		// are canonical, not deviant: "/"-filter IS search, and result-nav j/k
 		// IS up/down. Recognizing them here lets the deliberate memory-view /

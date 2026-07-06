@@ -112,7 +112,7 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Rules",
 				Bindings: []BindingEntry{
-					{Name: "Select", Keys: []string{"enter"}, Description: "select", Enabled: true, ConfigKey: "select"},
+					{Name: "Confirm", Keys: []string{"enter"}, Description: "confirm", Enabled: true, ConfigKey: "confirm"},
 					{Name: "Load", Keys: []string{"l"}, Description: "load to .grove/rules", Enabled: true, ConfigKey: "load"},
 					{Name: "Save", Keys: []string{"s"}, Description: "save", Enabled: true, ConfigKey: "save"},
 					{Name: "Edit", Keys: []string{"e"}, Description: "edit", Enabled: true, ConfigKey: "edit"},
@@ -226,7 +226,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "Down", Keys: []string{"j", "down"}, Description: "down", Enabled: true, ConfigKey: "down"},
 					{Name: "Next", Keys: []string{"tab"}, Description: "next field", Enabled: true, ConfigKey: "next"},
 					{Name: "Prev", Keys: []string{"shift+tab"}, Description: "prev field", Enabled: true, ConfigKey: "prev"},
-					{Name: "GoTop", Keys: []string{"home"}, Description: "go to top", Enabled: true, ConfigKey: "go_top"},
+					{Name: "GoTop", Keys: []string{"gg", "home"}, Description: "go to top", Enabled: true, ConfigKey: "go_top"},
 					{Name: "GoBottom", Keys: []string{"G", "end"}, Description: "go to bottom", Enabled: true, ConfigKey: "go_bottom"},
 					{Name: "PageUp", Keys: []string{"ctrl+u", "pgup"}, Description: "page up", Enabled: true, ConfigKey: "page_up"},
 					{Name: "PageDown", Keys: []string{"ctrl+d", "pgdown"}, Description: "page down", Enabled: true, ConfigKey: "page_down"},
@@ -318,7 +318,6 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "System",
 				Bindings: []BindingEntry{
 					{Name: "Help", Keys: []string{"?"}, Description: "show help", Enabled: true, ConfigKey: "help"},
-					{Name: "Back", Keys: []string{"q"}, Description: "cancel", Enabled: true, ConfigKey: "back"},
 					{Name: "Quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true, ConfigKey: "quit"},
 				},
 			},
@@ -815,7 +814,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "Tree Actions",
 				Bindings: []BindingEntry{
 					{Name: "Edit", Keys: []string{"enter"}, Description: "edit value", Enabled: true, ConfigKey: "edit"},
-					{Name: "Delete", Keys: []string{"D", "shift+d"}, Description: "delete from layer", Enabled: true, ConfigKey: "delete"},
+					{Name: "Delete", Keys: []string{"dd"}, Description: "delete from layer", Enabled: true, ConfigKey: "delete"},
 					{Name: "Info", Keys: []string{"i"}, Description: "field info", Enabled: true, ConfigKey: "info"},
 					{Name: "Sources", Keys: []string{"c"}, Description: "config sources", Enabled: true, ConfigKey: "sources"},
 					{Name: "Toggle", Keys: []string{" "}, Description: "expand/collapse", Enabled: true, ConfigKey: "toggle"},
@@ -969,7 +968,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "Toggle", Keys: []string{" ", "x"}, Description: "toggle selection", Enabled: true, ConfigKey: "toggle"},
 					{Name: "SelectAll", Keys: []string{"ctrl+a"}, Description: "select all", Enabled: true, ConfigKey: "select_all"},
-					{Name: "DeselectAll", Keys: []string{"ctrl+d"}, Description: "deselect all", Enabled: true, ConfigKey: "deselect_all"},
+					{Name: "SelectNone", Keys: []string{"-"}, Description: "deselect all", Enabled: true, ConfigKey: "select_none"},
 				},
 			},
 			{
@@ -988,7 +987,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "EditChangelog", Keys: []string{"e"}, Description: "edit staged changelog", Enabled: true, ConfigKey: "edit_changelog"},
 					{Name: "EditRepoChangelog", Keys: []string{"E"}, Description: "edit repo CHANGELOG.md", Enabled: true, ConfigKey: "edit_repo_changelog"},
 					{Name: "GenerateChangelog", Keys: []string{"g"}, Description: "generate changelog (LLM)", Enabled: true, ConfigKey: "generate_changelog"},
-					{Name: "GenerateAll", Keys: []string{"G"}, Description: "generate all changelogs", Enabled: true, ConfigKey: "generate_all"},
+					{Name: "GenerateAll", Keys: []string{"L"}, Description: "generate all changelogs", Enabled: true, ConfigKey: "generate_all"},
 					{Name: "WriteChangelog", Keys: []string{"w"}, Description: "write changelog to repo", Enabled: true, ConfigKey: "write_changelog"},
 				},
 			},
@@ -1259,7 +1258,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "History",
 				Bindings: []BindingEntry{
 					{Name: "Undo", Keys: []string{"u"}, Description: "undo", Enabled: true, ConfigKey: "undo"},
-					{Name: "Redo", Keys: []string{"ctrl+r"}, Description: "redo", Enabled: true, ConfigKey: "redo"},
+					{Name: "Redo", Keys: []string{"U"}, Description: "redo", Enabled: true, ConfigKey: "redo"},
 				},
 			},
 			{
@@ -1308,7 +1307,7 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Session",
 				Bindings: []BindingEntry{
-					{Name: "RefreshProjects", Keys: []string{"R"}, Description: "refresh project list", Enabled: true, ConfigKey: "refresh_projects"},
+					{Name: "RefreshProjects", Keys: []string{"ctrl+r"}, Description: "refresh project list", Enabled: true, ConfigKey: "refresh_projects"},
 					{Name: "EditKey", Keys: []string{"e"}, Description: "edit key mapping", Enabled: true, ConfigKey: "edit_key"},
 					{Name: "ClearKey", Keys: []string{"x", "ctrl+x"}, Description: "clear key mapping", Enabled: true, ConfigKey: "clear_key"},
 					{Name: "CopyPath", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true, ConfigKey: "copy_path"},
@@ -1324,7 +1323,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "FocusEcosystemCwd", Keys: []string{">"}, Description: "focus cwd ecosystem", Enabled: true, ConfigKey: "focus_ecosystem_cwd"},
 					{Name: "GoToMappingCursor", Keys: []string{","}, Description: "go to cursor mapping", Enabled: true, ConfigKey: "go_to_mapping_cursor"},
 					{Name: "GoToMappingCwd", Keys: []string{"<"}, Description: "go to cwd mapping", Enabled: true, ConfigKey: "go_to_mapping_cwd"},
-					{Name: "ClearFocus", Keys: []string{"0"}, Description: "clear ecosystem focus", Enabled: true, ConfigKey: "clear_focus"},
+					{Name: "ClearFocus", Keys: []string{"0", "ctrl+g"}, Description: "clear ecosystem focus", Enabled: true, ConfigKey: "clear_focus"},
 					{Name: "ToggleWorktrees", Keys: []string{"w"}, Description: "toggle worktrees", Enabled: true, ConfigKey: "toggle_worktrees"},
 					{Name: "ToggleScaffold", Keys: []string{"A"}, Description: "all anchor groups: summary/full", Enabled: true, ConfigKey: "toggle_scaffold"},
 					{Name: "FilterDirty", Keys: []string{"D"}, Description: "filter dirty", Enabled: true, ConfigKey: "filter_dirty"},
@@ -1346,7 +1345,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "History",
 				Bindings: []BindingEntry{
 					{Name: "Undo", Keys: []string{"u"}, Description: "undo data change", Enabled: true, ConfigKey: "undo"},
-					{Name: "Redo", Keys: []string{"ctrl+r"}, Description: "redo data change", Enabled: true, ConfigKey: "redo"},
+					{Name: "Redo", Keys: []string{"U"}, Description: "redo data change", Enabled: true, ConfigKey: "redo"},
 				},
 			},
 			{
