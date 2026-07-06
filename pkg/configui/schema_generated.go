@@ -445,6 +445,13 @@ var SchemaFields = []FieldMeta{
 				Layer:       config.SourceGlobal,
 				Priority:    67,
 			},
+			{
+				Path:        []string{"tui", "whichkey_delay_ms"},
+				Type:        FieldInt,
+				Description: "Delay in milliseconds before the which-key chord popup appears (0 = immediate)",
+				Layer:       config.SourceGlobal,
+				Priority:    68,
+			},
 		},
 	},
 	{

@@ -21,6 +21,8 @@ type auditReport struct {
 	Inconsistent       []string                    `json:"inconsistent_actions"`
 	TUIConflicts       []auditConflict             `json:"tui_conflicts"`
 	SemanticConflicts  []keys.SemanticConflict     `json:"semantic_conflicts"`
+	PrefixSquatters    []keys.PrefixSquatter       `json:"prefix_squatters"`
+	ShadowedPrefixes   []keys.PrefixShadowing      `json:"shadowed_prefixes"`
 	Strict             bool                        `json:"strict"`
 	ErrorCount         int                         `json:"error_count"`
 	WarningCount       int                         `json:"warning_count"`
@@ -83,6 +85,10 @@ un-sanctioned issues surface. Use --json for machine-readable output.`
 		}
 		report := keys.Analyze(bindings)
 
+		// Intra-TUI prefix shadowing (advisory; separate from ValidateRegistry so
+		// it does not gate). Squatters ride along on the Analyze report.
+		shadowed := keys.DetectShadowedPrefixes()
+
 		// Inconsistent canonical actions (post-allowlist).
 		var inconsistent []string
 		for action, res := range report.Consistency {
@@ -113,6 +119,11 @@ un-sanctioned issues surface. Use --json for machine-readable output.`
 		} else {
 			warningCount += len(report.ReservedKeyViolations) + len(inconsistent) + len(tuiConflicts)
 		}
+		// Phase 2: prefix squatters + shadowing stay advisory warnings even under
+		// --strict this phase. Phase 5 promotes them into the strict error set
+		// once the namespace-chord migrations (Phases 3–5) vacate the 28 flat
+		// prefixes; strict-gating now would break any --strict CI on known debt.
+		warningCount += len(report.PrefixSquatters) + len(shadowed)
 
 		if jsonOutput {
 			out, _ := json.MarshalIndent(auditReport{
@@ -121,6 +132,8 @@ un-sanctioned issues surface. Use --json for machine-readable output.`
 				Inconsistent:       inconsistent,
 				TUIConflicts:       tuiConflicts,
 				SemanticConflicts:  report.SemanticConflicts,
+				PrefixSquatters:    report.PrefixSquatters,
+				ShadowedPrefixes:   shadowed,
 				Strict:             strict,
 				ErrorCount:         errorCount,
 				WarningCount:       warningCount,
@@ -188,6 +201,36 @@ un-sanctioned issues surface. Use --json for machine-readable output.`
 			for _, c := range tuiConflicts {
 				fmt.Printf("  [%s] %s in %s: %s\n",
 					sev(strict), t.Highlight.Render(c.Key), t.Bold.Render(c.TUI), strings.Join(c.Actions, " / "))
+			}
+		}
+
+		// Reserved prefix squatters (Phase 2). Always advisory warnings this
+		// phase — even under --strict — see the Phase-5 promotion note above.
+		// Reuses the reserved-violations render loop + FreeKeysForTUI hint.
+		if len(report.PrefixSquatters) > 0 {
+			fmt.Println("\n" + t.Header.Render(" RESERVED PREFIX SQUATTERS "))
+			fmt.Println(t.Muted.Render(strings.Repeat("─", 50)))
+			for _, s := range report.PrefixSquatters {
+				hint := ""
+				if free := keys.FreeKeysForTUI(s.TUI); len(free) > 0 {
+					n := 3
+					if len(free) < n {
+						n = len(free)
+					}
+					hint = t.Muted.Render(fmt.Sprintf("  (free here: %s)", strings.Join(free[:n], ", ")))
+				}
+				fmt.Printf("  [%s] %s in %s: flat binding %q blocks the %s namespace%s\n",
+					warnLabel("warn"), t.Highlight.Render(s.Key), t.Bold.Render(s.TUI), s.Action, s.Namespace, hint)
+			}
+		}
+
+		// Prefix shadowing (Phase 2). Always advisory warnings this phase.
+		if len(shadowed) > 0 {
+			fmt.Println("\n" + t.Header.Render(" PREFIX SHADOWING "))
+			fmt.Println(t.Muted.Render(strings.Repeat("─", 50)))
+			for _, sh := range shadowed {
+				fmt.Printf("  [%s] %s in %s shadows %s\n",
+					warnLabel("warn"), t.Highlight.Render(sh.Key), t.Bold.Render(sh.TUI), strings.Join(sh.ShadowedKeys, ", "))
 			}
 		}
 
