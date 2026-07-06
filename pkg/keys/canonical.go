@@ -46,6 +46,10 @@ var ReservedKeys = map[string]string{
 	"ctrl+y": "copy path",
 	"enter":  "confirm",
 	"esc":    "back",
+	// ctrl+g is one family: cancel / clear the current constraint (input,
+	// focus, filter). StandardActions maps "clear focus"→ctrl+g; that is not a
+	// contradiction but a member of this family — ReservedAlternates["ctrl+g"]
+	// records "clear focus" as a sanctioned alternate so both tables agree.
 	"ctrl+g": "cancel/clear",
 
 	// System
@@ -59,6 +63,46 @@ var ReservedKeys = map[string]string{
 	"za": "fold toggle",
 	"zR": "fold open all",
 	"zM": "fold close all",
+}
+
+// ReservedAlternates records the sanctioned "family members" of a reserved
+// key — normalized actions that a context may legitimately bind on a reserved
+// key without it being a violation. These are the Tier-1 keys whose canonical
+// action is really a family: `enter` = do-the-obvious-thing-to-the-row (confirm
+// OR fold-toggle in a tree), `left`/`right` = horizontal nav OR structural
+// fold, space = select OR fold-toggle, esc = back OR cancel/clear, ctrl+g =
+// cancel/clear OR clear-focus, X = archive OR close/kill. Analyze consults this
+// alongside ReservedKeys before flagging a reserved-key violation.
+//
+// Actions are stored NORMALIZED (post-NormalizeAction). The primary canonical
+// action for each key still lives in ReservedKeys; this is the *additional*
+// allowed set.
+var ReservedAlternates = map[string][]string{
+	"enter":  {"fold toggle"},   // tree row: enter toggles the fold
+	"left":   {"fold close"},    // horizontal = structural: collapse
+	"right":  {"fold open"},     // horizontal = structural: expand
+	" ":      {"fold toggle"},   // space toggles the fold in a tree
+	"esc":    {"cancel/clear"},  // esc's job is cancel-the-current-thing
+	"ctrl+g": {"clear focus"},   // the ctrl+g canon merge (see ReservedKeys)
+	"X":      {"close", "kill"}, // uppercase-X = "remove this from my world"
+}
+
+// isReservedAlternate reports whether normAction is a sanctioned alternate for
+// the reserved key k (see ReservedAlternates).
+func isReservedAlternate(k, normAction string) bool {
+	for _, alt := range ReservedAlternates[k] {
+		if alt == normAction {
+			return true
+		}
+	}
+	return false
+}
+
+// isChordKey reports whether a key token belongs to a chord layer (treemux
+// <leader>/<action>, tuimux <leader>). Chord keys live in a separate keyspace
+// and must not be compared against base-layer canon.
+func isChordKey(k string) bool {
+	return strings.Contains(k, "<leader> ") || strings.Contains(k, "<action> ")
 }
 
 // FreeKeys are available for TUI-specific functions.
@@ -148,6 +192,30 @@ func IsFreeKey(key string) bool {
 	return freeKeysSet[key]
 }
 
+// FreeKeysForTUI returns the free keys (canonical FreeKeys, in order) that the
+// named TUI does not already bind — i.e. safe suggestions for rebinding a
+// reserved-key violation in that TUI. Unknown TUI names yield the full
+// FreeKeys list. Built on IsFreeKey/FreeKeys + the generated registry.
+func FreeKeysForTUI(name string) []string {
+	used := make(map[string]bool)
+	if tui := GetTUIByName(name); tui != nil {
+		for _, sec := range tui.Sections {
+			for _, b := range sec.Bindings {
+				for _, k := range b.Keys {
+					used[k] = true
+				}
+			}
+		}
+	}
+	var free []string
+	for _, k := range FreeKeys {
+		if IsFreeKey(k) && !used[k] {
+			free = append(free, k)
+		}
+	}
+	return free
+}
+
 // ConsistencyResult captures the consistency analysis for a single canonical action.
 type ConsistencyResult struct {
 	CanonicalKeys []string            `json:"canonical_keys"`
@@ -183,14 +251,11 @@ func NormalizeAction(name string) string {
 	n = strings.ReplaceAll(n, "_", " ")
 	n = strings.TrimSpace(n)
 
-	// Strip domain-specific suffixes
-	suffixes := []string{" selected", " job", " note", " session", " item", " entry", " list", " rules"}
-	for _, s := range suffixes {
-		n = strings.TrimSuffix(n, s)
-	}
-
-	// Normalize common aliases BEFORE stripping prefixes
-	// This allows "toggle fold" to match "fold toggle" etc.
+	// Normalize common aliases. This map is consulted TWICE: once on the full
+	// form (below) and again on the suffix-stripped form (further down). The
+	// full-form lookup must run BEFORE suffix-stripping, or multi-word aliases
+	// get mangled: "select session" would be stripped of " session" to
+	// "select" before the "select session" → "confirm" alias could ever fire.
 	aliases := map[string]string{
 		// Page navigation
 		"half page up":   "page up",
@@ -266,7 +331,37 @@ func NormalizeAction(name string) string {
 		// Edit-of-a-thing → edit
 		"edit changelog": "edit", // grove-release e=edit_changelog
 		"edit key":       "edit", // nav-sessionize e=edit_key
+		// Search-in-place / list-nav context reuse (memory-view, nav-*). These
+		// are canonical, not deviant: "/"-filter IS search, and result-nav j/k
+		// IS up/down. Recognizing them here lets the deliberate memory-view /
+		// nav rekeys land clean with zero rebinds.
+		"filter":       "search",  // nav-history, nav-windows /=filter
+		"focus search": "search",  // memory-view /=focus_search
+		"open result":  "confirm", // memory-view enter=open_result
+		"exit search":  "back",    // memory-view esc=exit_search
+		"cancel chord": "back",    // treemux/tuimux esc=cancel_chord
+		"result up":    "up",      // memory-view k/up=result_up
+		"result down":  "down",    // memory-view j/down=result_down
+		"confirm move": "confirm", // nav-manage enter=confirm_move
+		"switch":       "confirm", // nav-windows enter=switch (primary row action)
+		"open":         "confirm", // nav-*/hooks o/enter=open (primary row action)
+		"toggle expand": "fold toggle", // cx-view enter/space=toggle_expand
+		"toggle exclude": "exclude",    // cx-view x=toggle_exclude (dedupes with exclude)
 	}
+	// Alias lookup on the FULL form first, so multi-word aliases win before
+	// suffix-stripping can mangle them (e.g. "select session" → "confirm").
+	if alias, ok := aliases[n]; ok {
+		return alias
+	}
+
+	// Strip domain-specific suffixes
+	suffixes := []string{" selected", " job", " note", " session", " item", " entry", " list", " rules"}
+	for _, s := range suffixes {
+		n = strings.TrimSuffix(n, s)
+	}
+
+	// Alias lookup AGAIN on the stripped form (e.g. "toggle fold" → "fold
+	// toggle"); some alias keys only make sense after suffix-stripping.
 	if alias, ok := aliases[n]; ok {
 		n = alias
 	}
@@ -300,6 +395,19 @@ func Analyze(bindings []KeyBinding) AnalysisReport {
 			}
 			normName := NormalizeAction(b.Action)
 			if normName == canon.Name {
+				// Chord-layer bindings (treemux/tuimux <leader>/<action>) live
+				// in a separate keyspace; comparing their keys against the base
+				// layer produces the bogus help/quit/rename inconsistencies.
+				hasNonChord := false
+				for _, bk := range b.Keys {
+					if !isChordKey(bk) {
+						hasNonChord = true
+						break
+					}
+				}
+				if !hasNonChord {
+					continue
+				}
 				res.TUIs[b.TUI] = b.Keys
 				// Check if any binding key matches canonical
 				match := false
@@ -344,6 +452,11 @@ func Analyze(bindings []KeyBinding) AnalysisReport {
 		}
 		normAction := NormalizeAction(b.Action)
 		for _, k := range b.Keys {
+			// Chord-layer keys are a separate keyspace; never compare them
+			// against base-layer meanings.
+			if isChordKey(k) {
+				continue
+			}
 			// An intentional deviation is not a "meaning" for conflict
 			// purposes; skipping its insertion lets the remaining meanings
 			// collapse to one (no conflict emitted).
@@ -389,9 +502,19 @@ func Analyze(bindings []KeyBinding) AnalysisReport {
 		}
 		normAction := NormalizeAction(b.Action)
 		for _, k := range b.Keys {
+			// Chord-layer keys are a separate keyspace; they are never
+			// reserved-key violations against the base layer.
+			if isChordKey(k) {
+				continue
+			}
 			if expectedAction, isReserved := ReservedKeys[k]; isReserved {
 				// Deliberate deviations are allowlisted and not violations.
 				if isIntentional(b.TUI, k, normAction) {
+					continue
+				}
+				// A sanctioned family member (ReservedAlternates) is not a
+				// violation either — enter=fold-toggle in a tree, X=close, etc.
+				if isReservedAlternate(k, normAction) {
 					continue
 				}
 				// Check if the action matches the expected action

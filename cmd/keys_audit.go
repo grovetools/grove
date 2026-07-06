@@ -94,7 +94,7 @@ un-sanctioned issues surface. Use --json for machine-readable output.`
 
 		// Intra-TUI key conflicts (same key, different action within one TUI).
 		var tuiConflicts []auditConflict
-		for _, c := range keys.DetectConflicts(bindings) {
+		for _, c := range keys.DetectConflictsFiltered(bindings) {
 			if c.Domain != keys.DomainTUI || c.TUI == "" {
 				continue
 			}
@@ -159,8 +159,16 @@ un-sanctioned issues surface. Use --json for machine-readable output.`
 			fmt.Println("\n" + t.Header.Render(" RESERVED KEY VIOLATIONS "))
 			fmt.Println(t.Muted.Render(strings.Repeat("─", 50)))
 			for _, v := range report.ReservedKeyViolations {
-				fmt.Printf("  [%s] %s in %s: expected %q, got %q\n",
-					sev(strict), t.Highlight.Render(v.Key), t.Bold.Render(v.TUI), v.ExpectedAction, v.ActualAction)
+				hint := ""
+				if free := keys.FreeKeysForTUI(v.TUI); len(free) > 0 {
+					n := 3
+					if len(free) < n {
+						n = len(free)
+					}
+					hint = t.Muted.Render(fmt.Sprintf("  (free here: %s)", strings.Join(free[:n], ", ")))
+				}
+				fmt.Printf("  [%s] %s in %s: expected %q, got %q%s\n",
+					sev(strict), t.Highlight.Render(v.Key), t.Bold.Render(v.TUI), v.ExpectedAction, v.ActualAction, hint)
 			}
 		}
 

@@ -14,6 +14,24 @@ import (
 // actions, which is a real bug. Non-TUI domains carry an empty TUI, so they
 // bucket exactly as before.
 func DetectConflicts(bindings []KeyBinding) []Conflict {
+	return detectConflicts(bindings, false)
+}
+
+// DetectConflictsFiltered is DetectConflicts with deviation-awareness: a usage
+// that is an allowlisted intentional deviation (deviations.go) for its key is
+// dropped before counting, so a key whose only "extra" action is a sanctioned
+// deviation is not reported as an intra-TUI conflict. The audit gate
+// (cmd/keys_audit.go) uses this; the browsing/keys TUI may still want to *show*
+// deviated conflicts, so it keeps using DetectConflicts.
+func DetectConflictsFiltered(bindings []KeyBinding) []Conflict {
+	return detectConflicts(bindings, true)
+}
+
+// detectConflicts is the shared implementation. It dedupes usages on the
+// NORMALIZED action (so two ConfigKeys that mean the same canonical action —
+// e.g. confirm/inspect — collapse to one and don't count as a conflict). When
+// filterDeviations is set, allowlisted deviations are dropped first.
+func detectConflicts(bindings []KeyBinding, filterDeviations bool) []Conflict {
 	var conflicts []Conflict
 
 	// scope identifies a single conflict namespace: a domain, and within
@@ -44,12 +62,20 @@ func DetectConflicts(bindings []KeyBinding) []Conflict {
 
 		for keyCombo, usages := range keyUsage {
 			if len(usages) > 1 {
-				// Deduplicate: same action might specify the same key twice
+				// Deduplicate on the NORMALIZED action, so two ConfigKeys that
+				// share a canonical meaning (confirm|inspect, confirm_move|open,
+				// exclude|toggle_exclude) collapse to one and don't count.
 				seenActions := make(map[string]bool)
 				var uniqueBindings []KeyBinding
 				for _, u := range usages {
-					if !seenActions[u.Action] {
-						seenActions[u.Action] = true
+					normAction := NormalizeAction(u.Action)
+					// Drop allowlisted deviations for this key: a sanctioned
+					// deviation is not a competing meaning.
+					if filterDeviations && isIntentional(u.TUI, keyCombo, normAction) {
+						continue
+					}
+					if !seenActions[normAction] {
+						seenActions[normAction] = true
 						uniqueBindings = append(uniqueBindings, u)
 					}
 				}
