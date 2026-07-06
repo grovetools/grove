@@ -92,8 +92,9 @@ func getTUIBindingsFromRegistry() []KeyBinding {
 				}
 				bindings = append(bindings, KeyBinding{
 					Domain:      DomainTUI,
+					TUI:         tui.Name,
 					Section:     section.Name,
-					Action:      b.Name,
+					Action:      b.ConfigKey,
 					Keys:        b.Keys,
 					Description: b.Description,
 					Source:      tui.Name + " (" + tui.Package + ")",

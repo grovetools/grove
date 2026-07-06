@@ -4,23 +4,36 @@ import (
 	"sort"
 )
 
-// DetectConflicts finds overlapping key combinations within the same domain.
-// Cross-domain "conflicts" (e.g., tmux C-f vs TUI /) are NOT reported
-// because they operate in different contexts.
+// DetectConflicts finds overlapping key combinations within the same
+// (domain, TUI) scope. Cross-domain "conflicts" (e.g., tmux C-f vs TUI /) are
+// NOT reported because they operate in different contexts; likewise
+// same-key/different-TUI bindings (e.g. every TUI's enter/tab) and
+// same-key/different-page bindings that live under distinct registry TUI ids
+// (e.g. git-viewer's per-page c/u/w/o/s/m/r) are NOT conflicts — each is its
+// own keyspace. A conflict means one TUI binds one key to two different
+// actions, which is a real bug. Non-TUI domains carry an empty TUI, so they
+// bucket exactly as before.
 func DetectConflicts(bindings []KeyBinding) []Conflict {
 	var conflicts []Conflict
 
-	// Group by domain
-	domainMap := make(map[KeyDomain][]KeyBinding)
-	for _, b := range bindings {
-		domainMap[b.Domain] = append(domainMap[b.Domain], b)
+	// scope identifies a single conflict namespace: a domain, and within
+	// DomainTUI, a specific registry TUI id.
+	type scope struct {
+		domain KeyDomain
+		tui    string
 	}
 
-	// Find duplicates within each domain
-	for domain, domBindings := range domainMap {
+	// Group by (domain, TUI)
+	scopeMap := make(map[scope][]KeyBinding)
+	for _, b := range bindings {
+		scopeMap[scope{b.Domain, b.TUI}] = append(scopeMap[scope{b.Domain, b.TUI}], b)
+	}
+
+	// Find duplicates within each scope
+	for sc, scopeBindings := range scopeMap {
 		keyUsage := make(map[string][]KeyBinding)
 
-		for _, b := range domBindings {
+		for _, b := range scopeBindings {
 			for _, keyCombo := range b.Keys {
 				if keyCombo == "" {
 					continue
@@ -44,7 +57,8 @@ func DetectConflicts(bindings []KeyBinding) []Conflict {
 				if len(uniqueBindings) > 1 {
 					conflicts = append(conflicts, Conflict{
 						Key:      keyCombo,
-						Domain:   domain,
+						Domain:   sc.domain,
+						TUI:      sc.tui,
 						Bindings: uniqueBindings,
 					})
 				}
@@ -52,10 +66,13 @@ func DetectConflicts(bindings []KeyBinding) []Conflict {
 		}
 	}
 
-	// Sort conflicts by domain then key for consistent output
+	// Sort conflicts by domain, then TUI, then key for consistent output
 	sort.Slice(conflicts, func(i, j int) bool {
 		if conflicts[i].Domain != conflicts[j].Domain {
 			return conflicts[i].Domain < conflicts[j].Domain
+		}
+		if conflicts[i].TUI != conflicts[j].TUI {
+			return conflicts[i].TUI < conflicts[j].TUI
 		}
 		return conflicts[i].Key < conflicts[j].Key
 	})
