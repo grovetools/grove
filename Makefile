@@ -23,7 +23,7 @@ LDFLAGS = -ldflags="\
 -X '$(VERSION_PKG).Branch=$(GIT_BRANCH)' \
 -X '$(VERSION_PKG).BuildDate=$(BUILD_DATE)'"
 
-.PHONY: all build test clean fmt fmt-check vet lint run check dev build-all schema registry config-schema keys-registry help
+.PHONY: all build test clean fmt fmt-check vet lint run check dev build-all schema registry config-schema keys-registry keys-registry-check keys-audit help
 
 all: build
 
@@ -42,6 +42,15 @@ config-schema:
 keys-registry:
 	@echo "Generating keys registry..."
 	@go run ./tools/keys-registry-generator
+
+# Fail if the committed registry is stale (regenerate and diff). Keeps
+# pkg/keys/registry_generated.go in lockstep with the TUI keymap sources.
+keys-registry-check: keys-registry
+	@git diff --exit-code -- pkg/keys/registry_generated.go
+
+# Structural + semantic gate over the generated registry (see cmd/keys_audit.go).
+keys-audit:
+	@go run . keys audit
 
 build: registry schema config-schema keys-registry
 	@mkdir -p $(BIN_DIR)
@@ -89,7 +98,7 @@ run: build
 	@$(BIN_DIR)/$(BINARY_NAME) $(ARGS)
 
 # Run all checks
-check: schema fmt-check vet lint test
+check: schema fmt-check vet lint test keys-registry-check keys-audit
 
 # Development build with race detector
 dev:
