@@ -663,7 +663,7 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "System",
 				Bindings: []BindingEntry{
-					{Name: "Help", Keys: []string{"?"}, Description: "help", Enabled: false, ConfigKey: "help"},
+					{Name: "Help", Keys: []string{"?"}, Description: "help", Enabled: true, ConfigKey: "help"},
 					{Name: "Quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true, ConfigKey: "quit"},
 					{Name: "Back", Keys: []string{"esc"}, Description: "back", Enabled: true, ConfigKey: "back"},
 				},
@@ -712,7 +712,7 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "System",
 				Bindings: []BindingEntry{
-					{Name: "Help", Keys: []string{"?"}, Description: "help", Enabled: false, ConfigKey: "help"},
+					{Name: "Help", Keys: []string{"?"}, Description: "help", Enabled: true, ConfigKey: "help"},
 					{Name: "Quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true, ConfigKey: "quit"},
 					{Name: "Back", Keys: []string{"esc"}, Description: "back", Enabled: true, ConfigKey: "back"},
 				},
@@ -761,7 +761,7 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "System",
 				Bindings: []BindingEntry{
-					{Name: "Help", Keys: []string{"?"}, Description: "help", Enabled: false, ConfigKey: "help"},
+					{Name: "Help", Keys: []string{"?"}, Description: "help", Enabled: true, ConfigKey: "help"},
 					{Name: "Quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true, ConfigKey: "quit"},
 					{Name: "Back", Keys: []string{"esc"}, Description: "back", Enabled: true, ConfigKey: "back"},
 				},
@@ -1140,15 +1140,17 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Search",
 				Bindings: []BindingEntry{
-					{Name: "prev result", Keys: []string{"up", "ctrl+p"}, Description: "prev result", Enabled: true, ConfigKey: "prev_result"},
-					{Name: "next result", Keys: []string{"down", "ctrl+n"}, Description: "next result", Enabled: true, ConfigKey: "next_result"},
-					{Name: "open in editor", Keys: []string{"enter"}, Description: "open in editor", Enabled: true, ConfigKey: "open_in_editor"},
-					{Name: "CopyPath", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true, ConfigKey: "copy_path"},
-					{Name: "copy chunk", Keys: []string{"ctrl+shift+y"}, Description: "copy chunk", Enabled: true, ConfigKey: "copy_chunk"},
-					{Name: "cycle mode (hybrid/fts/vector)", Keys: []string{"alt+h"}, Description: "cycle mode (hybrid/fts/vector)", Enabled: true, ConfigKey: "cycle_mode_hybrid_fts_vector"},
-					{Name: "local/global scope", Keys: []string{"alt+s"}, Description: "local/global scope", Enabled: true, ConfigKey: "local_global_scope"},
-					{Name: "cycle type filter", Keys: []string{"alt+t"}, Description: "cycle type filter", Enabled: true, ConfigKey: "cycle_type_filter"},
-					{Name: "add to context", Keys: []string{"alt+a"}, Description: "add to context", Enabled: true, ConfigKey: "add_to_context"},
+					{Name: "FocusSearch", Keys: []string{"/", "i"}, Description: "edit query (insert)", Enabled: true, ConfigKey: "focus_search"},
+					{Name: "ExitSearch", Keys: []string{"esc"}, Description: "normal mode", Enabled: true, ConfigKey: "exit_search"},
+					{Name: "ResultUp", Keys: []string{"k", "up", "ctrl+p"}, Description: "prev result", Enabled: true, ConfigKey: "result_up"},
+					{Name: "ResultDown", Keys: []string{"j", "down", "ctrl+n"}, Description: "next result", Enabled: true, ConfigKey: "result_down"},
+					{Name: "OpenResult", Keys: []string{"enter"}, Description: "open in editor", Enabled: true, ConfigKey: "open_result"},
+					{Name: "CopyResultPath", Keys: []string{"y"}, Description: "copy path", Enabled: true, ConfigKey: "copy_result_path"},
+					{Name: "CopyChunk", Keys: []string{"Y"}, Description: "copy chunk", Enabled: true, ConfigKey: "copy_chunk"},
+					{Name: "CycleMode", Keys: []string{"m"}, Description: "cycle mode (hybrid/fts/vector)", Enabled: true, ConfigKey: "cycle_mode"},
+					{Name: "CycleScope", Keys: []string{"s"}, Description: "local/global scope", Enabled: true, ConfigKey: "cycle_scope"},
+					{Name: "CycleDocType", Keys: []string{"t"}, Description: "cycle type filter", Enabled: true, ConfigKey: "cycle_doc_type"},
+					{Name: "AppendContext", Keys: []string{"a"}, Description: "add to context", Enabled: true, ConfigKey: "append_context"},
 				},
 			},
 			{
