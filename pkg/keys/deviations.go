@@ -43,6 +43,18 @@ var IntentionalDeviations = []Deviation{
 	{TUI: "tuimux-mux", Key: "ctrl+g", Action: "arm action", Reason: "ctrl+g reserved for cancel/clear; arms the action chord"},
 	{TUI: "treemux-app", Key: "alt+s", Action: "jump hooks", Reason: "alt+s means scope-toggle in hooks-browser; jumps to Sessions panel here (ConfigKey jump_hooks)"},
 	{TUI: "treemux-app", Key: "d", Action: "rail close", Reason: "d closes the rail item (ConfigKey rail_close; also bound to x)"},
+	// Phase-1 mechanism-fix additions (24-keymap-consistency §1f): legitimate
+	// but too TUI-specific for a global ReservedAlternates family.
+	{TUI: "cx-view", Key: "X", Action: "exclude dir", Reason: "X reserved for archive; remove-from-context (X-family adjacent)"},
+	{TUI: "cx-view", Key: "left", Action: "switch focus", Reason: "left reserved for nav; Stats-page pane switch"},
+	{TUI: "cx-view", Key: "right", Action: "switch focus", Reason: "right reserved for nav; Stats-page pane switch"},
+	{TUI: "grove-config", Key: "enter", Action: "edit", Reason: "enter reserved for confirm; edits the tree row (primary action)"},
+	{TUI: "nb-browser", Key: "-", Action: "git stage toggle", Reason: "'-' reserved for select-none; mirrors git-viewer-changes -=toggle_staged"},
+	{TUI: "nb-browser", Key: "ctrl+g", Action: "clear focus", Reason: "ctrl+g cancel/clear family; clears focus (see ReservedAlternates ctrl+g)"},
+	{TUI: "treemux-app", Key: "right", Action: "rail exit", Reason: "right reserved for nav; vim-window 'leave sidebar rightward'"},
+	{TUI: "treemux-app", Key: "ctrl+l", Action: "rail exit", Reason: "ctrl+l reserved for clear-search; leaves the rail rightward"},
+	{TUI: "nav-manage", Key: "d", Action: "delete", Reason: "canonical delete is dd; d clears a key mapping (not destructive)"},
+	{TUI: "nav-manage", Key: "delete", Action: "delete", Reason: "canonical delete is dd; delete clears a key mapping (not destructive)"},
 }
 
 // isIntentional reports whether (tui, key, normAction) is an allowlisted
