@@ -21,8 +21,9 @@ func (d KeyDomain) String() string {
 // KeyBinding represents a single key mapping within a domain.
 type KeyBinding struct {
 	Domain      KeyDomain
+	TUI         string   // registry TUI id (e.g. "git-viewer-changes"); empty for tmux/nav/nvim
 	Section     string   // e.g., "Navigation", "Actions", "Popups"
-	Action      string   // e.g., "up", "flow_status", "create_note"
+	Action      string   // e.g., "up", "flow_status", "create_note"; for DomainTUI this is the registry ConfigKey
 	Keys        []string // e.g., ["k", "up"], ["C-p"]
 	Description string   // Human-readable description
 	Source      string   // e.g., "keymap.Base", "user config", "grove.toml"
@@ -34,6 +35,7 @@ type KeyBinding struct {
 type Conflict struct {
 	Key      string       // The conflicting key combination
 	Domain   KeyDomain    // The domain where the conflict occurs
+	TUI      string       // The registry TUI id where the conflict occurs (empty for tmux/nav/nvim)
 	Bindings []KeyBinding // All bindings that use this key
 }
 

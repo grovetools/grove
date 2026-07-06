@@ -76,6 +76,12 @@ var FreeKeys = []string{
 	// Ctrl combinations (not in Base)
 	"ctrl+e", "ctrl+j", "ctrl+k", "ctrl+o", "ctrl+s", "ctrl+x",
 
+	// Alt combinations (TUI-local scope toggles, e.g. treemux alt+s)
+	"alt+s",
+
+	// Angle brackets (TUI-local semantics: git-viewer folds, nav/nb) — no canonical meaning
+	"<", ">",
+
 	// Tab
 	"tab", "shift+tab",
 }
@@ -234,6 +240,8 @@ func NormalizeAction(name string) string {
 		"inspect":             "confirm",
 		"previous period":     "left",
 		"next period":         "right",
+		"compare":             "confirm", // git-viewer enter
+		"diff":                "confirm", // git-viewer enter
 	}
 	if alias, ok := aliases[n]; ok {
 		n = alias
@@ -268,7 +276,7 @@ func Analyze(bindings []KeyBinding) AnalysisReport {
 			}
 			normName := NormalizeAction(b.Action)
 			if normName == canon.Name {
-				res.TUIs[b.Source] = b.Keys
+				res.TUIs[b.TUI] = b.Keys
 				// Check if any binding key matches canonical
 				match := false
 				for _, bk := range b.Keys {
@@ -283,7 +291,18 @@ func Analyze(bindings []KeyBinding) AnalysisReport {
 					}
 				}
 				if !match {
-					res.Consistent = false
+					// An intentional deviation (e.g. git-viewer-log r=refresh)
+					// is not an inconsistency — the mismatch is on record.
+					deviated := false
+					for _, bk := range b.Keys {
+						if isIntentional(b.TUI, bk, canon.Name) {
+							deviated = true
+							break
+						}
+					}
+					if !deviated {
+						res.Consistent = false
+					}
 				}
 			}
 		}
@@ -294,17 +313,24 @@ func Analyze(bindings []KeyBinding) AnalysisReport {
 
 	// 2. Analyze Semantic Conflicts
 	// Group by key to find keys used for different actions across TUIs
-	keyUsage := make(map[string]map[string]string) // Key -> Source -> ActionName
+	keyUsage := make(map[string]map[string]string) // Key -> TUI -> ActionName
 	for _, b := range bindings {
 		if b.Domain != DomainTUI {
 			continue
 		}
+		normAction := NormalizeAction(b.Action)
 		for _, k := range b.Keys {
+			// An intentional deviation is not a "meaning" for conflict
+			// purposes; skipping its insertion lets the remaining meanings
+			// collapse to one (no conflict emitted).
+			if isIntentional(b.TUI, k, normAction) {
+				continue
+			}
 			if keyUsage[k] == nil {
 				keyUsage[k] = make(map[string]string)
 			}
-			// Store the normalized action per key per source
-			keyUsage[k][b.Source] = NormalizeAction(b.Action)
+			// Store the normalized action per key per TUI
+			keyUsage[k][b.TUI] = normAction
 		}
 	}
 
@@ -340,6 +366,10 @@ func Analyze(bindings []KeyBinding) AnalysisReport {
 		normAction := NormalizeAction(b.Action)
 		for _, k := range b.Keys {
 			if expectedAction, isReserved := ReservedKeys[k]; isReserved {
+				// Deliberate deviations are allowlisted and not violations.
+				if isIntentional(b.TUI, k, normAction) {
+					continue
+				}
 				// Check if the action matches the expected action
 				expectedNorm := NormalizeAction(expectedAction)
 				if normAction != expectedNorm {
@@ -347,7 +377,7 @@ func Analyze(bindings []KeyBinding) AnalysisReport {
 						Key:            k,
 						ExpectedAction: expectedAction,
 						ActualAction:   b.Action,
-						TUI:            b.Source,
+						TUI:            b.TUI,
 					})
 				}
 			}
