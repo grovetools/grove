@@ -242,6 +242,30 @@ func NormalizeAction(name string) string {
 		"next period":         "right",
 		"compare":             "confirm", // git-viewer enter
 		"diff":                "confirm", // git-viewer enter
+		"view plan":           "confirm", // flow-plan-list enter=view_plan (ConfigKey form)
+		"open in editor":      "confirm", // memory-view enter=open_in_editor
+		"select session":      "confirm", // nav-sessionize enter=select_session
+		// Directional/navigational synonyms surfaced post-regen as ConfigKeys.
+		// The KEY is already the reserved one; these name the same direction per
+		// context, so they are true aliases (not deviations).
+		"go top":         "top",
+		"go bottom":      "bottom",
+		"escape":         "back",
+		"prev period":    "left", // gemini prev_period (complements existing "previous period")
+		"focus left":     "left",
+		"focus right":    "right",
+		"prev result":    "up",   // memory-view prev_result
+		"next result":    "down", // memory-view next_result
+		"rail up":        "up",
+		"rail down":      "down",
+		"rail top":       "top",
+		"rail bottom":    "bottom",
+		"rail half up":   "page up",
+		"rail half down": "page down",
+		"rail select":    "confirm",
+		// Edit-of-a-thing → edit
+		"edit changelog": "edit", // grove-release e=edit_changelog
+		"edit key":       "edit", // nav-sessionize e=edit_key
 	}
 	if alias, ok := aliases[n]; ok {
 		n = alias

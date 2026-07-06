@@ -41,8 +41,8 @@ var IntentionalDeviations = []Deviation{
 	// treemux / tuimux chord systems
 	{TUI: "treemux-app", Key: "ctrl+g", Action: "arm action", Reason: "ctrl+g reserved for cancel/clear; arms the action chord"},
 	{TUI: "tuimux-mux", Key: "ctrl+g", Action: "arm action", Reason: "ctrl+g reserved for cancel/clear; arms the action chord"},
-	{TUI: "treemux-app", Key: "alt+s", Action: "nav hooks", Reason: "alt+s means scope-toggle in hooks-browser; opens Nav hooks tab here"}, // ⚠ Action derived from "Nav"+label pattern in treemux/pkg/keymap globalHotkeysSection — verify actual ConfigKey (nav_hooks assumed) against the regen
-	{TUI: "treemux-app", Key: "d", Action: "close rail", Reason: "d closes rail item"},                                                     // ⚠ ConfigKey assumed close_rail_item; NormalizeAction strips the " item" suffix → "close rail" — verify against the regen
+	{TUI: "treemux-app", Key: "alt+s", Action: "jump hooks", Reason: "alt+s means scope-toggle in hooks-browser; jumps to Sessions panel here (ConfigKey jump_hooks)"},
+	{TUI: "treemux-app", Key: "d", Action: "rail close", Reason: "d closes the rail item (ConfigKey rail_close; also bound to x)"},
 }
 
 // isIntentional reports whether (tui, key, normAction) is an allowlisted

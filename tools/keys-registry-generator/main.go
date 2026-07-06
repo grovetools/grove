@@ -29,6 +29,12 @@ import (
 	nb_cmd "github.com/grovetools/nb/cmd"
 	tend_cmd "github.com/grovetools/tend/cmd"
 
+	// Leaf pkg keymap packages (import-light: avoid the cmd cobra trees)
+	gitviewer_keymap "github.com/grovetools/git-viewer/pkg/keymap"
+	memory_keymap "github.com/grovetools/memory/pkg/keymap"
+	treemux_keymap "github.com/grovetools/treemux/pkg/keymap"
+	tuimux_bindings "github.com/grovetools/tuimux/bindings"
+
 	gemini_cmd "github.com/grovetools/grove-gemini/cmd"
 	grove_cmd "github.com/grovetools/grove/cmd"
 )
@@ -54,6 +60,18 @@ func getTUIInfos() []keymap.TUIInfo {
 		grove_cmd.ConfigKeymapInfo(),
 		grove_cmd.SetupKeymapInfo(),
 		grove_cmd.OnboardKeymapInfo(),
+		grove_cmd.EnvKeymapInfo(),
+		// git-viewer
+		gitviewer_keymap.ChangesKeymapInfo(),
+		gitviewer_keymap.LogKeymapInfo(),
+		gitviewer_keymap.RebaseKeymapInfo(),
+		gitviewer_keymap.ReviewerKeymapInfo(),
+		// memory
+		memory_keymap.KeymapInfo(),
+		// treemux
+		treemux_keymap.KeymapInfo(),
+		// tuimux
+		tuimux_bindings.KeymapInfo(),
 		// grove-gemini
 		gemini_cmd.QueryTuiKeymapInfo(),
 		gemini_cmd.DashboardKeymapInfo(),
@@ -239,9 +257,16 @@ func main() {
 		for _, section := range tui.Sections {
 			sd := sectionData{Name: section.Name}
 			for _, binding := range section.Bindings {
+				// Keys can contain Go-string-breaking characters (e.g. tuimux
+				// binds `<leader> "` for horizontal split); escape each like Name
+				// and Description so the generated composite literal stays valid.
+				keys := make([]string, len(binding.Keys))
+				for ki, k := range binding.Keys {
+					keys[ki] = escapeString(k)
+				}
 				sd.Bindings = append(sd.Bindings, bindingData{
 					Name:        escapeString(binding.Name),
-					Keys:        binding.Keys,
+					Keys:        keys,
 					Description: escapeString(binding.Description),
 					Enabled:     binding.Enabled,
 					ConfigKey:   binding.ConfigKey,
