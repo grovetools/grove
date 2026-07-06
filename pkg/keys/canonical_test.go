@@ -2,6 +2,87 @@ package keys
 
 import "testing"
 
+// TestAnalyzePrefixSquatters_Synthetic proves the squatter check fires on a flat
+// binding on a reserved prefix regardless of its action's meaning (no family
+// exemption), stays silent for rune-sequence keys and chords, and is suppressed
+// by an intentional deviation.
+func TestAnalyzePrefixSquatters_Synthetic(t *testing.T) {
+	bindings := []KeyBinding{
+		// Flat `t` on a "toggle sort" action → squats the toggle namespace.
+		{Domain: DomainTUI, TUI: "syn-a", Action: "toggle_sort", Keys: []string{"t"}},
+		// Flat `v` on an unrelated action → still a squatter (no family test).
+		{Domain: DomainTUI, TUI: "syn-a", Action: "cycle_doc_type", Keys: []string{"v"}},
+		// A rune-sequence key `gg` must NOT squat `g` (only exact single-key).
+		{Domain: DomainTUI, TUI: "syn-a", Action: "top", Keys: []string{"gg"}},
+		// A chord-layer key must never squat.
+		{Domain: DomainTUI, TUI: "syn-a", Action: "view_logs", Keys: []string{"<action> t"}},
+		// Non-TUI domain is ignored.
+		{Domain: DomainTmux, TUI: "", Action: "whatever", Keys: []string{"c"}},
+	}
+	sq := Analyze(bindings).PrefixSquatters
+	if len(sq) != 2 {
+		t.Fatalf("expected 2 squatters, got %d: %+v", len(sq), sq)
+	}
+	got := map[string]string{} // key -> namespace
+	for _, s := range sq {
+		got[s.Key] = s.Namespace
+		if s.TUI != "syn-a" {
+			t.Errorf("unexpected TUI %q in %+v", s.TUI, s)
+		}
+	}
+	if got["t"] != "toggle" {
+		t.Errorf("flat t: want namespace toggle, got %q", got["t"])
+	}
+	if got["v"] != "view" {
+		t.Errorf("flat v: want namespace view, got %q", got["v"])
+	}
+
+	// An intentional deviation suppresses the squatter. cx-view X=exclude_dir is
+	// a real deviation; craft an analogous synthetic one via a temporary entry.
+	saved := IntentionalDeviations
+	defer func() { IntentionalDeviations = saved }()
+	IntentionalDeviations = append(saved, Deviation{
+		TUI: "syn-b", Key: "t", Action: NormalizeAction("toggle_sort"), Reason: "test",
+	})
+	exempt := []KeyBinding{
+		{Domain: DomainTUI, TUI: "syn-b", Action: "toggle_sort", Keys: []string{"t"}},
+	}
+	if sq := Analyze(exempt).PrefixSquatters; len(sq) != 0 {
+		t.Errorf("expected intentional deviation to suppress squatter, got %+v", sq)
+	}
+}
+
+// TestAnalyzePrefixSquatters_Registry runs the check over the live registry and
+// asserts a representative membership set, logging the total rather than
+// hard-asserting an exact count so registry drift does not spuriously fail.
+func TestAnalyzePrefixSquatters_Registry(t *testing.T) {
+	sq := Analyze(getTUIBindingsFromRegistry()).PrefixSquatters
+	t.Logf("registry prefix squatters: %d", len(sq))
+
+	have := map[string]bool{} // "tui/key"
+	for _, s := range sq {
+		have[s.TUI+"/"+s.Key] = true
+	}
+	// flow-status was the Phase-3 pilot: its v/c/t/z flat squatters were
+	// vacated onto v…/c… namespace chords, so it is intentionally NO LONGER a
+	// squatter. core-logs/v (toggle_preview) stands in as the representative
+	// flat-view squatter until later phases restructure it too.
+	want := []string{
+		"core-logs/v",
+		"memory-view/t",
+		"nav-history/g",
+		"nb-browser/c",
+	}
+	for _, w := range want {
+		if !have[w] {
+			t.Errorf("expected registry squatter %q, not found in %d squatters", w, len(sq))
+		}
+	}
+	if len(sq) == 0 {
+		t.Error("expected a non-empty squatter set from the live registry")
+	}
+}
+
 // TestNormalizeAction covers the Phase-1 alias reorder: every ConfigKey the
 // alias-before-suffix-strip change rescues, plus a regression proving suffix
 // stripping still fires when no alias exists.

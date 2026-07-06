@@ -87,6 +87,26 @@ var ReservedAlternates = map[string][]string{
 	"X":      {"close", "kill"}, // uppercase-X = "remove this from my world"
 }
 
+// ReservedPrefixes are the single-letter keys that open a namespace chord
+// (magit/which-key style): pressing one arms a prefix and a follow-up key
+// completes a two-key sequence (e.g. `v` then `l` = view logs). Because
+// core/tui/keymap/sequence.go arms on ANY unbound prefix, a TUI that binds one
+// of these keys to a FLAT action fires immediately and blocks the namespace
+// from ever arming — regardless of what that action means. So the squatter
+// check (see Analyze) has NO family exemption: a flat binding on g/z/t/v/c is a
+// squatter whatever its action does; in Phases 3–5 it migrates INTO the chord,
+// it does not keep the flat key. The value is a human-readable namespace label,
+// not a NormalizeAction family. isIntentional (deviations.go) is the only escape
+// hatch. Disjoint from ReservedKeys by construction (none of g/z/t/v/c are
+// reserved base keys), so the two checks never interact.
+var ReservedPrefixes = map[string]string{
+	"g": "goto",
+	"z": "fold",
+	"t": "toggle",
+	"v": "view",
+	"c": "change",
+}
+
 // isReservedAlternate reports whether normAction is a sanctioned alternate for
 // the reserved key k (see ReservedAlternates).
 func isReservedAlternate(k, normAction string) bool {
@@ -237,11 +257,23 @@ type ReservedKeyViolation struct {
 	TUI            string `json:"tui"`
 }
 
+// PrefixSquatter captures a TUI binding that spends a reserved namespace prefix
+// (see ReservedPrefixes) on a flat action, blocking that namespace chord. Its
+// output is the Phase 3–5 migration worklist: each entry is a flat binding that
+// must move into the chord (e.g. flow-status flat `v`=view_edit → `vv`).
+type PrefixSquatter struct {
+	Key       string `json:"key"`
+	Namespace string `json:"namespace"`
+	Action    string `json:"action"`
+	TUI       string `json:"tui"`
+}
+
 // AnalysisReport contains the full analysis of keybindings.
 type AnalysisReport struct {
 	Consistency           map[string]ConsistencyResult `json:"canonical_consistency"`
 	SemanticConflicts     []SemanticConflict           `json:"semantic_conflicts"`
 	ReservedKeyViolations []ReservedKeyViolation       `json:"reserved_key_violations"`
+	PrefixSquatters       []PrefixSquatter             `json:"prefix_squatters"`
 }
 
 // NormalizeAction standardizes action names to allow cross-TUI comparison.
@@ -533,6 +565,23 @@ func Analyze(bindings []KeyBinding) AnalysisReport {
 						TUI:            b.TUI,
 					})
 				}
+			}
+
+			// Prefix-squatter check (Phase 2): a flat binding whose key exactly
+			// equals a reserved namespace prefix blocks that chord namespace.
+			// There is NO family exemption (see ReservedPrefixes) — the action's
+			// meaning is irrelevant; only isIntentional exempts. ReservedPrefixes
+			// is disjoint from ReservedKeys, so this never overlaps the branch
+			// above. Multi-key bindings squat via a secondary key too (e.g.
+			// git-viewer-log Compare ["enter","c"], nb-browser Copy ["y","c"]) —
+			// the per-key loop catches those naturally.
+			if ns, ok := ReservedPrefixes[k]; ok && !isIntentional(b.TUI, k, normAction) {
+				report.PrefixSquatters = append(report.PrefixSquatters, PrefixSquatter{
+					Key:       k,
+					Namespace: ns,
+					Action:    b.Action,
+					TUI:       b.TUI,
+				})
 			}
 		}
 	}
