@@ -60,6 +60,7 @@ type LayerPage struct {
 	// Vim chord state
 	lastZPress time.Time // For zR/zM/zo/zc
 	lastGPress time.Time // For gg
+	lastDPress time.Time // For dd (delete from layer)
 }
 
 // Compile-time checks.
@@ -303,12 +304,18 @@ func (p *LayerPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 				return p, func() tea.Msg { return infoNodeMsg{node: node} }
 			}
 
-		case key.Matches(msg, p.keys.Delete): // D / shift+d
-			// Delete key from its layer file (confirmed by the outer model).
-			if p.cursor >= 0 && p.cursor < len(p.nodes) {
-				node := p.nodes[p.cursor]
-				return p, func() tea.Msg { return deleteNodeMsg{node: node} }
+		case keyStr == "d": // dd chord — delete key from its layer file
+			// Base delete is "dd"; mirror the gg chord above with a timed
+			// two-press. Confirmed by the outer model (deleteNodeMsg).
+			if time.Since(p.lastDPress) < 500*time.Millisecond {
+				p.lastDPress = time.Time{}
+				if p.cursor >= 0 && p.cursor < len(p.nodes) {
+					node := p.nodes[p.cursor]
+					return p, func() tea.Msg { return deleteNodeMsg{node: node} }
+				}
+				return p, nil
 			}
+			p.lastDPress = time.Now()
 			return p, nil
 
 		// Tree navigation - expand

@@ -55,6 +55,12 @@ var IntentionalDeviations = []Deviation{
 	{TUI: "treemux-app", Key: "ctrl+l", Action: "rail exit", Reason: "ctrl+l reserved for clear-search; leaves the rail rightward"},
 	{TUI: "nav-manage", Key: "d", Action: "delete", Reason: "canonical delete is dd; d clears a key mapping (not destructive)"},
 	{TUI: "nav-manage", Key: "delete", Action: "delete", Reason: "canonical delete is dd; delete clears a key mapping (not destructive)"},
+	// grove-release r/R edit/reset pair (Phase 3): R=reset_rules kept as a
+	// deviation (R reserved for rename) and its mnemonic partner r=edit_rules
+	// (canonical edit is e) allowlisted so the r/R pair stays intact and the
+	// residual `edit` consistency failure clears.
+	{TUI: "grove-release", Key: "R", Action: "reset", Reason: "R reserved for rename; resets all LLM rules (mnemonic partner of r=edit rules)"},
+	{TUI: "grove-release", Key: "r", Action: "edit", Reason: "canonical edit is e; r=edit LLM rules keeps the r/R edit/reset mnemonic pair"},
 }
 
 // isIntentional reports whether (tui, key, normAction) is an allowlisted
