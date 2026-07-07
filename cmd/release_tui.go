@@ -43,6 +43,8 @@ const (
 	viewTable     = "table"
 	viewChangelog = "changelog"
 	viewSettings  = "settings"
+	viewDocs      = "docs"
+	viewDiff      = "diff"
 )
 
 // releaseTuiModel represents the TUI state
@@ -69,6 +71,12 @@ type releaseTuiModel struct {
 	settingsIndex int      // Currently selected setting in settings view
 	llmModel      string   // LLM model being used for changelog generation
 	cxRulesPath   string   // Path to cx rules being used
+
+	// Phase 5: docs review + inline regen state.
+	docsRepo     string           // repo whose docs panel/diff is open
+	docsSections []docsSectionRow // sections listed in the docs panel (built on entry)
+	docsIndex    int              // cursor within docsSections
+	regenCount   int              // inline regens this session (drives the --cache-ttl 1h hint)
 }
 
 func initialReleaseModel(plan *release.ReleasePlan) releaseTuiModel {
@@ -165,6 +173,10 @@ func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateChangelog(msg)
 		case viewSettings:
 			return m.updateSettings(msg)
+		case viewDocs:
+			return m.updateDocs(msg)
+		case viewDiff:
+			return m.updateDiff(msg)
 		}
 
 	case changelogGeneratedMsg:
@@ -227,6 +239,31 @@ func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return clearProgressMsg{}
 			})
 		}
+
+	case docsRegenMsg:
+		m.generating = false
+		if msg.err != nil {
+			m.genProgress = fmt.Sprintf("%s Regen failed for %s: %v", theme.IconError, msg.repoName, msg.err)
+		} else {
+			label := "docs"
+			if msg.section != "" {
+				label = "section " + msg.section
+			}
+			m.genProgress = fmt.Sprintf("%s Regenerated %s for %s (write %d / read %d tok, $%.4f)",
+				theme.IconSuccess, label, msg.repoName, msg.cacheWrite, msg.cacheRead, msg.estCostUSD)
+		}
+		// Refresh the docs panel rows if it is open for this repo.
+		if m.currentView == viewDocs && m.docsRepo == msg.repoName {
+			if repo, ok := m.plan.Repos[msg.repoName]; ok {
+				m.docsSections = collectDocsSections(m.plan.RootDir, msg.repoName, repo)
+				if m.docsIndex >= len(m.docsSections) {
+					m.docsIndex = 0
+				}
+			}
+		}
+		return m, tea.Tick(4*time.Second, func(t time.Time) tea.Msg {
+			return clearProgressMsg{}
+		})
 
 	case clearProgressMsg:
 		m.genProgress = ""
@@ -516,6 +553,46 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case key.Matches(msg, m.keys.ViewDocs):
+		// Open the docs review panel for the selected repo.
+		if m.plan.Type == "full" && m.selectedIndex < len(m.repoNames) {
+			repoName := m.repoNames[m.selectedIndex]
+			if repo, ok := m.plan.Repos[repoName]; ok && repo.CurrentVersion != repo.NextVersion {
+				m.docsRepo = repoName
+				m.docsSections = collectDocsSections(m.plan.RootDir, repoName, repo)
+				m.docsIndex = 0
+				m.currentView = viewDocs
+			}
+		}
+		return m, nil
+
+	case key.Matches(msg, m.keys.DiffDocs):
+		// Show the notebook-vs-repo docs diff for the selected repo.
+		if m.plan.Type == "full" && m.selectedIndex < len(m.repoNames) {
+			repoName := m.repoNames[m.selectedIndex]
+			if repo, ok := m.plan.Repos[repoName]; ok && repo.CurrentVersion != repo.NextVersion {
+				m.docsRepo = repoName
+				m.viewport.SetContent(renderDocsDiff(m.plan.RootDir, repoName))
+				m.viewport.GotoTop()
+				m.currentView = viewDiff
+			}
+		}
+		return m, nil
+
+	case key.Matches(msg, m.keys.RegenDocs):
+		// Regenerate all docs sections for the selected repo (scoped path,
+		// same as `grove release gen --repo X`).
+		if m.plan.Type == "full" && m.selectedIndex < len(m.repoNames) && !m.generating {
+			repoName := m.repoNames[m.selectedIndex]
+			if repo, ok := m.plan.Repos[repoName]; ok && repo.CurrentVersion != repo.NextVersion {
+				m.generating = true
+				m.regenCount++
+				m.genProgress = fmt.Sprintf("Regenerating docs for %s...", repoName)
+				return m, tea.Batch(regenDocsCmd(m.plan, repoName, ""), tickSpinner())
+			}
+		}
+		return m, nil
+
 	case key.Matches(msg, m.keys.WriteChangelog):
 		// Write changelog to repository CHANGELOG.md
 		if m.plan.Type == "full" && m.selectedIndex < len(m.repoNames) {
@@ -680,6 +757,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						StructuredOnly().
 						Log(ctx)
 					m.generating = true
+					m.regenCount++
 					m.genProgress = fmt.Sprintf("Generating changelog for %s", repoName)
 					// Start spinner animation
 					return m, tea.Batch(
@@ -748,17 +826,28 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.Approve):
-		// Toggle approval status for selected repository
+		// Toggle approval status for selected repository. Approval now covers
+		// the changelog AND the generated docs together: it is blocked while a
+		// generation error is recorded for the repo (the user must regen or
+		// clear the failure first).
 		if m.selectedIndex < len(m.repoNames) {
 			repoName := m.repoNames[m.selectedIndex]
 			if repo, ok := m.plan.Repos[repoName]; ok {
 				if repo.CurrentVersion != repo.NextVersion {
+					if repo.Status != "Approved" {
+						if blocker := approvalBlocker(repo); blocker != "" {
+							m.genProgress = fmt.Sprintf("%s Cannot approve %s: %s", theme.IconError, repoName, blocker)
+							return m, tea.Tick(4*time.Second, func(t time.Time) tea.Msg {
+								return clearProgressMsg{}
+							})
+						}
+					}
 					if repo.Status == "Approved" {
 						repo.Status = "Pending Review"
 						m.genProgress = fmt.Sprintf("%s Unapproved %s", theme.IconPending, repoName)
 					} else {
 						repo.Status = "Approved"
-						m.genProgress = fmt.Sprintf("%s Approved %s for release", theme.IconSuccess, repoName)
+						m.genProgress = fmt.Sprintf("%s Approved %s (docs + changelog) for release", theme.IconSuccess, repoName)
 					}
 					// Save the updated plan
 					_ = release.SavePlan(m.plan)
@@ -889,6 +978,10 @@ func (m releaseTuiModel) View() string {
 		return m.viewChangelog()
 	case viewSettings:
 		return m.viewSettings()
+	case viewDocs:
+		return m.viewDocs()
+	case viewDiff:
+		return m.viewDiff()
 	default:
 		return m.viewTable()
 	}
@@ -1161,6 +1254,24 @@ func (m releaseTuiModel) viewTable() string {
 		}
 	}
 
+	// Per-repo gen detail line: cache/cost totals + greyed check slot, plus any
+	// recorded generation error (blocks approval).
+	var detail string
+	if m.selectedIndex < len(m.repoNames) {
+		repo := m.plan.Repos[m.repoNames[m.selectedIndex]]
+		if repo != nil && repo.CurrentVersion != repo.NextVersion {
+			detail = "\n\n" + renderRepoGenDetail(repo)
+		}
+	}
+
+	// Repeated-regen hint: suggest a longer cache TTL once the user has
+	// regenerated a couple of times in this session.
+	var regenHint string
+	if m.regenCount >= 2 {
+		regenHint = "\n" + theme.DefaultTheme.Muted.Render(
+			fmt.Sprintf("%s Tip: regenerating often? Re-run 'grove release gen --cache-ttl 1h' to keep the shared prefix warm longer.", theme.IconLightbulb))
+	}
+
 	// Show generation progress if generating
 	var progress string
 	if m.genProgress != "" {
@@ -1182,7 +1293,7 @@ func (m releaseTuiModel) viewTable() string {
 	}
 
 	// Combine all content that should be scrollable
-	fullContent := fmt.Sprintf("%s%s%s%s", tableStr, releaseInfo, reasoning, progress)
+	fullContent := fmt.Sprintf("%s%s%s%s%s%s", tableStr, releaseInfo, reasoning, detail, regenHint, progress)
 
 	// Update viewport with the content
 	m.viewport.SetContent(fullContent)

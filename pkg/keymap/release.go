@@ -25,6 +25,9 @@ type ReleaseKeyMap struct {
 	GenerateChangelog key.Binding
 	GenerateAll       key.Binding
 	WriteChangelog    key.Binding
+	ViewDocs          key.Binding
+	DiffDocs          key.Binding
+	RegenDocs         key.Binding
 	EditRules         key.Binding
 	ResetRules        key.Binding
 	ToggleDryRun      key.Binding
@@ -96,6 +99,18 @@ func NewReleaseKeyMap(cfg *config.Config) ReleaseKeyMap {
 			key.WithKeys("w"),
 			key.WithHelp("w", "write changelog to repo"),
 		),
+		ViewDocs: key.NewBinding(
+			key.WithKeys("V"),
+			key.WithHelp("V", "view docs sections"),
+		),
+		DiffDocs: key.NewBinding(
+			key.WithKeys("D"),
+			key.WithHelp("D", "docs diff (notebook vs repo)"),
+		),
+		RegenDocs: key.NewBinding(
+			key.WithKeys("G"),
+			key.WithHelp("G", "regenerate docs section"),
+		),
 		EditRules: key.NewBinding(
 			key.WithKeys("r"),
 			key.WithHelp("r", "edit LLM rules"),
@@ -151,6 +166,8 @@ func (k ReleaseKeyMap) FullHelp() [][]key.Binding {
 		// Changelog
 		{k.ViewChangelog, k.EditChangelog, k.EditRepoChangelog},
 		{k.GenerateChangelog, k.GenerateAll, k.WriteChangelog},
+		// Docs
+		{k.ViewDocs, k.DiffDocs, k.RegenDocs},
 		// LLM rules
 		{k.EditRules, k.ResetRules},
 		// Settings
@@ -175,6 +192,9 @@ func (k ReleaseKeyMap) Sections() []keymap.Section {
 		),
 		keymap.NewSectionWithIcon("Changelog", theme.IconDiff,
 			k.ViewChangelog, k.EditChangelog, k.EditRepoChangelog, k.GenerateChangelog, k.GenerateAll, k.WriteChangelog,
+		),
+		keymap.NewSectionWithIcon("Docs", theme.IconNote,
+			k.ViewDocs, k.DiffDocs, k.RegenDocs,
 		),
 		keymap.NewSectionWithIcon("LLM Rules", theme.IconRobot,
 			k.EditRules, k.ResetRules,
