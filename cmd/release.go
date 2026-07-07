@@ -952,65 +952,36 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 							}
 						}
 					} else if !skipChangelog {
-						// No existing changelog modifications, generate new one
-						displayInfo(fmt.Sprintf("Generating changelog for %s", repo))
-						changelogCmdArgs := []string{"changelog", wsPath, "--version", version}
-						if useLLMChangelog {
-							changelogCmdArgs = append(changelogCmdArgs, "--llm")
+						// No reviewed changelog in the working tree. Generate one into
+						// the release STAGING dir for review — never commit+push an
+						// unreviewed (LLM- or auto-) generated changelog. Publishing a
+						// staged changelog happens only via the reviewed apply path
+						// (approval-gated), which promotes it into CHANGELOG.md.
+						// Generation failure is non-fatal but is recorded visibly in
+						// plan state (ChangelogGenError), not just a warn log.
+						displayInfo(fmt.Sprintf("Staging changelog for review: %s", repo))
+						stagedPath, genErr := stageGeneratedChangelog(wsPath, repo, version, useLLMChangelog)
+
+						var repoPlan *release.RepoReleasePlan
+						if plan != nil && plan.Repos != nil {
+							repoPlan = plan.Repos[repo]
 						}
-						changelogCmd := exec.CommandContext(ctx, "grove", changelogCmdArgs...)
-						if err := changelogCmd.Run(); err != nil {
-							// Log a warning but don't fail the release if changelog fails
-							logger.WithError(err).Warnf("Failed to generate changelog for %s", repo)
-						} else {
-							// Commit the changelog if it was modified
-							status, _ := git.GetStatus(wsPath)
-							if status.IsDirty {
-								displayInfo(fmt.Sprintf("Committing CHANGELOG.md for %s", repo))
-								if err := executeGitCommand(ctx, wsPath, []string{"add", "CHANGELOG.md"}, "Stage changelog", logger); err != nil {
-									logger.WithError(err).Warnf("Failed to stage changelog for %s", repo)
-								} else {
-									commitMsg := fmt.Sprintf("docs(changelog): update CHANGELOG.md for %s", version)
-									if err := executeGitCommand(ctx, wsPath, []string{"commit", "-m", commitMsg}, "Commit changelog", logger); err != nil {
-										logger.WithError(err).Warnf("Failed to commit changelog for %s", repo)
-									} else {
-										// Push the changelog commit to remote
-										if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", "HEAD:main"},
-											fmt.Sprintf("Push changelog for %s", repo), logger); err != nil {
-											logger.WithError(err).Warnf("Failed to push changelog commit for %s", repo)
-										} else {
-											// Wait for CI on main to complete after pushing changelog
-											// Update plan state to mark changelog as pushed first
-											if plan != nil && plan.Repos != nil {
-												if repoPlan, ok := plan.Repos[repo]; ok {
-													repoPlan.ChangelogPushed = true
-													repoPlan.LastFailedOperation = "ci_wait" // Next operation that could fail
-													_ = release.SavePlan(plan)               // Save updated state
-												}
-											}
-
-											if !releaseSkipCI {
-												displayInfo(fmt.Sprintf("Waiting for CI to pass for %s after changelog update...", repo))
-												if err := gh.WaitForCIWorkflow(ctx, wsPath); err != nil {
-													errChan <- fmt.Errorf("CI workflow for %s failed after changelog update: %w", repo, err)
-													return
-												}
-											} else {
-												displayInfo(fmt.Sprintf("Skipping CI wait for %s after changelog update (--skip-ci enabled)", repo))
-											}
-
-											// Mark CI as passed only after successful wait or skip
-											if plan != nil && plan.Repos != nil {
-												if repoPlan, ok := plan.Repos[repo]; ok {
-													repoPlan.CIPassed = true
-													repoPlan.LastFailedOperation = "" // Clear failure since CI passed
-													_ = release.SavePlan(plan)        // Save updated state
-												}
-											}
-										}
-									}
-								}
+						if genErr != nil {
+							logger.WithError(genErr).Warnf("Failed to generate changelog for %s (non-fatal; recorded in plan)", repo)
+							displayWarning(fmt.Sprintf("Changelog generation failed for %s: %v (recorded in plan; review required)", repo, genErr))
+							if repoPlan != nil {
+								repoPlan.ChangelogGenError = genErr.Error()
+								repoPlan.Status = "Changelog Gen Failed"
+								_ = release.SavePlan(plan)
 							}
+						} else if repoPlan != nil {
+							repoPlan.ChangelogPath = stagedPath
+							repoPlan.ChangelogGenError = ""
+							if repoPlan.Status != "Approved" {
+								repoPlan.Status = "Pending Review"
+							}
+							_ = release.SavePlan(plan)
+							displayInfo(fmt.Sprintf("Staged changelog for %s at %s — requires approval before publish", repo, stagedPath))
 						}
 					}
 				}

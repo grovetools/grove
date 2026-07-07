@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,10 +16,104 @@ import (
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/util/delegation"
 	grovecontext "github.com/grovetools/cx/pkg/context"
+	"github.com/grovetools/grove-anthropic/pkg/anthropic"
 )
 
 // Logger for changelog LLM operations
 var changelogLog = logging.NewUnifiedLogger("grove-meta.changelog-llm")
+
+// Changelog generation defaults. The diff toggle and token cap are exposed as
+// `grove changelog` flags and grove.yml [llm] config; these are the built-in
+// fallbacks when neither is set.
+const (
+	changelogDefaultDiff     = "stat" // none|stat|full
+	changelogDefaultTokenCap = 60000  // est. tokens; full diff over this falls back to stat
+	changelogDefaultCacheTTL = "5m"   // claude prefix cache TTL: 5m|1h
+	changelogDefaultModel    = "gemini-2.5-flash"
+	changelogTokenBytesRatio = 4 // ~4 chars/token estimate for the cap guard
+)
+
+// Flag-backed overrides for `grove changelog` (empty/zero ⇒ config, then default).
+var (
+	changelogDiffFlag     string
+	changelogModelFlag    string
+	changelogCacheTTLFlag string
+	changelogTokenCapFlag int
+)
+
+// changelogSettings is the resolved changelog-generation configuration for one
+// repo: flag > grove.yml [llm] > built-in default.
+type changelogSettings struct {
+	Model    string
+	Diff     string // none|stat|full
+	CacheTTL string // 5m|1h
+	TokenCap int
+}
+
+// resolveChangelogSettings resolves changelog-gen settings for repoPath with
+// flag > config > default precedence. quiet suppresses the "using model from
+// config" notice (TUI mode).
+func resolveChangelogSettings(repoPath string, quiet bool) changelogSettings {
+	s := changelogSettings{
+		Model:    changelogDefaultModel,
+		Diff:     changelogDefaultDiff,
+		CacheTTL: changelogDefaultCacheTTL,
+		TokenCap: changelogDefaultTokenCap,
+	}
+
+	if coreCfg, err := config.LoadFrom(repoPath); err == nil {
+		var llmCfg LLMConfig
+		if err := coreCfg.UnmarshalExtension("llm", &llmCfg); err == nil {
+			// changelog_model wins over default_model for changelog generation.
+			if llmCfg.ChangelogModel != "" {
+				s.Model = llmCfg.ChangelogModel
+			} else if llmCfg.DefaultModel != "" {
+				s.Model = llmCfg.DefaultModel
+			}
+			if llmCfg.ChangelogDiff != "" {
+				s.Diff = llmCfg.ChangelogDiff
+			}
+			if llmCfg.ChangelogCacheTTL != "" {
+				s.CacheTTL = llmCfg.ChangelogCacheTTL
+			}
+			if llmCfg.ChangelogTokenCap > 0 {
+				s.TokenCap = llmCfg.ChangelogTokenCap
+			}
+		}
+	}
+
+	// Flags take final precedence.
+	if changelogModelFlag != "" {
+		s.Model = changelogModelFlag
+	}
+	if changelogDiffFlag != "" {
+		s.Diff = changelogDiffFlag
+	}
+	if changelogCacheTTLFlag != "" {
+		s.CacheTTL = changelogCacheTTLFlag
+	}
+	if changelogTokenCapFlag > 0 {
+		s.TokenCap = changelogTokenCapFlag
+	}
+
+	switch s.Diff {
+	case "none", "stat", "full":
+	default:
+		fmt.Printf("Warning: unknown --diff %q, using %q\n", s.Diff, changelogDefaultDiff)
+		s.Diff = changelogDefaultDiff
+	}
+	if s.CacheTTL != anthropic.CacheTTL5m && s.CacheTTL != anthropic.CacheTTL1h {
+		s.CacheTTL = changelogDefaultCacheTTL
+	}
+	if s.TokenCap <= 0 {
+		s.TokenCap = changelogDefaultTokenCap
+	}
+
+	if !quiet && s.Model != changelogDefaultModel {
+		fmt.Printf("Using changelog model: %s\n", s.Model)
+	}
+	return s
+}
 
 // LLMChangelogResult holds the structured response from the LLM.
 type LLMChangelogResult struct {
@@ -28,60 +123,165 @@ type LLMChangelogResult struct {
 }
 
 // runLLMChangelog is the main entry point for LLM-based changelog generation.
+//
+// The generated changelog is written to the release STAGING directory
+// (~/.grove/release_staging/<repo>/CHANGELOG.md), never straight into the
+// repository's working-tree CHANGELOG.md. Staging keeps generation and approval
+// separate: nothing an LLM writes reaches a commit until a human reviews and
+// applies it. The staged path is printed so a caller (or the TUI) can preview
+// and, on approval, promote it.
 func runLLMChangelog(repoPath, newVersion string) error {
-	// 1. Get the commit range (from last tag to HEAD).
+	settings := resolveChangelogSettings(repoPath, false)
+
+	gitContext, err := buildChangelogGitContext(repoPath, settings, false)
+	if err != nil {
+		return err
+	}
+
+	result, err := generateChangelogResult(gitContext, newVersion, repoPath, settings, false)
+	if err != nil {
+		return fmt.Errorf("failed to generate changelog with LLM: %w", err)
+	}
+
+	stagedPath, err := stageChangelogNamed(filepath.Base(filepath.Clean(repoPath)), result.Changelog)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Staged changelog for review: %s\n", stagedPath)
+	fmt.Printf("Suggested version bump: %s (%s)\n", result.Suggestion, result.Justification)
+	return nil
+}
+
+// stageGeneratedChangelog generates a changelog for repoPath (LLM when useLLM,
+// else conventional-commit) and writes it to the release staging dir under
+// repoName. It returns the staged path. It never touches the working tree or
+// pushes; the reviewed apply path promotes the staged file on approval. Used by
+// orchestrateRelease so a fresh changelog is staged-for-review rather than
+// auto-committed.
+func stageGeneratedChangelog(repoPath, repoName, newVersion string, useLLM bool) (string, error) {
+	var content string
+	if useLLM {
+		settings := resolveChangelogSettings(repoPath, true)
+		gitContext, err := buildChangelogGitContext(repoPath, settings, true)
+		if err != nil {
+			return "", err
+		}
+		result, err := generateChangelogResult(gitContext, newVersion, repoPath, settings, true)
+		if err != nil {
+			return "", err
+		}
+		content = result.Changelog
+	} else {
+		c, err := generateConventionalChangelogContent(repoPath, newVersion)
+		if err != nil {
+			return "", err
+		}
+		content = c
+	}
+	return stageChangelogNamed(repoName, content)
+}
+
+// stageChangelogNamed writes changelogContent to the release staging directory
+// under repoName and returns the staged path. It does NOT touch any repo working
+// tree; promotion into CHANGELOG.md happens only through the reviewed apply path.
+func stageChangelogNamed(repoName, changelogContent string) (string, error) {
+	stagingDir, err := getStagingDirPath()
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve staging dir: %w", err)
+	}
+	stagedPath := filepath.Join(stagingDir, repoName, "CHANGELOG.md")
+	if err := os.MkdirAll(filepath.Dir(stagedPath), 0o755); err != nil {
+		return "", fmt.Errorf("failed to create staging dir: %w", err)
+	}
+	if err := os.WriteFile(stagedPath, []byte(changelogContent), 0o600); err != nil {
+		return "", fmt.Errorf("failed to write staged changelog: %w", err)
+	}
+	return stagedPath, nil
+}
+
+// buildChangelogGitContext assembles the git material (log + optional diff) fed
+// to the changelog LLM, honoring the diff-depth toggle and token-cap guard:
+//   - none: git log only, no diff.
+//   - stat: git log + `git diff --stat` (the historical default).
+//   - full: git log + full `git diff`; if the diff's estimated token count
+//     exceeds settings.TokenCap it auto-falls back to stat with a printed notice.
+//
+// This git material is always the volatile, per-request tail — for claude models
+// it goes in the task prompt AFTER the cached cx-context prefix, never inside it.
+func buildChangelogGitContext(repoPath string, settings changelogSettings, quiet bool) (string, error) {
 	lastTag, err := getLastTag(repoPath)
 	if err != nil {
-		fmt.Printf("Warning: could not get last tag for %s, analyzing all commits: %v\n", repoPath, err)
-		lastTag = "" // Will analyze all commits if no tag is found
+		if !quiet {
+			fmt.Printf("Warning: could not get last tag for %s, analyzing all commits: %v\n", repoPath, err)
+		}
+		lastTag = ""
 	}
 	commitRange := "HEAD"
 	if lastTag != "" {
 		commitRange = fmt.Sprintf("%s..HEAD", lastTag)
-		fmt.Printf("Analyzing commits from %s to HEAD\n", lastTag)
-	} else {
+		if !quiet {
+			fmt.Printf("Analyzing commits from %s to HEAD\n", lastTag)
+		}
+	} else if !quiet {
 		fmt.Println("Analyzing all commits (no previous tag found)")
 	}
 
-	// 2. Gather git context.
-	// Get detailed commit log with prominent commit hashes
-	// Format includes both full and short hash for easy reference
 	logCmd := exec.Command("git", "log", commitRange, "--pretty=format:commit %H (%h)%nAuthor: %an <%ae>%nDate: %ad%nCommit: %cn <%ce>%nCommitDate: %cd%n%n    %s%n%n%b%n")
 	logCmd.Dir = repoPath
 	logOutput, err := logCmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to get git log: %w\n%s", err, string(logOutput))
+		return "", fmt.Errorf("failed to get git log: %w\n%s", err, string(logOutput))
 	}
 
-	// Get diff statistics
-	diffCmd := exec.Command("git", "diff", "--stat", commitRange)
-	diffCmd.Dir = repoPath
-	diffOutput, err := diffCmd.CombinedOutput()
+	gitContext := fmt.Sprintf("GIT LOG:\n%s", string(logOutput))
+
+	switch settings.Diff {
+	case "none":
+		// Log only.
+	case "full":
+		fullDiff, err := runGitDiff(repoPath, commitRange, false)
+		if err != nil {
+			return "", err
+		}
+		estTokens := len(fullDiff) / changelogTokenBytesRatio
+		if estTokens > settings.TokenCap {
+			statDiff, err := runGitDiff(repoPath, commitRange, true)
+			if err != nil {
+				return "", err
+			}
+			if !quiet {
+				fmt.Printf("Notice: full diff ~%d tokens exceeds cap %d; falling back to --diff stat\n", estTokens, settings.TokenCap)
+			}
+			gitContext += fmt.Sprintf("\n\nGIT DIFF STAT:\n%s", statDiff)
+		} else {
+			gitContext += fmt.Sprintf("\n\nGIT DIFF:\n%s", fullDiff)
+		}
+	default: // "stat"
+		statDiff, err := runGitDiff(repoPath, commitRange, true)
+		if err != nil {
+			return "", err
+		}
+		gitContext += fmt.Sprintf("\n\nGIT DIFF STAT:\n%s", statDiff)
+	}
+
+	return gitContext, nil
+}
+
+// runGitDiff returns the git diff for commitRange; stat=true yields --stat.
+func runGitDiff(repoPath, commitRange string, stat bool) (string, error) {
+	args := []string{"diff"}
+	if stat {
+		args = append(args, "--stat")
+	}
+	args = append(args, commitRange)
+	cmd := exec.Command("git", args...)
+	cmd.Dir = repoPath
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to get git diff: %w\n%s", err, string(diffOutput))
+		return "", fmt.Errorf("failed to get git diff: %w\n%s", err, string(out))
 	}
-
-	// Combine git context
-	gitContext := fmt.Sprintf("GIT LOG:\n%s\n\nGIT DIFF STAT:\n%s", string(logOutput), string(diffOutput))
-
-	// 3. Generate changelog with LLM.
-	result, err := generateChangelogWithLLM(gitContext, newVersion, repoPath)
-	if err != nil {
-		return fmt.Errorf("failed to generate changelog with LLM: %w", err)
-	}
-	changelogContent := result.Changelog
-
-	// 4. Prepend to CHANGELOG.md.
-	changelogPath := filepath.Join(repoPath, "CHANGELOG.md")
-	existingContent, _ := os.ReadFile(changelogPath)
-
-	// Ensure proper spacing between entries
-	newContent := changelogContent
-	if len(existingContent) > 0 {
-		newContent = changelogContent + "\n" + string(existingContent)
-	}
-
-	return os.WriteFile(changelogPath, []byte(newContent), 0o600)
+	return string(out), nil
 }
 
 // getLastTag finds the most recent git tag in a repository.
@@ -277,42 +477,73 @@ func openInEditor(filepath string) error {
 	return cmd.Run()
 }
 
-// generateChangelogWithLLM constructs a prompt and calls grove-gemini to generate the changelog.
-// It now returns the new LLMChangelogResult struct.
+// generateChangelogWithLLM constructs a prompt and generates a changelog.
+// It returns the LLMChangelogResult struct. Callers (release plan, TUI) that
+// already assembled gitContext use this and generateChangelogWithLLMInteractive;
+// the resolved model/TTL come from flags/config/defaults.
 func generateChangelogWithLLM(gitContext, newVersion, repoPath string) (*LLMChangelogResult, error) {
 	return generateChangelogWithLLMInteractive(gitContext, newVersion, repoPath, false)
 }
 
-// generateChangelogWithLLMInteractive constructs a prompt and calls grove-gemini to generate the changelog.
+// generateChangelogWithLLMInteractive constructs a prompt and generates a changelog.
 // skipPrompt controls whether to skip interactive prompts (useful for TUI mode).
 func generateChangelogWithLLMInteractive(gitContext, newVersion, repoPath string, skipPrompt bool) (*LLMChangelogResult, error) {
-	// Prompt for rules file editing
+	settings := resolveChangelogSettings(repoPath, skipPrompt)
+	return generateChangelogResult(gitContext, newVersion, repoPath, settings, skipPrompt)
+}
+
+// generateChangelogResult is the changelog-generation core: it optionally
+// refreshes the repo's LLM rules file, builds the JSON-response prompt, routes
+// the request to the right backend, and parses + normalizes the result.
+//
+// Claude models (claude-*) go through the shared-prefix cache fan-out: the repo's
+// cx context is built once and cached behind a single breakpoint, and the
+// changelog request rides on that prefix with the git material as the volatile
+// task tail (AFTER the breakpoint). This is byte-identical to the prefix docgen
+// builds for the same repo, so a changelog co-scheduled with a docs wave (Phase
+// 3) cache-reads the already-warmed context instead of re-paying for it. When no
+// cx context can be built, or the claude path errors, generation falls back to
+// the universal `grove llm request` facade. Gemini and other providers always
+// use the facade — the historical path, unchanged.
+func generateChangelogResult(gitContext, newVersion, repoPath string, settings changelogSettings, skipPrompt bool) (*LLMChangelogResult, error) {
+	// Prompt for rules file editing (best-effort; rules are optional context).
 	if err := promptForRulesEdit(repoPath, skipPrompt); err != nil {
 		fmt.Printf("Warning: Failed to handle rules file: %v\n", err)
-		// Continue anyway - rules file is optional
-	}
-	// Determine the model to use
-	model := "gemini-2.5-flash" // Default model
-
-	// Try to load model from grove.yml configuration
-	coreCfg, err := config.LoadFrom(repoPath)
-	if err == nil {
-		var llmCfg LLMConfig
-		if err := coreCfg.UnmarshalExtension("llm", &llmCfg); err == nil && llmCfg.DefaultModel != "" {
-			model = llmCfg.DefaultModel
-			// Only print to stdout if not in TUI mode (skipPrompt = true means TUI mode)
-			if !skipPrompt {
-				fmt.Printf("Using model from grove.yml: %s\n", model)
-			}
-		}
 	}
 
-	// Get current date for the changelog entry
 	currentDate := time.Now().Format("2006-01-02")
+	prompt := buildChangelogPrompt(gitContext, newVersion, currentDate)
 
-	// Construct the NEW prompt asking for a JSON response
-	prompt := fmt.Sprintf(`You are a technical writer responsible for creating release notes and suggesting semantic version bumps.
-Based on the provided git log and diff stat, analyze the changes and generate a JSON object with three fields: "suggestion", "justification", and "changelog".
+	var rawOutput string
+	var err error
+	if anthropic.IsAnthropicModel(settings.Model) {
+		rawOutput, err = callChangelogViaSharedPrefix(repoPath, prompt, settings, skipPrompt)
+		if err != nil {
+			// Claude path failed (e.g. no cx context) — fall back to the facade,
+			// which also serves claude models via `grove llm request`.
+			if !skipPrompt {
+				fmt.Printf("Notice: cache fan-out changelog failed (%v); falling back to grove llm\n", err)
+			}
+			changelogLog.Warn("Shared-prefix changelog failed; falling back to grove llm").
+				Err(err).Field("model", settings.Model).StructuredOnly().Log(context.Background())
+			rawOutput, err = callChangelogViaGroveLLM(repoPath, prompt, settings.Model, skipPrompt)
+		}
+	} else {
+		rawOutput, err = callChangelogViaGroveLLM(repoPath, prompt, settings.Model, skipPrompt)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return parseChangelogResult(rawOutput, newVersion, currentDate)
+}
+
+// buildChangelogPrompt assembles the JSON-response changelog prompt from the git
+// material, version, and date. The git material is embedded as the task tail so
+// it can ride after a cached context prefix for claude models.
+func buildChangelogPrompt(gitContext, newVersion, currentDate string) string {
+	return fmt.Sprintf(`You are a technical writer responsible for creating release notes and suggesting semantic version bumps.
+Based on the provided git log and diff, analyze the changes and generate a JSON object with three fields: "suggestion", "justification", and "changelog".
 
 **JSON Schema:**
 {
@@ -329,7 +560,7 @@ Based on the provided git log and diff stat, analyze the changes and generate a 
 **Instructions for Changelog:**
 1. Format the changelog in Markdown using the "Keep a Changelog" standard.
 2. Start with a level 2 heading for the version, including the current date: "## %s (%s)"
-3. Begin with a summary section that organizes changes into topic-based paragraphs. Each paragraph should focus on a related set of changes (e.g., one for UI improvements, one for new commands, one for bug fixes). Include commit hash citations in parentheses when referencing specific changes. 
+3. Begin with a summary section that organizes changes into topic-based paragraphs. Each paragraph should focus on a related set of changes (e.g., one for UI improvements, one for new commands, one for bug fixes). Include commit hash citations in parentheses when referencing specific changes.
    Example: "The new workspace list command (a1b2c3d) provides convenient access to all discovered workspaces, with support for JSON output (b2c3d4e) for scripting integration."
    Write one paragraph per major topic or theme. No emojis.
 4. After the summary, categorize changes into sections (e.g., ### Features, ### Bug Fixes, ### BREAKING CHANGES). Omit empty sections. No emojis in section headers.
@@ -346,33 +577,101 @@ Based on the provided git log and diff stat, analyze the changes and generate a 
 ---
 
 Generate the JSON object now:`, newVersion, currentDate, gitContext)
+}
 
+// callChangelogViaSharedPrefix issues the changelog request as a rider on the
+// repo's shared cx-context prefix (claude models only). It builds the cx context
+// once, uploads it behind a single cache breakpoint byte-identical to docgen's
+// prefix, then fires the request with the changelog prompt as the volatile tail.
+// Returns the raw model text.
+func callChangelogViaSharedPrefix(repoPath, prompt string, settings changelogSettings, quiet bool) (string, error) {
+	// Build cx context in-repo (same as docgen's BuildContext) so the prefix
+	// documents exist for WorkDirContextFiles to resolve.
+	cxCmd := delegation.Command("cx", "generate")
+	cxCmd.Dir = repoPath
+	cxCmd.Stdout = io.Discard
+	cxCmd.Stderr = io.Discard
+	if err := cxCmd.Run(); err != nil {
+		return "", fmt.Errorf("failed to build cx context: %w", err)
+	}
+
+	ctxFiles := anthropic.WorkDirContextFiles(repoPath)
+	if len(ctxFiles) == 0 {
+		return "", fmt.Errorf("cx produced no context in %s", repoPath)
+	}
+
+	prefix, err := anthropic.NewSharedPrefixFromFiles("", ctxFiles, anthropic.SharedPrefixOptions{
+		Model:     settings.Model,
+		TTL:       settings.CacheTTL,
+		MaxTokens: 8192,
+		Caller:    "grove-changelog",
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to set up shared prefix: %w", err)
+	}
+	defer func() { _ = prefix.Close() }()
+
+	if !quiet {
+		fmt.Printf("Generating changelog via cache fan-out: model=%s ttl=%s prefix_docs=%d\n", prefix.Model(), settings.CacheTTL, len(ctxFiles))
+	}
+
+	text, usage, err := prefix.Request(context.Background(), prompt)
+	if err != nil {
+		return "", fmt.Errorf("cache fan-out changelog request failed: %w", err)
+	}
+	logChangelogCacheUsage(usage, quiet)
+	return text, nil
+}
+
+// logChangelogCacheUsage prints and structurally logs the changelog request's
+// cache write/read accounting so caching is verifiable from the CLI.
+func logChangelogCacheUsage(u *anthropic.UsageResult, quiet bool) {
+	if u == nil {
+		return
+	}
+	if !quiet {
+		fmt.Printf("Cache usage [changelog]: model=%s input=%d output=%d cache_write=%d (5m=%d 1h=%d) cache_read=%d est_cost=$%.4f\n",
+			u.Model, u.InputTokens, u.OutputTokens, u.CacheCreationTokens, u.CacheWrite5m, u.CacheWrite1h, u.CacheReadTokens, u.EstimatedCostUSD)
+	}
+	changelogLog.Info("Changelog cache usage").
+		Field("model", u.Model).
+		Field("input", u.InputTokens).
+		Field("output", u.OutputTokens).
+		Field("cache_write", u.CacheCreationTokens).
+		Field("cache_read", u.CacheReadTokens).
+		Field("est_cost_usd", u.EstimatedCostUSD).
+		StructuredOnly().
+		Log(context.Background())
+}
+
+// callChangelogViaGroveLLM runs the changelog prompt through the `grove llm
+// request` facade (the historical path; serves gemini and other providers, and
+// is the claude fallback). Returns the raw model text.
+func callChangelogViaGroveLLM(repoPath, prompt, model string, skipPrompt bool) (string, error) {
 	// Write prompt to a temporary file
 	tmpFile, err := os.CreateTemp("", "grove-changelog-prompt-*.md")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create temporary prompt file: %w", err)
+		return "", fmt.Errorf("failed to create temporary prompt file: %w", err)
 	}
 	defer os.Remove(tmpFile.Name())
 
 	if _, err := tmpFile.WriteString(prompt); err != nil {
-		return nil, fmt.Errorf("failed to write to temporary prompt file: %w", err)
+		return "", fmt.Errorf("failed to write to temporary prompt file: %w", err)
 	}
 	if err := tmpFile.Close(); err != nil {
-		return nil, fmt.Errorf("failed to close temporary prompt file: %w", err)
+		return "", fmt.Errorf("failed to close temporary prompt file: %w", err)
 	}
 
 	// Create a temp file for the LLM response output
 	outputFile, err := os.CreateTemp("", "grove-changelog-response-*.json")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create output file: %w", err)
+		return "", fmt.Errorf("failed to create output file: %w", err)
 	}
 	outputPath := outputFile.Name()
 	outputFile.Close()
 	defer os.Remove(outputPath)
 
-	// Construct and execute the LLM command via grove llm (which delegates to grove-gemini)
-	// Use --output flag to get clean response without console decoration
-	// Use --max-output-tokens to ensure the full changelog can be generated
+	// Use --output for a clean response and --max-output-tokens for full changelogs.
 	args := []string{
 		"llm",
 		"request",
@@ -383,21 +682,19 @@ Generate the JSON object now:`, newVersion, currentDate, gitContext)
 		"--yes",
 	}
 
-	// Create a log file for grove-gemini console output
-	logFile, err := os.CreateTemp("", "grove-gemini-*.log")
+	// Create a log file for provider console output
+	logFile, err := os.CreateTemp("", "grove-llm-changelog-*.log")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create log file: %w", err)
+		return "", fmt.Errorf("failed to create log file: %w", err)
 	}
 	logPath := logFile.Name()
 	defer logFile.Close()
 
-	// Only show this message if not in skip prompt mode (i.e., not in TUI)
 	if !skipPrompt {
-		fmt.Printf("Calling grove-gemini with model %s for version suggestion...\n", model)
+		fmt.Printf("Calling grove llm with model %s for changelog + version suggestion...\n", model)
 		fmt.Printf("Logging output to: %s\n", logPath)
 	}
 
-	// Use 'grove llm' for workspace-awareness (delegates to grove-gemini for Gemini models)
 	ctx := context.Background()
 	changelogLog.Debug("Calling grove llm").
 		Field("model", model).
@@ -409,21 +706,6 @@ Generate the JSON object now:`, newVersion, currentDate, gitContext)
 		StructuredOnly().
 		Log(ctx)
 
-	// Verify temp file exists and has content
-	if info, err := os.Stat(tmpFile.Name()); err != nil {
-		changelogLog.Error("Temp file does not exist").
-			Err(err).
-			Field("path", tmpFile.Name()).
-			StructuredOnly().
-			Log(ctx)
-	} else {
-		changelogLog.Debug("Temp file verified").
-			Field("path", tmpFile.Name()).
-			Field("size", info.Size()).
-			StructuredOnly().
-			Log(ctx)
-	}
-
 	llmCmd := delegation.Command(args[0], args[1:]...)
 	llmCmd.Dir = repoPath // Set working directory to the repository being analyzed
 
@@ -433,27 +715,25 @@ Generate the JSON object now:`, newVersion, currentDate, gitContext)
 
 	err = llmCmd.Run()
 
-	changelogLog.Debug("grove-gemini command completed").
+	changelogLog.Debug("grove llm command completed").
 		Field("has_error", err != nil).
 		StructuredOnly().
 		Log(ctx)
 
 	if err != nil {
-		// Read log file content for error details
 		logContent, _ := os.ReadFile(logPath)
-		changelogLog.Error("grove-gemini request failed").
+		changelogLog.Error("grove llm request failed").
 			Err(err).
 			Field("log_path", logPath).
 			Field("log_content", string(logContent)).
 			StructuredOnly().
 			Log(ctx)
-		return nil, fmt.Errorf("failed to execute 'grove-gemini request': %w\nLog: %s\nOutput: %s", err, logPath, string(logContent))
+		return "", fmt.Errorf("failed to execute 'grove llm request': %w\nLog: %s\nOutput: %s", err, logPath, string(logContent))
 	}
 
-	// Read the LLM response from the output file
 	output, err := os.ReadFile(outputPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read LLM response from output file: %w", err)
+		return "", fmt.Errorf("failed to read LLM response from output file: %w", err)
 	}
 
 	changelogLog.Debug("Read LLM response from file").
@@ -461,15 +741,17 @@ Generate the JSON object now:`, newVersion, currentDate, gitContext)
 		StructuredOnly().
 		Log(ctx)
 
-	changelogLog.Debug("Raw grove-gemini output").
-		Field("output", string(output)).
-		StructuredOnly().
-		Log(ctx)
+	return string(output), nil
+}
 
-	// Clean the output to ensure it's valid JSON
-	// LLMs sometimes wrap JSON in ```json ... ``` blocks
-	// The output may also contain console styling from grove-gemini, so we need to extract the JSON
-	jsonString := extractJSONFromOutput(string(output))
+// parseChangelogResult extracts the JSON object from raw model output, unmarshals
+// it, normalizes trailing newline, and enforces the correct version header
+// (LLMs frequently hallucinate the version from git history).
+func parseChangelogResult(rawOutput, newVersion, currentDate string) (*LLMChangelogResult, error) {
+	ctx := context.Background()
+
+	// LLMs sometimes wrap JSON in ```json ... ``` blocks or add console styling.
+	jsonString := extractJSONFromOutput(rawOutput)
 
 	previewLen := len(jsonString)
 	if previewLen > 200 {
@@ -481,7 +763,6 @@ Generate the JSON object now:`, newVersion, currentDate, gitContext)
 		StructuredOnly().
 		Log(ctx)
 
-	// Unmarshal the JSON response
 	var result LLMChangelogResult
 	if err := json.Unmarshal([]byte(jsonString), &result); err != nil {
 		changelogLog.Error("Failed to unmarshal JSON").
@@ -489,7 +770,7 @@ Generate the JSON object now:`, newVersion, currentDate, gitContext)
 			Field("json_string", jsonString).
 			StructuredOnly().
 			Log(ctx)
-		return nil, fmt.Errorf("failed to unmarshal LLM response into JSON: %w\nResponse:\n%s", err, string(output))
+		return nil, fmt.Errorf("failed to unmarshal LLM response into JSON: %w\nResponse:\n%s", err, rawOutput)
 	}
 
 	changelogLog.Info("Successfully parsed LLM response").
@@ -499,15 +780,11 @@ Generate the JSON object now:`, newVersion, currentDate, gitContext)
 		StructuredOnly().
 		Log(ctx)
 
-	// Ensure the changelog ends with a newline
 	if result.Changelog != "" && !strings.HasSuffix(result.Changelog, "\n") {
 		result.Changelog = result.Changelog + "\n"
 	}
 
-	// Fix the version header - LLMs often ignore explicit version instructions
-	// and hallucinate versions from the git context. Enforce the correct header.
 	result.Changelog = fixChangelogHeader(result.Changelog, newVersion, currentDate)
-
 	return &result, nil
 }
 
