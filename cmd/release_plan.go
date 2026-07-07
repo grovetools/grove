@@ -531,6 +531,13 @@ func runReleaseApply(ctx context.Context) error {
 		displayInfo("Skipping parent superrepo finalize (--skip-parent)")
 	}
 
+	// Ecosystem website finalize (opt-in): rebuild the docs site from the freshly
+	// published docs + changelogs. A website failure must NOT fail the release —
+	// it is reported and the apply continues to completion.
+	if err := runWebsiteFinalize(ctx, plan.RootDir, logger); err != nil {
+		displayWarning(fmt.Sprintf("Website finalize failed (release still succeeded): %v", err))
+	}
+
 	// Count actually released modules
 	releasedCount := 0
 	for _, hasChanges := range hasChanges {
