@@ -11,6 +11,7 @@ import (
 
 	"github.com/grovetools/core/git"
 	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 
@@ -321,13 +322,33 @@ func runReleasePlan(ctx context.Context, isRC bool) (*release.ReleasePlan, error
 	return plan, nil
 }
 
-// Helper function to get staging directory path
+// getStagingDirPath returns the release staging directory, unified under the
+// Grove state dir (paths.StateDir()/release/staging) so it lives alongside the
+// release plan and is cleaned by clear-plan (release.ClearPlan removes exactly
+// this path). It performs a one-time migration from the legacy
+// ~/.grove/release_staging location so content staged before the unification is
+// not orphaned.
 func getStagingDirPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
+	stateDir := paths.StateDir()
+	if stateDir == "" {
+		return "", fmt.Errorf("could not resolve grove state directory")
 	}
-	return filepath.Join(home, ".grove", "release_staging"), nil
+	newDir := filepath.Join(stateDir, "release", "staging")
+
+	// Migrate the legacy location on first use if the new one doesn't exist yet.
+	if _, err := os.Stat(newDir); os.IsNotExist(err) {
+		if home, herr := os.UserHomeDir(); herr == nil {
+			legacy := filepath.Join(home, ".grove", "release_staging")
+			if info, lerr := os.Stat(legacy); lerr == nil && info.IsDir() {
+				if mkErr := os.MkdirAll(filepath.Dir(newDir), 0o755); mkErr == nil {
+					// Best-effort move; if it fails, callers still get the new
+					// path and simply re-stage.
+					_ = os.Rename(legacy, newDir)
+				}
+			}
+		}
+	}
+	return newDir, nil
 }
 
 // Helper function to get current parent version
@@ -470,6 +491,9 @@ func runReleaseApply(ctx context.Context) error {
 	// Final phase: commit and tag ecosystem
 	displaySection(theme.IconStatusCompleted + " Finalizing Ecosystem Release")
 
+	// Parent (superrepo) finalize: stage the released submodule gitlinks, commit
+	// the bump, and push. No parent TAG is created (that stays manual for now).
+	// Opt out with --skip-parent.
 	if !releaseSkipParent {
 		// Stage only the submodules that were released
 		for repo := range hasChanges {
@@ -486,15 +510,25 @@ func runReleaseApply(ctx context.Context) error {
 			return fmt.Errorf("failed to check git status: %w", err)
 		}
 
-		// Only commit if there are staged changes
+		// Only commit + push if there are staged gitlink changes
 		if status.IsDirty {
 			commitMsg := createReleaseCommitMessage(versions, hasChanges)
-			if err := executeGitCommand(ctx, plan.RootDir, []string{"commit", "-m", commitMsg}, "Commit release", logger); err != nil {
+			if err := executeGitCommand(ctx, plan.RootDir, []string{"commit", "-m", commitMsg}, "Commit superrepo gitlink bump", logger); err != nil {
 				return err
 			}
+			if releasePush {
+				if err := executeGitCommand(ctx, plan.RootDir, []string{"push", "origin", "HEAD"}, "Push superrepo gitlink bump", logger); err != nil {
+					return err
+				}
+				displaySuccess("Superrepo gitlink bump committed and pushed (no parent tag)")
+			} else {
+				displayInfo("Superrepo gitlink bump committed (push skipped: --push=false)")
+			}
 		} else {
-			displayInfo("No changes to commit after staging submodules")
+			displayInfo("No superrepo gitlink changes to commit")
 		}
+	} else {
+		displayInfo("Skipping parent superrepo finalize (--skip-parent)")
 	}
 
 	// Count actually released modules
@@ -505,9 +539,6 @@ func runReleaseApply(ctx context.Context) error {
 		}
 	}
 
-	// Parent repository (grove-ecosystem) updates are currently disabled
-	// Submodule releases are independent - the parent repo is updated manually
-	displayInfo("Parent repo (grove-ecosystem) not auto-updated - commit submodule changes manually if needed")
 	displaySuccess(fmt.Sprintf("Released %d module(s) successfully", releasedCount))
 
 	// Clear the plan after successful completion (but not in dry-run mode)
