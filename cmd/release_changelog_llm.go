@@ -506,6 +506,17 @@ func generateChangelogWithLLMInteractive(gitContext, newVersion, repoPath string
 // the universal `grove llm request` facade. Gemini and other providers always
 // use the facade — the historical path, unchanged.
 func generateChangelogResult(gitContext, newVersion, repoPath string, settings changelogSettings, skipPrompt bool) (*LLMChangelogResult, error) {
+	result, _, err := generateChangelogResultWithUsage(gitContext, newVersion, repoPath, settings, skipPrompt)
+	return result, err
+}
+
+// generateChangelogResultWithUsage is generateChangelogResult plus the request's
+// cache usage. The usage is non-nil only when the request went through the
+// claude shared-prefix fan-out (the `grove llm` facade path does not surface
+// token accounting in-process); callers that don't need usage use the wrapper
+// above. `grove release gen` uses this to total the changelog's cache_read into
+// the repo's gen wave (the changelog rides the prefix docgen just warmed).
+func generateChangelogResultWithUsage(gitContext, newVersion, repoPath string, settings changelogSettings, skipPrompt bool) (*LLMChangelogResult, *anthropic.UsageResult, error) {
 	// Prompt for rules file editing (best-effort; rules are optional context).
 	if err := promptForRulesEdit(repoPath, skipPrompt); err != nil {
 		fmt.Printf("Warning: Failed to handle rules file: %v\n", err)
@@ -515,9 +526,10 @@ func generateChangelogResult(gitContext, newVersion, repoPath string, settings c
 	prompt := buildChangelogPrompt(gitContext, newVersion, currentDate)
 
 	var rawOutput string
+	var usage *anthropic.UsageResult
 	var err error
 	if anthropic.IsAnthropicModel(settings.Model) {
-		rawOutput, err = callChangelogViaSharedPrefix(repoPath, prompt, settings, skipPrompt)
+		rawOutput, usage, err = callChangelogViaSharedPrefix(repoPath, prompt, settings, skipPrompt)
 		if err != nil {
 			// Claude path failed (e.g. no cx context) — fall back to the facade,
 			// which also serves claude models via `grove llm request`.
@@ -526,16 +538,21 @@ func generateChangelogResult(gitContext, newVersion, repoPath string, settings c
 			}
 			changelogLog.Warn("Shared-prefix changelog failed; falling back to grove llm").
 				Err(err).Field("model", settings.Model).StructuredOnly().Log(context.Background())
+			usage = nil
 			rawOutput, err = callChangelogViaGroveLLM(repoPath, prompt, settings.Model, skipPrompt)
 		}
 	} else {
 		rawOutput, err = callChangelogViaGroveLLM(repoPath, prompt, settings.Model, skipPrompt)
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return parseChangelogResult(rawOutput, newVersion, currentDate)
+	result, err := parseChangelogResult(rawOutput, newVersion, currentDate)
+	if err != nil {
+		return nil, nil, err
+	}
+	return result, usage, nil
 }
 
 // buildChangelogPrompt assembles the JSON-response changelog prompt from the git
@@ -584,7 +601,7 @@ Generate the JSON object now:`, newVersion, currentDate, gitContext)
 // once, uploads it behind a single cache breakpoint byte-identical to docgen's
 // prefix, then fires the request with the changelog prompt as the volatile tail.
 // Returns the raw model text.
-func callChangelogViaSharedPrefix(repoPath, prompt string, settings changelogSettings, quiet bool) (string, error) {
+func callChangelogViaSharedPrefix(repoPath, prompt string, settings changelogSettings, quiet bool) (string, *anthropic.UsageResult, error) {
 	// Build cx context in-repo (same as docgen's BuildContext) so the prefix
 	// documents exist for WorkDirContextFiles to resolve.
 	cxCmd := delegation.Command("cx", "generate")
@@ -592,12 +609,12 @@ func callChangelogViaSharedPrefix(repoPath, prompt string, settings changelogSet
 	cxCmd.Stdout = io.Discard
 	cxCmd.Stderr = io.Discard
 	if err := cxCmd.Run(); err != nil {
-		return "", fmt.Errorf("failed to build cx context: %w", err)
+		return "", nil, fmt.Errorf("failed to build cx context: %w", err)
 	}
 
 	ctxFiles := anthropic.WorkDirContextFiles(repoPath)
 	if len(ctxFiles) == 0 {
-		return "", fmt.Errorf("cx produced no context in %s", repoPath)
+		return "", nil, fmt.Errorf("cx produced no context in %s", repoPath)
 	}
 
 	prefix, err := anthropic.NewSharedPrefixFromFiles("", ctxFiles, anthropic.SharedPrefixOptions{
@@ -607,7 +624,7 @@ func callChangelogViaSharedPrefix(repoPath, prompt string, settings changelogSet
 		Caller:    "grove-changelog",
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to set up shared prefix: %w", err)
+		return "", nil, fmt.Errorf("failed to set up shared prefix: %w", err)
 	}
 	defer func() { _ = prefix.Close() }()
 
@@ -617,10 +634,10 @@ func callChangelogViaSharedPrefix(repoPath, prompt string, settings changelogSet
 
 	text, usage, err := prefix.Request(context.Background(), prompt)
 	if err != nil {
-		return "", fmt.Errorf("cache fan-out changelog request failed: %w", err)
+		return "", nil, fmt.Errorf("cache fan-out changelog request failed: %w", err)
 	}
 	logChangelogCacheUsage(usage, quiet)
-	return text, nil
+	return text, usage, nil
 }
 
 // logChangelogCacheUsage prints and structurally logs the changelog request's
