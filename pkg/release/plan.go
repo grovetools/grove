@@ -33,11 +33,12 @@ type RepoReleasePlan struct {
 	Selected            bool   `json:"selected"`         // Whether this repo is selected for release
 
 	// Changelog tracking for dirty detection
-	ChangelogHash   string `json:"changelog_hash,omitempty"`   // SHA256 hash of generated changelog content
-	ChangelogState  string `json:"changelog_state,omitempty"`  // "clean", "dirty", or "none"
-	ChangelogPushed bool   `json:"changelog_pushed,omitempty"` // Whether changelog has been committed and pushed
-	CIPassed        bool   `json:"ci_passed,omitempty"`        // Whether CI passed after changelog push
-	TagPushed       bool   `json:"tag_pushed,omitempty"`       // Whether release tag has been created and pushed
+	ChangelogHash     string `json:"changelog_hash,omitempty"`      // SHA256 hash of generated changelog content
+	ChangelogState    string `json:"changelog_state,omitempty"`     // "clean", "dirty", or "none"
+	ChangelogPushed   bool   `json:"changelog_pushed,omitempty"`    // Whether changelog has been committed and pushed
+	ChangelogGenError string `json:"changelog_gen_error,omitempty"` // Non-fatal changelog generation failure, surfaced in plan state for review
+	CIPassed          bool   `json:"ci_passed,omitempty"`           // Whether CI passed after changelog push
+	TagPushed         bool   `json:"tag_pushed,omitempty"`          // Whether release tag has been created and pushed
 
 	// Release operation tracking
 	LastFailedOperation string `json:"last_failed_operation,omitempty"` // Track which operation failed for better recovery

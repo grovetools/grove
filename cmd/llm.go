@@ -15,6 +15,13 @@ import (
 
 type LLMConfig struct {
 	DefaultModel string `yaml:"default_model"`
+
+	// Changelog-generation tuning (grove changelog / release plan LLM changelog).
+	// All optional; empty/zero values fall back to the built-in defaults.
+	ChangelogModel    string `yaml:"changelog_model"`     // model override just for changelog gen (claude-* recommended)
+	ChangelogDiff     string `yaml:"changelog_diff"`      // diff depth fed to the LLM: none|stat|full (default stat)
+	ChangelogTokenCap int    `yaml:"changelog_token_cap"` // full-diff token budget; over this, full auto-falls back to stat (default 60000)
+	ChangelogCacheTTL string `yaml:"changelog_cache_ttl"` // prefix cache TTL for claude models: 5m|1h (default 5m)
 }
 
 func init() {

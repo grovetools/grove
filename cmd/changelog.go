@@ -82,5 +82,46 @@ With the --llm flag, it uses an LLM to generate the changelog based on the git h
 	}
 	cmd.Flags().String("version", "v0.0.0", "The new version for the changelog header")
 	cmd.Flags().BoolVar(&useLLM, "llm", false, "Generate changelog using an LLM")
+	cmd.Flags().StringVar(&changelogDiffFlag, "diff", "", "Diff depth in LLM context: none|stat|full (default stat, or [llm].changelog_diff)")
+	cmd.Flags().StringVar(&changelogModelFlag, "model", "", "Model for LLM changelog (default from [llm] config; claude-* recommended, e.g. claude-haiku-4-5)")
+	cmd.Flags().StringVar(&changelogCacheTTLFlag, "cache-ttl", "", "Prefix cache TTL for claude models: 5m|1h (default 5m)")
+	cmd.Flags().IntVar(&changelogTokenCapFlag, "token-cap", 0, "Est. token budget; a full diff over this falls back to stat (default 60000)")
 	return cmd
+}
+
+// generateConventionalChangelogContent builds a changelog entry for repoPath
+// from conventional commits since the last tag, returning the markdown content
+// (without writing anywhere). Returns an empty string when there are no
+// conventional commits to summarize.
+func generateConventionalChangelogContent(repoPath, newVersion string) (string, error) {
+	tagCmd := exec.Command("git", "describe", "--tags", "--abbrev=0")
+	tagCmd.Dir = repoPath
+	lastTagBytes, err := tagCmd.Output()
+	lastTag := "HEAD"
+	if err == nil {
+		lastTag = strings.TrimSpace(string(lastTagBytes))
+	}
+
+	logCmd := exec.Command("git", "log", fmt.Sprintf("%s..HEAD", lastTag), "--pretty=format:%B%x00")
+	logCmd.Dir = repoPath
+	logBytes, err := logCmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get git log: %w", err)
+	}
+
+	var conventionalCommits []*conventional.Commit
+	for _, msg := range strings.Split(string(logBytes), "\x00") {
+		msg = strings.TrimSpace(msg)
+		if msg == "" {
+			continue
+		}
+		if c, err := conventional.Parse(msg); err == nil {
+			conventionalCommits = append(conventionalCommits, c)
+		}
+	}
+
+	if len(conventionalCommits) == 0 {
+		return "", nil
+	}
+	return conventional.Generate(newVersion, conventionalCommits), nil
 }

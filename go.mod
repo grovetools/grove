@@ -12,6 +12,7 @@ require (
 	github.com/grovetools/core v0.6.3
 	github.com/grovetools/cx v0.6.0
 	github.com/grovetools/flow v0.6.3
+	github.com/grovetools/grove-anthropic v0.6.1
 	github.com/grovetools/tend v0.6.0
 	github.com/invopop/jsonschema v0.13.0
 	github.com/mattn/go-isatty v0.0.20
