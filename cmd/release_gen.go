@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -38,6 +39,13 @@ var (
 	genCacheTTL string
 	genModel    string
 )
+
+// genDocgenStdout is where runDocgenForRepo streams `docgen generate` output.
+// It defaults to os.Stdout for the headless CLI path; the release TUI redirects
+// it to io.Discard during inline regen so docgen's streaming output does not
+// corrupt the alt-screen. Only one gen/regen runs at a time (guarded by the
+// TUI's `generating` flag), so mutating this global is safe.
+var genDocgenStdout io.Writer = os.Stdout
 
 // newReleaseGenCmd creates the 'grove release gen' subcommand: a fully headless
 // batch that, per planned repo, warms one shared cx-context prefix and fans out
@@ -365,8 +373,8 @@ func runDocgenForRepo(ctx context.Context, repoPath string) (*docgenUsageReport,
 	displayInfo(fmt.Sprintf("Running: docgen %s", strings.Join(args, " ")))
 	docCmd := delegation.CommandContext(ctx, "docgen", args...)
 	docCmd.Dir = repoPath
-	docCmd.Stdout = os.Stdout
-	docCmd.Stderr = os.Stderr
+	docCmd.Stdout = genDocgenStdout
+	docCmd.Stderr = genDocgenStdout
 	runErr := docCmd.Run()
 
 	// Parse the usage report even if docgen returned an error — it is written in

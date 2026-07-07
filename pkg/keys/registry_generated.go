@@ -1002,6 +1002,14 @@ var TUIRegistry = []TUIRegistryEntry{
 				},
 			},
 			{
+				Name: "Docs",
+				Bindings: []BindingEntry{
+					{Name: "ViewDocs", Keys: []string{"V"}, Description: "view docs sections", Enabled: true, ConfigKey: "view_docs"},
+					{Name: "DiffDocs", Keys: []string{"D"}, Description: "docs diff (notebook vs repo)", Enabled: true, ConfigKey: "diff_docs"},
+					{Name: "RegenDocs", Keys: []string{"G"}, Description: "regenerate docs section", Enabled: true, ConfigKey: "regen_docs"},
+				},
+			},
+			{
 				Name: "LLM Rules",
 				Bindings: []BindingEntry{
 					{Name: "EditRules", Keys: []string{"r"}, Description: "edit LLM rules", Enabled: true, ConfigKey: "edit_rules"},

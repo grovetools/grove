@@ -886,6 +886,18 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 						}
 					}
 
+					// Per-repo approval gate: only repos explicitly Approved (via the
+					// TUI, or marked Approved by --auto-approve) publish their reviewed
+					// docs + changelog. A selected-but-unapproved repo skips the publish
+					// commit and proceeds straight to tagging — its docs/changelog stay
+					// unpublished until it is approved in a later run.
+					if plan != nil && plan.Repos != nil {
+						if repoPlan, ok := plan.Repos[repo]; ok && repoPlan.Status != "Approved" {
+							displayInfo(fmt.Sprintf("Skipping docs+changelog publish for %s (not approved; status=%q)", repo, repoPlan.Status))
+							goto createTag
+						}
+					}
+
 					pushed, err := publishRepo(ctx, wsPath, repo, version, plan, logger)
 					if err != nil {
 						errChan <- fmt.Errorf("failed to publish docs+changelog for %s: %w", repo, err)
