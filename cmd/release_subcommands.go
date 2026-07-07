@@ -170,6 +170,15 @@ Use --dry-run to preview what would be done without making changes.`,
 	cmd.Flags().BoolVar(&releaseCI, "ci", false, "Gate on GitHub CI at the pre-tag stages (default: off — CI waits are opt-in)")
 	cmd.Flags().BoolVar(&releaseNoReleaseWorkflowWait, "no-release-workflow-wait", false, "Do not wait for the post-tag Release workflow (binary publishing)")
 	cmd.Flags().BoolVar(&releaseAutoApprove, "auto-approve", false, "Publish everything staged by 'grove release gen' without the TUI approval gate")
+	cmd.Flags().BoolVar(&releaseWebsite, "website", false, "After the parent finalize, rebuild the docs site in grove-website (build only unless --website-deploy)")
+	cmd.Flags().BoolVar(&releaseWebsiteDryRun, "website-dry-run", false, "Run the website build stage but never deploy (build-only)")
+	cmd.Flags().BoolVar(&releaseWebsiteDeploy, "website-deploy", false, "Permit 'wrangler pages deploy' after the website build (explicit knob; off by default)")
+	// The pre-flight failure message ("use --force to proceed anyway") references
+	// this flag; it was previously declared but never bound to apply, so the
+	// promised bypass did nothing. --force proceeds past dirty/non-main-branch
+	// pre-flight issues (uncommitted docgen artifacts get folded into the publish
+	// commit).
+	cmd.Flags().BoolVar(&releaseForce, "force", false, "Proceed past pre-flight issues (dirty tree / not on main branch)")
 	// Deprecated: CI waits are opt-in now (--ci); --skip-ci is a no-op kept for back-compat.
 	cmd.Flags().BoolVar(&releaseSkipCI, "skip-ci", false, "Deprecated (no-op): CI waits are opt-in; use --ci to enable them")
 	_ = cmd.Flags().MarkHidden("skip-ci")
