@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -123,6 +124,27 @@ Use --dry-run to preview what would be done without making changes.`,
 				return fmt.Errorf("failed to load release plan: %w", err)
 			}
 
+			// --auto-approve: skip the interactive TUI approval gate and publish
+			// everything `grove release gen` staged. Only repos whose gen state
+			// is actually staged (docs generated or changelog staged) are
+			// auto-approved; anything else still requires manual review. The
+			// output is loud and explicit about what it is about to publish.
+			if releaseAutoApprove {
+				autoApproved := autoApproveStagedRepos(plan)
+				if len(autoApproved) == 0 {
+					return fmt.Errorf("--auto-approve: no repos have staged gen output (run 'grove release gen' first)")
+				}
+				if err := release.SavePlan(plan); err != nil {
+					return fmt.Errorf("failed to save plan after auto-approve: %w", err)
+				}
+				fmt.Printf("\n%s --auto-approve: publishing staged docs + changelog for %d repo(s) WITHOUT review:\n", theme.IconWarning, len(autoApproved))
+				for _, name := range autoApproved {
+					rp := plan.Repos[name]
+					fmt.Printf("  %s %s → %s  (docs=%v changelog=%v)\n", theme.IconArrow, name, rp.NextVersion, rp.DocsGenerated, rp.ChangelogStaged)
+				}
+				fmt.Println()
+			}
+
 			// Check that at least one repo is approved
 			hasApproved := false
 			for _, repo := range plan.Repos {
@@ -133,7 +155,7 @@ Use --dry-run to preview what would be done without making changes.`,
 			}
 
 			if !hasApproved {
-				return fmt.Errorf("no repositories are approved for release - run 'grove release tui' to review and approve")
+				return fmt.Errorf("no repositories are approved for release - run 'grove release tui' to review and approve (or --auto-approve to publish staged gen output)")
 			}
 
 			// Execute the release
@@ -143,11 +165,36 @@ Use --dry-run to preview what would be done without making changes.`,
 
 	cmd.Flags().BoolVar(&releaseDryRun, "dry-run", false, "Print commands without executing them")
 	cmd.Flags().BoolVar(&releasePush, "push", true, "Push changes to remote repositories (default: true)")
-	cmd.Flags().BoolVar(&releaseSkipParent, "skip-parent", false, "Skip parent repository updates")
-	cmd.Flags().BoolVar(&releaseSkipCI, "skip-ci", false, "Skip CI waits after changelog updates (still waits for release workflows)")
+	cmd.Flags().BoolVar(&releaseSkipParent, "skip-parent", false, "Skip parent superrepo gitlink bump/commit/push")
 	cmd.Flags().BoolVar(&releaseResume, "resume", false, "Only process repos that haven't completed successfully")
+	cmd.Flags().BoolVar(&releaseCI, "ci", false, "Gate on GitHub CI at the pre-tag stages (default: off — CI waits are opt-in)")
+	cmd.Flags().BoolVar(&releaseNoReleaseWorkflowWait, "no-release-workflow-wait", false, "Do not wait for the post-tag Release workflow (binary publishing)")
+	cmd.Flags().BoolVar(&releaseAutoApprove, "auto-approve", false, "Publish everything staged by 'grove release gen' without the TUI approval gate")
+	// Deprecated: CI waits are opt-in now (--ci); --skip-ci is a no-op kept for back-compat.
+	cmd.Flags().BoolVar(&releaseSkipCI, "skip-ci", false, "Deprecated (no-op): CI waits are opt-in; use --ci to enable them")
+	_ = cmd.Flags().MarkHidden("skip-ci")
 
 	return cmd
+}
+
+// autoApproveStagedRepos implements the --auto-approve gate: it marks as
+// "Approved" every SELECTED repo whose gen output is actually staged (docs
+// generated or changelog staged), and returns their names (sorted). Repos with
+// no staged gen output are left untouched so they still require manual review.
+// Pure/mutating-in-place so the gating logic is unit-testable without cobra.
+func autoApproveStagedRepos(plan *release.ReleasePlan) []string {
+	var approved []string
+	for name, repo := range plan.Repos {
+		if !repo.Selected {
+			continue
+		}
+		if repo.DocsGenerated || repo.ChangelogStaged {
+			repo.Status = "Approved"
+			approved = append(approved, name)
+		}
+	}
+	sort.Strings(approved)
+	return approved
 }
 
 // newReleaseClearPlanCmd creates the 'grove release clear-plan' subcommand

@@ -163,6 +163,7 @@ func (h *GoHandler) UpdateDependency(workspacePath string, dep Dependency) error
 	cmd.Env = append(os.Environ(),
 		"GOPRIVATE=github.com/grovetools/*",
 		"GOPROXY=direct",
+		"GOWORK=off",
 	)
 
 	output, err := cmd.CombinedOutput()
@@ -176,6 +177,7 @@ func (h *GoHandler) UpdateDependency(workspacePath string, dep Dependency) error
 	tidyCmd.Env = append(os.Environ(),
 		"GOPRIVATE=github.com/grovetools/*",
 		"GOPROXY=direct",
+		"GOWORK=off",
 	)
 
 	if output, err := tidyCmd.CombinedOutput(); err != nil {

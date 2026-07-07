@@ -41,8 +41,17 @@ var (
 	releaseWithDeps       bool
 	releaseLLMChangelog   bool
 	releaseInteractive    bool // New flag for interactive TUI mode
-	releaseSkipCI         bool // Skip CI waits after changelog updates
+	releaseSkipCI         bool // Deprecated: CI waits are opt-in now; retained for back-compat (no-op)
 	releaseResume         bool // Only process repos that haven't completed successfully
+
+	// CI gating is OPT-IN as of the docs/changelog fan-out rework. By default no
+	// GitHub CI wait gates the release. --ci restores WaitForCIWorkflow gating
+	// (after dep-update push and after the publish push). The post-tag
+	// Release-workflow wait (binary publishing) stays default-ON but can be
+	// turned off with --no-release-workflow-wait.
+	releaseCI                    bool // --ci: wait for CI workflow at the pre-tag gates
+	releaseNoReleaseWorkflowWait bool // --no-release-workflow-wait: skip the post-tag release-workflow wait
+	releaseAutoApprove           bool // --auto-approve: publish everything staged by `gen` without the TUI approval gate
 )
 
 func init() {
@@ -843,172 +852,95 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 							errChan <- fmt.Errorf("failed to push dependency updates for %s: %w", repo, err)
 							return
 						}
-						// Wait for CI to complete (only for non-RC or if not skipping)
-						if !releaseSkipCI {
-							displayInfo(fmt.Sprintf("Waiting for CI to pass for %s after dependency updates...", repo))
+						// CI gating is opt-in (--ci). Default: don't wait.
+						if releaseCI {
+							displayInfo(fmt.Sprintf("Waiting for CI to pass for %s after dependency updates (--ci)...", repo))
 							if err := gh.WaitForCIWorkflow(ctx, wsPath); err != nil {
 								errChan <- fmt.Errorf("CI workflow for %s failed after dependency update: %w", repo, err)
 								return
 							}
 						} else {
-							displayInfo(fmt.Sprintf("Skipping CI wait for %s after dependency updates (--skip-ci enabled)", repo))
+							displayInfo(fmt.Sprintf("Not gating on CI for %s after dependency updates (default; pass --ci to wait)", repo))
 						}
 					}
 				}
 
-				// Handle changelog - either use existing modifications or generate new
+				// Publish step (full releases only): promote the reviewed docs +
+				// changelog into the working tree and push them as ONE commit
+				// before tagging. Docs come from `docgen sync to-repo` +
+				// `docgen sync-readme`; the changelog comes from the approved
+				// staged copy in the release staging dir. Repos with no docgen
+				// config are handled gracefully (sync is best-effort). A
+				// nothing-to-publish worktree is a silent no-op. See publishRepo.
 				if !releaseDryRun && plan.Type == "full" {
-					// Check partial release state from previous attempts
+					// Resume shortcuts from a previous partial attempt.
 					if plan != nil && plan.Repos != nil {
 						if repoPlan, ok := plan.Repos[repo]; ok {
 							if repoPlan.ChangelogPushed && repoPlan.CIPassed {
-								displayInfo(fmt.Sprintf("Changelog pushed and CI passed for %s, skipping to tag creation", repo))
-								goto createTag // Skip everything - go straight to tagging
+								displayInfo(fmt.Sprintf("Docs+changelog already published and CI passed for %s, skipping to tag creation", repo))
+								goto createTag
 							} else if repoPlan.ChangelogPushed {
-								displayInfo(fmt.Sprintf("Changelog already pushed for %s, skipping to CI wait", repo))
-								goto waitForCI // Skip changelog operations, but still wait for CI
+								displayInfo(fmt.Sprintf("Docs+changelog already published for %s, skipping to CI wait", repo))
+								goto waitForCI
 							}
 						}
 					}
 
-					// Check if CHANGELOG.md is already modified (from TUI workflow)
-					// First check the plan's ChangelogState if available
-					changelogModified := false
-					skipChangelog := false
-
-					// Check plan for changelog state
-					if plan != nil && plan.Repos != nil {
-						if repoPlan, ok := plan.Repos[repo]; ok && repoPlan.ChangelogState == "dirty" {
-							// The changelog was written and modified by user
-							changelogModified = true
-							skipChangelog = true // Don't regenerate, use the dirty version
-							displayInfo(fmt.Sprintf("Using manually edited changelog for %s", repo))
-						}
+					pushed, err := publishRepo(ctx, wsPath, repo, version, plan, logger)
+					if err != nil {
+						errChan <- fmt.Errorf("failed to publish docs+changelog for %s: %w", repo, err)
+						return
 					}
 
-					// If not marked in plan, check git status
-					if !changelogModified {
-						// Check using git diff --name-only to see if CHANGELOG.md has changes
-						diffCmd := exec.Command("git", "diff", "--name-only", "CHANGELOG.md")
-						diffCmd.Dir = wsPath
-						if diffOutput, _ := diffCmd.Output(); len(diffOutput) > 0 {
-							changelogModified = true
-						}
-
-						// Also check if it's staged
-						if !changelogModified {
-							diffCmd = exec.Command("git", "diff", "--cached", "--name-only", "CHANGELOG.md")
-							diffCmd.Dir = wsPath
-							if diffOutput, _ := diffCmd.Output(); len(diffOutput) > 0 {
-								changelogModified = true
-							}
-						}
-					}
-
-					if changelogModified {
-						// CHANGELOG.md was already modified (likely from TUI workflow)
-						// Just commit it as-is
-						displayInfo(fmt.Sprintf("Using pre-generated changelog for %s", repo))
-						if err := executeGitCommand(ctx, wsPath, []string{"add", "CHANGELOG.md"}, "Stage changelog", logger); err != nil {
-							logger.WithError(err).Warnf("Failed to stage changelog for %s", repo)
-						} else {
-							commitMsg := fmt.Sprintf("docs(changelog): update CHANGELOG.md for %s", version)
-							if err := executeGitCommand(ctx, wsPath, []string{"commit", "-m", commitMsg}, "Commit changelog", logger); err != nil {
-								logger.WithError(err).Warnf("Failed to commit changelog for %s", repo)
-							} else {
-								// Push the changelog commit to remote
-								if err := executeGitCommand(ctx, wsPath, []string{"push", "origin", "HEAD:main"},
-									fmt.Sprintf("Push changelog for %s", repo), logger); err != nil {
-									logger.WithError(err).Warnf("Failed to push changelog commit for %s", repo)
-								} else {
-									// Wait for CI on main to complete after pushing changelog
-									// Update plan state to mark changelog as pushed first
-									if plan != nil && plan.Repos != nil {
-										if repoPlan, ok := plan.Repos[repo]; ok {
-											repoPlan.ChangelogPushed = true
-											repoPlan.LastFailedOperation = "ci_wait" // Next operation that could fail
-											_ = release.SavePlan(plan)               // Save updated state
-										}
-									}
-
-									if !releaseSkipCI {
-										displayInfo(fmt.Sprintf("Waiting for CI to pass for %s after changelog update...", repo))
-										if err := gh.WaitForCIWorkflow(ctx, wsPath); err != nil {
-											errChan <- fmt.Errorf("CI workflow for %s failed after changelog update: %w", repo, err)
-											return
-										}
-									} else {
-										displayInfo(fmt.Sprintf("Skipping CI wait for %s after changelog update (--skip-ci enabled)", repo))
-									}
-
-									// Mark CI as passed only after successful wait or skip
-									if plan != nil && plan.Repos != nil {
-										if repoPlan, ok := plan.Repos[repo]; ok {
-											repoPlan.CIPassed = true
-											repoPlan.LastFailedOperation = "" // Clear failure since CI passed
-											_ = release.SavePlan(plan)        // Save updated state
-										}
-									}
-								}
-							}
-						}
-					} else if !skipChangelog {
-						// No reviewed changelog in the working tree. Generate one into
-						// the release STAGING dir for review — never commit+push an
-						// unreviewed (LLM- or auto-) generated changelog. Publishing a
-						// staged changelog happens only via the reviewed apply path
-						// (approval-gated), which promotes it into CHANGELOG.md.
-						// Generation failure is non-fatal but is recorded visibly in
-						// plan state (ChangelogGenError), not just a warn log.
-						displayInfo(fmt.Sprintf("Staging changelog for review: %s", repo))
-						stagedPath, genErr := stageGeneratedChangelog(wsPath, repo, version, useLLMChangelog)
-
-						var repoPlan *release.RepoReleasePlan
+					if pushed {
+						// Record the publish; the next failure point is the CI wait.
 						if plan != nil && plan.Repos != nil {
-							repoPlan = plan.Repos[repo]
-						}
-						if genErr != nil {
-							logger.WithError(genErr).Warnf("Failed to generate changelog for %s (non-fatal; recorded in plan)", repo)
-							displayWarning(fmt.Sprintf("Changelog generation failed for %s: %v (recorded in plan; review required)", repo, genErr))
-							if repoPlan != nil {
-								repoPlan.ChangelogGenError = genErr.Error()
-								repoPlan.Status = "Changelog Gen Failed"
+							if repoPlan, ok := plan.Repos[repo]; ok {
+								repoPlan.ChangelogPushed = true
+								repoPlan.LastFailedOperation = "ci_wait"
 								_ = release.SavePlan(plan)
 							}
-						} else if repoPlan != nil {
-							repoPlan.ChangelogPath = stagedPath
-							repoPlan.ChangelogGenError = ""
-							if repoPlan.Status != "Approved" {
-								repoPlan.Status = "Pending Review"
+						}
+
+						// CI gating is OPT-IN (--ci). Default: proceed without waiting.
+						if releaseCI {
+							displayInfo(fmt.Sprintf("Waiting for CI to pass for %s after publish (--ci)...", repo))
+							if err := gh.WaitForCIWorkflow(ctx, wsPath); err != nil {
+								errChan <- fmt.Errorf("CI workflow for %s failed after publish: %w", repo, err)
+								return
 							}
-							_ = release.SavePlan(plan)
-							displayInfo(fmt.Sprintf("Staged changelog for %s at %s — requires approval before publish", repo, stagedPath))
+						} else {
+							displayInfo(fmt.Sprintf("Not gating on CI for %s (default; pass --ci to wait for CI)", repo))
+						}
+
+						if plan != nil && plan.Repos != nil {
+							if repoPlan, ok := plan.Repos[repo]; ok {
+								repoPlan.CIPassed = true
+								repoPlan.LastFailedOperation = ""
+								_ = release.SavePlan(plan)
+							}
 						}
 					}
 				}
 
 			waitForCI:
-				// If we jumped here, changelog was already pushed, but we need to wait for CI
-				// This handles the case where changelog succeeded but CI failed in a previous attempt
+				// Resume target: docs+changelog were published in a previous
+				// attempt but the CI gate (opt-in) hadn't cleared. Only meaningful
+				// when --ci is set; otherwise we just mark CI passed and continue.
 				if plan != nil && plan.Repos != nil {
 					if repoPlan, ok := plan.Repos[repo]; ok && repoPlan.ChangelogPushed && !repoPlan.CIPassed {
-						if !releaseSkipCI {
-							displayInfo(fmt.Sprintf("Waiting for CI to pass for %s (changelog already pushed)...", repo))
+						if releaseCI {
+							displayInfo(fmt.Sprintf("Waiting for CI to pass for %s (docs+changelog already published)...", repo))
 							if err := gh.WaitForCIWorkflow(ctx, wsPath); err != nil {
 								errChan <- fmt.Errorf("CI workflow for %s failed: %w", repo, err)
 								return
 							}
-							// Mark CI as passed and save plan
-							repoPlan.CIPassed = true
-							repoPlan.LastFailedOperation = "" // Clear failure since CI passed
-							_ = release.SavePlan(plan)
 						} else {
-							displayInfo(fmt.Sprintf("Skipping CI wait for %s (--skip-ci enabled)", repo))
-							// Even with --skip-ci, mark it as passed to avoid future waits
-							repoPlan.CIPassed = true
-							repoPlan.LastFailedOperation = "" // Clear failure since we're skipping CI
-							_ = release.SavePlan(plan)
+							displayInfo(fmt.Sprintf("Not gating on CI for %s (default; pass --ci to wait for CI)", repo))
 						}
+						repoPlan.CIPassed = true
+						repoPlan.LastFailedOperation = ""
+						_ = release.SavePlan(plan)
 					}
 				}
 
@@ -1072,9 +1004,11 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 
 				// Wait for CI workflow to complete (skip in dry-run mode)
 				if !releaseDryRun {
-					// Check if the project has a .github directory with workflows
+					// Check if the project has a .github directory with workflows.
+					// The post-tag Release-workflow wait (binary publishing) is
+					// default-ON but can be disabled with --no-release-workflow-wait.
 					githubDir := filepath.Join(wsPath, ".github")
-					if _, err := os.Stat(githubDir); err == nil {
+					if _, err := os.Stat(githubDir); err == nil && !releaseNoReleaseWorkflowWait {
 						// .github directory exists, wait for workflows
 						logger.Infof("Waiting for CI release of %s@%s to complete (timeout: 60 minutes)...", repo, version)
 						displayInfo(fmt.Sprintf("Waiting for CI release of %s@%s to complete (timeout: 60 minutes)...", repo, version))
@@ -1090,6 +1024,9 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 							Field("version", version).
 							Pretty(fmt.Sprintf("  %s CI release for %s@%s successful", theme.IconSuccess, repo, version)).
 							Log(ctx)
+					} else if releaseNoReleaseWorkflowWait {
+						logger.Infof("Skipping release-workflow wait for %s (--no-release-workflow-wait)", repo)
+						displayInfo(fmt.Sprintf("Skipping release-workflow wait for %s (--no-release-workflow-wait)", repo))
 					} else {
 						// No .github directory, skip CI workflow monitoring
 						logger.Infof("No .github directory found for %s, skipping CI workflow monitoring", repo)
@@ -1107,7 +1044,7 @@ func orchestrateRelease(ctx context.Context, rootDir string, releaseLevels [][]s
 						// Now wait for module to be available on the proxy
 						displayInfo(fmt.Sprintf("Waiting for %s@%s to be available...", node.Path, version))
 
-						if err := release.WaitForModuleAvailability(ctx, node.Path, version); err != nil {
+						if err := release.WaitForModuleAvailability(ctx, node.Path, version, wsPath); err != nil {
 							errChan <- fmt.Errorf("failed waiting for %s@%s: %w", node.Path, version, err)
 							return
 						}
@@ -1403,6 +1340,7 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 		cmd.Env = append(os.Environ(),
 			"GOPRIVATE=github.com/grovetools/*",
 			"GOPROXY=direct",
+			"GOWORK=off",
 		)
 
 		output, err := cmd.CombinedOutput()
@@ -1425,6 +1363,7 @@ func updateGoDependencies(ctx context.Context, modulePath string, releasedVersio
 		cmd.Env = append(os.Environ(),
 			"GOPRIVATE=github.com/grovetools/*",
 			"GOPROXY=direct",
+			"GOWORK=off",
 		)
 
 		if output, err := cmd.CombinedOutput(); err != nil {

@@ -125,8 +125,8 @@ type LLMChangelogResult struct {
 // runLLMChangelog is the main entry point for LLM-based changelog generation.
 //
 // The generated changelog is written to the release STAGING directory
-// (~/.grove/release_staging/<repo>/CHANGELOG.md), never straight into the
-// repository's working-tree CHANGELOG.md. Staging keeps generation and approval
+// (paths.StateDir()/release/staging/<repo>/CHANGELOG.md — see getStagingDirPath),
+// never straight into the repository's working-tree CHANGELOG.md. Staging keeps generation and approval
 // separate: nothing an LLM writes reaches a commit until a human reviews and
 // applies it. The staged path is printed so a caller (or the TUI) can preview
 // and, on approval, promote it.

@@ -75,6 +75,15 @@ func DiscoverProjectsInEcosystem(ecosystemRoot string, includeWorktrees bool) ([
 	// Normalize ecosystem root for case-insensitive comparison (macOS has case-insensitive filesystem)
 	ecosystemRootLower := strings.ToLower(ecosystemRoot)
 
+	// When the scope we resolved to is ITSELF a grove worktree (e.g. `grove
+	// release` run from inside an XDG-located ecosystem worktree), that
+	// worktree's own member repos live under paths.WorktreesDir() and are
+	// therefore worktree paths. The worktree filter below would wrongly drop
+	// every one of them, leaving zero workspaces. Detect that case so we can
+	// keep members that live under the scoped worktree root — they are the
+	// ecosystem's real repos, not stray worktrees of some other ecosystem.
+	rootIsWorktree := workspace.IsWorktreePath(ecosystemRoot)
+
 	// Filter to only projects within the specified ecosystem
 	var scopedProjects []*workspace.WorkspaceNode
 	for _, p := range allProjects {
@@ -98,9 +107,20 @@ func DiscoverProjectsInEcosystem(ecosystemRoot string, includeWorktrees bool) ([
 			// If not including worktrees, skip:
 			// - Nodes marked as worktrees
 			// - Nodes whose path is inside a worktree location
+			//
+			// EXCEPTION: when the scoped ecosystem root is itself a worktree,
+			// keep the worktree root and every member that lives under it.
+			// Those members ARE the ecosystem being released; excluding them
+			// (as ordinary worktree paths) would return an empty set and break
+			// release/plan from inside an XDG-located ecosystem worktree.
 			if !includeWorktrees {
-				if p.IsWorktree() || workspace.IsWorktreePath(p.Path) {
-					continue
+				underScopedWorktree := rootIsWorktree &&
+					(projectPathLower == ecosystemRootLower ||
+						strings.HasPrefix(projectPathLower, ecosystemRootLower+string(filepath.Separator)))
+				if !underScopedWorktree {
+					if p.IsWorktree() || workspace.IsWorktreePath(p.Path) {
+						continue
+					}
 				}
 			}
 

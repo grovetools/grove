@@ -231,6 +231,7 @@ func getLatestModuleVersion(modulePath string) (string, error) {
 	cmd.Env = append(os.Environ(),
 		"GOPRIVATE=github.com/grovetools/*",
 		"GOPROXY=direct",
+		"GOWORK=off",
 	)
 
 	output, err := cmd.Output()
@@ -261,6 +262,7 @@ func getLatestPrereleaseModuleVersion(modulePath string) (string, error) {
 	cmd.Env = append(os.Environ(),
 		"GOPRIVATE=github.com/grovetools/*",
 		"GOPROXY=direct",
+		"GOWORK=off",
 	)
 
 	output, err := cmd.Output()
@@ -302,6 +304,7 @@ func runGoGet(workspacePath, modulePath, version string) error {
 	cmd.Env = append(os.Environ(),
 		"GOPRIVATE=github.com/grovetools/*",
 		"GOPROXY=direct",
+		"GOWORK=off",
 	)
 
 	output, err := cmd.CombinedOutput()
@@ -319,6 +322,7 @@ func runGoModTidy(workspacePath string) error {
 	cmd.Env = append(os.Environ(),
 		"GOPRIVATE=github.com/grovetools/*",
 		"GOPROXY=direct",
+		"GOWORK=off",
 	)
 
 	if err := cmd.Run(); err != nil {
