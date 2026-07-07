@@ -40,6 +40,20 @@ type RepoReleasePlan struct {
 	CIPassed          bool   `json:"ci_passed,omitempty"`           // Whether CI passed after changelog push
 	TagPushed         bool   `json:"tag_pushed,omitempty"`          // Whether release tag has been created and pushed
 
+	// Docs + changelog generation tracking (grove release gen — cached-LLM
+	// fan-out). Populated by `grove release gen`; consumed by the TUI (Phase 5)
+	// and apply (Phase 4).
+	DocsGenerated    bool      `json:"docs_generated,omitempty"`     // docgen sections were generated + staged into the notebook
+	DocsGeneratedAt  time.Time `json:"docs_generated_at,omitempty"`  // when gen last generated docs for this repo
+	DocsSections     []string  `json:"docs_sections,omitempty"`      // section scope generated (empty ⇒ all sections)
+	ChangelogStaged  bool      `json:"changelog_staged,omitempty"`   // a fresh changelog was staged for review by gen
+	CacheWriteTokens int64     `json:"cache_write_tokens,omitempty"` // total cache_creation tokens across the repo's gen wave (docs + changelog)
+	CacheReadTokens  int64     `json:"cache_read_tokens,omitempty"`  // total cache_read tokens across the repo's gen wave
+	GenEstCostUSD    float64   `json:"gen_est_cost_usd,omitempty"`   // estimated USD cost of the repo's gen wave
+	GenError         string    `json:"gen_error,omitempty"`          // non-empty when gen failed this repo (context freeze-verify, docs, or changelog)
+	CheckCommand     string    `json:"check_command,omitempty"`      // optional per-repo local check command (opening only — no test wiring in this effort)
+	CheckStatus      string    `json:"check_status,omitempty"`       // "skipped" when no check command; placeholder for future check integration
+
 	// Release operation tracking
 	LastFailedOperation string `json:"last_failed_operation,omitempty"` // Track which operation failed for better recovery
 

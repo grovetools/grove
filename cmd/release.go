@@ -139,6 +139,7 @@ Examples:
 
 	// Add subcommands
 	cmd.AddCommand(newReleasePlanCmd())
+	cmd.AddCommand(newReleaseGenCmd())
 	cmd.AddCommand(newReleaseTuiCmd())
 	cmd.AddCommand(newReleaseReviewCmd()) // Alias for TUI
 	cmd.AddCommand(newReleaseApplyCmd())

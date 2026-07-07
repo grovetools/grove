@@ -22,6 +22,12 @@ type LLMConfig struct {
 	ChangelogDiff     string `yaml:"changelog_diff"`      // diff depth fed to the LLM: none|stat|full (default stat)
 	ChangelogTokenCap int    `yaml:"changelog_token_cap"` // full-diff token budget; over this, full auto-falls back to stat (default 60000)
 	ChangelogCacheTTL string `yaml:"changelog_cache_ttl"` // prefix cache TTL for claude models: 5m|1h (default 5m)
+
+	// CheckCommand is an optional local check command recorded by `grove release
+	// gen` per repo (e.g. "go test ./..."). This is an OPENING only: gen records
+	// CheckStatus="skipped" and never runs it — no tend/test wiring in this
+	// effort. A later phase may execute it.
+	CheckCommand string `yaml:"check_command"`
 }
 
 func init() {
