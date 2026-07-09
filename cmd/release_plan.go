@@ -112,7 +112,17 @@ func runReleasePlan(ctx context.Context, isRC bool) (*release.ReleasePlan, error
 		}
 	}
 
-	// Get topologically sorted release order
+	// Get topologically sorted release order. Go module require graphs may
+	// legitimately contain cycles (e.g. core <-> tuimux <-> compositor), so the
+	// sorter groups any cyclic modules into a single level rather than failing.
+	// Surface those groups so the user knows they're released together.
+	if cyclicGroups := graph.CyclicGroups(nodesToRelease); len(cyclicGroups) > 0 {
+		for _, group := range cyclicGroups {
+			displayInfo(fmt.Sprintf("Dependency cycle: %s will be released together (no ordering possible)", strings.Join(group, ", ")))
+			logger.WithField("cycle", group).Warn("Modules form a dependency cycle; releasing them in one level")
+		}
+	}
+
 	releaseLevels, err := graph.TopologicalSortWithFilter(nodesToRelease)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sort dependencies: %w", err)

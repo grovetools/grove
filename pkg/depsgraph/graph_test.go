@@ -56,7 +56,9 @@ func TestTopologicalSort(t *testing.T) {
 			wantErr:  false,
 		},
 		{
-			name: "circular dependency",
+			// A cycle can no longer be ordered, so its members are grouped into
+			// a single level and released together rather than erroring out.
+			name: "circular dependency is grouped, not an error",
 			setup: func() *Graph {
 				g := NewGraph()
 				g.AddNode(&Node{Name: "A"})
@@ -65,8 +67,29 @@ func TestTopologicalSort(t *testing.T) {
 				g.AddEdge("B", "A") // B depends on A (cycle)
 				return g
 			},
-			expected: nil,
-			wantErr:  true,
+			expected: [][]string{{"A", "B"}},
+			wantErr:  false,
+		},
+		{
+			// The real grovetools foundation cycle: core -> tuimux -> compositor
+			// -> core, with tend (-> core) and a downstream flow (-> core) hanging
+			// off it. The cyclic trio collapses to one level released first, then
+			// its dependents in order.
+			name: "foundation cycle with dependents",
+			setup: func() *Graph {
+				g := NewGraph()
+				for _, n := range []string{"core", "tuimux", "compositor", "tend", "flow"} {
+					g.AddNode(&Node{Name: n})
+				}
+				g.AddEdge("core", "tuimux")       // core depends on tuimux
+				g.AddEdge("tuimux", "compositor") // tuimux depends on compositor
+				g.AddEdge("compositor", "core")   // compositor depends on core (cycle)
+				g.AddEdge("tend", "core")         // tend depends on core
+				g.AddEdge("flow", "core")         // flow depends on core
+				return g
+			},
+			expected: [][]string{{"compositor", "core", "tuimux"}, {"flow", "tend"}},
+			wantErr:  false,
 		},
 	}
 
@@ -94,6 +117,41 @@ func TestTopologicalSort(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCyclicGroups(t *testing.T) {
+	g := NewGraph()
+	for _, n := range []string{"core", "tuimux", "compositor", "notify"} {
+		g.AddNode(&Node{Name: n})
+	}
+	g.AddEdge("core", "tuimux")
+	g.AddEdge("tuimux", "compositor")
+	g.AddEdge("compositor", "core") // core/tuimux/compositor form a cycle
+	g.AddEdge("notify", "core")      // notify is acyclic
+
+	if !g.HasCycle() {
+		t.Fatal("HasCycle() = false, want true")
+	}
+
+	groups := g.CyclicGroups(nil)
+	if len(groups) != 1 {
+		t.Fatalf("CyclicGroups() returned %d groups, want 1: %v", len(groups), groups)
+	}
+	if got, want := groups[0], []string{"compositor", "core", "tuimux"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("CyclicGroups()[0] = %v, want %v", got, want)
+	}
+
+	// An acyclic graph reports no cycles.
+	acyclic := NewGraph()
+	acyclic.AddNode(&Node{Name: "core"})
+	acyclic.AddNode(&Node{Name: "notify"})
+	acyclic.AddEdge("notify", "core")
+	if acyclic.HasCycle() {
+		t.Error("HasCycle() = true for acyclic graph, want false")
+	}
+	if groups := acyclic.CyclicGroups(nil); len(groups) != 0 {
+		t.Errorf("CyclicGroups() = %v for acyclic graph, want none", groups)
 	}
 }
 
