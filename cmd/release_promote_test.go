@@ -52,7 +52,7 @@ sections:
 func TestValidatePromoteBundle(t *testing.T) {
 	t.Run("valid bundle passes", func(t *testing.T) {
 		dir := writeBundle(t, goodBundleConfig, "01-overview.md")
-		b, err := validatePromoteBundle(dir)
+		b, err := validatePromoteBundle(dir, t.TempDir())
 		if err != nil {
 			t.Fatalf("expected valid bundle, got %v", err)
 		}
@@ -66,7 +66,7 @@ func TestValidatePromoteBundle(t *testing.T) {
 
 	t.Run("missing config file", func(t *testing.T) {
 		dir := writeBundle(t, "") // no config written
-		_, err := validatePromoteBundle(dir)
+		_, err := validatePromoteBundle(dir, t.TempDir())
 		if err == nil || !strings.Contains(err.Error(), "missing") {
 			t.Fatalf("expected missing-config error, got %v", err)
 		}
@@ -79,7 +79,7 @@ func TestValidatePromoteBundle(t *testing.T) {
       prompt: 01-overview.md
 `
 		dir := writeBundle(t, cfg, "01-overview.md")
-		_, err := validatePromoteBundle(dir)
+		_, err := validatePromoteBundle(dir, t.TempDir())
 		if err == nil || !strings.Contains(err.Error(), "no output") {
 			t.Fatalf("expected missing-output error, got %v", err)
 		}
@@ -88,7 +88,7 @@ func TestValidatePromoteBundle(t *testing.T) {
 	t.Run("prose prompt file missing from bundle", func(t *testing.T) {
 		// Config references 01-overview.md but the bundle prompts/ dir omits it.
 		dir := writeBundle(t, goodBundleConfig) // no prompt files
-		_, err := validatePromoteBundle(dir)
+		_, err := validatePromoteBundle(dir, t.TempDir())
 		if err == nil || !strings.Contains(err.Error(), "missing from the bundle") {
 			t.Fatalf("expected missing-prompt-file error, got %v", err)
 		}
@@ -101,7 +101,7 @@ func TestValidatePromoteBundle(t *testing.T) {
       output: 01-overview.md
 `
 		dir := writeBundle(t, cfg)
-		_, err := validatePromoteBundle(dir)
+		_, err := validatePromoteBundle(dir, t.TempDir())
 		if err == nil || !strings.Contains(err.Error(), "no prompt") {
 			t.Fatalf("expected missing-prompt error, got %v", err)
 		}
@@ -114,7 +114,7 @@ func TestValidatePromoteBundle(t *testing.T) {
       output: 02-cli.md
 `
 		dir := writeBundle(t, cfg)
-		_, err := validatePromoteBundle(dir)
+		_, err := validatePromoteBundle(dir, t.TempDir())
 		if err == nil || !strings.Contains(err.Error(), "no binary") {
 			t.Fatalf("expected missing-binary error, got %v", err)
 		}
@@ -129,7 +129,7 @@ func TestValidatePromoteBundle(t *testing.T) {
       output: 02-cli.md
 `
 		dir := writeBundle(t, cfg)
-		_, err := validatePromoteBundle(dir)
+		_, err := validatePromoteBundle(dir, t.TempDir())
 		if err == nil || !strings.Contains(err.Error(), "docgen expects binary:") {
 			t.Fatalf("expected command-vs-binary hint, got %v", err)
 		}
@@ -137,7 +137,7 @@ func TestValidatePromoteBundle(t *testing.T) {
 
 	t.Run("no sections", func(t *testing.T) {
 		dir := writeBundle(t, "enabled: true\n")
-		_, err := validatePromoteBundle(dir)
+		_, err := validatePromoteBundle(dir, t.TempDir())
 		if err == nil || !strings.Contains(err.Error(), "no sections") {
 			t.Fatalf("expected no-sections error, got %v", err)
 		}
@@ -145,9 +145,102 @@ func TestValidatePromoteBundle(t *testing.T) {
 
 	t.Run("unparseable config", func(t *testing.T) {
 		dir := writeBundle(t, "sections: : : not yaml\n  - [")
-		_, err := validatePromoteBundle(dir)
+		_, err := validatePromoteBundle(dir, t.TempDir())
 		if err == nil || !strings.Contains(err.Error(), "parse") {
 			t.Fatalf("expected parse error, got %v", err)
+		}
+	})
+
+	t.Run("schema pair and schema path checks", func(t *testing.T) {
+		// Table-driven: the descriptions: producer/consumer pairing and the
+		// schemas[].path repo-existence checks added to the validator.
+		writeRepoFile := func(t *testing.T, rel string) string {
+			t.Helper()
+			repo := t.TempDir()
+			p := filepath.Join(repo, rel)
+			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte("{}"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return repo
+		}
+
+		descPair := `sections:
+    - name: config-descriptions
+      type: schema_describe
+      output: descriptions.json
+    - name: config-reference
+      type: schema_table
+      descriptions: descriptions.json
+      output: 05-config.md
+`
+		descOrphan := `sections:
+    - name: config-reference
+      type: schema_table
+      descriptions: descriptions.json
+      output: 05-config.md
+`
+		withSchemas := `sections:
+    - name: config-reference
+      type: schema_table
+      schemas:
+        - path: schemas/config.schema.json
+      output: 05-config.md
+`
+
+		cases := []struct {
+			name     string
+			config   string
+			repo     func(t *testing.T) string
+			wantErr  string // "" ⇒ must validate
+			wantAlso string // additional fragment the error must carry
+		}{
+			{
+				name:   "descriptions with matching schema_describe producer is ok",
+				config: descPair,
+				repo:   func(t *testing.T) string { return t.TempDir() },
+			},
+			{
+				name:     "descriptions with no matching producer errors",
+				config:   descOrphan,
+				repo:     func(t *testing.T) string { return t.TempDir() },
+				wantErr:  "no schema_describe section",
+				wantAlso: "descriptions.json",
+			},
+			{
+				name:   "schemas path present in repo is ok",
+				config: withSchemas,
+				repo: func(t *testing.T) string {
+					return writeRepoFile(t, filepath.Join("schemas", "config.schema.json"))
+				},
+			},
+			{
+				name:     "schemas path missing from repo errors naming the path",
+				config:   withSchemas,
+				repo:     func(t *testing.T) string { return t.TempDir() },
+				wantErr:  "missing from the repo",
+				wantAlso: "schemas/config.schema.json",
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				dir := writeBundle(t, tc.config)
+				_, err := validatePromoteBundle(dir, tc.repo(t))
+				if tc.wantErr == "" {
+					if err != nil {
+						t.Fatalf("expected valid bundle, got %v", err)
+					}
+					return
+				}
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("expected error containing %q, got %v", tc.wantErr, err)
+				}
+				if tc.wantAlso != "" && !strings.Contains(err.Error(), tc.wantAlso) {
+					t.Fatalf("expected error to also carry %q, got %v", tc.wantAlso, err)
+				}
+			})
 		}
 	})
 
@@ -159,7 +252,7 @@ func TestValidatePromoteBundle(t *testing.T) {
       type: prose
 `
 		dir := writeBundle(t, cfg)
-		_, err := validatePromoteBundle(dir)
+		_, err := validatePromoteBundle(dir, t.TempDir())
 		if err == nil {
 			t.Fatal("expected an error")
 		}
@@ -175,7 +268,7 @@ func TestValidatePromoteBundle(t *testing.T) {
 // referenced by the new config is pruned.
 func TestPlanAndExecutePromoteApply(t *testing.T) {
 	bundleDir := writeBundle(t, goodBundleConfig, "01-overview.md")
-	bundle, err := validatePromoteBundle(bundleDir)
+	bundle, err := validatePromoteBundle(bundleDir, t.TempDir())
 	if err != nil {
 		t.Fatalf("bundle should validate: %v", err)
 	}
@@ -234,7 +327,7 @@ func TestPlanAndExecutePromoteApply(t *testing.T) {
 // nothing to the notebook (the --dry-run guarantee).
 func TestPromoteDryRunLeavesTargetUntouched(t *testing.T) {
 	bundleDir := writeBundle(t, goodBundleConfig, "01-overview.md")
-	bundle, err := validatePromoteBundle(bundleDir)
+	bundle, err := validatePromoteBundle(bundleDir, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

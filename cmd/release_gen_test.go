@@ -82,6 +82,7 @@ func TestIsRetryableGenError(t *testing.T) {
 		{"section missing output filename", fmt.Errorf("docgen generate failed: exit status 1: section \"cli\" has no output: filename"), false},
 		{"capture section wrong field", fmt.Errorf("docgen generate failed: exit status 1: section type 'capture' requires 'binary' (binary name)"), false},
 		{"schema section missing schemas", fmt.Errorf("docgen generate failed: exit status 1: section type 'schema_table' requires 'schemas' list or 'source' file"), false},
+		{"missing prompt file (pre-spend guard)", fmt.Errorf("docgen generate failed: exit status 1: could not resolve prompt for 2 prose section(s) — failing before any LLM call: section \"04-nope\": prompt not found; section \"05-gone\": prompt not found"), false},
 	}
 	for _, m := range genTransientErrorMarkers {
 		cases = append(cases, struct {

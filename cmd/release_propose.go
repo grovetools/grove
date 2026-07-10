@@ -63,15 +63,17 @@ Modes:
   --fresh     green-field: propose an outline from the code alone (the current
               sections/prompts/README are withheld). Excludes --followup.
   --followup  refine the latest proposal: replay its transcript and add the
-              given feedback as a new turn (reuse the same --model). Excludes
-              --fresh.
+              given feedback as a new turn. The model must match the prior
+              run's: omit --model to reuse the model recorded in the prior
+              run's transcript automatically; an explicit mismatching --model
+              errors. Excludes --fresh.
 
 Examples:
   grove release propose --repo flow --model claude-haiku-4-5
   grove release propose --repo flow --model claude-haiku-4-5 --cache-ttl 1h
   grove release propose --repo flow --dry-run   # assemble the request, no API spend
   grove release propose --repo flow --model claude-haiku-4-5 --fresh
-  grove release propose --repo flow --model claude-haiku-4-5 --followup "merge the CLI pages"`,
+  grove release propose --repo flow --followup "merge the CLI pages"   # model inferred from the prior run`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReleasePropose(context.Background())
@@ -79,11 +81,11 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&proposeRepo, "repo", "", "Repository to propose a docs outline for (required)")
-	cmd.Flags().StringVar(&proposeModel, "model", "", "Claude model whose cache the proposal warms (must match a later gen); a claude-* model is required for the shared cache")
+	cmd.Flags().StringVar(&proposeModel, "model", "", "Claude model whose cache the proposal warms (must match a later gen); a claude-* model is required for the shared cache; with --followup, omit to reuse the prior run's model")
 	cmd.Flags().StringVar(&proposeCacheTTL, "cache-ttl", "", "Shared-prefix cache TTL: 5m or 1h (docgen defaults propose to 1h — review outlasts 5m)")
 	cmd.Flags().BoolVar(&proposeDryRun, "dry-run", false, "Assemble the request suffix without any API spend")
 	cmd.Flags().BoolVar(&proposeFresh, "fresh", false, "Green-field: propose from the code alone (withhold the current sections/prompts/README); excludes --followup")
-	cmd.Flags().StringVar(&proposeFollowup, "followup", "", "Reviewer feedback that refines the latest proposal in a second turn (replays its transcript, reuse the same --model); excludes --fresh")
+	cmd.Flags().StringVar(&proposeFollowup, "followup", "", "Reviewer feedback that refines the latest proposal in a second turn (replays its transcript; omit --model to reuse the prior run's model); excludes --fresh")
 
 	_ = cmd.MarkFlagRequired("repo")
 
@@ -124,10 +126,11 @@ func runReleasePropose(ctx context.Context) error {
 		}
 	}
 
-	// Staging layout: the same staging root as changelogs, under proposal/, so
-	// 'grove release clear-plan' (which removes the whole staging tree) clears
-	// it too. Each run gets its own timestamped dir under proposal/runs/; a
-	// successful LIVE run repoints proposal/latest at it.
+	// Staging layout: the same staging root as changelogs, under proposal/.
+	// 'grove release clear-plan' PRESERVES this proposal/ subtree by default
+	// (it is drafting-loop run history awaiting review) and wipes it only with
+	// --include-proposals. Each run gets its own timestamped dir under
+	// proposal/runs/; a successful LIVE run repoints proposal/latest at it.
 	stagingDir, err := getStagingDirPath()
 	if err != nil {
 		return fmt.Errorf("failed to resolve staging dir: %w", err)

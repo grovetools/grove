@@ -334,8 +334,9 @@ func runReleasePlan(ctx context.Context, isRC bool) (*release.ReleasePlan, error
 
 // getStagingDirPath returns the release staging directory, unified under the
 // Grove state dir (paths.StateDir()/release/staging) so it lives alongside the
-// release plan and is cleaned by clear-plan (release.ClearPlan removes exactly
-// this path). It performs a one-time migration from the legacy
+// release plan and is cleaned by clear-plan (release.ClearPlan clears this
+// tree, preserving each repo's proposal/ subtree unless told otherwise).
+// It performs a one-time migration from the legacy
 // ~/.grove/release_staging location so content staged before the unification is
 // not orphaned.
 func getStagingDirPath() (string, error) {
@@ -558,9 +559,10 @@ func runReleaseApply(ctx context.Context) error {
 
 	displaySuccess(fmt.Sprintf("Released %d module(s) successfully", releasedCount))
 
-	// Clear the plan after successful completion (but not in dry-run mode)
+	// Clear the plan after successful completion (but not in dry-run mode).
+	// Proposal run history is preserved — it outlives any one plan.
 	if !releaseDryRun {
-		if err := release.ClearPlan(); err != nil {
+		if err := release.ClearPlan(false); err != nil {
 			logger.WithError(err).Warn("Failed to clear release plan")
 		}
 	}

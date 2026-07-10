@@ -37,8 +37,9 @@ and documentation updates.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 
-			// Clear any existing plan first
-			if err := release.ClearPlan(); err != nil {
+			// Clear any existing plan first (proposal run history is preserved —
+			// it is drafting-loop state independent of any one plan).
+			if err := release.ClearPlan(false); err != nil {
 				return fmt.Errorf("failed to clear existing plan: %w", err)
 			}
 
@@ -208,12 +209,20 @@ func autoApproveStagedRepos(plan *release.ReleasePlan) []string {
 
 // newReleaseClearPlanCmd creates the 'grove release clear-plan' subcommand
 func newReleaseClearPlanCmd() *cobra.Command {
+	var includeProposals bool
+
 	cmd := &cobra.Command{
 		Use:   "clear-plan",
-		Short: "Clear the current release plan",
+		Short: "Clear the current release plan (docs-proposal run history is preserved unless --include-proposals)",
 		Long: `Clear the current release plan and staging directory.
 
-This removes the release plan and staging directory from the Grove state directory.
+This removes the release plan and staged changelogs from the Grove state
+directory. Docs-proposal run history (staging/<repo>/proposal/ — the
+'grove release propose' drafting loop awaiting review) is PRESERVED by
+default: it belongs to the drafting loop, not to any one release plan.
+
+Pass --include-proposals to also wipe the proposal run history, restoring a
+full staging wipe.
 
 Use this to abort a release in progress and start fresh.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -239,6 +248,11 @@ Use this to abort a release in progress and start fresh.`,
 			}
 			fmt.Printf("- %d repositories in the plan\n", repoCount)
 			fmt.Println("- All staged changelogs")
+			if includeProposals {
+				fmt.Println("- All docs-proposal run history (--include-proposals)")
+			} else {
+				fmt.Println("  (docs-proposal run history under staging/<repo>/proposal/ is kept; use --include-proposals to wipe it too)")
+			}
 
 			// Confirm
 			fmt.Print("\nAre you sure you want to clear the release plan? [y/N]: ")
@@ -252,7 +266,7 @@ Use this to abort a release in progress and start fresh.`,
 			}
 
 			// Clear the plan
-			if err := release.ClearPlan(); err != nil {
+			if err := release.ClearPlan(includeProposals); err != nil {
 				return fmt.Errorf("failed to clear plan: %w", err)
 			}
 
@@ -260,6 +274,8 @@ Use this to abort a release in progress and start fresh.`,
 			return nil
 		},
 	}
+
+	cmd.Flags().BoolVar(&includeProposals, "include-proposals", false, "Also wipe docs-proposal run history (staging/<repo>/proposal/); by default it is preserved for review")
 
 	return cmd
 }

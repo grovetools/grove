@@ -39,10 +39,24 @@ type promoteSection struct {
 	Output string `yaml:"output"`
 	Prompt string `yaml:"prompt"`
 	Binary string `yaml:"binary"`
+	// Descriptions is the consumer half of the schema producer/consumer pair: a
+	// schema_table section reads the JSON file a schema_describe section wrote,
+	// so its value must equal some schema_describe section's output: in the same
+	// config or gen deterministically fails to find the descriptions file.
+	Descriptions string `yaml:"descriptions"`
+	// Schemas mirrors docgen's schemas: list (path only) — each path is
+	// repo-relative and must exist as a file, or gen's schema parser fails on it.
+	Schemas []promoteSchemaRef `yaml:"schemas"`
 	// Command is NOT a docgen field — proposals have been observed emitting
 	// 'command:' where docgen requires 'binary:'; parsed only to give a
 	// targeted validation hint.
 	Command string `yaml:"command"`
+}
+
+// promoteSchemaRef is the minimal shape of one schemas: entry — just the
+// repo-relative path promote validates for existence.
+type promoteSchemaRef struct {
+	Path string `yaml:"path"`
 }
 
 // promoteConfig is the minimal top-level shape parsed from the bundle config.
@@ -93,8 +107,11 @@ files with a validated, reversible step:
      specific run with --run <leaf> (a runs/<leaf> dir name).
   2. Validate the bundle BEFORE touching the notebook and hard-fail listing
      every problem: the config must parse, have at least one section, every
-     section must set 'output:', and every 'type: prose' section must set
-     'prompt:' pointing at a file present in the bundle's prompts/ dir.
+     section must set 'output:', every 'type: prose' section must set
+     'prompt:' pointing at a file present in the bundle's prompts/ dir, every
+     'descriptions:' value must match a 'schema_describe' section's 'output:'
+     in the same config (the producer/consumer pair), and every 'schemas:'
+     path must exist as a file in the repo.
   3. Require the notebook docgen dir to be git-clean (so promote is fully
      reversible with 'git checkout'); use --force to skip this gate.
   4. Write the bundle config to docgen.config.yml, copy every bundle prompt in,
@@ -149,7 +166,8 @@ func runReleasePromote(ctx context.Context) error {
 
 	// Validate BEFORE resolving/touching the notebook — a broken bundle stops
 	// here, listing every problem, so nothing partial ever reaches the notebook.
-	bundle, err := validatePromoteBundle(bundleDir)
+	// repoPath anchors the schemas: path existence checks (repo-relative paths).
+	bundle, err := validatePromoteBundle(bundleDir, repoPath)
 	if err != nil {
 		return err
 	}
@@ -226,9 +244,11 @@ func resolvePromoteBundleDir(proposalDir, run string) (bundleDir, leaf string, e
 
 // validatePromoteBundle reads and validates a proposal bundle's config, hard-
 // failing with EVERY problem collected (not just the first) so a reviewer fixes
-// the whole bundle in one pass. On success it returns the parsed sections plus
-// the raw config bytes to copy verbatim.
-func validatePromoteBundle(bundleDir string) (*promoteBundle, error) {
+// the whole bundle in one pass. repoDir is the resolved repo working dir —
+// schemas: paths are repo-relative, so their existence is checked against it.
+// On success it returns the parsed sections plus the raw config bytes to copy
+// verbatim.
+func validatePromoteBundle(bundleDir, repoDir string) (*promoteBundle, error) {
 	cfgPath := filepath.Join(bundleDir, proposedConfigName)
 	data, err := os.ReadFile(cfgPath) //nolint:gosec // staging path derived from resolved repo/staging dirs
 	if err != nil {
@@ -243,6 +263,14 @@ func validatePromoteBundle(bundleDir string) (*promoteBundle, error) {
 	var problems []string
 	if len(cfg.Sections) == 0 {
 		problems = append(problems, "config has no sections (expected at least one)")
+	}
+	// Producer outputs for the descriptions: pairing check — a schema_table's
+	// descriptions: must name a file some schema_describe section produces.
+	describeOutputs := map[string]bool{}
+	for _, s := range cfg.Sections {
+		if s.Type == "schema_describe" && strings.TrimSpace(s.Output) != "" {
+			describeOutputs[s.Output] = true
+		}
 	}
 	promptsDir := filepath.Join(bundleDir, "prompts")
 	for i, s := range cfg.Sections {
@@ -271,6 +299,25 @@ func validatePromoteBundle(bundleDir string) (*promoteBundle, error) {
 				msg += fmt.Sprintf(" (it sets command: %q — docgen expects binary:)", s.Command)
 			}
 			problems = append(problems, msg)
+		}
+		// descriptions: is a consumer reference — it must equal the output: of a
+		// schema_describe section in the SAME config (the producer/consumer
+		// pair), or gen never writes the file this section reads.
+		if d := strings.TrimSpace(s.Descriptions); d != "" && !describeOutputs[d] {
+			problems = append(problems, fmt.Sprintf("section %q consumes descriptions: %q, but no schema_describe section in the config produces it as its output:", label, d))
+		}
+		// Every schemas: path is repo-relative and must exist as a file — gen's
+		// schema parser fails deterministically on a missing schema file.
+		for _, ref := range s.Schemas {
+			p := strings.TrimSpace(ref.Path)
+			if p == "" {
+				problems = append(problems, fmt.Sprintf("section %q has a schemas: entry with no path:", label))
+				continue
+			}
+			abs := filepath.Join(repoDir, p)
+			if info, serr := os.Stat(abs); serr != nil || info.IsDir() {
+				problems = append(problems, fmt.Sprintf("section %q references schema path %q, missing from the repo (expected %s)", label, p, abs))
+			}
 		}
 	}
 
