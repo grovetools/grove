@@ -212,10 +212,13 @@ var genTransientErrorMarkers = []string{
 // genPermanentErrorMarkers are error-string fragments that identify failures a
 // retry can never fix: an over-window prompt 400s identically every attempt,
 // and docgen's own window precheck ("docs context too large") is deterministic.
-// These are checked BEFORE the transient markers — an API 400 wrapped in
-// "stream error: ..." would otherwise read as transient. String matching for
-// the same reason as genTransientErrorMarkers: docgen failures cross an exec
-// boundary.
+// Deterministic LOCAL failures — a malformed notebook layout (a docs/ dir where
+// a section output file must be written), a missing/misconfigured output path, an
+// unresolvable rules file — are permanent too: they re-fail identically each
+// attempt while re-paying the LLM fan-out for zero output. These are checked
+// BEFORE the transient markers — an API 400 wrapped in "stream error: ..." would
+// otherwise read as transient. String matching for the same reason as
+// genTransientErrorMarkers: docgen failures cross an exec boundary.
 var genPermanentErrorMarkers = []string{
 	"prompt is too long",
 	"invalid_request_error",
@@ -223,6 +226,9 @@ var genPermanentErrorMarkers = []string{
 	"has no settings.rules_file",
 	"resolve rules_file",
 	"resolve docgen rules",
+	"failed to write section output",
+	"is a directory",
+	"has no output: filename",
 }
 
 // isPermanentGenErrorText reports whether err's text matches a known-permanent
