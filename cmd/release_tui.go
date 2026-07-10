@@ -1483,51 +1483,22 @@ func generateChangelogCmd(rootDir, repoName string, repo *release.RepoReleasePla
 		wsPath := filepath.Join(rootDir, repoName)
 
 		// Get current commit hash
-		commitCmd := exec.Command("git", "rev-parse", "HEAD")
-		commitCmd.Dir = wsPath
-		commitOutput, err := commitCmd.Output()
+		currentCommit, err := gitHeadCommit(wsPath)
 		if err != nil {
-			return changelogGeneratedMsg{
-				repoName: repoName,
-				err:      fmt.Errorf("failed to get current commit: %w", err),
-			}
-		}
-		currentCommit := strings.TrimSpace(string(commitOutput))
-
-		// Get last tag
-		lastTag, _ := getLastTag(wsPath)
-
-		commitRange := "HEAD"
-		if lastTag != "" {
-			commitRange = fmt.Sprintf("%s..HEAD", lastTag)
+			return changelogGeneratedMsg{repoName: repoName, err: err}
 		}
 
-		// Gather git context with commit hashes
-		// Format includes both full and short hash for easy reference
-		logCmd := exec.Command("git", "log", commitRange, "--pretty=format:commit %H (%h)%nAuthor: %an <%ae>%nDate: %ad%nCommit: %cn <%ce>%nCommitDate: %cd%n%n    %s%n%n%b%n")
-		logCmd.Dir = wsPath
-		logOutput, err := logCmd.CombinedOutput()
+		// Assemble the git material through the same builder the headless
+		// paths use, so the configured diff depth (none|stat|full + token cap)
+		// applies here too — the old inline copy was hardcoded to --stat.
+		settings := resolveChangelogSettings(wsPath, true)
+		gitContext, err := buildChangelogGitContext(wsPath, settings, true)
 		if err != nil {
-			return changelogGeneratedMsg{
-				repoName: repoName,
-				err:      fmt.Errorf("failed to get git log: %w", err),
-			}
+			return changelogGeneratedMsg{repoName: repoName, err: err}
 		}
-
-		diffCmd := exec.Command("git", "diff", "--stat", commitRange)
-		diffCmd.Dir = wsPath
-		diffOutput, err := diffCmd.CombinedOutput()
-		if err != nil {
-			return changelogGeneratedMsg{
-				repoName: repoName,
-				err:      fmt.Errorf("failed to get git diff: %w", err),
-			}
-		}
-
-		gitContext := fmt.Sprintf("GIT LOG:\n%s\n\nGIT DIFF STAT:\n%s", string(logOutput), string(diffOutput))
 
 		// Generate changelog with LLM (skip interactive prompts in TUI mode)
-		result, err := generateChangelogWithLLMInteractive(gitContext, repo.NextVersion, wsPath, true)
+		result, err := generateChangelogResult(gitContext, repo.NextVersion, wsPath, settings, true)
 		if err != nil {
 			return changelogGeneratedMsg{
 				repoName: repoName,
@@ -1536,20 +1507,9 @@ func generateChangelogCmd(rootDir, repoName string, repo *release.RepoReleasePla
 		}
 
 		// Save changelog to staging
-		stagingDir, _ := getStagingDirPath()
-		changelogPath := filepath.Join(stagingDir, repoName, "CHANGELOG.md")
-		if err := os.MkdirAll(filepath.Dir(changelogPath), 0o755); err != nil {
-			return changelogGeneratedMsg{
-				repoName: repoName,
-				err:      fmt.Errorf("failed to create changelog directory: %w", err),
-			}
-		}
-
-		if err := os.WriteFile(changelogPath, []byte(result.Changelog), 0o600); err != nil {
-			return changelogGeneratedMsg{
-				repoName: repoName,
-				err:      fmt.Errorf("failed to write changelog: %w", err),
-			}
+		changelogPath, err := stageChangelogNamed(repoName, result.Changelog)
+		if err != nil {
+			return changelogGeneratedMsg{repoName: repoName, err: err}
 		}
 
 		// Return the message with all the information including LLM suggestion and commit

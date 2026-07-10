@@ -53,6 +53,7 @@ var (
 	genRepoTimeout time.Duration
 	genRetries     int
 	genRetryFailed bool
+	genDryRun      bool
 )
 
 // Retry pacing for transient gen failures (shape mirrors
@@ -150,6 +151,7 @@ Examples:
 	cmd.Flags().DurationVar(&genRepoTimeout, "repo-timeout", 15*time.Minute, "Per-repo timeout for one gen attempt (cancellation propagates to the cx/docgen subprocesses; the in-process changelog request is not interrupted)")
 	cmd.Flags().IntVar(&genRetries, "retries", 2, "Retries per repo for transient failures (a retry within the cache TTL rides the prefix the failed attempt warmed)")
 	cmd.Flags().BoolVar(&genRetryFailed, "retry-failed", false, "Only generate for repos whose last gen run recorded an error (composes with --repo)")
+	cmd.Flags().BoolVar(&genDryRun, "dry-run", false, "Resolve repos, build + freeze-verify each cx context, and report what would run — no API spend")
 
 	return cmd
 }
@@ -348,6 +350,10 @@ func runReleaseGen(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if genDryRun {
+		return runGenDryRun(ctx, plan, repos, opts)
+	}
+
 	displayInfo(fmt.Sprintf("Generating for %d repo(s), concurrency %d: %s", len(repos), genConcurrency, strings.Join(repos, ", ")))
 
 	// Worker: runs one repo's pipeline against a private copy of its repo plan
@@ -426,6 +432,95 @@ func runReleaseGen(ctx context.Context) error {
 	}
 	displaySuccess("Release docs + changelogs staged for review")
 	displayInfo("Next: review with 'grove release tui', then 'grove release apply'")
+	return nil
+}
+
+// runGenDryRun previews an ecosystem-wide gen without any API spend: per repo
+// it resolves the path, determines docs vs changelog-only mode, lists the
+// section scope from the notebook docgen config, and builds + freeze-verifies
+// the cx context (local subprocess only — this is exactly the guard a real run
+// pays before spending, so a clean dry run means a real run won't die on
+// context floors). Repos run sequentially; the point is the report, not speed.
+func runGenDryRun(ctx context.Context, plan *release.ReleasePlan, repos []string, opts genOptions) error {
+	fanout := "config-default model"
+	if opts.Model != "" {
+		if anthropic.IsAnthropicModel(opts.Model) {
+			fanout = fmt.Sprintf("%s (shared cache fan-out)", opts.Model)
+		} else {
+			fanout = fmt.Sprintf("%s (no shared prefix — not a claude-* model)", opts.Model)
+		}
+	}
+	displayInfo(fmt.Sprintf("Dry run: %d repo(s), %s — building + freeze-verifying contexts, no API spend", len(repos), fanout))
+
+	type dryRow struct {
+		repo, mode, sections, ctxDesc, note string
+		failed                              bool
+	}
+	var rows []dryRow
+	for _, repoName := range repos {
+		repoPlan := plan.Repos[repoName]
+		row := dryRow{repo: repoName, sections: "(all)", ctxDesc: "-"}
+		if len(opts.Sections) > 0 {
+			row.sections = strings.Join(opts.Sections, ",")
+		} else if secRows := collectDocsSections(plan.RootDir, repoName, repoPlan); len(secRows) > 0 {
+			names := make([]string, 0, len(secRows))
+			for _, s := range secRows {
+				names = append(names, s.Name)
+			}
+			row.sections = strings.Join(names, ",")
+		}
+
+		repoPath, err := resolveGenRepoPath(plan, repoName)
+		if err != nil {
+			row.mode, row.note, row.failed = "-", err.Error(), true
+			rows = append(rows, row)
+			continue
+		}
+
+		skipDocs := repoInSet(repoName, opts.SkipDocs)
+		autoSkip := false
+		if !skipDocs && !repoHasDocgenConfig(repoPath) {
+			skipDocs, autoSkip = true, true
+		}
+		switch {
+		case autoSkip:
+			row.mode, row.sections, row.note = "changelog-only", "-", "no docgen config (auto-skip)"
+		case skipDocs:
+			row.mode, row.sections, row.note = "changelog-only", "-", "--skip-docs"
+		default:
+			row.mode = "docs+changelog"
+		}
+
+		if err := freezeVerifyContext(ctx, repoPath, opts); err != nil {
+			row.note, row.failed = err.Error(), true
+		} else {
+			files := anthropic.WorkDirContextFiles(repoPath)
+			if totalBytes, vErr := verifyContextFileset(repoPath, files); vErr == nil {
+				row.ctxDesc = fmt.Sprintf("%d file(s) / %d bytes", len(files), totalBytes)
+			}
+		}
+		rows = append(rows, row)
+	}
+
+	fmt.Println()
+	fmt.Println("Release gen dry run:")
+	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(w, "REPO\tMODE\tSECTIONS\tCONTEXT\tNOTES")
+	anyFailed := false
+	for _, r := range rows {
+		note := r.note
+		if r.failed {
+			anyFailed = true
+			note = "FAILED: " + firstLine(note)
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.repo, r.mode, r.sections, r.ctxDesc, note)
+	}
+	_ = w.Flush()
+
+	if anyFailed {
+		return fmt.Errorf("dry run found repos that would fail; fix them before spending")
+	}
+	displaySuccess("Dry run clean — a real run would generate for every listed repo")
 	return nil
 }
 
@@ -576,7 +671,10 @@ func genOneRepo(ctx context.Context, plan *release.ReleasePlan, repoName string,
 		res.Err = fmt.Errorf("changelog: %w", err)
 		res.failedStage = genStageChangelog
 		repoPlan.GenError = res.Err.Error()
+		repoPlan.ChangelogGenError = err.Error()
 		// Docs succeeded; record that partial progress below before returning.
+	} else {
+		repoPlan.ChangelogGenError = ""
 	}
 
 	// (d) Record per-repo gen state.
@@ -935,6 +1033,12 @@ func runChangelogRider(repoPath, repoName string, repoPlan *release.RepoReleaseP
 	stagedPath, err := stageChangelogNamed(repoName, result.Changelog)
 	if err != nil {
 		return usage, "", err
+	}
+
+	// Record the commit the changelog was generated at so the TUI's staleness
+	// check covers gen-staged changelogs, not just TUI-generated ones.
+	if head, headErr := gitHeadCommit(repoPath); headErr == nil {
+		repoPlan.ChangelogCommit = head
 	}
 
 	// Refresh the plan's version suggestion from the fresh LLM analysis.

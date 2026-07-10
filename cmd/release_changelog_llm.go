@@ -308,6 +308,19 @@ func totalFileBytes(files []string) int64 {
 	return total
 }
 
+// gitHeadCommit returns the repo's current HEAD commit hash. Recorded next to
+// a freshly staged changelog (RepoReleasePlan.ChangelogCommit) so the TUI's
+// staleness check can flag changelogs generated before newer commits landed.
+func gitHeadCommit(repoPath string) (string, error) {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = repoPath
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get current commit: %w", err)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
 // getLastTag finds the most recent git tag in a repository.
 func getLastTag(repoPath string) (string, error) {
 	cmd := exec.Command("git", "describe", "--tags", "--abbrev=0")
