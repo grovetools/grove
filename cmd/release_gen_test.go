@@ -75,6 +75,11 @@ func TestIsRetryableGenError(t *testing.T) {
 		{"wrapped canceled", fmt.Errorf("changelog: %w", context.Canceled), false},
 		{"deadline exceeded", context.DeadlineExceeded, true},
 		{"unclassified default", fmt.Errorf("something odd happened"), true},
+		// Deterministic local failures docgen surfaces across the exec boundary
+		// must classify permanent, not retry the LLM fan-out for zero output.
+		{"section output write path", fmt.Errorf("docgen generate failed: exit status 1: failed to write section output: open /nb/docgen/docs: is a directory"), false},
+		{"is a directory fs error", fmt.Errorf("docgen generate failed: exit status 1: open /nb/docgen/docs: is a directory"), false},
+		{"section missing output filename", fmt.Errorf("docgen generate failed: exit status 1: section \"cli\" has no output: filename"), false},
 	}
 	for _, m := range genTransientErrorMarkers {
 		cases = append(cases, struct {

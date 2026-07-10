@@ -150,6 +150,7 @@ Examples:
 	cmd.AddCommand(newReleasePlanCmd())
 	cmd.AddCommand(newReleaseGenCmd())
 	cmd.AddCommand(newReleaseProposeCmd())
+	cmd.AddCommand(newReleasePromoteCmd())
 	cmd.AddCommand(newReleaseTuiCmd())
 	cmd.AddCommand(newReleaseReviewCmd()) // Alias for TUI
 	cmd.AddCommand(newReleaseApplyCmd())
