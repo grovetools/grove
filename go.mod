@@ -11,6 +11,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.10.1
 	github.com/grovetools/core v0.6.3
 	github.com/grovetools/cx v0.6.0
+	github.com/grovetools/docgen v0.6.0
 	github.com/grovetools/flow v0.6.3
 	github.com/grovetools/grove-anthropic v0.6.1
 	github.com/grovetools/tend v0.6.0

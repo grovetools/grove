@@ -19,9 +19,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/grovetools/core/config"
-	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/delegation"
+	docgenconfig "github.com/grovetools/docgen/pkg/config"
 	"github.com/grovetools/grove-anthropic/pkg/anthropic"
 	"github.com/grovetools/grove/pkg/release"
 )
@@ -844,7 +844,18 @@ func resolveGenRepoPath(plan *release.ReleasePlan, repoName string) (string, err
 // fileset clears the freeze-verify floors before any API spend. The cx
 // subprocess streams into opts.Out (per-repo sink), not the process stderr.
 func freezeVerifyContext(ctx context.Context, repoPath string, opts genOptions) error {
-	cxCmd := delegation.CommandContext(ctx, "cx", "generate")
+	// Resolve the exact artifact docgen and the changelog rider use. A broken
+	// configured preset is permanent and must stop before any API spend.
+	rulesPath, err := docgenconfig.ResolveDocsRulesFile(repoPath)
+	if err != nil {
+		return &genPermanentError{fmt.Errorf("freeze-verify: resolve docgen rules: %w", err)}
+	}
+	cxArgs := []string{"generate"}
+	if rulesPath != "" {
+		opts.logf("Freeze-verify uses docs rules: %s", rulesPath)
+		cxArgs = append(cxArgs, "--rules-file", rulesPath)
+	}
+	cxCmd := delegation.CommandContext(ctx, "cx", cxArgs...)
 	cxCmd.Dir = repoPath
 	cxCmd.Stdout = opts.Out
 	cxCmd.Stderr = opts.Out
@@ -883,34 +894,11 @@ func verifyContextFileset(repoPath string, files []string) (int64, error) {
 	return totalBytes, nil
 }
 
-// docgenConfigFileName mirrors docgen's config.ConfigFileName. Re-declared here
-// so grove can probe for config presence without importing docgen's packages
-// (the same decoupling rationale as docgenUsageReport below).
-const docgenConfigFileName = "docgen.config.yml"
-
-// repoHasDocgenConfig reports whether the repo at repoPath has a docgen config,
-// resolved the same way docgen's config.LoadWithNotebook does: notebook-first
-// (workspaces/<repo>/docgen/docgen.config.yml, via the shared core locator that
-// docgen itself uses), then the legacy repo-local docs/ fallback. gen uses this
-// to auto-skip docs for unconfigured repos rather than shelling docgen only to
-// hit "failed to load docgen config: file does not exist".
+// repoHasDocgenConfig uses docgen's notebook-aware discovery so release gen
+// cannot disagree with the binary it shells.
 func repoHasDocgenConfig(repoPath string) bool {
-	// Notebook-first — the authoritative resolver docgen shares.
-	if node, err := workspace.GetProjectByPath(repoPath); err == nil {
-		if cfg, cfgErr := config.LoadDefault(); cfgErr == nil {
-			locator := workspace.NewNotebookLocator(cfg)
-			if docgenDir, dirErr := locator.GetDocgenDir(node); dirErr == nil {
-				if _, statErr := os.Stat(filepath.Join(docgenDir, docgenConfigFileName)); statErr == nil {
-					return true
-				}
-			}
-		}
-	}
-	// Legacy repo-local fallback (docs/docgen.config.yml).
-	if _, err := os.Stat(filepath.Join(repoPath, "docs", docgenConfigFileName)); err == nil {
-		return true
-	}
-	return false
+	_, _, err := docgenconfig.LoadWithNotebook(repoPath)
+	return err == nil
 }
 
 // runDocgenForRepo shells `docgen generate` in repoPath with gen's model/ttl/

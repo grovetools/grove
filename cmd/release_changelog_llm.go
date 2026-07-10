@@ -16,6 +16,7 @@ import (
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/util/delegation"
 	grovecontext "github.com/grovetools/cx/pkg/context"
+	docgenconfig "github.com/grovetools/docgen/pkg/config"
 	"github.com/grovetools/grove-anthropic/pkg/anthropic"
 )
 
@@ -639,9 +640,17 @@ Generate the JSON object now:`, newVersion, currentDate, gitContext)
 // prefix, then fires the request with the changelog prompt as the volatile tail.
 // Returns the raw model text.
 func callChangelogViaSharedPrefix(repoPath, prompt string, settings changelogSettings, quiet bool) (string, *anthropic.UsageResult, error) {
-	// Build cx context in-repo (same as docgen's BuildContext) so the prefix
-	// documents exist for WorkDirContextFiles to resolve.
-	cxCmd := delegation.Command("cx", "generate")
+	// Resolve the same explicit artifact used by docgen and freeze verification.
+	// This preserves byte-identical shared-prefix contents by construction.
+	rulesPath, err := docgenconfig.ResolveDocsRulesFile(repoPath)
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve docgen rules: %w", err)
+	}
+	cxArgs := []string{"generate"}
+	if rulesPath != "" {
+		cxArgs = append(cxArgs, "--rules-file", rulesPath)
+	}
+	cxCmd := delegation.Command("cx", cxArgs...)
 	cxCmd.Dir = repoPath
 	cxCmd.Stdout = io.Discard
 	cxCmd.Stderr = io.Discard
