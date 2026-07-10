@@ -145,8 +145,17 @@ func SavePlan(plan *ReleasePlan) error {
 	return nil
 }
 
-// ClearPlan deletes the plan file and staging directory.
-func ClearPlan() error {
+// proposalDirName is the per-repo staging subtree ("staging/<repo>/proposal/")
+// that holds docs-proposal run history from 'grove release propose'. It is
+// drafting-loop history awaiting human review, not plan state, so ClearPlan
+// preserves it unless explicitly told otherwise.
+const proposalDirName = "proposal"
+
+// ClearPlan deletes the plan file and clears the staging directory. By default
+// each repo's staged content (changelogs etc.) is removed but its proposal/
+// subtree — docs-proposal run history awaiting review — is PRESERVED; pass
+// includeProposals to wipe the whole staging tree.
+func ClearPlan(includeProposals bool) error {
 	planPath, err := getPlanPath()
 	if err == nil {
 		os.Remove(planPath)
@@ -154,7 +163,55 @@ func ClearPlan() error {
 
 	// Staging dir is now a subdirectory of the release state dir
 	stagingDir := filepath.Join(getReleaseStateDir(), "staging")
-	os.RemoveAll(stagingDir)
+	return clearStagingDir(stagingDir, includeProposals)
+}
 
+// clearStagingDir clears a release staging tree. With includeProposals it is a
+// full wipe; otherwise everything under each repo's staging dir EXCEPT the
+// proposal/ subtree is removed (and a repo dir with no proposal history is
+// removed entirely). Factored on a caller-supplied path so it is unit-testable
+// against a temp dir.
+func clearStagingDir(stagingDir string, includeProposals bool) error {
+	if includeProposals {
+		return os.RemoveAll(stagingDir)
+	}
+
+	entries, err := os.ReadDir(stagingDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, e := range entries {
+		repoDir := filepath.Join(stagingDir, e.Name())
+		if !e.IsDir() {
+			// Stray top-level files are plan-scoped staging output.
+			if rerr := os.Remove(repoDir); rerr != nil {
+				return rerr
+			}
+			continue
+		}
+		// A repo dir with no proposal history clears entirely; one with history
+		// keeps exactly the proposal/ subtree.
+		if info, serr := os.Stat(filepath.Join(repoDir, proposalDirName)); serr != nil || !info.IsDir() {
+			if rerr := os.RemoveAll(repoDir); rerr != nil {
+				return rerr
+			}
+			continue
+		}
+		subEntries, serr := os.ReadDir(repoDir)
+		if serr != nil {
+			return serr
+		}
+		for _, se := range subEntries {
+			if se.IsDir() && se.Name() == proposalDirName {
+				continue
+			}
+			if rerr := os.RemoveAll(filepath.Join(repoDir, se.Name())); rerr != nil {
+				return rerr
+			}
+		}
+	}
 	return nil
 }

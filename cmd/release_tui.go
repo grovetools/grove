@@ -1705,7 +1705,7 @@ resumed if interrupted.`,
 			// Clear stale plan if requested
 			if forceFresh {
 				fmt.Println("Clearing existing release plan...")
-				if err := release.ClearPlan(); err != nil {
+				if err := release.ClearPlan(false); err != nil {
 					return fmt.Errorf("failed to clear plan: %w", err)
 				}
 			}

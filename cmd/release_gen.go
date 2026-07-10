@@ -229,6 +229,9 @@ var genPermanentErrorMarkers = []string{
 	"failed to write section output",
 	"is a directory",
 	"has no output: filename",
+	// docgen's pre-spend prompt-existence guard (and the per-section resolver
+	// behind it): a missing prompt file fails identically every attempt.
+	"could not resolve prompt",
 	// docgen's per-type config validation family ("section type 'capture'
 	// requires 'binary'", "section type 'schema_table' requires 'schemas' list
 	// or 'source' file", …) — a misconfigured section fails identically every
