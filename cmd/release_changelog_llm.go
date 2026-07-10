@@ -31,6 +31,17 @@ const (
 	changelogDefaultCacheTTL = "5m"   // claude prefix cache TTL: 5m|1h
 	changelogDefaultModel    = "gemini-2.5-flash"
 	changelogTokenBytesRatio = 4 // ~4 chars/token estimate for the cap guard
+
+	// changelogCtxBudgetBytes caps the whole-repo cx context the claude changelog
+	// path uploads as its cached prefix. A changelog's real subject — the commit
+	// log and diff — is already embedded in the task prompt, so the ambient repo
+	// source is secondary; for large repos it blows Claude's 200k window ("prompt
+	// is too long"). Above this budget we drop the source prefix and send the
+	// changelog diff-only. 500 KB ≈ ~160k real tokens (Go source runs ~3.1 B/tok),
+	// leaving ample headroom for the prompt tail under 200k. The largest repo that
+	// generated cleanly (agentlogs, ~473 KB) stays under it; the smallest that
+	// overflowed (hooks, ~623 KB) falls to diff-only.
+	changelogCtxBudgetBytes = 500_000
 )
 
 // Flag-backed overrides for `grove changelog` (empty/zero ⇒ config, then default).
@@ -282,6 +293,19 @@ func runGitDiff(repoPath, commitRange string, stat bool) (string, error) {
 		return "", fmt.Errorf("failed to get git diff: %w\n%s", err, string(out))
 	}
 	return string(out), nil
+}
+
+// totalFileBytes sums the on-disk sizes of the given files, skipping any that
+// cannot be stat'd. Used to budget the changelog's cx-context prefix against
+// Claude's context window before uploading it.
+func totalFileBytes(files []string) int64 {
+	var total int64
+	for _, f := range files {
+		if info, err := os.Stat(f); err == nil {
+			total += info.Size()
+		}
+	}
+	return total
 }
 
 // getLastTag finds the most recent git tag in a repository.
@@ -617,12 +641,40 @@ func callChangelogViaSharedPrefix(repoPath, prompt string, settings changelogSet
 		return "", nil, fmt.Errorf("cx produced no context in %s", repoPath)
 	}
 
-	prefix, err := anthropic.NewSharedPrefixFromFiles("", ctxFiles, anthropic.SharedPrefixOptions{
-		Model:     settings.Model,
-		TTL:       settings.CacheTTL,
-		MaxTokens: 8192,
-		Caller:    "grove-changelog",
-	})
+	// Scope the context to Claude's window. The whole-repo cx context is uploaded
+	// as the cached prefix, but the changelog's real subject (git log + diff) is
+	// already in the task prompt, so for large repos the source prefix is both
+	// redundant and fatal — it overflows the 200k limit ("prompt is too long").
+	// Above the budget, drop the source and anchor the prefix on a tiny note so
+	// the request is effectively diff-only and always fits.
+	var (
+		prefix *anthropic.SharedPrefix
+		err    error
+	)
+	if ctxBytes := totalFileBytes(ctxFiles); ctxBytes > changelogCtxBudgetBytes {
+		if !quiet {
+			fmt.Printf("Changelog context %d bytes exceeds %d budget for %s; sending diff-only (git log + diff carry the changelog)\n",
+				ctxBytes, changelogCtxBudgetBytes, filepath.Base(repoPath))
+		}
+		changelogLog.Info("Changelog context over budget; diff-only").
+			Field("repo", filepath.Base(repoPath)).Field("ctx_bytes", ctxBytes).
+			Field("budget_bytes", changelogCtxBudgetBytes).
+			StructuredOnly().Log(context.Background())
+		note := fmt.Sprintf("Repository: %s\n(The commit log and diff for this changelog are provided in the task prompt.)\n", filepath.Base(repoPath))
+		prefix, err = anthropic.NewSharedPrefix("", []byte(note), anthropic.SharedPrefixOptions{
+			Model:     settings.Model,
+			TTL:       settings.CacheTTL,
+			MaxTokens: 8192,
+			Caller:    "grove-changelog",
+		})
+	} else {
+		prefix, err = anthropic.NewSharedPrefixFromFiles("", ctxFiles, anthropic.SharedPrefixOptions{
+			Model:     settings.Model,
+			TTL:       settings.CacheTTL,
+			MaxTokens: 8192,
+			Caller:    "grove-changelog",
+		})
+	}
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to set up shared prefix: %w", err)
 	}
