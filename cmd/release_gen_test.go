@@ -59,6 +59,92 @@ func TestVerifyContextFileset(t *testing.T) {
 	})
 }
 
+// TestIsRetryableGenError covers the retry classification: permanent wrappers
+// and cancellation never retry; known-transient markers and unclassified
+// errors both do.
+func TestIsRetryableGenError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"permanent wrapper", &genPermanentError{fmt.Errorf("freeze-verify: empty prefix")}, false},
+		{"wrapped permanent", fmt.Errorf("docgen: %w", &genPermanentError{fmt.Errorf("no repo")}), false},
+		{"canceled", context.Canceled, false},
+		{"wrapped canceled", fmt.Errorf("changelog: %w", context.Canceled), false},
+		{"deadline exceeded", context.DeadlineExceeded, true},
+		{"unclassified default", fmt.Errorf("something odd happened"), true},
+	}
+	for _, m := range genTransientErrorMarkers {
+		cases = append(cases, struct {
+			name string
+			err  error
+			want bool
+		}{"marker " + m, fmt.Errorf("docgen generate failed: %s", m), true})
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isRetryableGenError(tc.err); got != tc.want {
+				t.Fatalf("isRetryableGenError(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+	// The markers must also each register as known-transient (log wording).
+	for _, m := range genTransientErrorMarkers {
+		if !isKnownTransientGenError(fmt.Errorf("err: %s", m)) {
+			t.Errorf("marker %q not recognized as known-transient", m)
+		}
+	}
+}
+
+// TestResolveGenReposRetryFailed exercises the --retry-failed narrowing
+// against a synthetic plan.
+func TestResolveGenReposRetryFailed(t *testing.T) {
+	plan := &release.ReleasePlan{
+		ReleaseLevels: [][]string{{"core"}, {"flow", "nav"}},
+		Repos: map[string]*release.RepoReleasePlan{
+			"core": {Selected: true},
+			"flow": {Selected: true, GenError: "docgen: boom"},
+			"nav":  {Selected: true},
+		},
+	}
+
+	t.Run("narrows to failed repos", func(t *testing.T) {
+		out, err := resolveGenRepos(plan, genOptions{RetryFailed: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(out) != 1 || out[0] != "flow" {
+			t.Fatalf("expected [flow], got %v", out)
+		}
+	})
+
+	t.Run("composes with --repo", func(t *testing.T) {
+		_, err := resolveGenRepos(plan, genOptions{Repos: []string{"core"}, RetryFailed: true})
+		if err == nil || !strings.Contains(err.Error(), "retry-failed") {
+			t.Fatalf("expected a clear no-failed-repos error, got %v", err)
+		}
+		out, err := resolveGenRepos(plan, genOptions{Repos: []string{"core", "flow"}, RetryFailed: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(out) != 1 || out[0] != "flow" {
+			t.Fatalf("expected [flow], got %v", out)
+		}
+	})
+
+	t.Run("errors when nothing failed", func(t *testing.T) {
+		clean := &release.ReleasePlan{
+			ReleaseLevels: [][]string{{"core"}},
+			Repos:         map[string]*release.RepoReleasePlan{"core": {Selected: true}},
+		}
+		if _, err := resolveGenRepos(clean, genOptions{RetryFailed: true}); err == nil {
+			t.Fatal("expected an error when no repos have a gen error")
+		}
+	})
+}
+
 // TestRunGenPool exercises the worker pool + single-writer collector: every
 // repo is processed exactly once, each repo's log block contains only its own
 // lines (no interleaving), callbacks never run concurrently, and sorting the
