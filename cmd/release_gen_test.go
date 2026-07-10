@@ -96,6 +96,36 @@ func TestIsRetryableGenError(t *testing.T) {
 			t.Errorf("marker %q not recognized as known-transient", m)
 		}
 	}
+
+	// Permanent-marker error text never retries — even when wrapped in text
+	// that also matches a transient marker ("stream error", "400"): an
+	// over-window prompt fails identically on every attempt.
+	for _, m := range genPermanentErrorMarkers {
+		err := fmt.Errorf("docgen generate failed: exit status 1: anthropic API error (HTTP 400 %s)", m)
+		if isRetryableGenError(err) {
+			t.Errorf("permanent marker %q should not be retryable", m)
+		}
+	}
+	overWindow := fmt.Errorf("stream error: 400 Bad Request: prompt is too long: 435671 tokens > 200000 maximum")
+	if isRetryableGenError(overWindow) {
+		t.Error("prompt-too-long inside a stream error must classify permanent, not transient")
+	}
+}
+
+// TestLastCobraErrorLine covers extraction of docgen's final "Error: ..." line
+// from a captured stderr tail (cobra may print a usage block after it).
+func TestLastCobraErrorLine(t *testing.T) {
+	stderr := `some log line
+Error: generation process failed: docs context too large for claude-haiku-4-5
+Usage:
+  docgen generate [flags]
+`
+	if got := lastCobraErrorLine(stderr); got != "generation process failed: docs context too large for claude-haiku-4-5" {
+		t.Errorf("lastCobraErrorLine = %q", got)
+	}
+	if got := lastCobraErrorLine("no errors here\n"); got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
 }
 
 // TestResolveGenReposRetryFailed exercises the --retry-failed narrowing

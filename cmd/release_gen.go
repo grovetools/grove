@@ -136,6 +136,10 @@ Examples:
   grove release gen --repo flow --model claude-haiku-4-5
   grove release gen --repo flow --sections 03-workflows   # scoped idempotent re-run
   grove release gen --skip-docs cloud,sync,memory --model claude-haiku-4-5  # changelog-only for config-less repos`,
+		// A failed gen run is a runtime error, not a usage error — the flag
+		// reference after "release gen failed for one or more repos" buries
+		// the per-repo causes in the summary above it.
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReleaseGen(context.Background())
 		},
@@ -205,9 +209,38 @@ var genTransientErrorMarkers = []string{
 	"connection reset", "temporarily", "stream error",
 }
 
-// isRetryableGenError classifies a per-repo gen failure: permanent wrappers
-// and user cancellation never retry; everything else does (see the marker
-// comment above for why unclassified defaults to retry).
+// genPermanentErrorMarkers are error-string fragments that identify failures a
+// retry can never fix: an over-window prompt 400s identically every attempt,
+// and docgen's own window precheck ("docs context too large") is deterministic.
+// These are checked BEFORE the transient markers — an API 400 wrapped in
+// "stream error: ..." would otherwise read as transient. String matching for
+// the same reason as genTransientErrorMarkers: docgen failures cross an exec
+// boundary.
+var genPermanentErrorMarkers = []string{
+	"prompt is too long",
+	"invalid_request_error",
+	"docs context too large",
+	"has no settings.rules_file",
+	"resolve rules_file",
+	"resolve docgen rules",
+}
+
+// isPermanentGenErrorText reports whether err's text matches a known-permanent
+// marker.
+func isPermanentGenErrorText(err error) bool {
+	msg := strings.ToLower(err.Error())
+	for _, m := range genPermanentErrorMarkers {
+		if strings.Contains(msg, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// isRetryableGenError classifies a per-repo gen failure: permanent wrappers,
+// known-permanent error text, and user cancellation never retry; everything
+// else does (see the marker comment above for why unclassified defaults to
+// retry).
 func isRetryableGenError(err error) bool {
 	if err == nil {
 		return false
@@ -219,7 +252,7 @@ func isRetryableGenError(err error) bool {
 	if errors.Is(err, context.Canceled) {
 		return false
 	}
-	return true
+	return !isPermanentGenErrorText(err)
 }
 
 // isKnownTransientGenError reports whether err matches a known-transient
@@ -757,7 +790,12 @@ func genOneRepoWithRetry(ctx context.Context, plan *release.ReleasePlan, repoNam
 		totCost += res.EstCostUSD
 		rp.GenAttempts = attempt
 
-		if res.Err == nil || attempt > retries || !isRetryableGenError(res.Err) || ctx.Err() != nil {
+		if res.Err == nil || attempt > retries || ctx.Err() != nil {
+			break
+		}
+		if !isRetryableGenError(res.Err) {
+			opts.logf("%s failed (permanent error — a retry would fail identically, not retrying): %v",
+				repoName, res.Err)
 			break
 		}
 
@@ -928,7 +966,11 @@ func runDocgenForRepo(ctx context.Context, repoPath string, opts genOptions) (*d
 	docCmd := delegation.CommandContext(ctx, "docgen", args...)
 	docCmd.Dir = repoPath
 	docCmd.Stdout = opts.Out
-	docCmd.Stderr = opts.Out
+	// Tee stderr so docgen's own "Error: ..." line can ride the returned error
+	// — the exec boundary otherwise reduces every failure to "exit status 1",
+	// which the retry classifier can't tell apart from a network blip.
+	var stderrBuf bytes.Buffer
+	docCmd.Stderr = io.MultiWriter(opts.Out, &stderrBuf)
 	runErr := docCmd.Run()
 
 	// Parse the usage report even if docgen returned an error — it is written in
@@ -946,9 +988,34 @@ func runDocgenForRepo(ctx context.Context, repoPath string, opts genOptions) (*d
 	}
 
 	if runErr != nil {
+		// Surface the real cause next to the exit status, best source first:
+		// the usage report's per-section error (written even on failure by a
+		// new-enough docgen), else docgen's final "Error: ..." stderr line.
+		cause := ""
+		if report != nil && len(report.FailedSections) > 0 {
+			cause = report.FailedSectionErrors[report.FailedSections[0]]
+		}
+		if cause == "" {
+			cause = lastCobraErrorLine(stderrBuf.String())
+		}
+		if cause != "" {
+			return report, sections, fmt.Errorf("docgen generate failed: %w: %s", runErr, cause)
+		}
 		return report, sections, fmt.Errorf("docgen generate failed: %w", runErr)
 	}
 	return report, sections, nil
+}
+
+// lastCobraErrorLine returns the last "Error: ..." line in s (cobra prints one
+// for a failed RunE), stripped of the prefix; "" when there is none.
+func lastCobraErrorLine(s string) string {
+	var out string
+	for _, ln := range strings.Split(s, "\n") {
+		if trimmed := strings.TrimSpace(ln); strings.HasPrefix(trimmed, "Error:") {
+			out = strings.TrimSpace(strings.TrimPrefix(trimmed, "Error:"))
+		}
+	}
+	return out
 }
 
 // docgenUsageReport mirrors docgen's generator.UsageReport JSON shape (the
@@ -963,12 +1030,16 @@ type docgenUsageReport struct {
 	// accepts; absent/empty from an older docgen binary (grove shells the
 	// binary, so version skew is possible), in which case retries fall back to
 	// a full re-run.
-	FailedSections        []string `json:"failed_sections"`
-	TotalInputTokens      int64    `json:"total_input_tokens"`
-	TotalOutputTokens     int64    `json:"total_output_tokens"`
-	TotalCacheWriteTokens int64    `json:"total_cache_write_tokens"`
-	TotalCacheReadTokens  int64    `json:"total_cache_read_tokens"`
-	TotalEstCostUSD       float64  `json:"total_est_cost_usd"`
+	FailedSections []string `json:"failed_sections"`
+	// FailedSectionErrors maps each failed section to its error text (absent
+	// from older docgen binaries); used to surface the real cause and classify
+	// permanence across the exec boundary.
+	FailedSectionErrors   map[string]string `json:"failed_section_errors"`
+	TotalInputTokens      int64             `json:"total_input_tokens"`
+	TotalOutputTokens     int64             `json:"total_output_tokens"`
+	TotalCacheWriteTokens int64             `json:"total_cache_write_tokens"`
+	TotalCacheReadTokens  int64             `json:"total_cache_read_tokens"`
+	TotalEstCostUSD       float64           `json:"total_est_cost_usd"`
 }
 
 func parseDocgenUsageReport(path string) *docgenUsageReport {
