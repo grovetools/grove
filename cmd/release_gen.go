@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/grove-anthropic/pkg/anthropic"
 	"github.com/grovetools/grove/pkg/release"
@@ -35,6 +36,7 @@ const (
 var (
 	genRepos    []string
 	genSections []string
+	genSkipDocs []string
 	genDiff     string
 	genCacheTTL string
 	genModel    string
@@ -76,10 +78,17 @@ re-run (--repo X --sections a,b) within the cache TTL rides the warm prefix.
 Pass a claude-* --model so docgen and the changelog share one prefix; that is
 what makes the changelog cache-read the docs prefix.
 
+Repos with no docgen config are auto-detected and carried through for versioning
++ changelog only (they bypass the freeze-verify and docgen stages and go straight
+to the changelog rider) — so an ecosystem-wide run no longer dies on the first
+unconfigured repo. Use --skip-docs to force that same changelog-only treatment
+for a configured repo (e.g. one with unresolved doc sections).
+
 Examples:
   grove release gen                                   # all planned repos
   grove release gen --repo flow --model claude-haiku-4-5
-  grove release gen --repo flow --sections 03-workflows   # scoped idempotent re-run`,
+  grove release gen --repo flow --sections 03-workflows   # scoped idempotent re-run
+  grove release gen --skip-docs cloud,sync,memory --model claude-haiku-4-5  # changelog-only for config-less repos`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReleaseGen(context.Background())
 		},
@@ -87,6 +96,7 @@ Examples:
 
 	cmd.Flags().StringSliceVar(&genRepos, "repo", nil, "Only generate for these repos (default: all selected repos in the plan)")
 	cmd.Flags().StringSliceVar(&genSections, "sections", nil, "Only generate these docgen sections (scopes docgen -s; changelog still runs)")
+	cmd.Flags().StringSliceVar(&genSkipDocs, "skip-docs", nil, "Force changelog-only for these repos (still stage a changelog): use for configured repos with unresolved sections; configless repos are auto-skipped")
 	cmd.Flags().StringVar(&genDiff, "diff", "", "Changelog git diff depth: none|stat|full (default: config/stat)")
 	cmd.Flags().StringVar(&genCacheTTL, "cache-ttl", "", "Shared-prefix cache TTL: 5m (default) or 1h")
 	cmd.Flags().StringVar(&genModel, "model", "", "Model for docs + changelog; a claude-* model enables the shared cache fan-out")
@@ -232,19 +242,47 @@ func genOneRepo(ctx context.Context, plan *release.ReleasePlan, repoName string,
 	repoPlan.CheckCommand = loadRepoCheckCommand(repoPath)
 	repoPlan.CheckStatus = "skipped"
 
-	// (a) Context freeze-verify — guard before any API spend.
-	if err := freezeVerifyContext(ctx, repoPath); err != nil {
-		res.Err = err
-		repoPlan.GenError = err.Error()
-		return res
+	// --skip-docs: repos with no docgen config (or unresolved doc sections) are
+	// carried through the release for versioning + changelog only. Bypass the
+	// freeze-verify and docgen stages entirely and go straight to the changelog
+	// rider, rather than failing the repo on a docgen error.
+	skipDocs := repoInSet(repoName, genSkipDocs)
+
+	// Auto-skip: a repo with no docgen config would shell docgen only to
+	// hard-fail on "failed to load docgen config: file does not exist". Detect
+	// that up front and carry the repo changelog-only, so an ecosystem-wide
+	// `grove release gen` doesn't die on the first unconfigured repo and the
+	// user need not hand-enumerate every configless repo in --skip-docs.
+	autoSkipDocs := false
+	if !skipDocs && !repoHasDocgenConfig(repoPath) {
+		skipDocs = true
+		autoSkipDocs = true
 	}
 
-	// (b) Warm prefix + docs via docgen fan-out.
-	docsUsage, sections, err := runDocgenForRepo(ctx, repoPath)
-	if err != nil {
-		res.Err = fmt.Errorf("docgen: %w", err)
-		repoPlan.GenError = res.Err.Error()
-		return res
+	var docsUsage *docgenUsageReport
+	sections := "-"
+	if skipDocs {
+		if autoSkipDocs {
+			displayInfo(fmt.Sprintf("%s: no docgen config; changelog only (auto-skip docs)", repoName))
+		} else {
+			displayInfo(fmt.Sprintf("%s: --skip-docs set; changelog only (no docs generated)", repoName))
+		}
+	} else {
+		// (a) Context freeze-verify — guard before any API spend.
+		if err := freezeVerifyContext(ctx, repoPath); err != nil {
+			res.Err = err
+			repoPlan.GenError = err.Error()
+			return res
+		}
+
+		// (b) Warm prefix + docs via docgen fan-out.
+		var docErr error
+		docsUsage, sections, docErr = runDocgenForRepo(ctx, repoPath)
+		if docErr != nil {
+			res.Err = fmt.Errorf("docgen: %w", docErr)
+			repoPlan.GenError = res.Err.Error()
+			return res
+		}
 	}
 
 	// (c) Changelog rider in-process — rides the prefix docgen just warmed.
@@ -256,7 +294,7 @@ func genOneRepo(ctx context.Context, plan *release.ReleasePlan, repoName string,
 	}
 
 	// (d) Record per-repo gen state.
-	repoPlan.DocsGenerated = true
+	repoPlan.DocsGenerated = !skipDocs
 	repoPlan.DocsGeneratedAt = time.Now()
 	repoPlan.DocsSections = append([]string{}, genSections...)
 	repoPlan.ChangelogStaged = staged != ""
@@ -289,9 +327,23 @@ func genOneRepo(ctx context.Context, plan *release.ReleasePlan, repoName string,
 	res.EstCostUSD = cost
 	res.Sections = sections
 	if res.Err == nil {
-		res.Status = "staged"
+		if skipDocs {
+			res.Status = "changelog-only"
+		} else {
+			res.Status = "staged"
+		}
 	}
 	return res
+}
+
+// repoInSet reports whether repo appears in set (exact match).
+func repoInSet(repo string, set []string) bool {
+	for _, r := range set {
+		if r == repo {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveGenRepoPath resolves a repo name to its working directory, consistent
@@ -345,6 +397,36 @@ func verifyContextFileset(repoPath string, files []string) (int64, error) {
 		return totalBytes, fmt.Errorf("freeze-verify: cx context is only %d bytes across %d file(s) in %s (floor %d) — refusing to spend on a near-empty prefix", totalBytes, len(files), repoPath, genMinContextBytes)
 	}
 	return totalBytes, nil
+}
+
+// docgenConfigFileName mirrors docgen's config.ConfigFileName. Re-declared here
+// so grove can probe for config presence without importing docgen's packages
+// (the same decoupling rationale as docgenUsageReport below).
+const docgenConfigFileName = "docgen.config.yml"
+
+// repoHasDocgenConfig reports whether the repo at repoPath has a docgen config,
+// resolved the same way docgen's config.LoadWithNotebook does: notebook-first
+// (workspaces/<repo>/docgen/docgen.config.yml, via the shared core locator that
+// docgen itself uses), then the legacy repo-local docs/ fallback. gen uses this
+// to auto-skip docs for unconfigured repos rather than shelling docgen only to
+// hit "failed to load docgen config: file does not exist".
+func repoHasDocgenConfig(repoPath string) bool {
+	// Notebook-first — the authoritative resolver docgen shares.
+	if node, err := workspace.GetProjectByPath(repoPath); err == nil {
+		if cfg, cfgErr := config.LoadDefault(); cfgErr == nil {
+			locator := workspace.NewNotebookLocator(cfg)
+			if docgenDir, dirErr := locator.GetDocgenDir(node); dirErr == nil {
+				if _, statErr := os.Stat(filepath.Join(docgenDir, docgenConfigFileName)); statErr == nil {
+					return true
+				}
+			}
+		}
+	}
+	// Legacy repo-local fallback (docs/docgen.config.yml).
+	if _, err := os.Stat(filepath.Join(repoPath, "docs", docgenConfigFileName)); err == nil {
+		return true
+	}
+	return false
 }
 
 // runDocgenForRepo shells `docgen generate` in repoPath with gen's model/ttl/
