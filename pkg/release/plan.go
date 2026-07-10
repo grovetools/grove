@@ -104,7 +104,10 @@ func LoadPlan() (*ReleasePlan, error) {
 	return &plan, nil
 }
 
-// SavePlan marshals and writes the plan to disk.
+// SavePlan marshals and writes the plan to disk. The write is atomic (temp
+// file in the same directory + rename) so a crash mid-write can never leave a
+// truncated plan behind — the plan is the release's checkpoint state, and both
+// gen (after every repo) and apply (after every stage) rewrite it frequently.
 func SavePlan(plan *ReleasePlan) error {
 	planPath, err := getPlanPath()
 	if err != nil {
@@ -116,7 +119,29 @@ func SavePlan(plan *ReleasePlan) error {
 		return err
 	}
 
-	return os.WriteFile(planPath, data, 0o600) //nolint:gosec // G306: internal tool, non-sensitive config file
+	tmp, err := os.CreateTemp(filepath.Dir(planPath), ".release_plan-*.json.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Chmod(tmpPath, 0o600); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, planPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 // ClearPlan deletes the plan file and staging directory.

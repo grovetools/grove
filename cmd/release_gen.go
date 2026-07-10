@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"text/tabwriter"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/grove-anthropic/pkg/anthropic"
 	"github.com/grovetools/grove/pkg/release"
@@ -38,12 +41,14 @@ const (
 // per-repo pipeline is re-entrant (the TUI's inline regen constructs its own
 // genOptions instead of mutating shared state).
 var (
-	genRepos    []string
-	genSections []string
-	genSkipDocs []string
-	genDiff     string
-	genCacheTTL string
-	genModel    string
+	genRepos       []string
+	genSections    []string
+	genSkipDocs    []string
+	genDiff        string
+	genCacheTTL    string
+	genModel       string
+	genConcurrency int
+	genRepoTimeout time.Duration
 )
 
 // genOptions is the resolved, immutable configuration for one gen invocation
@@ -124,6 +129,8 @@ Examples:
 	cmd.Flags().StringVar(&genDiff, "diff", "", "Changelog git diff depth: none|stat|full (default: config/stat)")
 	cmd.Flags().StringVar(&genCacheTTL, "cache-ttl", "", "Shared-prefix cache TTL: 5m (default) or 1h")
 	cmd.Flags().StringVar(&genModel, "model", "", "Model for docs + changelog; a claude-* model enables the shared cache fan-out")
+	cmd.Flags().IntVar(&genConcurrency, "concurrency", 3, "Repos generated in parallel; docgen generates sections sequentially within a repo, so total in-flight LLM requests ≈ this value")
+	cmd.Flags().DurationVar(&genRepoTimeout, "repo-timeout", 15*time.Minute, "Per-repo timeout for one gen attempt (cancellation propagates to the cx/docgen subprocesses; the in-process changelog request is not interrupted)")
 
 	return cmd
 }
@@ -137,6 +144,88 @@ type genRepoResult struct {
 	EstCostUSD       float64
 	Status           string
 	Err              error
+}
+
+// genWorkerResult carries one repo's completed gen work from a worker to the
+// collector: the mutated repo-plan copy to fold back into the shared plan, the
+// summary result, and the repo's buffered log block.
+type genWorkerResult struct {
+	repo string
+	plan release.RepoReleasePlan
+	res  genRepoResult
+	log  []byte
+}
+
+// runGenPool runs work for every repo across `concurrency` workers and funnels
+// all events to the calling goroutine: onStart fires when a worker picks up a
+// repo, onResult when it finishes. Because both callbacks run only on the
+// caller's goroutine, the caller is the single writer for the shared plan and
+// any progress state — no locks needed. Each worker hands work a private
+// buffer; the buffered bytes come back on the result so the caller can flush
+// each repo's output as one uninterleaved block. Workers stop picking up new
+// repos once ctx is canceled (in-flight repos still finish and report), so the
+// returned results may cover fewer repos than requested. concurrency=1 goes
+// through this same path — there is no separate sequential branch.
+func runGenPool(
+	ctx context.Context,
+	repos []string,
+	concurrency int,
+	work func(ctx context.Context, repo string, out io.Writer) genWorkerResult,
+	onStart func(repo string),
+	onResult func(genWorkerResult),
+) []genWorkerResult {
+	if concurrency < 1 {
+		concurrency = 1
+	}
+
+	type poolEvent struct {
+		started bool
+		repo    string
+		result  genWorkerResult
+	}
+	jobs := make(chan string)
+	events := make(chan poolEvent)
+
+	var wg sync.WaitGroup
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for repo := range jobs {
+				if ctx.Err() != nil {
+					continue // canceled: drain the queue without starting new repos
+				}
+				events <- poolEvent{started: true, repo: repo}
+				var buf bytes.Buffer
+				r := work(ctx, repo, &buf)
+				r.log = buf.Bytes()
+				events <- poolEvent{repo: repo, result: r}
+			}
+		}()
+	}
+	go func() {
+		for _, r := range repos {
+			jobs <- r
+		}
+		close(jobs)
+		wg.Wait()
+		close(events)
+	}()
+
+	var results []genWorkerResult
+	for ev := range events {
+		if ev.started {
+			if onStart != nil {
+				onStart(ev.repo)
+			}
+			continue
+		}
+		if onResult != nil {
+			onResult(ev.result)
+		}
+		results = append(results, ev.result)
+	}
+	return results
 }
 
 // runReleaseGen executes the headless docs+changelog generation over the plan.
@@ -172,27 +261,77 @@ func runReleaseGen(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	displayInfo(fmt.Sprintf("Generating for %d repo(s): %s", len(repos), strings.Join(repos, ", ")))
+	displayInfo(fmt.Sprintf("Generating for %d repo(s), concurrency %d: %s", len(repos), genConcurrency, strings.Join(repos, ", ")))
+
+	// Worker: runs one repo's pipeline against a private copy of its repo plan
+	// and a private log buffer. Workers never touch the shared plan — SavePlan
+	// marshals the whole thing, so any shared mutation would race the
+	// collector's per-repo saves.
+	work := func(ctx context.Context, repoName string, out io.Writer) genWorkerResult {
+		rp := *plan.Repos[repoName] // struct copy; plan map is read-only from workers
+		rp.DocsSections = append([]string(nil), rp.DocsSections...)
+		wopts := opts
+		wopts.Out = out
+		attemptCtx, cancel := context.WithTimeout(ctx, genRepoTimeout)
+		defer cancel()
+		res := genOneRepo(attemptCtx, plan, repoName, &rp, wopts)
+		return genWorkerResult{repo: repoName, plan: rp, res: res}
+	}
+
+	// Collector state: both callbacks run on this goroutine only (single
+	// writer), so the counters, the shared plan, and SavePlan need no locking.
+	total := len(repos)
+	done, running := 0, 0
+	onStart := func(repo string) {
+		running++
+		displayInfo(fmt.Sprintf("[%d/%d done, %d running] %s started", done, total, running, repo))
+	}
+	onResult := func(r genWorkerResult) {
+		running--
+		done++
+		*plan.Repos[r.repo] = r.plan
+
+		// Persist per-repo progress immediately so a mid-run failure still
+		// leaves completed repos recorded in the plan.
+		if saveErr := release.SavePlan(plan); saveErr != nil {
+			displayWarning(fmt.Sprintf("failed to save plan after %s: %v", r.repo, saveErr))
+		}
+
+		// Flush the repo's buffered pipeline output as one delimited block.
+		displaySection(fmt.Sprintf("%s  %s", r.repo, r.plan.NextVersion))
+		if len(r.log) > 0 {
+			_, _ = os.Stdout.Write(r.log)
+		}
+		if r.res.Err != nil {
+			displayError(fmt.Sprintf("[%d/%d done, %d running] %s: %v", done, total, running, r.repo, r.res.Err))
+		} else {
+			displayInfo(fmt.Sprintf("[%d/%d done, %d running] %s %s ($%.4f)", done, total, running, r.repo, theme.IconSuccess, r.res.EstCostUSD))
+		}
+	}
+
+	workerResults := runGenPool(ctx, repos, genConcurrency, work, onStart, onResult)
+
+	// Results arrive completion-ordered; restore the plan-level order so the
+	// summary is deterministic.
+	orderIdx := make(map[string]int, len(repos))
+	for i, r := range repos {
+		orderIdx[r] = i
+	}
+	sort.Slice(workerResults, func(i, j int) bool {
+		return orderIdx[workerResults[i].repo] < orderIdx[workerResults[j].repo]
+	})
 
 	var results []genRepoResult
 	anyFailed := false
-
-	for _, repoName := range repos {
-		repoPlan := plan.Repos[repoName]
-		displaySection(fmt.Sprintf("%s  %s", repoName, repoPlan.NextVersion))
-
-		res := genOneRepo(ctx, plan, repoName, repoPlan, opts)
-		results = append(results, res)
-		if res.Err != nil {
+	for _, wr := range workerResults {
+		results = append(results, wr.res)
+		if wr.res.Err != nil {
 			anyFailed = true
-			displayError(fmt.Sprintf("%s: %v", repoName, res.Err))
 		}
-
-		// Persist per-repo progress immediately so a mid-run failure still leaves
-		// completed repos recorded in the plan.
-		if saveErr := release.SavePlan(plan); saveErr != nil {
-			displayWarning(fmt.Sprintf("failed to save plan after %s: %v", repoName, saveErr))
-		}
+	}
+	if len(workerResults) < total {
+		displayWarning(fmt.Sprintf("%d repo(s) were not generated (run canceled before they started)", total-len(workerResults)))
+		anyFailed = true
 	}
 
 	printGenSummary(results)
