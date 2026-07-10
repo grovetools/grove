@@ -42,6 +42,7 @@ sections:
     - name: cli-reference
       title: CLI Reference
       type: capture
+      binary: notify
       output: 02-cli-reference.md
 `
 
@@ -103,6 +104,34 @@ func TestValidatePromoteBundle(t *testing.T) {
 		_, err := validatePromoteBundle(dir)
 		if err == nil || !strings.Contains(err.Error(), "no prompt") {
 			t.Fatalf("expected missing-prompt error, got %v", err)
+		}
+	})
+
+	t.Run("capture section missing binary", func(t *testing.T) {
+		cfg := `sections:
+    - name: cli-reference
+      type: capture
+      output: 02-cli.md
+`
+		dir := writeBundle(t, cfg)
+		_, err := validatePromoteBundle(dir)
+		if err == nil || !strings.Contains(err.Error(), "no binary") {
+			t.Fatalf("expected missing-binary error, got %v", err)
+		}
+	})
+
+	t.Run("capture section with command instead of binary hints the rename", func(t *testing.T) {
+		// Live-observed --fresh defect: 'command:' where docgen wants 'binary:'.
+		cfg := `sections:
+    - name: cli-reference
+      type: capture
+      command: notify
+      output: 02-cli.md
+`
+		dir := writeBundle(t, cfg)
+		_, err := validatePromoteBundle(dir)
+		if err == nil || !strings.Contains(err.Error(), "docgen expects binary:") {
+			t.Fatalf("expected command-vs-binary hint, got %v", err)
 		}
 	})
 

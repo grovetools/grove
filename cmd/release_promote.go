@@ -38,6 +38,11 @@ type promoteSection struct {
 	Type   string `yaml:"type"`
 	Output string `yaml:"output"`
 	Prompt string `yaml:"prompt"`
+	Binary string `yaml:"binary"`
+	// Command is NOT a docgen field — proposals have been observed emitting
+	// 'command:' where docgen requires 'binary:'; parsed only to give a
+	// targeted validation hint.
+	Command string `yaml:"command"`
 }
 
 // promoteConfig is the minimal top-level shape parsed from the bundle config.
@@ -257,6 +262,15 @@ func validatePromoteBundle(bundleDir string) (*promoteBundle, error) {
 			if _, serr := os.Stat(promptFile); serr != nil {
 				problems = append(problems, fmt.Sprintf("prose section %q references prompt %q, missing from the bundle prompts/ dir", label, s.Prompt))
 			}
+		}
+		if s.Type == "capture" && strings.TrimSpace(s.Binary) == "" {
+			// Live-observed proposal defect: 'command:' where docgen requires
+			// 'binary:' — gen fails deterministically on it.
+			msg := fmt.Sprintf("capture section %q has no binary: field", label)
+			if strings.TrimSpace(s.Command) != "" {
+				msg += fmt.Sprintf(" (it sets command: %q — docgen expects binary:)", s.Command)
+			}
+			problems = append(problems, msg)
 		}
 	}
 

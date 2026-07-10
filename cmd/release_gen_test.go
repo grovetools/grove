@@ -80,6 +80,8 @@ func TestIsRetryableGenError(t *testing.T) {
 		{"section output write path", fmt.Errorf("docgen generate failed: exit status 1: failed to write section output: open /nb/docgen/docs: is a directory"), false},
 		{"is a directory fs error", fmt.Errorf("docgen generate failed: exit status 1: open /nb/docgen/docs: is a directory"), false},
 		{"section missing output filename", fmt.Errorf("docgen generate failed: exit status 1: section \"cli\" has no output: filename"), false},
+		{"capture section wrong field", fmt.Errorf("docgen generate failed: exit status 1: section type 'capture' requires 'binary' (binary name)"), false},
+		{"schema section missing schemas", fmt.Errorf("docgen generate failed: exit status 1: section type 'schema_table' requires 'schemas' list or 'source' file"), false},
 	}
 	for _, m := range genTransientErrorMarkers {
 		cases = append(cases, struct {
