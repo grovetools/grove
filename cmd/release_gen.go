@@ -32,7 +32,11 @@ const (
 )
 
 // gen flag vars (scoped to `grove release gen`; do not reuse the `grove
-// changelog` flag globals so the two commands stay independent).
+// changelog` flag globals so the two commands stay independent). These are
+// only read once, at the top of runReleaseGen, to build the run's genOptions;
+// everything below the command entry point works off the options value so the
+// per-repo pipeline is re-entrant (the TUI's inline regen constructs its own
+// genOptions instead of mutating shared state).
 var (
 	genRepos    []string
 	genSections []string
@@ -42,12 +46,32 @@ var (
 	genModel    string
 )
 
-// genDocgenStdout is where runDocgenForRepo streams `docgen generate` output.
-// It defaults to os.Stdout for the headless CLI path; the release TUI redirects
-// it to io.Discard during inline regen so docgen's streaming output does not
-// corrupt the alt-screen. Only one gen/regen runs at a time (guarded by the
-// TUI's `generating` flag), so mutating this global is safe.
-var genDocgenStdout io.Writer = os.Stdout
+// genOptions is the resolved, immutable configuration for one gen invocation
+// (headless run or a single TUI inline regen). Passing it explicitly — rather
+// than reading the flag globals — is what makes genOneRepo safe to run for
+// several repos concurrently.
+type genOptions struct {
+	Repos    []string // --repo subset (empty ⇒ all selected repos in the plan)
+	Sections []string // --sections scope for docgen -s (empty ⇒ all sections)
+	SkipDocs []string // --skip-docs: force changelog-only for these repos
+	Model    string   // --model override for docs + changelog
+	Diff     string   // --diff override for the changelog git context
+	CacheTTL string   // --cache-ttl override for the shared prefix
+
+	// Out receives everything a single repo's pipeline emits: gen's own
+	// progress lines plus the streamed docgen/cx subprocess output. The
+	// headless path hands each repo a private buffer (flushed as one block by
+	// the collector); the TUI passes io.Discard so nothing corrupts the
+	// alt-screen.
+	Out io.Writer
+}
+
+// logf writes one per-repo progress line to the options' output sink. Worker-
+// side code must use this instead of displayInfo/ulog, which write straight to
+// the terminal and would interleave across concurrent repos.
+func (o genOptions) logf(format string, a ...any) {
+	fmt.Fprintf(o.Out, format+"\n", a...)
+}
 
 // newReleaseGenCmd creates the 'grove release gen' subcommand: a fully headless
 // batch that, per planned repo, warms one shared cx-context prefix and fans out
@@ -131,8 +155,20 @@ func runReleaseGen(ctx context.Context) error {
 		displayWarning(fmt.Sprintf("--model %q is not a claude-* model; docs+changelog will not share a cached prefix (no cache-read savings)", genModel))
 	}
 
+	// Snapshot the flag globals into the run's immutable options. Everything
+	// below works off opts; the flag vars are not read again.
+	opts := genOptions{
+		Repos:    genRepos,
+		Sections: genSections,
+		SkipDocs: genSkipDocs,
+		Model:    genModel,
+		Diff:     genDiff,
+		CacheTTL: genCacheTTL,
+		Out:      os.Stdout,
+	}
+
 	// Resolve the repo set: explicit --repo subset, else every selected repo.
-	repos, err := resolveGenRepos(plan)
+	repos, err := resolveGenRepos(plan, opts)
 	if err != nil {
 		return err
 	}
@@ -145,7 +181,7 @@ func runReleaseGen(ctx context.Context) error {
 		repoPlan := plan.Repos[repoName]
 		displaySection(fmt.Sprintf("%s  %s", repoName, repoPlan.NextVersion))
 
-		res := genOneRepo(ctx, plan, repoName, repoPlan)
+		res := genOneRepo(ctx, plan, repoName, repoPlan, opts)
 		results = append(results, res)
 		if res.Err != nil {
 			anyFailed = true
@@ -173,7 +209,7 @@ func runReleaseGen(ctx context.Context) error {
 // --repo subset is validated against the plan; otherwise every Selected repo is
 // used (repos with changes). The order follows the plan's release levels so
 // output is stable.
-func resolveGenRepos(plan *release.ReleasePlan) ([]string, error) {
+func resolveGenRepos(plan *release.ReleasePlan, opts genOptions) ([]string, error) {
 	// Flatten release levels into a stable order, then filter.
 	var order []string
 	seen := map[string]bool{}
@@ -195,9 +231,9 @@ func resolveGenRepos(plan *release.ReleasePlan) ([]string, error) {
 	sort.Strings(extras)
 	order = append(order, extras...)
 
-	if len(genRepos) > 0 {
+	if len(opts.Repos) > 0 {
 		want := map[string]bool{}
-		for _, r := range genRepos {
+		for _, r := range opts.Repos {
 			if _, ok := plan.Repos[r]; !ok {
 				return nil, fmt.Errorf("repo %q is not in the release plan", r)
 			}
@@ -227,7 +263,7 @@ func resolveGenRepos(plan *release.ReleasePlan) ([]string, error) {
 // genOneRepo runs the freeze-verify → docs → changelog pipeline for one repo and
 // records its outcome into the plan. It never returns an error directly; the
 // per-repo error is carried on the result and mirrored into repoPlan.GenError.
-func genOneRepo(ctx context.Context, plan *release.ReleasePlan, repoName string, repoPlan *release.RepoReleasePlan) genRepoResult {
+func genOneRepo(ctx context.Context, plan *release.ReleasePlan, repoName string, repoPlan *release.RepoReleasePlan, opts genOptions) genRepoResult {
 	res := genRepoResult{Repo: repoName, Sections: "-", Status: "failed"}
 
 	repoPath, err := resolveGenRepoPath(plan, repoName)
@@ -246,7 +282,7 @@ func genOneRepo(ctx context.Context, plan *release.ReleasePlan, repoName string,
 	// carried through the release for versioning + changelog only. Bypass the
 	// freeze-verify and docgen stages entirely and go straight to the changelog
 	// rider, rather than failing the repo on a docgen error.
-	skipDocs := repoInSet(repoName, genSkipDocs)
+	skipDocs := repoInSet(repoName, opts.SkipDocs)
 
 	// Auto-skip: a repo with no docgen config would shell docgen only to
 	// hard-fail on "failed to load docgen config: file does not exist". Detect
@@ -263,13 +299,13 @@ func genOneRepo(ctx context.Context, plan *release.ReleasePlan, repoName string,
 	sections := "-"
 	if skipDocs {
 		if autoSkipDocs {
-			displayInfo(fmt.Sprintf("%s: no docgen config; changelog only (auto-skip docs)", repoName))
+			opts.logf("%s: no docgen config; changelog only (auto-skip docs)", repoName)
 		} else {
-			displayInfo(fmt.Sprintf("%s: --skip-docs set; changelog only (no docs generated)", repoName))
+			opts.logf("%s: --skip-docs set; changelog only (no docs generated)", repoName)
 		}
 	} else {
 		// (a) Context freeze-verify — guard before any API spend.
-		if err := freezeVerifyContext(ctx, repoPath); err != nil {
+		if err := freezeVerifyContext(ctx, repoPath, opts); err != nil {
 			res.Err = err
 			repoPlan.GenError = err.Error()
 			return res
@@ -277,7 +313,7 @@ func genOneRepo(ctx context.Context, plan *release.ReleasePlan, repoName string,
 
 		// (b) Warm prefix + docs via docgen fan-out.
 		var docErr error
-		docsUsage, sections, docErr = runDocgenForRepo(ctx, repoPath)
+		docsUsage, sections, docErr = runDocgenForRepo(ctx, repoPath, opts)
 		if docErr != nil {
 			res.Err = fmt.Errorf("docgen: %w", docErr)
 			repoPlan.GenError = res.Err.Error()
@@ -286,7 +322,7 @@ func genOneRepo(ctx context.Context, plan *release.ReleasePlan, repoName string,
 	}
 
 	// (c) Changelog rider in-process — rides the prefix docgen just warmed.
-	clUsage, staged, err := runChangelogRider(repoPath, repoName, repoPlan)
+	clUsage, staged, err := runChangelogRider(repoPath, repoName, repoPlan, opts)
 	if err != nil {
 		res.Err = fmt.Errorf("changelog: %w", err)
 		repoPlan.GenError = res.Err.Error()
@@ -294,9 +330,14 @@ func genOneRepo(ctx context.Context, plan *release.ReleasePlan, repoName string,
 	}
 
 	// (d) Record per-repo gen state.
-	repoPlan.DocsGenerated = !skipDocs
-	repoPlan.DocsGeneratedAt = time.Now()
-	repoPlan.DocsSections = append([]string{}, genSections...)
+	// A skip-docs pass (forced or auto) records nothing about docs rather than
+	// clearing prior state: a changelog-only re-run must not erase the record
+	// of docs a previous pass staged.
+	if !skipDocs {
+		repoPlan.DocsGenerated = true
+		repoPlan.DocsGeneratedAt = time.Now()
+		repoPlan.DocsSections = append([]string{}, opts.Sections...)
+	}
 	repoPlan.ChangelogStaged = staged != ""
 	if staged != "" {
 		repoPlan.ChangelogPath = staged
@@ -360,12 +401,13 @@ func resolveGenRepoPath(plan *release.ReleasePlan, repoName string) (string, err
 }
 
 // freezeVerifyContext builds the repo's cx context and asserts the resulting
-// fileset clears the freeze-verify floors before any API spend.
-func freezeVerifyContext(ctx context.Context, repoPath string) error {
+// fileset clears the freeze-verify floors before any API spend. The cx
+// subprocess streams into opts.Out (per-repo sink), not the process stderr.
+func freezeVerifyContext(ctx context.Context, repoPath string, opts genOptions) error {
 	cxCmd := delegation.CommandContext(ctx, "cx", "generate")
 	cxCmd.Dir = repoPath
-	cxCmd.Stdout = os.Stderr
-	cxCmd.Stderr = os.Stderr
+	cxCmd.Stdout = opts.Out
+	cxCmd.Stderr = opts.Out
 	if err := cxCmd.Run(); err != nil {
 		return fmt.Errorf("freeze-verify: failed to build cx context: %w", err)
 	}
@@ -375,7 +417,7 @@ func freezeVerifyContext(ctx context.Context, repoPath string) error {
 	if err != nil {
 		return err
 	}
-	displayInfo(fmt.Sprintf("Context freeze-verify OK: %d file(s), %d bytes", len(files), totalBytes))
+	opts.logf("Context freeze-verify OK: %d file(s), %d bytes", len(files), totalBytes)
 	return nil
 }
 
@@ -432,7 +474,7 @@ func repoHasDocgenConfig(repoPath string) bool {
 // runDocgenForRepo shells `docgen generate` in repoPath with gen's model/ttl/
 // section scope, writing a machine-readable usage report it then parses and
 // returns. docgen's live output is streamed so per-section usage is visible.
-func runDocgenForRepo(ctx context.Context, repoPath string) (*docgenUsageReport, string, error) {
+func runDocgenForRepo(ctx context.Context, repoPath string, opts genOptions) (*docgenUsageReport, string, error) {
 	usageFile, err := os.CreateTemp("", "grove-gen-docgen-usage-*.json")
 	if err != nil {
 		return nil, "-", fmt.Errorf("creating usage report temp file: %w", err)
@@ -442,21 +484,21 @@ func runDocgenForRepo(ctx context.Context, repoPath string) (*docgenUsageReport,
 	defer os.Remove(usagePath)
 
 	args := []string{"generate", "--usage-json", usagePath}
-	if genModel != "" {
-		args = append(args, "--model", genModel)
+	if opts.Model != "" {
+		args = append(args, "--model", opts.Model)
 	}
-	if genCacheTTL != "" {
-		args = append(args, "--cache-ttl", genCacheTTL)
+	if opts.CacheTTL != "" {
+		args = append(args, "--cache-ttl", opts.CacheTTL)
 	}
-	for _, s := range genSections {
+	for _, s := range opts.Sections {
 		args = append(args, "-s", s)
 	}
 
-	displayInfo(fmt.Sprintf("Running: docgen %s", strings.Join(args, " ")))
+	opts.logf("Running: docgen %s", strings.Join(args, " "))
 	docCmd := delegation.CommandContext(ctx, "docgen", args...)
 	docCmd.Dir = repoPath
-	docCmd.Stdout = genDocgenStdout
-	docCmd.Stderr = genDocgenStdout
+	docCmd.Stdout = opts.Out
+	docCmd.Stderr = opts.Out
 	runErr := docCmd.Run()
 
 	// Parse the usage report even if docgen returned an error — it is written in
@@ -469,8 +511,8 @@ func runDocgenForRepo(ctx context.Context, repoPath string) (*docgenUsageReport,
 			names = append(names, s.Section)
 		}
 		sections = strings.Join(names, ",")
-	} else if len(genSections) > 0 {
-		sections = strings.Join(genSections, ",")
+	} else if len(opts.Sections) > 0 {
+		sections = strings.Join(opts.Sections, ",")
 	}
 
 	if runErr != nil {
@@ -510,16 +552,16 @@ func parseDocgenUsageReport(path string) *docgenUsageReport {
 // byte-identical shared prefix (so it cache-reads the context docgen just
 // warmed), stages it, and returns its cache usage and staged path. It uses the
 // skipPrompt=true route so nothing is interactive.
-func runChangelogRider(repoPath, repoName string, repoPlan *release.RepoReleasePlan) (*anthropic.UsageResult, string, error) {
+func runChangelogRider(repoPath, repoName string, repoPlan *release.RepoReleasePlan, opts genOptions) (*anthropic.UsageResult, string, error) {
 	settings := resolveChangelogSettings(repoPath, true)
-	if genModel != "" {
-		settings.Model = genModel
+	if opts.Model != "" {
+		settings.Model = opts.Model
 	}
-	if genDiff != "" {
-		settings.Diff = genDiff
+	if opts.Diff != "" {
+		settings.Diff = opts.Diff
 	}
-	if genCacheTTL != "" {
-		settings.CacheTTL = genCacheTTL
+	if opts.CacheTTL != "" {
+		settings.CacheTTL = opts.CacheTTL
 	}
 	// Re-validate the (possibly gen-overridden) values.
 	switch settings.Diff {
@@ -551,7 +593,7 @@ func runChangelogRider(repoPath, repoName string, repoPlan *release.RepoReleaseP
 		repoPlan.SuggestedBump = result.Suggestion
 		repoPlan.SuggestionReasoning = result.Justification
 	}
-	displayInfo(fmt.Sprintf("Staged changelog: %s (suggested bump: %s)", stagedPath, result.Suggestion))
+	opts.logf("Staged changelog: %s (suggested bump: %s)", stagedPath, result.Suggestion)
 	return usage, stagedPath, nil
 }
 
