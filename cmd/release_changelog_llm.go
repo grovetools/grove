@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -33,15 +34,15 @@ const (
 	changelogDefaultModel    = "gemini-2.5-flash"
 	changelogTokenBytesRatio = 4 // ~4 chars/token estimate for the cap guard
 
-	// changelogCtxBudgetBytes caps the whole-repo cx context the claude changelog
-	// path uploads as its cached prefix. A changelog's real subject — the commit
-	// log and diff — is already embedded in the task prompt, so the ambient repo
-	// source is secondary; for large repos it blows Claude's 200k window ("prompt
-	// is too long"). Above this budget we drop the source prefix and send the
-	// changelog diff-only. 500 KB ≈ ~160k real tokens (Go source runs ~3.1 B/tok),
-	// leaving ample headroom for the prompt tail under 200k. The largest repo that
-	// generated cleanly (agentlogs, ~473 KB) stays under it; the smallest that
-	// overflowed (hooks, ~623 KB) falls to diff-only.
+	// changelogCtxBudgetBytes caps the claude changelog request's total upload —
+	// the whole-repo cx context prefix PLUS the task prompt (commit log + diff).
+	// A changelog's real subject is the prompt, so the ambient repo source is
+	// secondary; when prefix+prompt together blow Claude's 200k window ("prompt
+	// is too long") we drop the source prefix and send the changelog diff-only.
+	// 500 KB ≈ ~160k real tokens (Go source runs ~3.1 B/tok), leaving response
+	// headroom under 200k. The prompt MUST count against the budget: a 488 KB
+	// docs-narrowed context passed a context-only check and still 400'd at
+	// 205k tokens once a 42k-token diff prompt rode behind it.
 	changelogCtxBudgetBytes = 500_000
 )
 
@@ -569,6 +570,14 @@ func generateChangelogResultWithUsage(gitContext, newVersion, repoPath string, s
 	if anthropic.IsAnthropicModel(settings.Model) {
 		rawOutput, usage, err = callChangelogViaSharedPrefix(repoPath, prompt, settings, skipPrompt)
 		if err != nil {
+			// A permanent API rejection (4xx, e.g. "prompt is too long") fails
+			// identically through the facade — it attaches the same context and
+			// prompt — so falling back just doubles the failed spend and buries
+			// the cause under a second error. Surface it directly.
+			var apiErr *anthropic.APIStatusError
+			if errors.As(err, &apiErr) && apiErr.Permanent() {
+				return nil, nil, fmt.Errorf("changelog request rejected (the grove llm fallback would fail identically): %w", err)
+			}
 			// Claude path failed (e.g. no cx context) — fall back to the facade,
 			// which also serves claude models via `grove llm request`.
 			if !skipPrompt {
@@ -663,23 +672,22 @@ func callChangelogViaSharedPrefix(repoPath, prompt string, settings changelogSet
 		return "", nil, fmt.Errorf("cx produced no context in %s", repoPath)
 	}
 
-	// Scope the context to Claude's window. The whole-repo cx context is uploaded
+	// Scope the request to Claude's window. The whole-repo cx context is uploaded
 	// as the cached prefix, but the changelog's real subject (git log + diff) is
 	// already in the task prompt, so for large repos the source prefix is both
-	// redundant and fatal — it overflows the 200k limit ("prompt is too long").
+	// redundant and fatal — prefix + prompt together overflow the 200k limit
+	// ("prompt is too long"), which is why the prompt counts against the budget.
 	// Above the budget, drop the source and anchor the prefix on a tiny note so
 	// the request is effectively diff-only and always fits.
-	var (
-		prefix *anthropic.SharedPrefix
-		err    error
-	)
-	if ctxBytes := totalFileBytes(ctxFiles); ctxBytes > changelogCtxBudgetBytes {
+	var prefix *anthropic.SharedPrefix
+	if reqBytes := totalFileBytes(ctxFiles) + int64(len(prompt)); reqBytes > changelogCtxBudgetBytes {
 		if !quiet {
-			fmt.Printf("Changelog context %d bytes exceeds %d budget for %s; sending diff-only (git log + diff carry the changelog)\n",
-				ctxBytes, changelogCtxBudgetBytes, filepath.Base(repoPath))
+			fmt.Printf("Changelog context+prompt %d bytes exceeds %d budget for %s; sending diff-only (git log + diff carry the changelog)\n",
+				reqBytes, changelogCtxBudgetBytes, filepath.Base(repoPath))
 		}
 		changelogLog.Info("Changelog context over budget; diff-only").
-			Field("repo", filepath.Base(repoPath)).Field("ctx_bytes", ctxBytes).
+			Field("repo", filepath.Base(repoPath)).Field("req_bytes", reqBytes).
+			Field("prompt_bytes", len(prompt)).
 			Field("budget_bytes", changelogCtxBudgetBytes).
 			StructuredOnly().Log(context.Background())
 		note := fmt.Sprintf("Repository: %s\n(The commit log and diff for this changelog are provided in the task prompt.)\n", filepath.Base(repoPath))
