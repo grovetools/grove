@@ -51,6 +51,7 @@ type RepoReleasePlan struct {
 	CacheReadTokens  int64     `json:"cache_read_tokens,omitempty"`  // total cache_read tokens across the repo's gen wave
 	GenEstCostUSD    float64   `json:"gen_est_cost_usd,omitempty"`   // estimated USD cost of the repo's gen wave
 	GenError         string    `json:"gen_error,omitempty"`          // non-empty when gen failed this repo (context freeze-verify, docs, or changelog)
+	GenAttempts      int       `json:"gen_attempts,omitempty"`       // attempts the last gen run made for this repo (>1 ⇒ transient failures were retried)
 	CheckCommand     string    `json:"check_command,omitempty"`      // optional per-repo local check command (opening only — no test wiring in this effort)
 	CheckStatus      string    `json:"check_status,omitempty"`       // "skipped" when no check command; placeholder for future check integration
 

@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"sort"
@@ -49,6 +51,17 @@ var (
 	genModel       string
 	genConcurrency int
 	genRepoTimeout time.Duration
+	genRetries     int
+	genRetryFailed bool
+)
+
+// Retry pacing for transient gen failures (shape mirrors
+// release.WaitForModuleAvailabilityWithConfig: exponential backoff with a cap,
+// plus jitter here since several workers may fail in the same rate-limit
+// window).
+const (
+	genRetryInitialBackoff = 5 * time.Second
+	genRetryMaxBackoff     = 60 * time.Second
 )
 
 // genOptions is the resolved, immutable configuration for one gen invocation
@@ -62,6 +75,10 @@ type genOptions struct {
 	Model    string   // --model override for docs + changelog
 	Diff     string   // --diff override for the changelog git context
 	CacheTTL string   // --cache-ttl override for the shared prefix
+
+	// RetryFailed narrows the resolved repo set to repos whose last gen run
+	// recorded a GenError — the one-command post-mortem re-run.
+	RetryFailed bool
 
 	// Out receives everything a single repo's pipeline emits: gen's own
 	// progress lines plus the streamed docgen/cx subprocess output. The
@@ -131,9 +148,20 @@ Examples:
 	cmd.Flags().StringVar(&genModel, "model", "", "Model for docs + changelog; a claude-* model enables the shared cache fan-out")
 	cmd.Flags().IntVar(&genConcurrency, "concurrency", 3, "Repos generated in parallel; docgen generates sections sequentially within a repo, so total in-flight LLM requests ≈ this value")
 	cmd.Flags().DurationVar(&genRepoTimeout, "repo-timeout", 15*time.Minute, "Per-repo timeout for one gen attempt (cancellation propagates to the cx/docgen subprocesses; the in-process changelog request is not interrupted)")
+	cmd.Flags().IntVar(&genRetries, "retries", 2, "Retries per repo for transient failures (a retry within the cache TTL rides the prefix the failed attempt warmed)")
+	cmd.Flags().BoolVar(&genRetryFailed, "retry-failed", false, "Only generate for repos whose last gen run recorded an error (composes with --repo)")
 
 	return cmd
 }
+
+// Pipeline stages recorded on a failed genRepoResult so the retry wrapper can
+// scope the next attempt to the work that actually failed.
+const (
+	genStageResolve      = "resolve"
+	genStageFreezeVerify = "freeze-verify"
+	genStageDocgen       = "docgen"
+	genStageChangelog    = "changelog"
+)
 
 // genRepoResult holds one repo's gen outcome for the summary table.
 type genRepoResult struct {
@@ -144,6 +172,64 @@ type genRepoResult struct {
 	EstCostUSD       float64
 	Status           string
 	Err              error
+
+	// failedStage identifies which pipeline stage produced Err ("" on
+	// success); docsFailedSections carries the failed docgen sections from the
+	// usage report (empty when docgen is too old to report them, in which case
+	// a retry re-runs all sections).
+	failedStage        string
+	docsFailedSections []string
+}
+
+// genPermanentError marks failures that must never be retried: freeze-verify
+// floor violations (the cost guard — retrying an empty context re-spends
+// nothing but wastes a worker slot and confuses users) and unresolvable repo
+// paths.
+type genPermanentError struct{ err error }
+
+func (e *genPermanentError) Error() string { return e.err.Error() }
+func (e *genPermanentError) Unwrap() error { return e.err }
+
+// genTransientErrorMarkers are the error-string fragments recognized as known
+// transient (HTTP 429/5xx and overload from the Anthropic SDK, network
+// hiccups, per-attempt timeouts). Matching on strings is unavoidable here:
+// docgen failures cross an exec boundary and carry only a stderr tail. The
+// markers only refine the retry log line ("transient" vs "unclassified") —
+// unclassified errors retry too, since attempts are bounded and a retry
+// within the cache TTL cache-reads the prefix the failed attempt warmed.
+var genTransientErrorMarkers = []string{
+	"429", "500", "502", "503", "529",
+	"overloaded", "rate limit", "timeout", "deadline exceeded",
+	"connection reset", "temporarily", "stream error",
+}
+
+// isRetryableGenError classifies a per-repo gen failure: permanent wrappers
+// and user cancellation never retry; everything else does (see the marker
+// comment above for why unclassified defaults to retry).
+func isRetryableGenError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var perm *genPermanentError
+	if errors.As(err, &perm) {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	return true
+}
+
+// isKnownTransientGenError reports whether err matches a known-transient
+// marker; used only to word the retry log line.
+func isKnownTransientGenError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	for _, m := range genTransientErrorMarkers {
+		if strings.Contains(msg, m) {
+			return true
+		}
+	}
+	return false
 }
 
 // genWorkerResult carries one repo's completed gen work from a worker to the
@@ -247,13 +333,14 @@ func runReleaseGen(ctx context.Context) error {
 	// Snapshot the flag globals into the run's immutable options. Everything
 	// below works off opts; the flag vars are not read again.
 	opts := genOptions{
-		Repos:    genRepos,
-		Sections: genSections,
-		SkipDocs: genSkipDocs,
-		Model:    genModel,
-		Diff:     genDiff,
-		CacheTTL: genCacheTTL,
-		Out:      os.Stdout,
+		Repos:       genRepos,
+		Sections:    genSections,
+		SkipDocs:    genSkipDocs,
+		Model:       genModel,
+		Diff:        genDiff,
+		CacheTTL:    genCacheTTL,
+		RetryFailed: genRetryFailed,
+		Out:         os.Stdout,
 	}
 
 	// Resolve the repo set: explicit --repo subset, else every selected repo.
@@ -272,9 +359,7 @@ func runReleaseGen(ctx context.Context) error {
 		rp.DocsSections = append([]string(nil), rp.DocsSections...)
 		wopts := opts
 		wopts.Out = out
-		attemptCtx, cancel := context.WithTimeout(ctx, genRepoTimeout)
-		defer cancel()
-		res := genOneRepo(attemptCtx, plan, repoName, &rp, wopts)
+		res := genOneRepoWithRetry(ctx, plan, repoName, &rp, wopts, genRetries, genRepoTimeout)
 		return genWorkerResult{repo: repoName, plan: rp, res: res}
 	}
 
@@ -370,6 +455,7 @@ func resolveGenRepos(plan *release.ReleasePlan, opts genOptions) ([]string, erro
 	sort.Strings(extras)
 	order = append(order, extras...)
 
+	var out []string
 	if len(opts.Repos) > 0 {
 		want := map[string]bool{}
 		for _, r := range opts.Repos {
@@ -378,23 +464,35 @@ func resolveGenRepos(plan *release.ReleasePlan, opts genOptions) ([]string, erro
 			}
 			want[r] = true
 		}
-		var out []string
 		for _, r := range order {
 			if want[r] {
 				out = append(out, r)
 			}
 		}
-		return out, nil
-	}
-
-	var out []string
-	for _, r := range order {
-		if plan.Repos[r] != nil && plan.Repos[r].Selected {
-			out = append(out, r)
+	} else {
+		for _, r := range order {
+			if plan.Repos[r] != nil && plan.Repos[r].Selected {
+				out = append(out, r)
+			}
+		}
+		if len(out) == 0 {
+			return nil, fmt.Errorf("no selected repos in the plan; pass --repo to target repos explicitly")
 		}
 	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("no selected repos in the plan; pass --repo to target repos explicitly")
+
+	// --retry-failed narrows the selection to repos whose last gen run
+	// recorded an error, making a post-mortem re-run one command.
+	if opts.RetryFailed {
+		var failed []string
+		for _, r := range out {
+			if plan.Repos[r] != nil && strings.TrimSpace(plan.Repos[r].GenError) != "" {
+				failed = append(failed, r)
+			}
+		}
+		if len(failed) == 0 {
+			return nil, fmt.Errorf("--retry-failed: none of the %d resolved repo(s) has a recorded gen error", len(out))
+		}
+		out = failed
 	}
 	return out, nil
 }
@@ -408,6 +506,7 @@ func genOneRepo(ctx context.Context, plan *release.ReleasePlan, repoName string,
 	repoPath, err := resolveGenRepoPath(plan, repoName)
 	if err != nil {
 		res.Err = err
+		res.failedStage = genStageResolve
 		repoPlan.GenError = err.Error()
 		return res
 	}
@@ -446,6 +545,7 @@ func genOneRepo(ctx context.Context, plan *release.ReleasePlan, repoName string,
 		// (a) Context freeze-verify — guard before any API spend.
 		if err := freezeVerifyContext(ctx, repoPath, opts); err != nil {
 			res.Err = err
+			res.failedStage = genStageFreezeVerify
 			repoPlan.GenError = err.Error()
 			return res
 		}
@@ -455,7 +555,17 @@ func genOneRepo(ctx context.Context, plan *release.ReleasePlan, repoName string,
 		docsUsage, sections, docErr = runDocgenForRepo(ctx, repoPath, opts)
 		if docErr != nil {
 			res.Err = fmt.Errorf("docgen: %w", docErr)
+			res.failedStage = genStageDocgen
 			repoPlan.GenError = res.Err.Error()
+			// A partial docgen run still spent tokens (the usage report is
+			// written even on failure) and may name the failed sections —
+			// surface both so the retry wrapper can account and scope.
+			if docsUsage != nil {
+				res.CacheWriteTokens = docsUsage.TotalCacheWriteTokens
+				res.CacheReadTokens = docsUsage.TotalCacheReadTokens
+				res.EstCostUSD = docsUsage.TotalEstCostUSD
+				res.docsFailedSections = docsUsage.FailedSections
+			}
 			return res
 		}
 	}
@@ -464,6 +574,7 @@ func genOneRepo(ctx context.Context, plan *release.ReleasePlan, repoName string,
 	clUsage, staged, err := runChangelogRider(repoPath, repoName, repoPlan, opts)
 	if err != nil {
 		res.Err = fmt.Errorf("changelog: %w", err)
+		res.failedStage = genStageChangelog
 		repoPlan.GenError = res.Err.Error()
 		// Docs succeeded; record that partial progress below before returning.
 	}
@@ -516,6 +627,98 @@ func genOneRepo(ctx context.Context, plan *release.ReleasePlan, repoName string,
 	return res
 }
 
+// genOneRepoWithRetry runs genOneRepo with bounded retries for transient
+// failures, holding the worker's slot for the whole sequence so concurrency
+// stays honest. Each attempt gets a fresh per-attempt timeout. Later attempts
+// are scoped to the work that actually failed: a docgen failure whose usage
+// report names the failed sections retries only those sections (falling back
+// to a full re-run when the shelled docgen is too old to report them), and a
+// changelog failure after staged docs retries changelog-only. Cache usage is
+// accumulated across attempts — every attempt's spend is real spend — and the
+// attempt count is recorded on the repo plan for the TUI.
+func genOneRepoWithRetry(ctx context.Context, plan *release.ReleasePlan, repoName string, rp *release.RepoReleasePlan, opts genOptions, retries int, attemptTimeout time.Duration) genRepoResult {
+	origSections := append([]string(nil), opts.Sections...)
+
+	var totWrite, totRead int64
+	var totCost float64
+	docsDone := false   // docs staged by an earlier attempt this run
+	docsSections := "-" // sections string from that successful docs attempt
+	scopedRetry := false
+
+	var res genRepoResult
+	attempt := 0
+	backoff := genRetryInitialBackoff
+	for {
+		attempt++
+		attemptCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
+		res = genOneRepo(attemptCtx, plan, repoName, rp, opts)
+		cancel()
+
+		totWrite += res.CacheWriteTokens
+		totRead += res.CacheReadTokens
+		totCost += res.EstCostUSD
+		rp.GenAttempts = attempt
+
+		if res.Err == nil || attempt > retries || !isRetryableGenError(res.Err) || ctx.Err() != nil {
+			break
+		}
+
+		// Narrow the next attempt to the failed work.
+		switch res.failedStage {
+		case genStageDocgen:
+			if len(res.docsFailedSections) > 0 {
+				opts.Sections = append([]string(nil), res.docsFailedSections...)
+				scopedRetry = true
+				opts.logf("retry will regenerate only the failed section(s): %s", strings.Join(res.docsFailedSections, ", "))
+			}
+		case genStageChangelog:
+			if !repoInSet(repoName, opts.SkipDocs) {
+				docsDone = true
+				docsSections = res.Sections
+				opts.SkipDocs = append(append([]string(nil), opts.SkipDocs...), repoName)
+				opts.logf("docs already staged; retry will regenerate the changelog only")
+			}
+		}
+
+		kind := "unclassified"
+		if isKnownTransientGenError(res.Err) {
+			kind = "transient"
+		}
+		sleep := backoff + time.Duration(rand.Int63n(int64(backoff)/2+1))
+		opts.logf("%s attempt %d/%d failed (%s error): %v — retrying in %s (a retry within the cache TTL rides the warmed prefix)",
+			repoName, attempt, retries+1, kind, res.Err, sleep.Round(time.Second))
+		select {
+		case <-ctx.Done():
+			return finalizeRetriedResult(res, rp, totWrite, totRead, totCost, docsDone, docsSections, scopedRetry, origSections)
+		case <-time.After(sleep):
+		}
+		backoff *= 2
+		if backoff > genRetryMaxBackoff {
+			backoff = genRetryMaxBackoff
+		}
+	}
+	return finalizeRetriedResult(res, rp, totWrite, totRead, totCost, docsDone, docsSections, scopedRetry, origSections)
+}
+
+// finalizeRetriedResult folds multi-attempt bookkeeping back into the final
+// result and the repo-plan copy: accumulated usage totals, the run's original
+// section scope (not a narrowed retry scope), and a "staged" status when docs
+// from an earlier attempt plus a retried changelog together completed the repo.
+func finalizeRetriedResult(res genRepoResult, rp *release.RepoReleasePlan, totWrite, totRead int64, totCost float64, docsDone bool, docsSections string, scopedRetry bool, origSections []string) genRepoResult {
+	res.CacheWriteTokens, res.CacheReadTokens, res.EstCostUSD = totWrite, totRead, totCost
+	rp.CacheWriteTokens, rp.CacheReadTokens, rp.GenEstCostUSD = totWrite, totRead, totCost
+	if res.Err == nil {
+		if docsDone {
+			res.Status = "staged"
+			res.Sections = docsSections
+		}
+		if scopedRetry || docsDone {
+			rp.DocsSections = append([]string{}, origSections...)
+		}
+	}
+	return res
+}
+
 // repoInSet reports whether repo appears in set (exact match).
 func repoInSet(repo string, set []string) bool {
 	for _, r := range set {
@@ -536,7 +739,7 @@ func resolveGenRepoPath(plan *release.ReleasePlan, repoName string) (string, err
 	if p := findRepositoryPath(repoName); p != "" {
 		return p, nil
 	}
-	return "", fmt.Errorf("could not locate repository %q under %s", repoName, plan.RootDir)
+	return "", &genPermanentError{fmt.Errorf("could not locate repository %q under %s", repoName, plan.RootDir)}
 }
 
 // freezeVerifyContext builds the repo's cx context and asserts the resulting
@@ -565,8 +768,10 @@ func freezeVerifyContext(ctx context.Context, repoPath string, opts genOptions) 
 // total byte count on success. Factored out of freezeVerifyContext so the guard
 // is unit-testable without cx or any API spend.
 func verifyContextFileset(repoPath string, files []string) (int64, error) {
+	// Floor violations are permanent: retrying an empty context cannot succeed
+	// and must never burn retry attempts.
 	if len(files) < genMinContextFiles {
-		return 0, fmt.Errorf("freeze-verify: cx produced no context files in %s (expected >= %d) — refusing to spend on an empty prefix", repoPath, genMinContextFiles)
+		return 0, &genPermanentError{fmt.Errorf("freeze-verify: cx produced no context files in %s (expected >= %d) — refusing to spend on an empty prefix", repoPath, genMinContextFiles)}
 	}
 	var totalBytes int64
 	for _, f := range files {
@@ -575,7 +780,7 @@ func verifyContextFileset(repoPath string, files []string) (int64, error) {
 		}
 	}
 	if totalBytes < genMinContextBytes {
-		return totalBytes, fmt.Errorf("freeze-verify: cx context is only %d bytes across %d file(s) in %s (floor %d) — refusing to spend on a near-empty prefix", totalBytes, len(files), repoPath, genMinContextBytes)
+		return totalBytes, &genPermanentError{fmt.Errorf("freeze-verify: cx context is only %d bytes across %d file(s) in %s (floor %d) — refusing to spend on a near-empty prefix", totalBytes, len(files), repoPath, genMinContextBytes)}
 	}
 	return totalBytes, nil
 }
@@ -668,11 +873,16 @@ type docgenUsageReport struct {
 	Sections []struct {
 		Section string `json:"section"`
 	} `json:"sections"`
-	TotalInputTokens      int64   `json:"total_input_tokens"`
-	TotalOutputTokens     int64   `json:"total_output_tokens"`
-	TotalCacheWriteTokens int64   `json:"total_cache_write_tokens"`
-	TotalCacheReadTokens  int64   `json:"total_cache_read_tokens"`
-	TotalEstCostUSD       float64 `json:"total_est_cost_usd"`
+	// FailedSections names the sections that failed, in a form docgen's -s
+	// accepts; absent/empty from an older docgen binary (grove shells the
+	// binary, so version skew is possible), in which case retries fall back to
+	// a full re-run.
+	FailedSections        []string `json:"failed_sections"`
+	TotalInputTokens      int64    `json:"total_input_tokens"`
+	TotalOutputTokens     int64    `json:"total_output_tokens"`
+	TotalCacheWriteTokens int64    `json:"total_cache_write_tokens"`
+	TotalCacheReadTokens  int64    `json:"total_cache_read_tokens"`
+	TotalEstCostUSD       float64  `json:"total_est_cost_usd"`
 }
 
 func parseDocgenUsageReport(path string) *docgenUsageReport {

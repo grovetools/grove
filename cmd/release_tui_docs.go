@@ -160,7 +160,11 @@ func approvalBlocker(repo *release.RepoReleasePlan) string {
 		return ""
 	}
 	if strings.TrimSpace(repo.GenError) != "" {
-		return "docs/changelog generation failed — " + firstLine(repo.GenError) + " (regenerate with 'G'/'g')"
+		msg := "docs/changelog generation failed"
+		if repo.GenAttempts > 1 {
+			msg = fmt.Sprintf("docs/changelog generation failed after %d attempts", repo.GenAttempts)
+		}
+		return msg + " — " + firstLine(repo.GenError) + " (regenerate with 'G'/'g')"
 	}
 	if strings.TrimSpace(repo.ChangelogGenError) != "" {
 		return "changelog generation failed — " + firstLine(repo.ChangelogGenError) + " (regenerate with 'g')"
