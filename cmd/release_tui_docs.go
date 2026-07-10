@@ -207,10 +207,10 @@ type docsRegenMsg struct {
 
 // regenDocsCmd regenerates docs (optionally a single section) for a repo through
 // the exact Phase 3 gen path (genOneRepo), so inline TUI regen and headless
-// `grove release gen --repo X --sections y` share one code path. docgen's
-// streaming output is redirected to io.Discard so it does not corrupt the
-// alt-screen; the TUI's `generating` flag guarantees only one regen runs at a
-// time, so scoping the gen flag globals here is safe.
+// `grove release gen --repo X --sections y` share one code path. It constructs
+// its own genOptions (model/diff/TTL empty ⇒ the same config-default fallbacks
+// as a flagless headless run) with docgen's streaming output routed to
+// io.Discard so it does not corrupt the alt-screen.
 func regenDocsCmd(plan *release.ReleasePlan, repoName, section string) tea.Cmd {
 	return func() tea.Msg {
 		repo, ok := plan.Repos[repoName]
@@ -218,23 +218,12 @@ func regenDocsCmd(plan *release.ReleasePlan, repoName, section string) tea.Cmd {
 			return docsRegenMsg{repoName: repoName, section: section, err: fmt.Errorf("repo %q not in plan", repoName)}
 		}
 
-		// Scope the shared gen flag globals for this single invocation, then
-		// restore them (the headless `gen` command owns them otherwise).
-		prevRepos, prevSections := genRepos, genSections
-		prevStdout := genDocgenStdout
-		genRepos = []string{repoName}
+		opts := genOptions{Repos: []string{repoName}, Out: io.Discard}
 		if section != "" {
-			genSections = []string{section}
-		} else {
-			genSections = nil
+			opts.Sections = []string{section}
 		}
-		genDocgenStdout = io.Discard
-		defer func() {
-			genRepos, genSections = prevRepos, prevSections
-			genDocgenStdout = prevStdout
-		}()
 
-		res := genOneRepo(context.Background(), plan, repoName, repo)
+		res := genOneRepo(context.Background(), plan, repoName, repo, opts)
 		_ = release.SavePlan(plan)
 
 		return docsRegenMsg{
