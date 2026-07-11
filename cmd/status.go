@@ -82,11 +82,116 @@ func runStatus(cmd *cobra.Command) error {
 	// Discover all verb columns dynamically
 	displayVerbs := discoverVerbs(scoped)
 
+	// Net-new federated surfaces (C17): fetch remote/local jobs and satellite
+	// health from the global daemon. These are SOFT — an older groved without
+	// the endpoints returns an error and we simply skip the section rather than
+	// failing the whole command (mirrors the errEndpointNotFound tolerance in
+	// core/pkg/daemon/remote.go).
+	jobs := softListJobs(ctx, client)
+	sats := softSatelliteStatuses(ctx, client)
+
 	if opts.JSONOutput {
-		return runStatusJSON(scoped, displayVerbs)
+		return runStatusJSON(scoped, displayVerbs, jobs, sats)
 	}
 
-	return runStatusTable(scoped, displayVerbs, showErrors)
+	return runStatusTable(scoped, displayVerbs, showErrors, jobs, sats)
+}
+
+// softListJobs fetches jobs, swallowing errors so `grove status` still renders
+// against an older daemon that lacks the endpoint.
+func softListJobs(ctx context.Context, client daemon.Client) []*models.JobInfo {
+	jobs, err := client.ListJobs(ctx, models.JobFilter{})
+	if err != nil {
+		return nil
+	}
+	return jobs
+}
+
+// softSatelliteStatuses fetches satellite health, swallowing errors (older
+// groved → skip the section).
+func softSatelliteStatuses(ctx context.Context, client daemon.Client) map[string]*models.SatelliteStatus {
+	sats, err := client.GetSatelliteStatuses(ctx)
+	if err != nil {
+		return nil
+	}
+	return sats
+}
+
+// jobIsRecent keeps non-terminal jobs plus jobs that reached a terminal state
+// within the last hour, so the Jobs section shows live and just-finished work.
+func jobIsRecent(job *models.JobInfo) bool {
+	switch job.Status {
+	case "completed", "failed", "cancelled":
+		if job.CompletedAt == nil {
+			return false
+		}
+		return time.Since(*job.CompletedAt) <= time.Hour
+	default:
+		return true
+	}
+}
+
+// renderJobsSection prints the federated Jobs table (C17). Origin renders the
+// satellite registry name, or "local" when empty. Remote-supplied strings were
+// already sanitized at the collector boundary (C9), so no re-sanitization here.
+func renderJobsSection(jobs []*models.JobInfo) {
+	var rows [][]string
+	for _, job := range jobs {
+		if job == nil || !jobIsRecent(job) {
+			continue
+		}
+		name := job.JobFile
+		if name == "" {
+			name = job.ID
+		}
+		origin := job.Origin
+		if origin == "" {
+			origin = "local"
+		}
+		rows = append(rows, []string{name, job.PlanName, job.Status, origin, timeAgo(job.SubmittedAt)})
+	}
+	if len(rows) == 0 {
+		return
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i][0] < rows[j][0] })
+	tbl := table.NewStyledTable().
+		Headers("Job", "Plan", "Status", "Origin", "Age").
+		Rows(rows...)
+	fmt.Println("\nJobs:")
+	fmt.Println(tbl.Render())
+}
+
+// renderSatellitesSection prints satellite connection health (C17), only when
+// at least one satellite is known.
+func renderSatellitesSection(sats map[string]*models.SatelliteStatus) {
+	if len(sats) == 0 {
+		return
+	}
+	names := make([]string, 0, len(sats))
+	for n := range sats {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	var rows [][]string
+	for _, name := range names {
+		st := sats[name]
+		if st == nil {
+			continue
+		}
+		since := "-"
+		if !st.Since.IsZero() {
+			since = timeAgo(st.Since)
+		}
+		rows = append(rows, []string{name, st.State, st.Addr, since, st.LastError})
+	}
+	if len(rows) == 0 {
+		return
+	}
+	tbl := table.NewStyledTable().
+		Headers("Satellite", "State", "Addr", "Since", "Last Error").
+		Rows(rows...)
+	fmt.Println("\nSatellites:")
+	fmt.Println(tbl.Render())
 }
 
 func discoverVerbs(workspaces []*models.EnrichedWorkspace) []string {
@@ -125,7 +230,7 @@ func verbDisplayName(verb string) string {
 	return strings.Join(parts, "-")
 }
 
-func runStatusTable(scoped []*models.EnrichedWorkspace, displayVerbs []string, showErrors bool) error {
+func runStatusTable(scoped []*models.EnrichedWorkspace, displayVerbs []string, showErrors bool, jobs []*models.JobInfo, sats map[string]*models.SatelliteStatus) error {
 	t := theme.DefaultTheme
 
 	headers := []string{"Workspace", "Branch", "Dirty"}
@@ -171,6 +276,10 @@ func runStatusTable(scoped []*models.EnrichedWorkspace, displayVerbs []string, s
 		Rows(rows...)
 
 	fmt.Println(tbl.Render())
+
+	// Federated Jobs + Satellites sections (C17). Empty inputs render nothing.
+	renderJobsSection(jobs)
+	renderSatellitesSection(sats)
 
 	if showErrors {
 		if len(failures) > 0 {
@@ -246,7 +355,7 @@ func runStatusTable(scoped []*models.EnrichedWorkspace, displayVerbs []string, s
 	return nil
 }
 
-func runStatusJSON(scoped []*models.EnrichedWorkspace, displayVerbs []string) error {
+func runStatusJSON(scoped []*models.EnrichedWorkspace, displayVerbs []string, jobs []*models.JobInfo, sats map[string]*models.SatelliteStatus) error {
 	type JSONTaskResult struct {
 		ExitCode     int    `json:"exit_code"`
 		DurationMs   int64  `json:"duration_ms"`
@@ -301,10 +410,41 @@ func runStatusJSON(scoped []*models.EnrichedWorkspace, displayVerbs []string) er
 		})
 	}
 
+	// Jobs (C17): emit the federated rows the Store holds, unmodified. Origin
+	// serializes automatically (empty == local).
+	type JSONJob struct {
+		ID          string `json:"id"`
+		JobFile     string `json:"job_file"`
+		PlanName    string `json:"plan_name,omitempty"`
+		Status      string `json:"status"`
+		Origin      string `json:"origin,omitempty"`
+		SubmittedAt string `json:"submitted_at,omitempty"`
+	}
+	jobsOut := make([]JSONJob, 0, len(jobs))
+	for _, job := range jobs {
+		if job == nil {
+			continue
+		}
+		submitted := ""
+		if !job.SubmittedAt.IsZero() {
+			submitted = job.SubmittedAt.Format(time.RFC3339)
+		}
+		jobsOut = append(jobsOut, JSONJob{
+			ID:          job.ID,
+			JobFile:     job.JobFile,
+			PlanName:    job.PlanName,
+			Status:      job.Status,
+			Origin:      job.Origin,
+			SubmittedAt: submitted,
+		})
+	}
+
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(map[string]any{
 		"workspaces": output,
+		"jobs":       jobsOut,
+		"satellites": sats,
 	})
 }
 
