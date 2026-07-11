@@ -48,6 +48,7 @@ func init() {
 	rootCmd.AddCommand(newKeysCmd())
 	rootCmd.AddCommand(newLintCmd())
 	rootCmd.AddCommand(newRecordCmd())
+	rootCmd.AddCommand(newSatelliteCmd())
 	rootCmd.AddCommand(newSchemaCmd())
 	rootCmd.AddCommand(newSetupCmd())
 	rootCmd.AddCommand(newStatusCmd())
