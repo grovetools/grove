@@ -74,11 +74,6 @@ func runStatus(cmd *cobra.Command) error {
 		}
 	}
 
-	if len(scoped) == 0 {
-		fmt.Println("No workspaces found.")
-		return nil
-	}
-
 	// Discover all verb columns dynamically
 	displayVerbs := discoverVerbs(scoped)
 
@@ -87,6 +82,11 @@ func runStatus(cmd *cobra.Command) error {
 	// the endpoints returns an error and we simply skip the section rather than
 	// failing the whole command (mirrors the errEndpointNotFound tolerance in
 	// core/pkg/daemon/remote.go).
+	//
+	// NOTE: fetched even when zero workspaces were discovered — satellite
+	// health and federated jobs come from the daemon, not from workspaces, so
+	// their sections must render regardless (the zero-workspaces message is
+	// handled inside runStatusTable).
 	jobs := softListJobs(ctx, client)
 	sats := softSatelliteStatuses(ctx, client)
 
@@ -231,6 +231,17 @@ func verbDisplayName(verb string) string {
 }
 
 func runStatusTable(scoped []*models.EnrichedWorkspace, displayVerbs []string, showErrors bool, jobs []*models.JobInfo, sats map[string]*models.SatelliteStatus) error {
+	// Zero workspaces is not a reason to skip the federated sections: satellite
+	// health and jobs come from the daemon, not from workspace discovery.
+	// Empty jobs/sats still render nothing, preserving the plain
+	// "No workspaces found." output when nothing federated is configured.
+	if len(scoped) == 0 {
+		fmt.Println("No workspaces found.")
+		renderJobsSection(jobs)
+		renderSatellitesSection(sats)
+		return nil
+	}
+
 	t := theme.DefaultTheme
 
 	headers := []string{"Workspace", "Branch", "Dirty"}
