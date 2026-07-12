@@ -62,6 +62,7 @@ from and dispatches to over SSH (M2). 'up' is billable — it creates cloud
 resources via terraform.`
 	cmd.AddCommand(newSatelliteUpCmd())
 	cmd.AddCommand(newSatelliteUpgradeCmd())
+	cmd.AddCommand(newSatelliteConfigCmd())
 	cmd.AddCommand(newSatelliteDownCmd())
 	cmd.AddCommand(newSatelliteStatusCmd())
 	cmd.AddCommand(newSatelliteListCmd())
@@ -105,7 +106,13 @@ config the registry lives in; the matching flags override the block:
 
 Token commands run locally through your shell BEFORE terraform (a failing
 command aborts the provision while it is still free), and the tokens are piped
-to the bootstrap script on stdin — never argv (its documented framing).`
+to the bootstrap script on stdin — never argv (its documented framing).
+
+Config propagation: if the entry also declares seed_fragments or a
+[satellites.<name>.config] table, 'up' pushes them to the VM's ~/.config/grove
+after bootstrap — the same code path as 'grove satellite config push' (see its
+help for the denylist and precedence story). The set is validated BEFORE
+terraform so a denied fragment aborts while the provision is still free.`
 	cmd.Args = cobra.ExactArgs(1)
 	cmd.SilenceUsage = true
 	cmd.Flags().StringVar(&project, "project", "", "GCP project id (terraform var project_id) [required]")
@@ -144,6 +151,27 @@ to the bootstrap script on stdin — never argv (its documented framing).`
 			ServiceAccount: serviceAccount,
 			ServiceAccSet:  cmd.Flags().Changed("service-account"),
 		})
+
+		// Config propagation ([satellites.<name>].seed_fragments + .config):
+		// assemble + validate NOW — before terraform — so a denied/missing
+		// fragment aborts while the provision is still free (same fail-fast
+		// stance as the token commands). The actual push happens after
+		// bootstrap + socket probe, sharing `config push`'s code path.
+		prop, err := loadSatelliteConfigPropagation(name)
+		if err != nil {
+			return err
+		}
+		var configPushFiles []satellitePushFile
+		if prop.hasConfigToPush() {
+			laptopConfigDir := paths.ConfigDir()
+			if laptopConfigDir == "" {
+				return fmt.Errorf("could not resolve the laptop's grove config directory")
+			}
+			if configPushFiles, err = assembleSatellitePush(name, prop, laptopConfigDir); err != nil {
+				return err
+			}
+		}
+
 		tfAbs, err := filepath.Abs(tfDir)
 		if err != nil {
 			return fmt.Errorf("resolve --tf-dir: %w", err)
@@ -266,6 +294,18 @@ to the bootstrap script on stdin — never argv (its documented framing).`
 		// 5c. Write the [satellites.<name>] registry entry.
 		if err := writeSatelliteRegistry(name, entry); err != nil {
 			return fmt.Errorf("write registry entry: %w", err)
+		}
+
+		// 5d. Config propagation: ship the fragment set assembled (and
+		// validated) before terraform — the same code path as `grove
+		// satellite config push`. Non-fatal: the VM is provisioned and
+		// registered; a transport hiccup here is retried with the verb.
+		if len(configPushFiles) > 0 {
+			fmt.Printf("\nPushing %d config fragment(s) to %q...\n", len(configPushFiles), name)
+			if err := pushSatelliteConfigOverSSH(name, entry, configPushFiles, false); err != nil {
+				fmt.Printf("warning: config push failed: %v\n", err)
+				fmt.Printf("  retry with: grove satellite config push %s\n", name)
+			}
 		}
 
 		// 6. Next steps — the registry loads only at daemon boot (same
