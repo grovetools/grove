@@ -213,7 +213,7 @@ Notes:
 
 		// (g) Verified by the restart script (is-active); laptop half.
 		fmt.Printf("\nSatellite %q upgraded (%s).\n", name, strings.Join(deltaRepoNames(updates), ", "))
-		printSatelliteNextSteps(entry.User, ssh.host, false)
+		printSatelliteNextSteps(false, entry.SyncLocalPort)
 		return nil
 	}
 	return cmd
@@ -759,34 +759,28 @@ func expandUserPath(p string) string {
 	return p
 }
 
-// printSatelliteNextSteps is the copy-paste laptop-half block `up` and
-// `upgrade` end with. Full laptop-side sync.toml automation is out of scope —
-// this points at the template instead.
-func printSatelliteNextSteps(user, ip string, freshProvision bool) {
-	dest := ip
-	if user != "" {
-		dest = user + "@" + ip
-	}
+// printSatelliteNextSteps is the laptop-half block `up` and `upgrade` end
+// with. The laptop sync half (token, push-only sync.toml, registry forward
+// fields) is automated by `up` now, and the daemon owns the syncd forward —
+// so the only remaining step is a daemon reload; there is no tunnel line.
+func printSatelliteNextSteps(freshProvision bool, syncPort int) {
 	fmt.Println()
 	fmt.Println("Next steps (laptop side):")
 	if freshProvision {
-		fmt.Println("  1. Reload the laptop daemon's satellite registry (loads only at boot):")
+		fmt.Println("  1. Reload the laptop daemon — the satellite registry and sync config")
+		fmt.Println("     load only at boot:")
 		fmt.Println("       groved upgrade --global   # or restart your groved service")
-		fmt.Println("  2. Tunnel note-sync to the VM's syncd (keep open while syncing):")
-		fmt.Printf("       ssh -fN -L 8788:127.0.0.1:8788 %s\n", dest)
-		fmt.Println("  3. Point the laptop's sync at the tunnel (PUSH-only) — template:")
-		fmt.Println("       cloud/poc/grove-satellite/templates/sync.toml.laptop -> ~/.config/grove/sync.toml")
-		fmt.Println("     (bootstrap already fetched the token to ~/.config/grove/sync.token),")
-		fmt.Println("     then restart the laptop groved.")
-		fmt.Println("  4. Verify the connection:")
+		if syncPort != 0 {
+			fmt.Printf("     (it then binds 127.0.0.1:%d and forwards note-sync to the VM's\n", syncPort)
+			fmt.Println("      syncd over its pinned SSH connection — no manual tunnel)")
+		}
+		fmt.Println("  2. Verify the connection:")
 		fmt.Println("       grove satellite status")
 	} else {
 		fmt.Println("  - Nothing to restart here: the laptop daemon reconnects automatically")
-		fmt.Println("    (ConnManager backoff); the registry is unchanged.")
+		fmt.Println("    (ConnManager backoff) and re-establishes its sync forward; the")
+		fmt.Println("    registry is unchanged.")
 		fmt.Println("  - Verify the connection:")
 		fmt.Println("       grove satellite status")
-		fmt.Println("  - If your note-sync tunnel dropped during the restart, re-open it:")
-		fmt.Printf("       ssh -fN -L 8788:127.0.0.1:8788 %s\n", dest)
-		fmt.Println("    (laptop sync config stays ~/.config/grove/sync.toml, push-only)")
 	}
 }
