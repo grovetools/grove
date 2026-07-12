@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -15,7 +16,9 @@ import (
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/daemon"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/tui/components/table"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/grovetools/grove/pkg/setup"
@@ -106,6 +109,16 @@ func newSatelliteUpCmd() *cobra.Command {
 				return fmt.Errorf("could not auto-detect your public IP; pass --cidr (e.g. 203.0.113.7/32)")
 			}
 			fmt.Printf("Using detected SSH CIDR: %s\n", cidr)
+		}
+
+		// Persist the required (default-less) terraform variables as
+		// terraform.tfvars in the tf dir BEFORE apply, so `grove satellite
+		// down` can run terraform destroy non-interactively — variables.tf
+		// deliberately has no defaults for project_id/ssh_user/
+		// allowed_ssh_cidr. terraform auto-loads the file from the -chdir
+		// dir, and the PoC's .gitignore already excludes *.tfvars.
+		if err := writeSatelliteTFVars(tfAbs, project, sshUser, cidr, name, zone); err != nil {
+			return fmt.Errorf("write %s: %w", satelliteTFVarsName, err)
 		}
 
 		// 1. terraform init + apply (subprocess, inherited stdio — terraform
@@ -208,8 +221,16 @@ func newSatelliteDownCmd() *cobra.Command {
 		bestEffortDeregisterCursors(name, syncOriginID)
 
 		// 2. terraform destroy (subprocess, inherited stdio — terraform runs
-		//    its own confirmation).
-		destroyArgs := []string{"-chdir=" + tfAbs, "destroy", "-var", "vm_name=" + name}
+		//    its own confirmation). Destroy needs the same required vars as
+		//    apply (variables.tf has no defaults for project_id/ssh_user/
+		//    allowed_ssh_cidr); `up` persists them as terraform.tfvars, and
+		//    -input=false makes a missing variable a hard error instead of an
+		//    interactive prompt so scripted teardown fails fast.
+		tfvarsPath := filepath.Join(tfAbs, satelliteTFVarsName)
+		if _, err := os.Stat(tfvarsPath); err != nil {
+			return fmt.Errorf("%s not found — `grove satellite up` writes it and terraform destroy needs project_id/ssh_user/allowed_ssh_cidr (no defaults in variables.tf); recreate it or run terraform destroy manually with -var flags: %w", tfvarsPath, err)
+		}
+		destroyArgs := []string{"-chdir=" + tfAbs, "destroy", "-input=false", "-var", "vm_name=" + name}
 		if err := runInherited(tfAbs, "terraform", destroyArgs...); err != nil {
 			return fmt.Errorf("terraform destroy: %w", err)
 		}
@@ -332,11 +353,38 @@ func loadConfiguredSatellites() map[string]satelliteConfigEntry {
 	return raw
 }
 
-// writeSatelliteRegistry writes/updates the [satellites.<name>] entry using
-// bootstrap.go's YAML plumbing (LoadGlobalConfig → SetValue → SaveGlobalConfig).
+// satelliteRegistryPath resolves the global config file the [satellites.*]
+// registry must land in: the SAME file core's loader (getXDGConfigPath in
+// core/config/config.go) will read back. The loader prefers ConfigDir/grove.toml
+// and only falls back to grove.yml when no grove.toml exists — so on a machine
+// with a grove.toml, writing the entry into grove.yml would make it silently
+// invisible to satellite.LoadRegistry and the whole up→daemon flow.
+func satelliteRegistryPath() (path string, isTOML bool, err error) {
+	configDir := paths.ConfigDir()
+	if configDir == "" {
+		return "", false, fmt.Errorf("could not resolve grove config directory")
+	}
+	tomlPath := filepath.Join(configDir, "grove.toml")
+	if _, statErr := os.Stat(tomlPath); statErr == nil {
+		return tomlPath, true, nil
+	}
+	return filepath.Join(configDir, "grove.yml"), false, nil
+}
+
+// writeSatelliteRegistry writes/updates the [satellites.<name>] entry in the
+// global config file the loader actually reads (see satelliteRegistryPath).
+// TOML configs get a targeted table splice (comment-preserving); YAML configs
+// use bootstrap.go's yaml.Node plumbing (LoadYAML → SetValue → SaveYAML).
 func writeSatelliteRegistry(name string, entry satelliteConfigEntry) error {
+	path, isTOML, err := satelliteRegistryPath()
+	if err != nil {
+		return err
+	}
+	if isTOML {
+		return upsertSatelliteTOMLTable(path, name, entry)
+	}
 	yh := setup.NewYAMLHandler(setup.NewService(false))
-	root, err := yh.LoadGlobalConfig()
+	root, err := yh.LoadYAML(path)
 	if err != nil {
 		return err
 	}
@@ -347,13 +395,30 @@ func writeSatelliteRegistry(name string, entry satelliteConfigEntry) error {
 	}, "satellites", name); err != nil {
 		return err
 	}
-	return yh.SaveGlobalConfig(root)
+	return yh.SaveYAML(path, root)
 }
 
-// removeSatelliteRegistry deletes the [satellites.<name>] entry.
+// removeSatelliteRegistry deletes the [satellites.<name>] entry from whichever
+// global config file the loader reads (symmetric with writeSatelliteRegistry).
 func removeSatelliteRegistry(name string) error {
+	path, isTOML, err := satelliteRegistryPath()
+	if err != nil {
+		return err
+	}
+	if isTOML {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		content, removed := removeSatelliteTOMLTable(string(data), name)
+		if !removed {
+			fmt.Printf("(no [satellites.%s] entry in grove config)\n", name)
+			return nil
+		}
+		return writeValidatedTOML(path, content)
+	}
 	yh := setup.NewYAMLHandler(setup.NewService(false))
-	root, err := yh.LoadGlobalConfig()
+	root, err := yh.LoadYAML(path)
 	if err != nil {
 		return err
 	}
@@ -361,7 +426,81 @@ func removeSatelliteRegistry(name string) error {
 		fmt.Printf("(no [satellites.%s] entry in grove config)\n", name)
 		return nil
 	}
-	return yh.SaveGlobalConfig(root)
+	return yh.SaveYAML(path, root)
+}
+
+// upsertSatelliteTOMLTable replaces-or-appends the [satellites.<name>] table in
+// a TOML global config as a targeted text splice. go-toml/v2 does not
+// round-trip comments or formatting, so re-marshaling the whole file (the
+// setup.TOMLHandler approach) would destroy the user's grove.toml; instead only
+// the one table block is edited and the rest of the file is preserved
+// byte-for-byte.
+func upsertSatelliteTOMLTable(path, name string, entry satelliteConfigEntry) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	content, _ := removeSatelliteTOMLTable(string(data), name)
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	content += fmt.Sprintf("\n[satellites.%s]\nssh_addr = %q\nuser = %q\nhost_key = %q\n",
+		tomlTableKey(name), entry.SSHAddr, entry.User, entry.HostKey)
+	return writeValidatedTOML(path, content)
+}
+
+// writeValidatedTOML writes an edited TOML config back, refusing to persist
+// content the loader could not parse (the splice helpers are textual, so this
+// is the safety net against ever corrupting the user's global config).
+func writeValidatedTOML(path, content string) error {
+	if err := toml.Unmarshal([]byte(content), &map[string]interface{}{}); err != nil {
+		return fmt.Errorf("refusing to write %s: edited TOML does not parse: %w", path, err)
+	}
+	perm := os.FileMode(0o600)
+	if info, err := os.Stat(path); err == nil {
+		perm = info.Mode().Perm()
+	}
+	return os.WriteFile(path, []byte(content), perm)
+}
+
+// bareTOMLKeyRe matches names usable as bare TOML keys; anything else is
+// written (and matched) in quoted form.
+var bareTOMLKeyRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// tomlTableKey renders a satellite name as a TOML table-path segment.
+func tomlTableKey(name string) string {
+	if bareTOMLKeyRe.MatchString(name) {
+		return name
+	}
+	return fmt.Sprintf("%q", name)
+}
+
+// removeSatelliteTOMLTable removes the [satellites.<name>] block — the header
+// line through the line before the next table header (or EOF) — from content.
+// Returns the edited content and whether a block was found.
+func removeSatelliteTOMLTable(content, name string) (string, bool) {
+	quoted := regexp.QuoteMeta(name)
+	header := regexp.MustCompile(`^\[\s*satellites\s*\.\s*(?:` + quoted + `|"` + quoted + `")\s*\]\s*(?:#.*)?$`)
+	lines := strings.Split(content, "\n")
+	out := make([]string, 0, len(lines))
+	removed := false
+	skipping := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if skipping {
+			if !strings.HasPrefix(trimmed, "[") {
+				continue // still inside the removed table's body
+			}
+			skipping = false
+		}
+		if header.MatchString(trimmed) {
+			skipping = true
+			removed = true
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n"), removed
 }
 
 // bestEffortDeregisterCursors calls the sync cursor-deregister endpoint (C19)
@@ -404,6 +543,28 @@ func bestEffortDeregisterCursors(name, syncOriginID string) {
 		}
 		_ = resp.Body.Close()
 	}
+}
+
+// satelliteTFVarsName is the variables file `up` persists into the terraform
+// dir (auto-loaded by terraform) so `down` can destroy non-interactively.
+const satelliteTFVarsName = "terraform.tfvars"
+
+// writeSatelliteTFVars persists the terraform variables that have no defaults
+// in variables.tf (plus vm_name/zone) so a later terraform destroy resolves
+// them without prompting. Values are %q-quoted, which is valid HCL string
+// syntax for these flag-derived inputs.
+func writeSatelliteTFVars(tfDir, project, sshUser, cidr, vmName, zone string) error {
+	var b strings.Builder
+	b.WriteString("# Generated by `grove satellite up`. `grove satellite down` relies on this\n")
+	b.WriteString("# file so terraform destroy runs without prompting for variables.\n")
+	fmt.Fprintf(&b, "project_id       = %q\n", project)
+	fmt.Fprintf(&b, "ssh_user         = %q\n", sshUser)
+	fmt.Fprintf(&b, "allowed_ssh_cidr = %q\n", cidr)
+	fmt.Fprintf(&b, "vm_name          = %q\n", vmName)
+	if zone != "" {
+		fmt.Fprintf(&b, "zone             = %q\n", zone)
+	}
+	return os.WriteFile(filepath.Join(tfDir, satelliteTFVarsName), []byte(b.String()), 0o600)
 }
 
 // --- small subprocess / prompt helpers ---
