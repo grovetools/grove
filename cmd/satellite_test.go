@@ -198,7 +198,7 @@ ssh_addr = "5.6.7.8:22"
 // round-trip is asserted through a real parser.
 func TestWriteSatelliteTFVars(t *testing.T) {
 	dir := t.TempDir()
-	if err := writeSatelliteTFVars(dir, "my-proj", "solair", "203.0.113.7/32", "sat1", ""); err != nil {
+	if err := writeSatelliteTFVars(dir, "my-proj", "solair", "203.0.113.7/32", "sat1", "", ""); err != nil {
 		t.Fatalf("writeSatelliteTFVars: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, satelliteTFVarsName))
@@ -223,17 +223,23 @@ func TestWriteSatelliteTFVars(t *testing.T) {
 	if _, ok := vars["zone"]; ok {
 		t.Fatalf("zone should be omitted when unset:\n%s", data)
 	}
+	if _, ok := vars["service_account_email"]; ok {
+		t.Fatalf("service_account_email should be omitted when unset:\n%s", data)
+	}
 
-	// With a zone override it must be persisted too.
-	if err := writeSatelliteTFVars(dir, "my-proj", "solair", "203.0.113.7/32", "sat1", "us-west1-a"); err != nil {
-		t.Fatalf("writeSatelliteTFVars (zone): %v", err)
+	// With zone + service account overrides they must be persisted too.
+	if err := writeSatelliteTFVars(dir, "my-proj", "solair", "203.0.113.7/32", "sat1", "us-west1-a", "sa@my-proj.iam.gserviceaccount.com"); err != nil {
+		t.Fatalf("writeSatelliteTFVars (zone+sa): %v", err)
 	}
 	data, _ = os.ReadFile(filepath.Join(dir, satelliteTFVarsName))
 	vars = map[string]string{}
 	if err := toml.Unmarshal(data, &vars); err != nil {
-		t.Fatalf("tfvars (zone) did not parse: %v\n%s", err, data)
+		t.Fatalf("tfvars (zone+sa) did not parse: %v\n%s", err, data)
 	}
 	if vars["zone"] != "us-west1-a" {
 		t.Fatalf("tfvars[zone] = %q, want us-west1-a\n%s", vars["zone"], data)
+	}
+	if vars["service_account_email"] != "sa@my-proj.iam.gserviceaccount.com" {
+		t.Fatalf("tfvars[service_account_email] = %q\n%s", vars["service_account_email"], data)
 	}
 }
