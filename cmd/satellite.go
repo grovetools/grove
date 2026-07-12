@@ -40,6 +40,14 @@ type satelliteConfigEntry struct {
 	// /run/user/<uid>/grove/groved.sock. Written explicitly because the
 	// daemon's remoteSocketPath default guesses wrong on the real VM.
 	SocketPath string `yaml:"socket_path"`
+	// SyncLocalPort is the laptop-local port the daemon binds
+	// (127.0.0.1:<port>) and forwards to the VM's syncd over its pinned SSH
+	// connection. 0/absent = daemon sync forward off (fixed M2 contract with
+	// the daemon side).
+	SyncLocalPort int `yaml:"sync_local_port"`
+	// SyncRemoteAddr is the VM-side syncd address the forward dials.
+	// Optional; the daemon defaults it to 127.0.0.1:8788.
+	SyncRemoteAddr string `yaml:"sync_remote_addr"`
 }
 
 // newSatelliteCmd is the `grove satellite` noun. It wraps the PoC
@@ -88,6 +96,9 @@ func newSatelliteUpCmd() *cobra.Command {
 		claudeTokenCmd string
 		dotfilesRepo   string
 		serviceAccount string
+		syncPort       int
+		syncWorkspaces string
+		reloadDaemon   bool
 	)
 	cmd := cli.NewStandardCommand("up <name>", "Provision a satellite VM (billable)")
 	cmd.Long = `Provision a satellite VM: terraform apply, host-key pin, bootstrap, registry.
@@ -112,7 +123,15 @@ Config propagation: if the entry also declares seed_fragments or a
 [satellites.<name>.config] table, 'up' pushes them to the VM's ~/.config/grove
 after bootstrap — the same code path as 'grove satellite config push' (see its
 help for the denylist and precedence story). The set is validated BEFORE
-terraform so a denied fragment aborts while the provision is still free.`
+terraform so a denied fragment aborts while the provision is still free.
+
+Note sync (laptop half, automated): 'up' verifies the sync token bootstrap
+fetched, writes/merges the laptop's PUSH-ONLY sync.toml (never a pull entry),
+and records sync_local_port/sync_remote_addr in the registry entry so the
+laptop daemon binds 127.0.0.1:<port> and forwards note-sync to the VM's syncd
+over its pinned SSH connection — no manual tunnel. Workspaces come from a
+[satellites.<name>.sync] block (workspaces = ["cloud", "grovetools"]) with
+--sync-workspaces overriding; --sync-port 0 disables the whole sync half.`
 	cmd.Args = cobra.ExactArgs(1)
 	cmd.SilenceUsage = true
 	cmd.Flags().StringVar(&project, "project", "", "GCP project id (terraform var project_id) [required]")
@@ -127,6 +146,9 @@ terraform so a denied fragment aborts while the provision is still free.`
 	cmd.Flags().StringVar(&claudeTokenCmd, "claude-token-cmd", "", "Local command producing CLAUDE_CODE_OAUTH_TOKEN, piped to bootstrap; implies --claude (overrides provision config; empty disables)")
 	cmd.Flags().StringVar(&dotfilesRepo, "dotfiles-repo", "", "Dotfiles repo cloned + installed on the VM, best-effort (overrides provision config; empty disables)")
 	cmd.Flags().StringVar(&serviceAccount, "service-account", "", "Service account email attached to the VM (terraform var service_account_email; overrides provision config; empty disables)")
+	cmd.Flags().IntVar(&syncPort, "sync-port", defaultSyncLocalPort, "Laptop-local port the daemon binds and forwards to the VM's syncd (registry sync_local_port; 0 disables the sync forward and laptop sync setup)")
+	cmd.Flags().StringVar(&syncWorkspaces, "sync-workspaces", "", "Comma-separated workspaces to sync with the VM (overrides [satellites.<name>.sync] workspaces; default "+strings.Join(defaultSatelliteSyncWorkspaces, ",")+")")
+	cmd.Flags().BoolVar(&reloadDaemon, "reload-daemon", false, "Run 'groved upgrade --global' at the end so the daemon loads the new registry + sync forward")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		if project == "" || sshUser == "" {
@@ -151,6 +173,20 @@ terraform so a denied fragment aborts while the provision is still free.`
 			ServiceAccount: serviceAccount,
 			ServiceAccSet:  cmd.Flags().Changed("service-account"),
 		})
+
+		// Note-sync inputs: [satellites.<name>.sync] workspaces with the
+		// --sync-workspaces flag winning (same flag>config stance as the
+		// provision block). Resolved before terraform: the list drives both
+		// the bootstrap script's VM-side sync.toml (--workspaces) and the
+		// laptop's push-only sync.toml after bootstrap.
+		if syncPort < 0 || syncPort > 65535 {
+			return fmt.Errorf("--sync-port %d out of range (0-65535; 0 disables the sync forward)", syncPort)
+		}
+		syncOpts, err := loadSatelliteSyncOptions(name)
+		if err != nil {
+			return err
+		}
+		resolvedSyncWorkspaces := resolveSatelliteSyncWorkspaces(syncOpts, syncWorkspaces, cmd.Flags().Changed("sync-workspaces"))
 
 		// Config propagation ([satellites.<name>].seed_fragments + .config):
 		// assemble + validate NOW — before terraform — so a denied/missing
@@ -260,6 +296,10 @@ terraform so a denied fragment aborts while the provision is still free.`
 			return fmt.Errorf("bootstrap script not found at %q: %w", bootstrapScript, err)
 		}
 		provArgs, secretStdin := buildBootstrapProvision(prov, ghToken, claudeToken)
+		// The resolved sync workspaces drive the VM's pull-enabled sync.toml
+		// (bootstrap step 5). Always passed — an explicitly empty flag value
+		// means "no sync workspaces" on the VM too.
+		provArgs = append(provArgs, "--workspaces", strings.Join(resolvedSyncWorkspaces, ","))
 		bootstrapArgs := append([]string{bootstrapScript, sshUser + "@" + ip}, provArgs...)
 		if err := runInheritedWithStdin(tfAbs, secretStdin, "bash", bootstrapArgs...); err != nil {
 			return fmt.Errorf("satellite bootstrap: %w", err)
@@ -274,6 +314,14 @@ terraform so a denied fragment aborts while the provision is still free.`
 		}
 		if identityFile != "" {
 			entry.IdentityFile = expandUserPath(identityFile)
+		}
+		// Sync forward fields (fixed M2 contract with the daemon side): the
+		// daemon binds 127.0.0.1:<sync_local_port> and forwards to the VM's
+		// syncd over the pinned SSH connection. 0 = forward off (fields
+		// omitted so the entry stays minimal).
+		if syncPort != 0 {
+			entry.SyncLocalPort = syncPort
+			entry.SyncRemoteAddr = defaultSyncRemoteAddr
 		}
 
 		// 5b. Probe the VM for the remote groved socket path
@@ -308,14 +356,39 @@ terraform so a denied fragment aborts while the provision is still free.`
 			}
 		}
 
-		// 6. Next steps — the registry loads only at daemon boot (same
-		//    constraint as sync transport registration in groved.go), and the
-		//    laptop sync half (tunnel + push-only sync.toml) is manual.
+		// 5e. Laptop sync finishing: verify the token bootstrap fetched and
+		// create-or-merge the laptop's PUSH-ONLY sync.toml. The registry
+		// entry (5c) already carries the forward fields; the daemon owns the
+		// tunnel from its next boot. Errors here are real errors (with
+		// remediation in the message) — but the VM is provisioned and
+		// registered, so a re-run is cheap.
+		if syncPort != 0 {
+			laptopConfigDir := paths.ConfigDir()
+			if laptopConfigDir == "" {
+				return fmt.Errorf("could not resolve the laptop's grove config directory for sync setup")
+			}
+			fmt.Println()
+			if err := setupLaptopSyncConfig(laptopConfigDir, syncPort, resolvedSyncWorkspaces, os.Stdout); err != nil {
+				return fmt.Errorf("laptop sync setup (the VM is provisioned and registered; fix and re-run `grove satellite up %s`): %w", name, err)
+			}
+		}
+
+		// 6. Next steps — the registry AND sync config load only at daemon
+		//    boot (same constraint as sync transport registration in
+		//    groved.go). The daemon owns the sync forward now; there is no
+		//    manual tunnel step anymore.
 		fmt.Printf("\nSatellite %q provisioned at %s.\n", name, ip)
-		printSatelliteNextSteps(sshUser, ip, true)
+		printSatelliteNextSteps(true, syncPort)
 		fmt.Println()
 		fmt.Println("Note: the satellite's sync origin_id (C20) is minted per-install on the VM")
 		fmt.Println("and is disposable; the registry name above is the stable federation Origin (C6).")
+		if reloadDaemon {
+			fmt.Println("\n--reload-daemon: running `groved upgrade --global`...")
+			if err := runInherited("", "groved", "upgrade", "--global"); err != nil {
+				fmt.Printf("warning: groved upgrade --global failed: %v\n", err)
+				fmt.Println("  run it manually so the daemon loads the new registry + sync forward.")
+			}
+		}
 		return nil
 	}
 	return cmd
@@ -372,8 +445,14 @@ func newSatelliteDownCmd() *cobra.Command {
 		}
 
 		fmt.Printf("\nSatellite %q destroyed and deregistered.\n", name)
-		fmt.Println("Restart the global daemon to drop its connection:")
+		fmt.Println("Restart the global daemon to drop its connection (the sync port-forward")
+		fmt.Println("disappears with the registry entry):")
 		fmt.Println("  groved upgrade --global")
+		if configDir := paths.ConfigDir(); configDir != "" {
+			fmt.Println()
+			fmt.Printf("Note: the laptop sync config keeps its workspace entries (%s)\n", filepath.Join(configDir, syncConfigFileName))
+			fmt.Printf("and the sync token (%s) — remove them manually if unwanted.\n", filepath.Join(configDir, syncTokenFileName))
+		}
 		return nil
 	}
 	return cmd
@@ -530,6 +609,12 @@ func writeSatelliteRegistry(name string, entry satelliteConfigEntry) error {
 	if entry.SocketPath != "" {
 		values["socket_path"] = entry.SocketPath
 	}
+	if entry.SyncLocalPort != 0 {
+		values["sync_local_port"] = entry.SyncLocalPort
+	}
+	if entry.SyncRemoteAddr != "" {
+		values["sync_remote_addr"] = entry.SyncRemoteAddr
+	}
 	if err := setup.SetValue(root, values, "satellites", name); err != nil {
 		return err
 	}
@@ -592,6 +677,12 @@ func upsertSatelliteTOMLTable(path, name string, entry satelliteConfigEntry) err
 	}
 	if entry.SocketPath != "" {
 		fmt.Fprintf(&table, "socket_path = %q\n", entry.SocketPath)
+	}
+	if entry.SyncLocalPort != 0 {
+		fmt.Fprintf(&table, "sync_local_port = %d\n", entry.SyncLocalPort)
+	}
+	if entry.SyncRemoteAddr != "" {
+		fmt.Fprintf(&table, "sync_remote_addr = %q\n", entry.SyncRemoteAddr)
 	}
 	content += table.String()
 	return writeValidatedTOML(path, content)
