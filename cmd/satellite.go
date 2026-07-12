@@ -33,6 +33,13 @@ type satelliteConfigEntry struct {
 	SSHAddr string `yaml:"ssh_addr"`
 	User    string `yaml:"user"`
 	HostKey string `yaml:"host_key"`
+	// IdentityFile is the optional SSH private key `up --identity-file` was
+	// invoked with (empty = agent-only auth, matching SatelliteConfig).
+	IdentityFile string `yaml:"identity_file"`
+	// SocketPath is the remote groved unix socket, probed post-bootstrap as
+	// /run/user/<uid>/grove/groved.sock. Written explicitly because the
+	// daemon's remoteSocketPath default guesses wrong on the real VM.
+	SocketPath string `yaml:"socket_path"`
 }
 
 // newSatelliteCmd is the `grove satellite` noun. It wraps the PoC
@@ -54,6 +61,7 @@ A satellite is a whole-host grove daemon the laptop federates jobs/sessions
 from and dispatches to over SSH (M2). 'up' is billable — it creates cloud
 resources via terraform.`
 	cmd.AddCommand(newSatelliteUpCmd())
+	cmd.AddCommand(newSatelliteUpgradeCmd())
 	cmd.AddCommand(newSatelliteDownCmd())
 	cmd.AddCommand(newSatelliteStatusCmd())
 	cmd.AddCommand(newSatelliteListCmd())
@@ -67,12 +75,13 @@ const defaultTerraformDir = "cloud/poc/grove-satellite/terraform"
 
 func newSatelliteUpCmd() *cobra.Command {
 	var (
-		project   string
-		sshUser   string
-		cidr      string
-		zone      string
-		tfDir     string
-		assumeYes bool
+		project      string
+		sshUser      string
+		cidr         string
+		zone         string
+		tfDir        string
+		identityFile string
+		assumeYes    bool
 	)
 	cmd := cli.NewStandardCommand("up <name>", "Provision a satellite VM (billable)")
 	cmd.Args = cobra.ExactArgs(1)
@@ -82,6 +91,7 @@ func newSatelliteUpCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cidr, "cidr", "", "CIDR allowed to reach :22 (default: your public IP /32 via ifconfig.me)")
 	cmd.Flags().StringVar(&zone, "zone", "", "GCP zone override (terraform var zone)")
 	cmd.Flags().StringVar(&tfDir, "tf-dir", defaultTerraformDir, "Path to the grove-satellite terraform directory")
+	cmd.Flags().StringVar(&identityFile, "identity-file", "", "SSH private key for the satellite (written to the registry as identity_file; default: agent-only auth)")
 	cmd.Flags().BoolVar(&assumeYes, "yes", false, "Skip the billable-resource confirmation prompt")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		name := args[0]
@@ -167,21 +177,42 @@ func newSatelliteUpCmd() *cobra.Command {
 			return fmt.Errorf("satellite bootstrap: %w", err)
 		}
 
-		// 5. Write the [satellites.<name>] registry entry (yaml keys match P7's
-		//    SatelliteConfig tags). This is exactly what LoadRegistry reads.
-		if err := writeSatelliteRegistry(name, satelliteConfigEntry{
+		// 5. Assemble the registry entry (yaml keys match P7's SatelliteConfig
+		//    tags — exactly what LoadRegistry reads).
+		entry := satelliteConfigEntry{
 			SSHAddr: ip + ":22",
 			User:    sshUser,
 			HostKey: hostKey,
-		}); err != nil {
+		}
+		if identityFile != "" {
+			entry.IdentityFile = expandUserPath(identityFile)
+		}
+
+		// 5b. Probe the VM for the remote groved socket path
+		//     (/run/user/<uid>/grove/groved.sock). Written explicitly because
+		//     the daemon's default socket-path convention guesses wrong on the
+		//     real VM; a probe failure degrades to the daemon default rather
+		//     than failing a successful provision. The probe pins the host key
+		//     just scanned — never TOFU (C2).
+		if socketPath, exists, probeErr := probeSatelliteSocketPath(entry); probeErr != nil {
+			fmt.Printf("(could not probe remote groved socket path, leaving socket_path unset: %v)\n", probeErr)
+		} else {
+			if !exists {
+				fmt.Printf("(remote socket %s not present yet — groved may still be starting; writing the path anyway)\n", socketPath)
+			}
+			entry.SocketPath = socketPath
+		}
+
+		// 5c. Write the [satellites.<name>] registry entry.
+		if err := writeSatelliteRegistry(name, entry); err != nil {
 			return fmt.Errorf("write registry entry: %w", err)
 		}
 
-		// 6. Restart reminder — the registry loads only at daemon boot (same
-		//    constraint as sync transport registration in groved.go).
+		// 6. Next steps — the registry loads only at daemon boot (same
+		//    constraint as sync transport registration in groved.go), and the
+		//    laptop sync half (tunnel + push-only sync.toml) is manual.
 		fmt.Printf("\nSatellite %q provisioned at %s.\n", name, ip)
-		fmt.Println("Restart the global daemon to pick it up:")
-		fmt.Println("  groved upgrade --global   # or restart your groved service")
+		printSatelliteNextSteps(sshUser, ip, true)
 		fmt.Println()
 		fmt.Println("Note: the satellite's sync origin_id (C20) is minted per-install on the VM")
 		fmt.Println("and is disposable; the registry name above is the stable federation Origin (C6).")
@@ -388,11 +419,18 @@ func writeSatelliteRegistry(name string, entry satelliteConfigEntry) error {
 	if err != nil {
 		return err
 	}
-	if err := setup.SetValue(root, map[string]interface{}{
+	values := map[string]interface{}{
 		"ssh_addr": entry.SSHAddr,
 		"user":     entry.User,
 		"host_key": entry.HostKey,
-	}, "satellites", name); err != nil {
+	}
+	if entry.IdentityFile != "" {
+		values["identity_file"] = entry.IdentityFile
+	}
+	if entry.SocketPath != "" {
+		values["socket_path"] = entry.SocketPath
+	}
+	if err := setup.SetValue(root, values, "satellites", name); err != nil {
 		return err
 	}
 	return yh.SaveYAML(path, root)
@@ -444,8 +482,18 @@ func upsertSatelliteTOMLTable(path, name string, entry satelliteConfigEntry) err
 	if content != "" && !strings.HasSuffix(content, "\n") {
 		content += "\n"
 	}
-	content += fmt.Sprintf("\n[satellites.%s]\nssh_addr = %q\nuser = %q\nhost_key = %q\n",
+	var table strings.Builder
+	fmt.Fprintf(&table, "\n[satellites.%s]\nssh_addr = %q\nuser = %q\nhost_key = %q\n",
 		tomlTableKey(name), entry.SSHAddr, entry.User, entry.HostKey)
+	// Optional fields are omitted when empty so entries stay minimal and the
+	// daemon's defaults keep applying.
+	if entry.IdentityFile != "" {
+		fmt.Fprintf(&table, "identity_file = %q\n", entry.IdentityFile)
+	}
+	if entry.SocketPath != "" {
+		fmt.Fprintf(&table, "socket_path = %q\n", entry.SocketPath)
+	}
+	content += table.String()
 	return writeValidatedTOML(path, content)
 }
 
