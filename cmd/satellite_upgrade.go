@@ -42,6 +42,7 @@ const satelliteRemotePATH = "/usr/local/go/bin:$HOME/.local/share/grove/bin:$PAT
 func newSatelliteUpgradeCmd() *cobra.Command {
 	var (
 		reposFlag     string
+		allRepos      bool
 		sourceDir     string
 		remoteCodeDir string
 		dryRun        bool
@@ -56,15 +57,23 @@ out, builds (on the VM — sync needs CGO/fts5), and atomically installs the
 binaries, and restarts grove-syncd + groved.
 
 Notes:
+  - --repos is a force list: every repo named there is rebuilt and reinstalled
+    even when already at the local tip (shown as "forced" in the delta table).
+    --all forces every registered repo the same way. Without either flag only
+    changed repos deploy.
+  - a failed repo build no longer aborts the deploy: the remaining repos still
+    build and install, the restart still runs, and the command exits nonzero
+    with a per-repo summary — rerun with --repos <failed,...> after fixing.
   - compositor (zig) is slow to build and rarely needed; when it changed it is
-    HELD unless explicitly listed in --repos.
+    HELD unless explicitly listed in --repos (or --all).
   - core is a library: its changes only reach binaries when dependent repos are
     rebuilt — include those dependents in --repos if only core moved.
   - the VM checkout is forced to the shipped tip; uncommitted VM changes to
     tracked files are discarded.`
 	cmd.Args = cobra.ExactArgs(1)
 	cmd.SilenceUsage = true
-	cmd.Flags().StringVar(&reposFlag, "repos", "", "Comma-separated repos to upgrade (default: every changed repo)")
+	cmd.Flags().StringVar(&reposFlag, "repos", "", "Comma-separated repos to deploy; listed repos are forced even when already up-to-date (default: every changed repo)")
+	cmd.Flags().BoolVar(&allRepos, "all", false, "Force-deploy every repo, including ones already at the local tip")
 	cmd.Flags().StringVar(&sourceDir, "source-dir", "", "Local ecosystem worktree root (default: the go.work root above cwd)")
 	cmd.Flags().StringVar(&remoteCodeDir, "remote-code-dir", defaultRemoteCodeDir, "Superrepo checkout on the VM")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Stop after printing the local-vs-VM delta table")
@@ -89,7 +98,7 @@ Notes:
 			return fmt.Errorf("resolve --source-dir: %w", err)
 		}
 
-		// Requested repos (empty = all changed).
+		// Requested repos (empty = all changed; --repos/--all force).
 		requested, err := parseReposFlag(reposFlag)
 		if err != nil {
 			return err
@@ -102,14 +111,9 @@ Notes:
 		if len(localRepos) == 0 {
 			return fmt.Errorf("no git repos found under %s — is this an ecosystem worktree? (pass --source-dir)", sourceAbs)
 		}
-		repoSet := localRepos
-		if len(requested) > 0 {
-			for _, r := range requested {
-				if !containsString(localRepos, r) {
-					return fmt.Errorf("--repos %q: no git repo %s/%s", r, sourceAbs, r)
-				}
-			}
-			repoSet = requested
+		repoSet, forced, err := resolveUpgradeRepoSet(requested, allRepos, localRepos, sourceAbs)
+		if err != nil {
+			return err
 		}
 
 		// Local tips.
@@ -140,10 +144,10 @@ Notes:
 			return fmt.Errorf("read remote HEADs: %w", err)
 		}
 		remote := parseRemoteHeads(out)
-		deltas := computeSatelliteDelta(repoSet, local, remote, len(requested) > 0)
+		deltas := computeSatelliteDelta(repoSet, local, remote, forced)
 		printSatelliteDelta(deltas)
 
-		updates := deltasWithStatus(deltas, deltaStatusUpdate)
+		updates := deltasToShip(deltas)
 		if held := deltasWithStatus(deltas, deltaStatusHeld); len(held) > 0 {
 			fmt.Printf("\nwarning: compositor changed but is HELD — its zig build is slow and rarely needed.\n")
 			fmt.Printf("Include it explicitly to deploy it: --repos %s\n", strings.Join(append(deltaRepoNames(updates), "compositor"), ","))
@@ -176,25 +180,35 @@ Notes:
 		defer func() { _ = os.RemoveAll(bundleDir) }()
 		var bundlePaths []string
 		for _, d := range updates {
+			if d.Status == deltaStatusForced {
+				continue // the VM already has the sha — the deploy script re-checkouts and rebuilds without a bundle
+			}
 			bundlePath := filepath.Join(bundleDir, d.Repo+".bundle")
 			if err := createRepoBundle(filepath.Join(sourceAbs, d.Repo), bundlePath, d.Branch, d.RemoteSHA); err != nil {
 				return fmt.Errorf("bundle %s: %w", d.Repo, err)
 			}
 			bundlePaths = append(bundlePaths, bundlePath)
 		}
-		fmt.Printf("\nShipping %d bundle(s) to %s:%s ...\n", len(bundlePaths), name, satelliteStageDir)
-		if err := ssh.runCommand("mkdir -p " + satelliteStageDir); err != nil {
-			return fmt.Errorf("create remote stage dir: %w", err)
-		}
-		if err := ssh.scp(bundlePaths, satelliteStageDir+"/"); err != nil {
-			return fmt.Errorf("scp bundles: %w", err)
+		if len(bundlePaths) > 0 {
+			fmt.Printf("\nShipping %d bundle(s) to %s:%s ...\n", len(bundlePaths), name, satelliteStageDir)
+			if err := ssh.runCommand("mkdir -p " + satelliteStageDir); err != nil {
+				return fmt.Errorf("create remote stage dir: %w", err)
+			}
+			if err := ssh.scp(bundlePaths, satelliteStageDir+"/"); err != nil {
+				return fmt.Errorf("scp bundles: %w", err)
+			}
 		}
 
 		// (c)–(e) One generated remote script: fetch+checkout (self-healing),
-		// build, install (temp+mv, ETXTBSY-safe).
+		// build, install (temp+mv, ETXTBSY-safe). Each repo is failure-isolated
+		// inside the script: a failed build records the repo and moves on, so
+		// every repo that DID build still gets installed — and we still restart
+		// below to put those binaries live. The script exits nonzero after its
+		// per-repo summary when anything failed.
 		fmt.Println("\nRunning remote deploy script (fetch, checkout, build, install)...")
-		if err := ssh.runScript(buildSatelliteDeployScript(remoteCodeDir, satelliteStageDir, updates)); err != nil {
-			return fmt.Errorf("remote deploy failed: %w", err)
+		deployErr := ssh.runScript(buildSatelliteDeployScript(remoteCodeDir, satelliteStageDir, updates))
+		if deployErr != nil {
+			fmt.Fprintln(os.Stderr, "\nwarning: deploy failed for some repos (per-repo summary above) — proceeding to restart so the repos that did build go live.")
 		}
 
 		// (f) Restart, gated.
@@ -203,12 +217,21 @@ Notes:
 				fmt.Println("\nBinaries are installed but services still run the old ones. Restart manually with:")
 				fmt.Printf("  ssh %s 'sudo systemctl restart grove-syncd'\n", ssh.dest())
 				fmt.Printf("  ssh %s 'XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user restart groved'\n", ssh.dest())
+				if deployErr != nil {
+					return fmt.Errorf("deploy failed for some repos — rerun with --repos <failed,...> after fixing: %w", deployErr)
+				}
 				return nil
 			}
 		}
 		fmt.Println("\nRestarting grove-syncd + groved...")
 		if err := ssh.runScript(buildSatelliteRestartScript()); err != nil {
+			if deployErr != nil {
+				return fmt.Errorf("remote restart/verify failed (%v) after a deploy with failed repos: %w", err, deployErr)
+			}
 			return fmt.Errorf("remote restart/verify failed: %w", err)
+		}
+		if deployErr != nil {
+			return fmt.Errorf("services restarted, but deploy failed for some repos (per-repo summary above) — rerun with --repos <failed,...> after fixing: %w", deployErr)
 		}
 
 		// (g) Verified by the restart script (is-active); laptop half.
@@ -253,6 +276,28 @@ func parseReposFlag(flag string) ([]string, error) {
 		repos = append(repos, r)
 	}
 	return repos, nil
+}
+
+// resolveUpgradeRepoSet turns the --repos/--all flags into the repo set to
+// probe plus the force bit: naming repos explicitly (either way) means "deploy
+// these regardless of delta status" — up-to-date repos come back as forced.
+// No flags = every repo, changed-only.
+func resolveUpgradeRepoSet(requested []string, all bool, localRepos []string, sourceAbs string) (repos []string, forced bool, err error) {
+	if all && len(requested) > 0 {
+		return nil, false, fmt.Errorf("--all and --repos are mutually exclusive")
+	}
+	if all {
+		return localRepos, true, nil
+	}
+	if len(requested) == 0 {
+		return localRepos, false, nil
+	}
+	for _, r := range requested {
+		if !containsString(localRepos, r) {
+			return nil, false, fmt.Errorf("--repos %q: no git repo %s/%s", r, sourceAbs, r)
+		}
+	}
+	return requested, true, nil
 }
 
 // discoverLocalRepos lists the git-repo subdirectories of the ecosystem root
@@ -344,6 +389,7 @@ func createRepoBundle(repoDir, bundlePath, branch, remoteSHA string) error {
 const (
 	deltaStatusUpToDate      = "up-to-date"
 	deltaStatusUpdate        = "update"
+	deltaStatusForced        = "forced"
 	deltaStatusHeld          = "held (zig; opt in via --repos)"
 	deltaStatusMissingRemote = "missing on VM"
 	deltaStatusRemoteError   = "remote error"
@@ -358,9 +404,11 @@ type repoDelta struct {
 }
 
 // computeSatelliteDelta diffs local tips against the VM's HEADs for repos (in
-// order). compositor is special-cased: its zig build is slow and rarely needed,
-// so a changed compositor is HELD unless the user passed --repos explicitly.
-func computeSatelliteDelta(repos []string, local map[string]repoTip, remote map[string]string, explicit bool) []repoDelta {
+// order). forced (--repos/--all) means explicitly named repos deploy even when
+// their shas already match: up-to-date becomes forced (rebuild+reinstall).
+// compositor is special-cased: its zig build is slow and rarely needed, so a
+// changed compositor is HELD unless the user passed --repos/--all explicitly.
+func computeSatelliteDelta(repos []string, local map[string]repoTip, remote map[string]string, forced bool) []repoDelta {
 	deltas := make([]repoDelta, 0, len(repos))
 	for _, r := range repos {
 		tip := local[r]
@@ -373,16 +421,31 @@ func computeSatelliteDelta(repos []string, local map[string]repoTip, remote map[
 		case sha == tip.SHA:
 			d.RemoteSHA = sha
 			d.Status = deltaStatusUpToDate
+			if forced {
+				d.Status = deltaStatusForced
+			}
 		default:
 			d.RemoteSHA = sha
 			d.Status = deltaStatusUpdate
-			if r == "compositor" && !explicit {
+			if r == "compositor" && !forced {
 				d.Status = deltaStatusHeld
 			}
 		}
 		deltas = append(deltas, d)
 	}
 	return deltas
+}
+
+// deltasToShip selects the repos the deploy actually ships: real updates plus
+// explicitly forced up-to-date repos, in input order.
+func deltasToShip(deltas []repoDelta) []repoDelta {
+	var out []repoDelta
+	for _, d := range deltas {
+		if d.Status == deltaStatusUpdate || d.Status == deltaStatusForced {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 func deltasWithStatus(deltas []repoDelta, status string) []repoDelta {
@@ -474,8 +537,18 @@ func buildRemoteHeadsScript(remoteCodeDir string, repos []string) string {
 // (c)-(e): fetch from the shipped bundles, force-checkout the tips (with the
 // bootstrap script's empty-worktree self-heal), build on the VM, and install
 // binaries atomically (copy-to-temp + mv dodges ETXTBSY on running binaries;
-// grove-syncd goes to /usr/local/bin via sudo the same way). Idempotent: a
-// re-run re-fetches no-ops, re-checkouts the same sha, rebuilds, reinstalls.
+// grove-syncd goes to /usr/local/bin via sudo the same way).
+//
+// Every repo is failure-isolated (no global set -e): a failed checkout or
+// build records the repo and CONTINUES, every repo that built still installs,
+// and the script ends with a per-repo outcome summary (built+installed /
+// build FAILED / skipped / ...), exiting nonzero if anything failed — the
+// caller still restarts services so the successful binaries go live. Build
+// output goes to per-repo logs under $STAGE/build-logs; a failure surfaces
+// its tail inline and the stage dir (with logs) is kept for inspection.
+// Forced repos ship no bundle (the sha is already on the VM), so update_repo
+// only fetches when its bundle exists. Idempotent: a re-run re-fetches
+// no-ops, re-checkouts the same sha, rebuilds, reinstalls.
 func buildSatelliteDeployScript(remoteCodeDir, stageDir string, updates []repoDelta) string {
 	// compositor first: grove/treemux/tuimux link its zig lib.
 	ordered := make([]repoDelta, 0, len(updates))
@@ -491,19 +564,29 @@ func buildSatelliteDeployScript(remoteCodeDir, stageDir string, updates []repoDe
 	}
 
 	var b strings.Builder
-	b.WriteString("# generated by `grove satellite upgrade` — idempotent\n")
-	b.WriteString("set -euo pipefail\n")
+	b.WriteString("# generated by `grove satellite upgrade` — idempotent, per-repo failure-isolated\n")
+	b.WriteString("set -uo pipefail\n")
 	fmt.Fprintf(&b, "export PATH=\"%s\"\n", satelliteRemotePATH)
 	fmt.Fprintf(&b, "CODE=%s\n", remoteCodeDirExpr(remoteCodeDir))
 	fmt.Fprintf(&b, "STAGE=%q\n", stageDir)
 	fmt.Fprintf(&b, "BIN_DIR=\"%s\"\n", satelliteUserBinDir)
-	b.WriteString(`mkdir -p "$BIN_DIR"
+	b.WriteString(`LOG_DIR="$STAGE/build-logs"
+mkdir -p "$BIN_DIR" "$LOG_DIR" || exit 1
 
-update_repo() { # <repo> <ref> <sha> — fetch from bundle, force-checkout, self-heal
+FAILED_REPOS=""
+SUMMARY=""
+mark_failed() { FAILED_REPOS="$FAILED_REPOS $1"; }
+repo_failed() { case " $FAILED_REPOS " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+record() { SUMMARY="$SUMMARY  $1: $2"$'\n'; }
+
+update_repo() { # <repo> <ref> <sha> — fetch from bundle (if shipped), force-checkout, self-heal
   local repo="$1" ref="$2" sha="$3"
   local dir="$CODE/$repo"
   echo "==> $repo: fetch + checkout ${sha:0:12}"
-  git -C "$dir" fetch "$STAGE/$repo.bundle" "$ref"
+  # forced repos ship no bundle: the sha is already on the VM.
+  if [ -f "$STAGE/$repo.bundle" ]; then
+    git -C "$dir" fetch "$STAGE/$repo.bundle" "$ref" || return 1
+  fi
   if [ "$ref" = HEAD ]; then
     git -C "$dir" checkout -f --detach "$sha" || true
   else
@@ -515,14 +598,23 @@ update_repo() { # <repo> <ref> <sha> — fetch from bundle, force-checkout, self
   if [ "$(git -C "$dir" rev-parse HEAD)" != "$sha" ] \
      || [ -z "$(find "$dir" -mindepth 1 -maxdepth 1 ! -name .git -print -quit)" ]; then
     echo "self-heal: hard-resetting $repo to ${sha:0:12}" >&2
-    git -C "$dir" reset --hard "$sha"
+    git -C "$dir" reset --hard "$sha" || return 1
+  fi
+  [ "$(git -C "$dir" rev-parse HEAD)" = "$sha" ]
+}
+
+checkout_repo() { # <repo> <ref> <sha> — failure-isolated: a bad checkout only excludes this repo
+  if ! update_repo "$1" "$2" "$3"; then
+    echo "==> $1: checkout FAILED — excluded from build, continuing" >&2
+    mark_failed "$1"
+    record "$1" "checkout FAILED"
   fi
 }
 
 build_repo() { # <repo> — mirror bootstrap step 4 (build ON the VM; sync needs CGO+fts5)
   local repo="$1"
-  echo "==> $repo: build"
-  cd "$CODE/$repo"
+  BUILD_RESULT=built
+  cd "$CODE/$repo" || return 1
   if [ "$repo" = compositor ]; then
     make zig
   elif [ -f Makefile ] && grep -q '^build:' Makefile; then
@@ -531,6 +623,7 @@ build_repo() { # <repo> — mirror bootstrap step 4 (build ON the VM; sync needs
     mkdir -p bin && go build -o bin/ ./...
   else
     echo "==> $repo: no build recipe (content-only repo; skipping build)"
+    BUILD_RESULT=skipped
   fi
 }
 
@@ -543,10 +636,41 @@ install_bins() { # <repo> — user binaries via copy-to-temp + mv (atomic; no ET
     [ -f "$f" ] && [ -x "$f" ] || continue
     b="$(basename "$f")"
     [ "$b" = grove-syncd ] && continue # system binary, installed below via sudo
-    cp "$f" "$BIN_DIR/.$b.tmp"
-    mv -f "$BIN_DIR/.$b.tmp" "$BIN_DIR/$b"
+    cp "$f" "$BIN_DIR/.$b.tmp" || return 1
+    mv -f "$BIN_DIR/.$b.tmp" "$BIN_DIR/$b" || return 1
     echo "installed $b -> $BIN_DIR"
   done
+  return 0
+}
+
+build_install_repo() { # <repo> — failure-isolated: a failed build records and CONTINUES
+  local repo="$1"
+  local log="$LOG_DIR/$repo.log"
+  if repo_failed "$repo"; then
+    return 0 # checkout already failed; recorded above
+  fi
+  echo "==> $repo: build"
+  if ! build_repo "$repo" >"$log" 2>&1; then
+    echo "==> $repo: build FAILED — continuing with the remaining repos" >&2
+    echo "--- tail of $log ---" >&2
+    tail -n 40 "$log" >&2
+    mark_failed "$repo"
+    record "$repo" "build FAILED"
+    return 0
+  fi
+  cat "$log"
+  if [ "$BUILD_RESULT" = skipped ]; then
+    record "$repo" "skipped (no build recipe)"
+    return 0
+  fi
+  if install_bins "$repo"; then
+    record "$repo" "built+installed"
+  else
+    echo "==> $repo: install FAILED — continuing with the remaining repos" >&2
+    mark_failed "$repo"
+    record "$repo" "install FAILED"
+  fi
+  return 0
 }
 `)
 	b.WriteString("\n")
@@ -559,27 +683,40 @@ install_bins() { # <repo> — user binaries via copy-to-temp + mv (atomic; no ET
 		if ref == "" {
 			ref = "HEAD"
 		}
-		fmt.Fprintf(&b, "update_repo %s %s %s\n", d.Repo, ref, d.LocalSHA)
+		fmt.Fprintf(&b, "checkout_repo %s %s %s\n", d.Repo, ref, d.LocalSHA)
 	}
 	b.WriteString("\n")
 	for _, d := range ordered {
-		fmt.Fprintf(&b, "build_repo %s\n", d.Repo)
-	}
-	b.WriteString("\n")
-	for _, d := range ordered {
-		fmt.Fprintf(&b, "install_bins %s\n", d.Repo)
+		fmt.Fprintf(&b, "build_install_repo %s\n", d.Repo)
 	}
 	if syncIncluded {
 		b.WriteString(`
 # grove-syncd is a system binary under systemd; sudo temp+mv (a running
 # grove-syncd makes in-place copy fail with ETXTBSY).
-sudo cp "$CODE/sync/bin/grove-syncd" /usr/local/bin/.grove-syncd.tmp
-sudo chmod 0755 /usr/local/bin/.grove-syncd.tmp
-sudo mv -f /usr/local/bin/.grove-syncd.tmp /usr/local/bin/grove-syncd
-echo "installed grove-syncd -> /usr/local/bin"
+if ! repo_failed sync; then
+  if sudo cp "$CODE/sync/bin/grove-syncd" /usr/local/bin/.grove-syncd.tmp \
+     && sudo chmod 0755 /usr/local/bin/.grove-syncd.tmp \
+     && sudo mv -f /usr/local/bin/.grove-syncd.tmp /usr/local/bin/grove-syncd; then
+    echo "installed grove-syncd -> /usr/local/bin"
+  else
+    echo "==> sync: grove-syncd system install FAILED" >&2
+    mark_failed sync
+    record sync "grove-syncd system install FAILED"
+  fi
+fi
 `)
 	}
-	b.WriteString("\nrm -rf \"$STAGE\"\necho \"deploy complete\"\n")
+	b.WriteString(`
+echo
+echo "=== deploy summary ==="
+printf '%s' "$SUMMARY"
+if [ -n "$FAILED_REPOS" ]; then
+  echo "deploy FAILED for:$FAILED_REPOS (build logs kept in $LOG_DIR)" >&2
+  exit 1
+fi
+rm -rf "$STAGE"
+echo "deploy complete"
+`)
 	return b.String()
 }
 
