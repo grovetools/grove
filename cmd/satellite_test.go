@@ -1,0 +1,239 @@
+package cmd
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/grovetools/core/config"
+	"github.com/pelletier/go-toml/v2"
+)
+
+// setupGroveHome points GROVE_HOME at a temp root and returns the config dir
+// (paths.ConfigDir() = $GROVE_HOME/config/grove — the extra /grove segment
+// matters).
+func setupGroveHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("GROVE_HOME", home)
+	configDir := filepath.Join(home, "config", "grove")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return configDir
+}
+
+// loadSatellitesViaConfig loads the merged grove config from a fresh empty dir
+// (so the global XDG config is the only layer) and decodes the [satellites.*]
+// extension exactly the way daemon's satellite.LoadRegistry does
+// (cfg.UnmarshalExtension keyed off the same yaml tags).
+func loadSatellitesViaConfig(t *testing.T) map[string]satelliteConfigEntry {
+	t.Helper()
+	cfg, err := config.LoadFrom(t.TempDir())
+	if err != nil {
+		t.Fatalf("config.LoadFrom: %v", err)
+	}
+	var raw map[string]satelliteConfigEntry
+	if err := cfg.UnmarshalExtension("satellites", &raw); err != nil {
+		t.Fatalf("UnmarshalExtension(satellites): %v", err)
+	}
+	return raw
+}
+
+// TestSatelliteRegistryTOMLVisibleToLoader covers B3: on a machine whose
+// global config is grove.toml, the registry entry written by `up` must land in
+// grove.toml (the file getXDGConfigPath resolves), not grove.yml (which the
+// loader never reads when grove.toml exists) — and the write must not clobber
+// the rest of the user's config.
+func TestSatelliteRegistryTOMLVisibleToLoader(t *testing.T) {
+	configDir := setupGroveHome(t)
+	tomlPath := filepath.Join(configDir, "grove.toml")
+	original := `# my grove config — do not clobber
+[satellites.other]
+ssh_addr = "10.0.0.9:22"
+user = "keep"
+host_key = "ssh-ed25519 OTHER"
+`
+	if err := os.WriteFile(tomlPath, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entry := satelliteConfigEntry{
+		SSHAddr: "203.0.113.7:22",
+		User:    "solair",
+		HostKey: "ssh-ed25519 AAAATESTKEY",
+	}
+	if err := writeSatelliteRegistry("sat1", entry); err != nil {
+		t.Fatalf("writeSatelliteRegistry: %v", err)
+	}
+
+	// The entry must be visible through the real config loader.
+	sats := loadSatellitesViaConfig(t)
+	got, ok := sats["sat1"]
+	if !ok {
+		t.Fatalf("satellites.sat1 not visible via config loader; got %v", sats)
+	}
+	if got != entry {
+		t.Fatalf("loaded entry = %+v, want %+v", got, entry)
+	}
+	if _, ok := sats["other"]; !ok {
+		t.Fatalf("pre-existing satellites.other was lost: %v", sats)
+	}
+
+	// The rest of the file (comments included) is preserved byte-for-byte.
+	data, err := os.ReadFile(tomlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "# my grove config — do not clobber") {
+		t.Fatalf("comment was destroyed by registry write:\n%s", data)
+	}
+
+	// No stray grove.yml should have been written (the loader would ignore it).
+	if _, err := os.Stat(filepath.Join(configDir, "grove.yml")); !os.IsNotExist(err) {
+		t.Fatalf("registry write created grove.yml alongside grove.toml (stat err = %v)", err)
+	}
+
+	// Upsert: re-provisioning the same name replaces the table, not duplicates it.
+	entry.SSHAddr = "203.0.113.8:22"
+	if err := writeSatelliteRegistry("sat1", entry); err != nil {
+		t.Fatalf("writeSatelliteRegistry (upsert): %v", err)
+	}
+	data, _ = os.ReadFile(tomlPath)
+	if n := strings.Count(string(data), "[satellites.sat1]"); n != 1 {
+		t.Fatalf("expected exactly 1 [satellites.sat1] table after upsert, got %d:\n%s", n, data)
+	}
+	if got := loadSatellitesViaConfig(t)["sat1"]; got.SSHAddr != "203.0.113.8:22" {
+		t.Fatalf("upsert not visible via loader: %+v", got)
+	}
+
+	// Removal round-trip.
+	if err := removeSatelliteRegistry("sat1"); err != nil {
+		t.Fatalf("removeSatelliteRegistry: %v", err)
+	}
+	sats = loadSatellitesViaConfig(t)
+	if _, ok := sats["sat1"]; ok {
+		t.Fatalf("satellites.sat1 still present after removal: %v", sats)
+	}
+	if _, ok := sats["other"]; !ok {
+		t.Fatalf("removal dropped unrelated satellites.other: %v", sats)
+	}
+	data, _ = os.ReadFile(tomlPath)
+	if !strings.Contains(string(data), "# my grove config — do not clobber") {
+		t.Fatalf("comment was destroyed by registry removal:\n%s", data)
+	}
+
+	// Removing a nonexistent entry is a no-op, not an error.
+	if err := removeSatelliteRegistry("sat1"); err != nil {
+		t.Fatalf("removeSatelliteRegistry (absent): %v", err)
+	}
+}
+
+// TestSatelliteRegistryYAMLOnlyMachine pins the pre-B3 behavior for machines
+// without a grove.toml: the entry goes to grove.yml, which getXDGConfigPath
+// falls back to, so the loader still sees it.
+func TestSatelliteRegistryYAMLOnlyMachine(t *testing.T) {
+	configDir := setupGroveHome(t)
+
+	entry := satelliteConfigEntry{
+		SSHAddr: "203.0.113.7:22",
+		User:    "solair",
+		HostKey: "ssh-ed25519 AAAATESTKEY",
+	}
+	if err := writeSatelliteRegistry("sat1", entry); err != nil {
+		t.Fatalf("writeSatelliteRegistry: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(configDir, "grove.yml")); err != nil {
+		t.Fatalf("expected grove.yml to be written: %v", err)
+	}
+
+	if got := loadSatellitesViaConfig(t)["sat1"]; got != entry {
+		t.Fatalf("loaded entry = %+v, want %+v", got, entry)
+	}
+
+	if err := removeSatelliteRegistry("sat1"); err != nil {
+		t.Fatalf("removeSatelliteRegistry: %v", err)
+	}
+	if sats := loadSatellitesViaConfig(t); len(sats) != 0 {
+		t.Fatalf("satellites still present after removal: %v", sats)
+	}
+}
+
+// TestRemoveSatelliteTOMLTable exercises the textual splice directly: only the
+// named table's block is removed, up to the next table header.
+func TestRemoveSatelliteTOMLTable(t *testing.T) {
+	content := `[ui]
+theme = "dark"
+
+[satellites.sat1]
+ssh_addr = "1.2.3.4:22"
+# a comment inside the block
+user = "u"
+
+[satellites.sat2]
+ssh_addr = "5.6.7.8:22"
+`
+	out, removed := removeSatelliteTOMLTable(content, "sat1")
+	if !removed {
+		t.Fatal("expected sat1 block to be removed")
+	}
+	if strings.Contains(out, "1.2.3.4") || strings.Contains(out, "[satellites.sat1]") {
+		t.Fatalf("sat1 block not fully removed:\n%s", out)
+	}
+	for _, keep := range []string{"[ui]", `theme = "dark"`, "[satellites.sat2]", "5.6.7.8"} {
+		if !strings.Contains(out, keep) {
+			t.Fatalf("removal dropped unrelated content %q:\n%s", keep, out)
+		}
+	}
+
+	if _, removed := removeSatelliteTOMLTable(content, "nope"); removed {
+		t.Fatal("removal of absent table reported removed=true")
+	}
+}
+
+// TestWriteSatelliteTFVars covers B2: `up` persists the default-less terraform
+// variables so `down` (terraform destroy -input=false) resolves them without
+// prompting. Simple key = "value" tfvars lines are TOML-parseable, so the
+// round-trip is asserted through a real parser.
+func TestWriteSatelliteTFVars(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeSatelliteTFVars(dir, "my-proj", "solair", "203.0.113.7/32", "sat1", ""); err != nil {
+		t.Fatalf("writeSatelliteTFVars: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, satelliteTFVarsName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	vars := map[string]string{}
+	if err := toml.Unmarshal(data, &vars); err != nil {
+		t.Fatalf("tfvars did not parse: %v\n%s", err, data)
+	}
+	want := map[string]string{
+		"project_id":       "my-proj",
+		"ssh_user":         "solair",
+		"allowed_ssh_cidr": "203.0.113.7/32",
+		"vm_name":          "sat1",
+	}
+	for k, v := range want {
+		if vars[k] != v {
+			t.Fatalf("tfvars[%s] = %q, want %q\n%s", k, vars[k], v, data)
+		}
+	}
+	if _, ok := vars["zone"]; ok {
+		t.Fatalf("zone should be omitted when unset:\n%s", data)
+	}
+
+	// With a zone override it must be persisted too.
+	if err := writeSatelliteTFVars(dir, "my-proj", "solair", "203.0.113.7/32", "sat1", "us-west1-a"); err != nil {
+		t.Fatalf("writeSatelliteTFVars (zone): %v", err)
+	}
+	data, _ = os.ReadFile(filepath.Join(dir, satelliteTFVarsName))
+	vars = map[string]string{}
+	if err := toml.Unmarshal(data, &vars); err != nil {
+		t.Fatalf("tfvars (zone) did not parse: %v\n%s", err, data)
+	}
+	if vars["zone"] != "us-west1-a" {
+		t.Fatalf("tfvars[zone] = %q, want us-west1-a\n%s", vars["zone"], data)
+	}
+}
