@@ -75,15 +75,37 @@ const defaultTerraformDir = "cloud/poc/grove-satellite/terraform"
 
 func newSatelliteUpCmd() *cobra.Command {
 	var (
-		project      string
-		sshUser      string
-		cidr         string
-		zone         string
-		tfDir        string
-		identityFile string
-		assumeYes    bool
+		project        string
+		sshUser        string
+		cidr           string
+		zone           string
+		tfDir          string
+		identityFile   string
+		assumeYes      bool
+		ghTokenCmd     string
+		claudeFlag     bool
+		claudeTokenCmd string
+		dotfilesRepo   string
+		serviceAccount string
 	)
 	cmd := cli.NewStandardCommand("up <name>", "Provision a satellite VM (billable)")
+	cmd.Long = `Provision a satellite VM: terraform apply, host-key pin, bootstrap, registry.
+
+Optional provisioning inputs (GitHub auth, Claude Code, dotfiles, service
+account) come from a [satellites.<name>.provision] block in the same grove
+config the registry lives in; the matching flags override the block:
+
+  [satellites.mysat.provision]
+  gh_token_cmd = "gh auth token"       # local command; stdout is the GH token
+  claude = true                        # install Claude Code on the VM
+  claude_token_cmd = "..."             # local command producing CLAUDE_CODE_OAUTH_TOKEN
+                                       # (mint once with 'claude setup-token'; implies claude)
+  dotfiles_repo = "https://github.com/you/dotfiles"
+  service_account_email = "sa@proj.iam.gserviceaccount.com"  # terraform var
+
+Token commands run locally through your shell BEFORE terraform (a failing
+command aborts the provision while it is still free), and the tokens are piped
+to the bootstrap script on stdin — never argv (its documented framing).`
 	cmd.Args = cobra.ExactArgs(1)
 	cmd.SilenceUsage = true
 	cmd.Flags().StringVar(&project, "project", "", "GCP project id (terraform var project_id) [required]")
@@ -93,11 +115,35 @@ func newSatelliteUpCmd() *cobra.Command {
 	cmd.Flags().StringVar(&tfDir, "tf-dir", defaultTerraformDir, "Path to the grove-satellite terraform directory")
 	cmd.Flags().StringVar(&identityFile, "identity-file", "", "SSH private key for the satellite (written to the registry as identity_file; default: agent-only auth)")
 	cmd.Flags().BoolVar(&assumeYes, "yes", false, "Skip the billable-resource confirmation prompt")
+	cmd.Flags().StringVar(&ghTokenCmd, "gh-token-cmd", "", "Local command whose stdout is the GitHub token piped to bootstrap (overrides provision config; empty disables)")
+	cmd.Flags().BoolVar(&claudeFlag, "claude", false, "Install Claude Code on the VM (overrides provision config)")
+	cmd.Flags().StringVar(&claudeTokenCmd, "claude-token-cmd", "", "Local command producing CLAUDE_CODE_OAUTH_TOKEN, piped to bootstrap; implies --claude (overrides provision config; empty disables)")
+	cmd.Flags().StringVar(&dotfilesRepo, "dotfiles-repo", "", "Dotfiles repo cloned + installed on the VM, best-effort (overrides provision config; empty disables)")
+	cmd.Flags().StringVar(&serviceAccount, "service-account", "", "Service account email attached to the VM (terraform var service_account_email; overrides provision config; empty disables)")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		if project == "" || sshUser == "" {
 			return fmt.Errorf("--project and --ssh-user are required")
 		}
+
+		// Provisioning options: [satellites.<name>.provision] with flag
+		// overrides (a set flag wins even when set to empty).
+		provCfg, err := loadSatelliteProvision(name)
+		if err != nil {
+			return err
+		}
+		prov := mergeProvision(provCfg, provisionFlagOverrides{
+			GHTokenCmd:     ghTokenCmd,
+			GHTokenCmdSet:  cmd.Flags().Changed("gh-token-cmd"),
+			Claude:         claudeFlag,
+			ClaudeSet:      cmd.Flags().Changed("claude"),
+			ClaudeTokenCmd: claudeTokenCmd,
+			ClaudeTokenSet: cmd.Flags().Changed("claude-token-cmd"),
+			DotfilesRepo:   dotfilesRepo,
+			DotfilesSet:    cmd.Flags().Changed("dotfiles-repo"),
+			ServiceAccount: serviceAccount,
+			ServiceAccSet:  cmd.Flags().Changed("service-account"),
+		})
 		tfAbs, err := filepath.Abs(tfDir)
 		if err != nil {
 			return fmt.Errorf("resolve --tf-dir: %w", err)
@@ -111,6 +157,13 @@ func newSatelliteUpCmd() *cobra.Command {
 			if !confirmYesNo(fmt.Sprintf("Provision satellite %q — this creates BILLABLE GCP resources. Continue?", name)) {
 				return fmt.Errorf("aborted")
 			}
+		}
+
+		// Resolve tokens NOW — before terraform — so a broken token command
+		// aborts while the provision is still free (fail fast, no orphaned VM).
+		ghToken, claudeToken, err := resolveProvisionTokens(prov)
+		if err != nil {
+			return err
 		}
 
 		if cidr == "" {
@@ -127,7 +180,7 @@ func newSatelliteUpCmd() *cobra.Command {
 		// deliberately has no defaults for project_id/ssh_user/
 		// allowed_ssh_cidr. terraform auto-loads the file from the -chdir
 		// dir, and the PoC's .gitignore already excludes *.tfvars.
-		if err := writeSatelliteTFVars(tfAbs, project, sshUser, cidr, name, zone); err != nil {
+		if err := writeSatelliteTFVars(tfAbs, project, sshUser, cidr, name, zone, prov.ServiceAccountEmail); err != nil {
 			return fmt.Errorf("write %s: %w", satelliteTFVarsName, err)
 		}
 
@@ -145,6 +198,9 @@ func newSatelliteUpCmd() *cobra.Command {
 		}
 		if zone != "" {
 			applyArgs = append(applyArgs, "-var", "zone="+zone)
+		}
+		if prov.ServiceAccountEmail != "" {
+			applyArgs = append(applyArgs, "-var", "service_account_email="+prov.ServiceAccountEmail)
 		}
 		if err := runInherited(tfAbs, "terraform", applyArgs...); err != nil {
 			return fmt.Errorf("terraform apply: %w", err)
@@ -167,13 +223,17 @@ func newSatelliteUpCmd() *cobra.Command {
 			return fmt.Errorf("ssh-keyscan host-key pin: %w", err)
 		}
 
-		// 4. Bootstrap the VM (subprocess, inherited stdio; the gh-token stdin
-		//    step stays user-run per the script's own docs). The script already
-		//    fetches the laptop sync token to ~/.config/grove/sync.token.
+		// 4. Bootstrap the VM (subprocess, inherited stdout/stderr). Provision
+		//    options become the script's flags; tokens ride stdin in its
+		//    documented framing (raw single token, or KEY=VALUE lines when both
+		//    are present) — never argv. The script already fetches the laptop
+		//    sync token to ~/.config/grove/sync.token.
 		if _, err := os.Stat(bootstrapScript); err != nil {
 			return fmt.Errorf("bootstrap script not found at %q: %w", bootstrapScript, err)
 		}
-		if err := runInherited(tfAbs, "bash", bootstrapScript, sshUser+"@"+ip); err != nil {
+		provArgs, secretStdin := buildBootstrapProvision(prov, ghToken, claudeToken)
+		bootstrapArgs := append([]string{bootstrapScript, sshUser + "@" + ip}, provArgs...)
+		if err := runInheritedWithStdin(tfAbs, secretStdin, "bash", bootstrapArgs...); err != nil {
 			return fmt.Errorf("satellite bootstrap: %w", err)
 		}
 
@@ -598,10 +658,11 @@ func bestEffortDeregisterCursors(name, syncOriginID string) {
 const satelliteTFVarsName = "terraform.tfvars"
 
 // writeSatelliteTFVars persists the terraform variables that have no defaults
-// in variables.tf (plus vm_name/zone) so a later terraform destroy resolves
-// them without prompting. Values are %q-quoted, which is valid HCL string
-// syntax for these flag-derived inputs.
-func writeSatelliteTFVars(tfDir, project, sshUser, cidr, vmName, zone string) error {
+// in variables.tf (plus vm_name/zone/service_account_email) so a later
+// terraform destroy resolves them without prompting — and, for the service
+// account, so destroy plans the same instance shape apply created. Values are
+// %q-quoted, which is valid HCL string syntax for these flag-derived inputs.
+func writeSatelliteTFVars(tfDir, project, sshUser, cidr, vmName, zone, serviceAccountEmail string) error {
 	var b strings.Builder
 	b.WriteString("# Generated by `grove satellite up`. `grove satellite down` relies on this\n")
 	b.WriteString("# file so terraform destroy runs without prompting for variables.\n")
@@ -611,6 +672,9 @@ func writeSatelliteTFVars(tfDir, project, sshUser, cidr, vmName, zone string) er
 	fmt.Fprintf(&b, "vm_name          = %q\n", vmName)
 	if zone != "" {
 		fmt.Fprintf(&b, "zone             = %q\n", zone)
+	}
+	if serviceAccountEmail != "" {
+		fmt.Fprintf(&b, "service_account_email = %q\n", serviceAccountEmail)
 	}
 	return os.WriteFile(filepath.Join(tfDir, satelliteTFVarsName), []byte(b.String()), 0o600)
 }
@@ -631,9 +695,21 @@ func confirmYesNo(prompt string) bool {
 // runInherited runs a command with the caller's stdio attached (so terraform /
 // the bootstrap script show their own prompts and progress).
 func runInherited(dir, name string, args ...string) error {
+	return runInheritedWithStdin(dir, "", name, args...)
+}
+
+// runInheritedWithStdin is runInherited with the child's stdin replaced by the
+// given payload when non-empty (how bootstrap secrets travel — the framing is
+// assembled by buildBootstrapProvision and never appears in argv). An empty
+// payload keeps the caller's stdin attached.
+func runInheritedWithStdin(dir, stdin, name string, args ...string) error {
 	cmd := exec.Command(name, args...) //nolint:gosec // G204: args are internal/flag-derived
 	cmd.Dir = dir
-	cmd.Stdin = os.Stdin
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	} else {
+		cmd.Stdin = os.Stdin
+	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
