@@ -243,3 +243,53 @@ func TestWriteSatelliteTFVars(t *testing.T) {
 		t.Fatalf("tfvars[service_account_email] = %q\n%s", vars["service_account_email"], data)
 	}
 }
+
+// TestSatelliteTableRowsForward pins the Forward column contract for
+// `satellite status`/`list`: a live status carrying the daemon's forward
+// string (models.SatelliteStatus.Forward) renders it in the Forward cell,
+// and a status without one shows the "-" placeholder.
+func TestSatelliteTableRowsForward(t *testing.T) {
+	forwardIdx := -1
+	for i, h := range satelliteTableHeaders {
+		if h == "Forward" {
+			forwardIdx = i
+		}
+	}
+	if forwardIdx == -1 {
+		t.Fatalf("no Forward column in headers: %v", satelliteTableHeaders)
+	}
+
+	configured := map[string]satelliteConfigEntry{
+		"sat-fwd":  {SSHAddr: "203.0.113.7:22"},
+		"sat-none": {SSHAddr: "203.0.113.8:22"},
+	}
+	live := map[string]satelliteLiveStatus{
+		"sat-fwd":  {state: "connected", addr: "203.0.113.7:22", forward: "active on 127.0.0.1:8789"},
+		"sat-none": {state: "connected", addr: "203.0.113.8:22"},
+	}
+
+	rows := satelliteTableRows(configured, live)
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d: %v", len(rows), rows)
+	}
+	byName := map[string][]string{}
+	for _, r := range rows {
+		if len(r) != len(satelliteTableHeaders) {
+			t.Fatalf("row width %d != header width %d: %v", len(r), len(satelliteTableHeaders), r)
+		}
+		byName[r[0]] = r
+	}
+
+	if got := byName["sat-fwd"][forwardIdx]; got != "active on 127.0.0.1:8789" {
+		t.Fatalf("Forward cell = %q, want %q", got, "active on 127.0.0.1:8789")
+	}
+	if got := byName["sat-none"][forwardIdx]; got != "-" {
+		t.Fatalf("Forward cell without forward = %q, want %q", got, "-")
+	}
+
+	// A configured-only satellite (daemon not reporting it) also stays clean.
+	rows = satelliteTableRows(map[string]satelliteConfigEntry{"sat-cfg": {SSHAddr: "203.0.113.9:22"}}, nil)
+	if got := rows[0][forwardIdx]; got != "-" {
+		t.Fatalf("Forward cell for configured-only satellite = %q, want %q", got, "-")
+	}
+}

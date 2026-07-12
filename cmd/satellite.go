@@ -487,13 +487,31 @@ func renderSatellites() error {
 				if st == nil {
 					continue
 				}
-				live[name] = satelliteLiveStatus{state: st.State, addr: st.Addr, since: st.Since, lastError: st.LastError}
+				live[name] = satelliteLiveStatus{state: st.State, addr: st.Addr, since: st.Since, lastError: st.LastError, forward: st.Forward}
 			}
 		}
 	}
 
-	// Union of configured + live names so a just-added (not-yet-connected)
-	// satellite still shows, and vice versa.
+	rows := satelliteTableRows(configured, live)
+	if rows == nil {
+		fmt.Println("No satellites configured.")
+		return nil
+	}
+
+	tbl := table.NewStyledTable().
+		Headers(satelliteTableHeaders...).
+		Rows(rows...)
+	fmt.Println(tbl.Render())
+	return nil
+}
+
+// satelliteTableHeaders is the column contract for satelliteTableRows.
+var satelliteTableHeaders = []string{"Name", "State", "Addr", "Forward", "Since", "Last Error"}
+
+// satelliteTableRows builds the status/list table rows from the union of
+// configured + live names, so a just-added (not-yet-connected) satellite still
+// shows, and vice versa. Returns nil when there is nothing to show.
+func satelliteTableRows(configured map[string]satelliteConfigEntry, live map[string]satelliteLiveStatus) [][]string {
 	names := map[string]struct{}{}
 	for n := range configured {
 		names[n] = struct{}{}
@@ -502,7 +520,6 @@ func renderSatellites() error {
 		names[n] = struct{}{}
 	}
 	if len(names) == 0 {
-		fmt.Println("No satellites configured.")
 		return nil
 	}
 	ordered := make([]string, 0, len(names))
@@ -515,6 +532,7 @@ func renderSatellites() error {
 	for _, name := range ordered {
 		state := "not connected"
 		addr := configured[name].SSHAddr
+		forward := "-"
 		since := "-"
 		lastErr := ""
 		if ls, ok := live[name]; ok {
@@ -523,6 +541,9 @@ func renderSatellites() error {
 			}
 			if ls.addr != "" {
 				addr = ls.addr
+			}
+			if ls.forward != "" {
+				forward = ls.forward
 			}
 			if !ls.since.IsZero() {
 				since = timeAgo(ls.since)
@@ -534,14 +555,9 @@ func renderSatellites() error {
 		if addr == "" {
 			addr = "-"
 		}
-		rows = append(rows, []string{name, state, addr, since, lastErr})
+		rows = append(rows, []string{name, state, addr, forward, since, lastErr})
 	}
-
-	tbl := table.NewStyledTable().
-		Headers("Name", "State", "Addr", "Since", "Last Error").
-		Rows(rows...)
-	fmt.Println(tbl.Render())
-	return nil
+	return rows
 }
 
 type satelliteLiveStatus struct {
@@ -549,6 +565,7 @@ type satelliteLiveStatus struct {
 	addr      string
 	since     time.Time
 	lastError string
+	forward   string
 }
 
 // loadConfiguredSatellites reads the [satellites.*] tables from the merged grove
