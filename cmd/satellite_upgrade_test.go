@@ -69,10 +69,14 @@ func TestComputeSatelliteDelta(t *testing.T) {
 		t.Errorf("missing repo should have empty RemoteSHA, got %q", got["daemon"].RemoteSHA)
 	}
 
-	// Explicit --repos run: compositor becomes a normal update.
+	// Explicit --repos/--all run: compositor becomes a normal update and the
+	// up-to-date core is FORCED (rebuild+reinstall despite matching shas).
 	got = byRepo(computeSatelliteDelta(repos, local, remote, true))
 	if got["compositor"].Status != deltaStatusUpdate {
 		t.Errorf("explicit compositor delta = %q, want %q", got["compositor"].Status, deltaStatusUpdate)
+	}
+	if got["core"].Status != deltaStatusForced {
+		t.Errorf("explicit up-to-date core delta = %q, want %q", got["core"].Status, deltaStatusForced)
 	}
 
 	// Ordering follows the input repo order.
@@ -83,10 +87,46 @@ func TestComputeSatelliteDelta(t *testing.T) {
 		}
 	}
 
-	// Selection helper: only real updates ship.
-	updates := deltasWithStatus(deltas, deltaStatusUpdate)
-	if names := strings.Join(deltaRepoNames(updates), ","); names != "sync" {
-		t.Errorf("updates = %q, want sync only", names)
+	// Selection helper: by default only real updates ship.
+	if names := strings.Join(deltaRepoNames(deltasToShip(deltas)), ","); names != "sync" {
+		t.Errorf("default ship set = %q, want sync only", names)
+	}
+	// Forced run: updates AND forced ship; missing/error repos never do.
+	forcedShip := deltasToShip(computeSatelliteDelta(repos, local, remote, true))
+	if names := strings.Join(deltaRepoNames(forcedShip), ","); names != "compositor,core,sync" {
+		t.Errorf("forced ship set = %q, want compositor,core,sync", names)
+	}
+}
+
+func TestResolveUpgradeRepoSet(t *testing.T) {
+	localRepos := []string{"core", "daemon", "grove", "sync"}
+
+	// No flags: every repo probed, changed-only (not forced).
+	repos, forced, err := resolveUpgradeRepoSet(nil, false, localRepos, "/src")
+	if err != nil || forced || strings.Join(repos, ",") != "core,daemon,grove,sync" {
+		t.Fatalf("default = (%v, %v, %v)", repos, forced, err)
+	}
+
+	// --repos: exactly the listed repos, forced regardless of delta status.
+	repos, forced, err = resolveUpgradeRepoSet([]string{"grove", "sync"}, false, localRepos, "/src")
+	if err != nil || !forced || strings.Join(repos, ",") != "grove,sync" {
+		t.Fatalf("--repos = (%v, %v, %v)", repos, forced, err)
+	}
+
+	// --repos with an unknown repo errors.
+	if _, _, err = resolveUpgradeRepoSet([]string{"nope"}, false, localRepos, "/src"); err == nil {
+		t.Fatal("expected error for unknown --repos entry")
+	}
+
+	// --all: every repo, forced.
+	repos, forced, err = resolveUpgradeRepoSet(nil, true, localRepos, "/src")
+	if err != nil || !forced || strings.Join(repos, ",") != "core,daemon,grove,sync" {
+		t.Fatalf("--all = (%v, %v, %v)", repos, forced, err)
+	}
+
+	// --all + --repos: mutually exclusive.
+	if _, _, err = resolveUpgradeRepoSet([]string{"grove"}, true, localRepos, "/src"); err == nil {
+		t.Fatal("expected error for --all with --repos")
 	}
 }
 
@@ -139,15 +179,28 @@ func TestBuildSatelliteDeployScript(t *testing.T) {
 	script := buildSatelliteDeployScript("~/code/grovetools", satelliteStageDir, updates)
 
 	for _, want := range []string{
-		"set -euo pipefail",
+		"set -uo pipefail", // NOT -e: a repo failure must not abort the deploy
 		`export PATH="/usr/local/go/bin:$HOME/.local/share/grove/bin:$PATH"`,
 		`CODE="$HOME/code/grovetools"`,
 		`STAGE="` + satelliteStageDir + `"`,
-		"update_repo grove grove-satellite-poc aaa111",
-		"update_repo flow HEAD ddd444", // detached local HEAD ships by sha
-		"build_repo compositor",
+		"checkout_repo grove grove-satellite-poc aaa111",
+		"checkout_repo flow HEAD ddd444", // detached local HEAD ships by sha
+		"build_install_repo compositor",
 		"make zig",
-		"install_bins sync",
+		"build_install_repo sync",
+		// forced repos ship no bundle — fetch only when the bundle exists
+		`if [ -f "$STAGE/$repo.bundle" ]; then`,
+		// failure isolation: record + continue, tail the failed build log,
+		// end with a per-repo summary and a nonzero exit
+		`mark_failed "$repo"`,
+		`record "$repo" "build FAILED"`,
+		"tail -n 40",
+		`record "$repo" "built+installed"`,
+		`record "$repo" "skipped (no build recipe)"`,
+		"=== deploy summary ===",
+		"exit 1",
+		// grove-syncd sudo install is gated on sync actually building
+		"if ! repo_failed sync; then",
 		// self-heal for aborted checkouts (bootstrap step 3's failure mode)
 		"reset --hard",
 		`! -name .git -print -quit`,
@@ -161,9 +214,12 @@ func TestBuildSatelliteDeployScript(t *testing.T) {
 			t.Errorf("deploy script missing %q:\n%s", want, script)
 		}
 	}
+	if strings.Contains(script, "set -euo pipefail") {
+		t.Errorf("deploy script must not be globally fail-fast (set -e aborts on the first repo build failure):\n%s", script)
+	}
 
 	// compositor builds first (grove/treemux/tuimux link its zig lib).
-	if idx1, idx2 := strings.Index(script, "build_repo compositor"), strings.Index(script, "build_repo grove"); idx1 > idx2 {
+	if idx1, idx2 := strings.Index(script, "build_install_repo compositor"), strings.Index(script, "build_install_repo grove"); idx1 > idx2 {
 		t.Error("compositor must build before grove")
 	}
 
@@ -180,6 +236,100 @@ func TestBuildSatelliteDeployScript(t *testing.T) {
 
 	assertBashParses(t, script)
 	assertBashParses(t, noSync)
+}
+
+// TestSatelliteDeployScriptFailureIsolation executes a generated deploy script
+// against throwaway git repos (the forced, bundle-less path) and proves K1: a
+// repo whose build fails is recorded and does NOT prevent later repos from
+// building and installing; the script exits nonzero after a per-repo summary,
+// surfaces the failed build's output, and keeps the build logs.
+func TestSatelliteDeployScriptFailureIsolation(t *testing.T) {
+	for _, tool := range []string{"bash", "git", "make"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("%s not on PATH", tool)
+		}
+	}
+	home := t.TempDir()
+	code := filepath.Join(home, "code")
+	stage := filepath.Join(home, "stage")
+
+	mkRepo := func(name string, files map[string]string) repoDelta {
+		t.Helper()
+		dir := filepath.Join(code, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		run := func(args ...string) string {
+			t.Helper()
+			out, err := gitOutput(dir, args...)
+			if err != nil {
+				t.Fatalf("git %v in %s: %v", args, name, err)
+			}
+			return out
+		}
+		run("init", "-b", "main")
+		run("config", "user.email", "t@t")
+		run("config", "user.name", "t")
+		for f, content := range files {
+			if err := os.WriteFile(filepath.Join(dir, f), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		run("add", ".")
+		run("commit", "-m", "c1")
+		// Forced: sha already on the "VM" — no bundle is shipped for it.
+		return repoDelta{Repo: name, Branch: "main", LocalSHA: run("rev-parse", "HEAD"), Status: deltaStatusForced}
+	}
+
+	bad := mkRepo("badrepo", map[string]string{
+		"Makefile": "build:\n\t@echo boom-badrepo-build\n\t@exit 1\n",
+	})
+	good := mkRepo("goodrepo", map[string]string{
+		"Makefile": "build:\n\tmkdir -p bin\n\tprintf '#!/bin/sh\\necho ok\\n' > bin/goodtool\n\tchmod +x bin/goodtool\n",
+	})
+	content := mkRepo("contentrepo", map[string]string{"README.md": "content only\n"})
+
+	// badrepo FIRST: its failure must not stop goodrepo's build+install.
+	script := buildSatelliteDeployScript(code, stage, []repoDelta{bad, good, content})
+	assertBashParses(t, script)
+
+	cmd := exec.Command("bash", "-s")
+	cmd.Stdin = strings.NewReader(script)
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+	if err == nil {
+		t.Fatalf("script must exit nonzero when a repo fails:\n%s", output)
+	}
+	if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 1 {
+		t.Errorf("expected exit code 1, got %v:\n%s", err, output)
+	}
+
+	// The repo after the failure still built AND installed.
+	if _, statErr := os.Stat(filepath.Join(home, ".local/share/grove/bin/goodtool")); statErr != nil {
+		t.Errorf("goodrepo binary not installed despite badrepo failing first: %v\n%s", statErr, output)
+	}
+
+	for _, want := range []string{
+		"badrepo: build FAILED",
+		"goodrepo: built+installed",
+		"contentrepo: skipped (no build recipe)",
+		"boom-badrepo-build", // failed build output surfaced (tail)
+		"=== deploy summary ===",
+		"deploy FAILED for: badrepo",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("deploy output missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "deploy complete") {
+		t.Errorf("failed deploy must not report success:\n%s", output)
+	}
+
+	// The failed build's log is kept for postmortem (stage not removed).
+	if _, statErr := os.Stat(filepath.Join(stage, "build-logs", "badrepo.log")); statErr != nil {
+		t.Errorf("badrepo build log not kept: %v\n%s", statErr, output)
+	}
 }
 
 func TestBuildSatelliteRestartScript(t *testing.T) {
