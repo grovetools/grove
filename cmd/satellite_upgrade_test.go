@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	orch "github.com/grovetools/grove/pkg/orchestrator"
 )
 
 // assertBashParses pipes a generated script through `bash -n` so emitted
@@ -209,6 +211,9 @@ func TestBuildSatelliteDeployScript(t *testing.T) {
 		// grove-syncd system install via sudo temp+mv
 		"sudo mv -f /usr/local/bin/.grove-syncd.tmp /usr/local/bin/grove-syncd",
 		`rm -rf "$STAGE"`,
+		// a source build supersedes any prebuilt-heads overlay entry
+		`HEADS="$HOME/.local/share/grove/prebuilt-heads"`,
+		`clear_prebuilt_head "$repo"`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("deploy script missing %q:\n%s", want, script)
@@ -560,5 +565,334 @@ func TestSatelliteRegistryOptionalFields(t *testing.T) {
 	}
 	if string(cfgData) != "# keep me\n" {
 		t.Errorf("grove.toml modified by state writes:\n%s", cfgData)
+	}
+}
+
+// --- --prebuilt tests ---
+
+func TestComputeSatellitePrebuiltDelta(t *testing.T) {
+	repos := []string{"compositor", "core", "grove", "sync", "nav", "flow"}
+	local := map[string]repoTip{
+		"compositor": {SHA: "c1", Branch: "main"},
+		"core":       {SHA: "c2", Branch: "main"},
+		"grove":      {SHA: "c3", Branch: "main"},
+		"sync":       {SHA: "c4", Branch: "main"},
+		"nav":        {SHA: "c5", Branch: "main"},
+		"flow":       {SHA: "c6", Branch: "main"},
+	}
+	remote := map[string]string{
+		"compositor": "old1",
+		"core":       "c2",       // up to date, clean
+		"grove":      "c3",       // up to date but DIRTY locally
+		"sync":       "c4-dirty", // overlay says a dirty build is installed; local now clean at c4
+		"nav":        "MISSING",  // dirtiness must not override MISSING semantics
+		"flow":       "old6",
+	}
+	dirty := map[string]bool{"grove": true, "nav": true}
+
+	byRepo := func(deltas []repoDelta) map[string]repoDelta {
+		m := map[string]repoDelta{}
+		for _, d := range deltas {
+			m[d.Repo] = d
+		}
+		return m
+	}
+
+	got := byRepo(computeSatellitePrebuiltDelta(repos, local, remote, false, dirty))
+	want := map[string]string{
+		"compositor": deltaStatusHeldPrebuilt, // never shippable prebuilt
+		"core":       deltaStatusUpToDate,
+		"grove":      deltaStatusDirty,  // dirty ships even at a matching HEAD
+		"sync":       deltaStatusUpdate, // -dirty overlay sha != clean local sha → re-ship
+		"nav":        deltaStatusMissingRemote,
+		"flow":       deltaStatusUpdate,
+	}
+	for repo, status := range want {
+		if got[repo].Status != status {
+			t.Errorf("prebuilt delta[%s].Status = %q, want %q", repo, got[repo].Status, status)
+		}
+	}
+
+	// Even --repos/--all (forced) cannot ship compositor prebuilt.
+	got = byRepo(computeSatellitePrebuiltDelta(repos, local, remote, true, dirty))
+	if got["compositor"].Status != deltaStatusHeldPrebuilt {
+		t.Errorf("forced prebuilt compositor = %q, want %q", got["compositor"].Status, deltaStatusHeldPrebuilt)
+	}
+	if got["core"].Status != deltaStatusForced {
+		t.Errorf("forced up-to-date core = %q, want %q", got["core"].Status, deltaStatusForced)
+	}
+
+	// The ship set includes dirty repos but never compositor or MISSING.
+	ship := deltaRepoNames(deltasToShip(computeSatellitePrebuiltDelta(repos, local, remote, false, dirty)))
+	if strings.Join(ship, ",") != "grove,sync,flow" {
+		t.Errorf("prebuilt ship set = %v, want [grove sync flow]", ship)
+	}
+}
+
+func TestBuildRemoteHeadsScriptPrebuilt(t *testing.T) {
+	script := buildRemoteHeadsScriptPrebuilt("~/code/grovetools", []string{"grove", "daemon"})
+	for _, want := range []string{
+		`CODE="$HOME/code/grovetools"`,
+		`HEADS="$HOME/.local/share/grove/prebuilt-heads"`,
+		"head_of()", // overlay entry wins over git HEAD
+		`s="$(head_of grove)"`,
+		`git -C "$CODE/daemon" rev-parse HEAD`,
+		`echo "grove MISSING"`,
+		`echo ERROR`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("prebuilt heads script missing %q:\n%s", want, script)
+		}
+	}
+	// Same read-only contract as the source probe.
+	for _, forbid := range []string{"sudo", "systemctl", "checkout", "reset", "mkdir"} {
+		if strings.Contains(script, forbid) {
+			t.Errorf("prebuilt heads script contains non-read-only token %q:\n%s", forbid, script)
+		}
+	}
+	assertBashParses(t, script)
+}
+
+func TestBuildPrebuiltManifest(t *testing.T) {
+	repos := []prebuiltRepo{
+		{Repo: "grove", SHA: "abc123", Binaries: []prebuiltBinary{
+			{Name: "grove", SHA256: "aaaa"},
+			{Name: "grove-helper", SHA256: "bbbb"},
+		}},
+		{Repo: "sync", SHA: "def456-dirty", Binaries: []prebuiltBinary{
+			{Name: "grove-syncd", SHA256: "cccc"},
+		}},
+	}
+	got := buildPrebuiltManifest(repos)
+	want := "grove abc123 grove aaaa\n" +
+		"grove abc123 grove-helper bbbb\n" +
+		"sync def456-dirty grove-syncd cccc\n"
+	if got != want {
+		t.Errorf("manifest = %q, want %q", got, want)
+	}
+}
+
+func TestBuildSatellitePrebuiltInstallScript(t *testing.T) {
+	repos := []prebuiltRepo{
+		{Repo: "grove", SHA: "abc123", Binaries: []prebuiltBinary{{Name: "grove", SHA256: "aaaa"}}},
+		{Repo: "sync", SHA: "def456-dirty", Binaries: []prebuiltBinary{
+			{Name: "grove-sync", SHA256: "bbbb"},
+			{Name: "grove-syncd", SHA256: "cccc"},
+		}},
+	}
+	script := buildSatellitePrebuiltInstallScript(satelliteStageDir, repos)
+
+	for _, want := range []string{
+		"set -uo pipefail", // NOT -e: per-repo failure isolation
+		`STAGE="` + satelliteStageDir + `"`,
+		`BIN_DIR="$HOME/.local/share/grove/bin"`,
+		`HEADS="$HOME/.local/share/grove/prebuilt-heads"`,
+		`tar -xzf "$ARCHIVE" -C "$STAGE"`,
+		// verify-then-install: one mismatch excludes the whole repo
+		`if [ "$(sha256sum "$STAGE/$repo/$name" 2>/dev/null | awk '{print $1}')" != "$sum" ]; then`,
+		`record "$repo" "sha256 mismatch ($name)"`,
+		// atomic user install: temp + mv (ETXTBSY-safe)
+		`mv -f "$BIN_DIR/.$b.tmp" "$BIN_DIR/$b"`,
+		// grove-syncd system install via sudo temp+mv
+		"sudo mv -f /usr/local/bin/.grove-syncd.tmp /usr/local/bin/grove-syncd",
+		// atomic prebuilt-heads rewrite
+		`mv "$HEADS.tmp" "$HEADS"`,
+		// per-repo invocations carry the (possibly -dirty) sha and hashes
+		"deploy_repo grove abc123 grove:aaaa",
+		"deploy_repo sync def456-dirty grove-sync:bbbb grove-syncd:cccc",
+		"=== prebuilt install summary ===",
+		"exit 1",
+		`rm -rf "$STAGE"`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("prebuilt install script missing %q:\n%s", want, script)
+		}
+	}
+	if strings.Contains(script, "set -euo pipefail") {
+		t.Errorf("install script must not be globally fail-fast:\n%s", script)
+	}
+	// No git, no VM build, no bundles, no service restarts.
+	for _, forbid := range []string{"git ", "make ", ".bundle", "systemctl", "go build"} {
+		if strings.Contains(script, forbid) {
+			t.Errorf("prebuilt install script must not contain %q:\n%s", forbid, script)
+		}
+	}
+	assertBashParses(t, script)
+}
+
+// TestCollectAndArchivePrebuiltBinaries covers the collect → manifest →
+// archive pipeline against a real temp layout: only regular executable files
+// are collected, hashes match the file contents, and the tar.gz round-trips
+// paths as <repo>/<binary> with exec mode preserved.
+func TestCollectAndArchivePrebuiltBinaries(t *testing.T) {
+	target := orch.Target{GOOS: "linux", GOARCH: "amd64"}
+	src := t.TempDir()
+	repoDir := filepath.Join(src, "grove")
+	binDir := prebuiltBinDir(repoDir, target)
+	if err := os.MkdirAll(filepath.Join(binDir, "subdir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "grove"), []byte("BINARY-A"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "notes.txt"), []byte("not a binary"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	bins, err := collectPrebuiltBinaries(repoDir, target)
+	if err != nil {
+		t.Fatalf("collectPrebuiltBinaries: %v", err)
+	}
+	if len(bins) != 1 || bins[0].Name != "grove" {
+		t.Fatalf("collected = %+v, want just the grove executable", bins)
+	}
+	// sha256("BINARY-A")
+	if bins[0].SHA256 != "3d17ff33ca2e42d1241ff08060354fc406fb05c07d9b6bd70f8ebe988287f55d" {
+		t.Errorf("sha256 = %s", bins[0].SHA256)
+	}
+
+	// A repo with no target bin dir collects nothing (→ the hard
+	// GROVE_BUILD_OUT warning path), without error.
+	if bins, err := collectPrebuiltBinaries(filepath.Join(src, "nope"), target); err != nil || len(bins) != 0 {
+		t.Fatalf("missing dir collect = (%v, %v), want empty", bins, err)
+	}
+
+	repos := []prebuiltRepo{{Repo: "grove", SHA: "abc", Binaries: bins}}
+	archive := filepath.Join(t.TempDir(), prebuiltArchiveName)
+	if err := writePrebuiltArchive(archive, src, target, repos); err != nil {
+		t.Fatalf("writePrebuiltArchive: %v", err)
+	}
+	if _, err := exec.LookPath("tar"); err != nil {
+		t.Skip("tar not on PATH")
+	}
+	dest := t.TempDir()
+	if out, err := exec.Command("tar", "-xzf", archive, "-C", dest).CombinedOutput(); err != nil {
+		t.Fatalf("untar: %v: %s", err, out)
+	}
+	extracted := filepath.Join(dest, "grove", "grove")
+	info, err := os.Stat(extracted)
+	if err != nil {
+		t.Fatalf("archived binary missing: %v", err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Errorf("exec mode not preserved: %v", info.Mode())
+	}
+	data, err := os.ReadFile(extracted)
+	if err != nil || string(data) != "BINARY-A" {
+		t.Errorf("archived content = %q err=%v", data, err)
+	}
+}
+
+// TestPrebuiltInstallScriptExecution executes a generated install script
+// against a real staged archive: a repo with a tampered hash is excluded
+// entirely (none of its binaries install), the good repo installs and its
+// (-dirty) sha lands in prebuilt-heads atomically, the script exits nonzero
+// with a per-repo summary, and the stage dir is kept.
+func TestPrebuiltInstallScriptExecution(t *testing.T) {
+	for _, tool := range []string{"bash", "tar", "sha256sum"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("%s not on PATH", tool)
+		}
+	}
+	target := orch.Target{GOOS: "linux", GOARCH: "amd64"}
+	home := t.TempDir()
+	src := t.TempDir()
+	stage := filepath.Join(home, "stage")
+	if err := os.MkdirAll(stage, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	mkBin := func(repo, name, content string) prebuiltRepo {
+		t.Helper()
+		dir := prebuiltBinDir(filepath.Join(src, repo), target)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		bins, err := collectPrebuiltBinaries(filepath.Join(src, repo), target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return prebuiltRepo{Repo: repo, Binaries: bins}
+	}
+
+	good := mkBin("goodrepo", "goodtool", "#!/bin/sh\necho good\n")
+	good.SHA = "aaa111-dirty" // dirty builds are recorded with the suffix
+	bad := mkBin("badrepo", "badtool", "#!/bin/sh\necho bad\n")
+	bad.SHA = "bbb222"
+	bad.Binaries[0].SHA256 = strings.Repeat("0", 64) // tampered → mismatch
+
+	// A pre-existing overlay entry for goodrepo must be REPLACED, not
+	// duplicated; badrepo's stale entry must survive its failed install.
+	headsPath := filepath.Join(home, ".local/share/grove/prebuilt-heads")
+	if err := os.MkdirAll(filepath.Dir(headsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(headsPath, []byte("goodrepo old000\nbadrepo old111\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	repos := []prebuiltRepo{bad, good} // bad FIRST: must not block good
+	if err := writePrebuiltArchive(filepath.Join(stage, prebuiltArchiveName), src, target, repos); err != nil {
+		t.Fatal(err)
+	}
+
+	script := buildSatellitePrebuiltInstallScript(stage, repos)
+	assertBashParses(t, script)
+
+	cmd := exec.Command("bash", "-s")
+	cmd.Stdin = strings.NewReader(script)
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+	if err == nil {
+		t.Fatalf("script must exit nonzero when a repo fails:\n%s", output)
+	}
+
+	// goodrepo installed despite badrepo failing first.
+	installed := filepath.Join(home, ".local/share/grove/bin/goodtool")
+	if info, statErr := os.Stat(installed); statErr != nil {
+		t.Errorf("goodtool not installed: %v\n%s", statErr, output)
+	} else if info.Mode().Perm()&0o111 == 0 {
+		t.Errorf("goodtool not executable: %v", info.Mode())
+	}
+	// badrepo's binary must NOT be installed (sha mismatch excludes the repo).
+	if _, statErr := os.Stat(filepath.Join(home, ".local/share/grove/bin/badtool")); statErr == nil {
+		t.Errorf("badtool installed despite sha mismatch:\n%s", output)
+	}
+
+	heads, readErr := os.ReadFile(headsPath)
+	if readErr != nil {
+		t.Fatalf("prebuilt-heads missing: %v\n%s", readErr, output)
+	}
+	text := string(heads)
+	if !strings.Contains(text, "goodrepo aaa111-dirty") {
+		t.Errorf("goodrepo head not recorded with -dirty suffix:\n%s", text)
+	}
+	if strings.Contains(text, "old000") {
+		t.Errorf("goodrepo's stale overlay entry not replaced:\n%s", text)
+	}
+	if !strings.Contains(text, "badrepo old111") {
+		t.Errorf("badrepo's overlay entry must survive its failed install:\n%s", text)
+	}
+
+	for _, want := range []string{
+		"badrepo: sha256 MISMATCH",
+		"installed goodtool",
+		"=== prebuilt install summary ===",
+		"install FAILED for: badrepo",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("install output missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "prebuilt install complete") {
+		t.Errorf("failed install must not report success:\n%s", output)
+	}
+	// Stage kept for postmortem.
+	if _, statErr := os.Stat(filepath.Join(stage, prebuiltArchiveName)); statErr != nil {
+		t.Errorf("stage dir not kept on failure: %v", statErr)
 	}
 }

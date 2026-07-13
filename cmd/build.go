@@ -68,6 +68,10 @@ This command replaces the root 'make build' for a faster and more informative bu
 	cmd.SilenceUsage = true
 
 	addTaskFlags(cmd)
+	// --target is build-only (deliberately not in addTaskFlags): test/other
+	// verbs run natively. Cross builds land in bin/<goos>_<goarch> — never
+	// plain bin/, whose native binaries are live symlink targets.
+	cmd.Flags().String("target", "", "Cross-compile for <goos>/<goarch> (e.g. linux/amd64); binaries land in bin/<goos>_<goarch> via GROVE_BUILD_OUT")
 
 	return cmd
 }

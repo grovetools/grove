@@ -43,21 +43,36 @@ type Orchestrator struct {
 	remoteDisabled  bool
 	remoteSubmitted bool
 	groupID         string
+
+	// Cross-cgo state: GROVE_TARGET_CGO_CFLAGS is resolved at most once per
+	// run (go list + shim write are I/O); "" means unavailable/omitted.
+	crossCgoOnce  sync.Once
+	crossCgoFlags string
+}
+
+// crossTarget returns the active cross-compilation target, or false when the
+// run is native (no target, or a target equal to the host).
+func (o *Orchestrator) crossTarget() (Target, bool) {
+	t := o.Options.Target
+	if t.IsZero() || t.IsNative() {
+		return Target{}, false
+	}
+	return t, true
+}
+
+// verbKey is the TaskResults map key for a verb: the verb itself natively,
+// "<verb>@<goos>_<goarch>" under a cross target. Both cache lookup and
+// storage (reportTaskVerb) go through it so cross and native builds never
+// invalidate or false-hit each other.
+func (o *Orchestrator) verbKey(verb string) string {
+	if t, ok := o.crossTarget(); ok {
+		return verb + "@" + t.Pair()
+	}
+	return verb
 }
 
 func (o *Orchestrator) isCacheHit(job TaskJob, states map[string]WorkspaceState) bool {
-	if o.Options.NoCache {
-		return false
-	}
-	s, ok := states[job.Name]
-	if !ok || s.IsDirty || s.TaskResults == nil {
-		return false
-	}
-	tr, ok := s.TaskResults[o.Options.Verb]
-	if !ok || tr == nil {
-		return false
-	}
-	return tr.ExitCode == 0 && tr.CommitHash == s.CommitHash
+	return o.isCacheHitForVerb(job, o.Options.Verb, states)
 }
 
 func (o *Orchestrator) isCacheHitForVerb(job TaskJob, verb string, states map[string]WorkspaceState) bool {
@@ -68,7 +83,7 @@ func (o *Orchestrator) isCacheHitForVerb(job TaskJob, verb string, states map[st
 	if !ok || s.IsDirty || s.TaskResults == nil {
 		return false
 	}
-	tr, ok := s.TaskResults[verb]
+	tr, ok := s.TaskResults[o.verbKey(verb)]
 	if !ok || tr == nil {
 		return false
 	}
@@ -139,7 +154,7 @@ func (o *Orchestrator) runFlat(ctx context.Context, jobs []TaskJob, states map[s
 		numWorkers = runtime.NumCPU()
 	}
 
-	env := buildEnv(o.RunOpts)
+	env := o.buildJobEnv(jobs)
 	eventsChan := make(chan TaskEvent, len(jobs)*3)
 
 	var execJobs []TaskJob
@@ -177,7 +192,7 @@ func (o *Orchestrator) runWaves(ctx context.Context, jobs []TaskJob, states map[
 		numWorkers = runtime.NumCPU()
 	}
 
-	env := buildEnv(o.RunOpts)
+	env := o.buildJobEnv(jobs)
 	eventsChan := make(chan TaskEvent, len(jobs)*3)
 
 	go func() {
@@ -321,6 +336,21 @@ func (o *Orchestrator) executeJobVerbs(ctx context.Context, job TaskJob, verbs [
 			skipped = true
 		}
 
+		// Cross-target compliance probe: a successful cross build whose
+		// GROVE_BUILD_OUT dir holds no executable came from a Makefile that
+		// ignores the injection — its bin/ may now hold foreign-arch
+		// binaries, and it cannot participate in prebuilt deploys. Warn
+		// hard (on the event stream for the TUI, on stderr for JSON/non-TTY
+		// paths, and in the stored output) but do not fail the build.
+		if t, cross := o.crossTarget(); cross && verb == "build" && err == nil && !skipped {
+			if !t.OutDirHasExecutable(job.Path) {
+				warn := fmt.Sprintf("WARNING: %s built for %s but produced no executable in %s — its Makefile ignores GROVE_BUILD_OUT; it will be excluded from prebuilt deploys", job.Name, t, t.OutDir())
+				eventsChan <- TaskEvent{Job: job, Verb: verb, Type: "output", OutputLine: warn}
+				fmt.Fprintln(os.Stderr, warn)
+				output = append(output, []byte("\n"+warn+"\n")...)
+			}
+		}
+
 		result := TaskResult{
 			Job:      job,
 			Verb:     verb,
@@ -372,7 +402,9 @@ func (o *Orchestrator) reportTaskVerb(ctx context.Context, job TaskJob, verb str
 	if o.DaemonClient == nil || !o.DaemonClient.IsRunning() {
 		return
 	}
-	_ = o.DaemonClient.ReportTask(ctx, job.Path, verb, exitCode, commitHash, durationMs, errorSummary)
+	// Stored under verbKey so a cross-targeted result never masquerades as
+	// (or clobbers) the native one — lookup (isCacheHitForVerb) matches.
+	_ = o.DaemonClient.ReportTask(ctx, job.Path, o.verbKey(verb), exitCode, commitHash, durationMs, errorSummary)
 }
 
 // runProcess executes a single verb for a job, preferring the daemon's
@@ -418,6 +450,37 @@ func (o *Orchestrator) runLocalProcess(ctx context.Context, job TaskJob, verb st
 	}
 	output, err := task.Wait()
 	return output, time.Since(start), err, true
+}
+
+// buildJobEnv assembles the job environment: the standard env plus, under a
+// cross target, the GROVE_TARGET_* injection (including the resolved
+// GROVE_TARGET_CGO_CFLAGS when go-sqlite3 is in the module graph). A native
+// target injects nothing — the Makefiles' default (native) build path stays
+// untouched.
+func (o *Orchestrator) buildJobEnv(jobs []TaskJob) []string {
+	env := buildEnv(o.RunOpts)
+	if t, ok := o.crossTarget(); ok {
+		env = append(env, t.Env()...)
+		if flags := o.crossCgoCflags(t, jobs); flags != "" {
+			env = append(env, "GROVE_TARGET_CGO_CFLAGS="+flags)
+		}
+	}
+	return env
+}
+
+// crossCgoCflags resolves Target.CgoCflags for the run's workspace container
+// once per run. Failures are non-fatal: warn and omit the var (the affected
+// repo's cross link will say the rest).
+func (o *Orchestrator) crossCgoCflags(t Target, jobs []TaskJob) string {
+	o.crossCgoOnce.Do(func() {
+		flags, err := t.CgoCflags(workspaceContainer(jobs))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: GROVE_TARGET_CGO_CFLAGS unavailable (%v) — sqlite cgo repos may fail their cross link\n", err)
+			return
+		}
+		o.crossCgoFlags = flags
+	})
+	return o.crossCgoFlags
 }
 
 func buildEnv(opts *RunOptions) []string {

@@ -90,44 +90,18 @@ func executeTaskWithCommand(cmd *cobra.Command, verb string, rawCommand []string
 		}
 	}
 
-	depGraph := orch.DeriveWorkspaceBuildAfter(taskJobs, configMap)
 	waves := orch.SortIntoWaves(taskJobs, configMap)
 	hasWaves := len(waves) > 1
 
-	var binDirs []string
-	for _, wsPath := range workspaces {
-		binDirs = append(binDirs, filepath.Join(wsPath, "bin"))
-	}
-	runOpts := &orch.RunOptions{ExtraPathDirs: binDirs}
-
-	// Global daemon client: the global daemon is the single owner of
-	// TaskResults and the machine-wide build queue. Auto-starts groved;
-	// when that fails we still degrade to LocalStateProvider + local pool.
-	client := daemon.NewGlobalClient()
-	var stateProvider orch.StateProvider
-	if client.IsRunning() {
-		stateProvider = &orch.DaemonStateProvider{Client: client}
-	} else {
-		stateProvider = &orch.LocalStateProvider{}
-	}
-
-	o := &orch.Orchestrator{
-		Options: orch.OrchestratorOptions{
-			Verb:         verb,
-			Strategy:     orch.StrategyFlat,
-			AffectedOnly: affected,
-			NoCache:      noCache,
-			Jobs:         jobs,
-			FailFast:     failFast,
-			RemoteExec:   true,
-		},
-		RunOpts:       runOpts,
-		StateProvider: stateProvider,
-		DaemonClient:  client,
-		BuildClient:   client,
-		Configs:       configMap,
-		DepGraph:      depGraph,
-	}
+	o := newTaskOrchestrator(orch.OrchestratorOptions{
+		Verb:         verb,
+		Strategy:     orch.StrategyFlat,
+		AffectedOnly: affected,
+		NoCache:      noCache,
+		Jobs:         jobs,
+		FailFast:     failFast,
+		RemoteExec:   true,
+	}, workspaces, taskJobs, configMap)
 
 	buildFailFast = failFast
 	buildInteractive = interactive
@@ -163,6 +137,20 @@ func executeTask(cmd *cobra.Command, verb string, strategy orch.ConcurrencyStrat
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	interactive, _ := cmd.Flags().GetBool("interactive")
 
+	// --target is registered on the build command only; other verbs have no
+	// such flag and stay native.
+	var target orch.Target
+	if f := cmd.Flags().Lookup("target"); f != nil && f.Value.String() != "" {
+		t, err := orch.ParseTarget(f.Value.String())
+		if err != nil {
+			return err
+		}
+		target = t
+		if !t.IsNative() {
+			fmt.Printf("cross-compiling for %s → %s\n", t, t.OutDir())
+		}
+	}
+
 	projects, _, err := DiscoverTargetProjects()
 	if err != nil {
 		return fmt.Errorf("failed to discover projects: %w", err)
@@ -190,63 +178,20 @@ func executeTask(cmd *cobra.Command, verb string, strategy orch.ConcurrencyStrat
 		return nil
 	}
 
-	var taskJobs []orch.TaskJob
-	configMap := make(map[string]*config.Config)
-
-	for _, wsPath := range workspaces {
-		cfg, loadErr := config.LoadFrom(wsPath)
-		name := filepath.Base(wsPath)
-		resolved := orch.ResolveCommand(cfg, verb)
-
-		taskJobs = append(taskJobs, orch.TaskJob{
-			Name:    name,
-			Path:    wsPath,
-			Command: resolved,
-		})
-
-		if loadErr == nil {
-			configMap[name] = cfg
-		}
-	}
-
-	depGraph := orch.DeriveWorkspaceBuildAfter(taskJobs, configMap)
+	taskJobs, configMap := makeVerbTaskJobs(verb, workspaces)
 	waves := orch.SortIntoWaves(taskJobs, configMap)
 	hasWaves := len(waves) > 1
 
-	var binDirs []string
-	for _, wsPath := range workspaces {
-		binDirs = append(binDirs, filepath.Join(wsPath, "bin"))
-	}
-	runOpts := &orch.RunOptions{ExtraPathDirs: binDirs}
-
-	// Global daemon client: the global daemon is the single owner of
-	// TaskResults and the machine-wide build queue. Auto-starts groved;
-	// when that fails we still degrade to LocalStateProvider + local pool.
-	client := daemon.NewGlobalClient()
-	var stateProvider orch.StateProvider
-	if client.IsRunning() {
-		stateProvider = &orch.DaemonStateProvider{Client: client}
-	} else {
-		stateProvider = &orch.LocalStateProvider{}
-	}
-
-	o := &orch.Orchestrator{
-		Options: orch.OrchestratorOptions{
-			Verb:         verb,
-			Strategy:     strategy,
-			AffectedOnly: affected,
-			NoCache:      noCache,
-			Jobs:         jobs,
-			FailFast:     failFast,
-			RemoteExec:   true,
-		},
-		RunOpts:       runOpts,
-		StateProvider: stateProvider,
-		DaemonClient:  client,
-		BuildClient:   client,
-		Configs:       configMap,
-		DepGraph:      depGraph,
-	}
+	o := newTaskOrchestrator(orch.OrchestratorOptions{
+		Verb:         verb,
+		Strategy:     strategy,
+		AffectedOnly: affected,
+		NoCache:      noCache,
+		Jobs:         jobs,
+		FailFast:     failFast,
+		RemoteExec:   true,
+		Target:       target,
+	}, workspaces, taskJobs, configMap)
 
 	// Store flags in package vars for TUI/verbose callbacks
 	buildFailFast = failFast
@@ -269,6 +214,85 @@ func executeTask(cmd *cobra.Command, verb string, strategy orch.ConcurrencyStrat
 	}
 
 	return runTuiTask(o, verb, taskJobs)
+}
+
+// makeVerbTaskJobs resolves the verb's command per workspace into TaskJobs and
+// returns the loaded configs (workspaces without a loadable config still get a
+// job, just no config entry).
+func makeVerbTaskJobs(verb string, workspaces []string) ([]orch.TaskJob, map[string]*config.Config) {
+	var taskJobs []orch.TaskJob
+	configMap := make(map[string]*config.Config)
+	for _, wsPath := range workspaces {
+		cfg, loadErr := config.LoadFrom(wsPath)
+		name := filepath.Base(wsPath)
+		taskJobs = append(taskJobs, orch.TaskJob{
+			Name:    name,
+			Path:    wsPath,
+			Command: orch.ResolveCommand(cfg, verb),
+		})
+		if loadErr == nil {
+			configMap[name] = cfg
+		}
+	}
+	return taskJobs, configMap
+}
+
+// newTaskOrchestrator wires the standard task orchestrator around the given
+// jobs: per-workspace bin/ dirs on PATH, the global daemon as state provider
+// and build queue (degrading to local state + local pool when unreachable),
+// and the derived import dep graph.
+func newTaskOrchestrator(options orch.OrchestratorOptions, workspaces []string, taskJobs []orch.TaskJob, configMap map[string]*config.Config) *orch.Orchestrator {
+	var binDirs []string
+	for _, wsPath := range workspaces {
+		binDirs = append(binDirs, filepath.Join(wsPath, "bin"))
+	}
+
+	// Global daemon client: the global daemon is the single owner of
+	// TaskResults and the machine-wide build queue. Auto-starts groved;
+	// when that fails we still degrade to LocalStateProvider + local pool.
+	client := daemon.NewGlobalClient()
+	var stateProvider orch.StateProvider
+	if client.IsRunning() {
+		stateProvider = &orch.DaemonStateProvider{Client: client}
+	} else {
+		stateProvider = &orch.LocalStateProvider{}
+	}
+
+	return &orch.Orchestrator{
+		Options:       options,
+		RunOpts:       &orch.RunOptions{ExtraPathDirs: binDirs},
+		StateProvider: stateProvider,
+		DaemonClient:  client,
+		BuildClient:   client,
+		Configs:       configMap,
+		DepGraph:      orch.DeriveWorkspaceBuildAfter(taskJobs, configMap),
+	}
+}
+
+// BuildReposForTarget builds the named repos under sourceDir for target via
+// the standard orchestrator: wave-ordered, parallel, cached per
+// "build@<goos>_<goarch>". This is the local-build engine behind
+// `grove satellite upgrade --prebuilt` (and the answer to "why doesn't
+// satellite upgrade use grove build" — now it does). Results come back
+// per-repo; a failed repo is one failed TaskResult, never an error.
+func BuildReposForTarget(ctx context.Context, sourceDir string, repos []string, target orch.Target, jobs int) ([]orch.TaskResult, error) {
+	var workspaces []string
+	for _, r := range repos {
+		workspaces = append(workspaces, filepath.Join(sourceDir, r))
+	}
+	taskJobs, configMap := makeVerbTaskJobs("build", workspaces)
+	if jobs <= 0 {
+		jobs = runtime.NumCPU()
+	}
+	o := newTaskOrchestrator(orch.OrchestratorOptions{
+		Verb:       "build",
+		Strategy:   orch.StrategyWaveSorted,
+		Jobs:       jobs,
+		FailFast:   false,
+		RemoteExec: true,
+		Target:     target,
+	}, workspaces, taskJobs, configMap)
+	return o.RunWithResults(ctx, taskJobs)
 }
 
 var taskUlog = logging.NewUnifiedLogger("grove-meta.task")

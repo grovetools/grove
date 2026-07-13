@@ -7,10 +7,21 @@ package cmd
 // repos, then (in ONE generated remote script, like bootstrap) fetch+checkout,
 // build, and atomically install on the VM, and finally restart grove-syncd +
 // groved. Every SSH/scp invocation pins the registry host_key — never TOFU
-// (C2). Building happens ON the VM (sync needs CGO+fts5; never cross-compile).
+// (C2). In the default source mode building happens ON the VM (sync needs
+// CGO+fts5); with --prebuilt the binaries are cross-compiled locally instead
+// (`grove build --target`, zig cc as the sanctioned cgo cross path) and only
+// verified binaries ship — no VM-side git or build. Prebuilt installs record
+// their shas in the VM's prebuilt-heads overlay so later deltas compare
+// against what is installed, not just the checkout's git HEAD.
 
 import (
+	"archive/tar"
+	"compress/gzip"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -22,6 +33,8 @@ import (
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/components/table"
 	"github.com/spf13/cobra"
+
+	orch "github.com/grovetools/grove/pkg/orchestrator"
 )
 
 // defaultRemoteCodeDir is where satellite-bootstrap.sh clones the superrepo.
@@ -39,6 +52,21 @@ const satelliteUserBinDir = "$HOME/.local/share/grove/bin"
 // shells (go for builds, the grove bin dir for tooling).
 const satelliteRemotePATH = "/usr/local/go/bin:$HOME/.local/share/grove/bin:$PATH"
 
+// satellitePrebuiltHeads is the VM-side overlay recording which sha's
+// prebuilt binaries are installed per repo ("<repo> <sha>" lines; the sha
+// carries a -dirty suffix for builds from dirty trees). Installed binaries
+// can be newer than the checkout's git HEAD, so the prebuilt heads probe
+// prefers this file; a source build deletes the repo's line again so the
+// overlay never goes stale-authoritative.
+const satellitePrebuiltHeads = "$HOME/.local/share/grove/prebuilt-heads"
+
+// prebuiltArchiveName / prebuiltManifestName are the payload files staged on
+// the VM by --prebuilt.
+const (
+	prebuiltArchiveName  = "grove-prebuilt.tar.gz"
+	prebuiltManifestName = "grove-prebuilt.manifest"
+)
+
 func newSatelliteUpgradeCmd() *cobra.Command {
 	var (
 		reposFlag     string
@@ -47,6 +75,8 @@ func newSatelliteUpgradeCmd() *cobra.Command {
 		remoteCodeDir string
 		dryRun        bool
 		assumeYes     bool
+		prebuilt      bool
+		targetFlag    string
 	)
 	cmd := cli.NewStandardCommand("upgrade <name>", "Redeploy the grove stack on a satellite VM from local branch tips")
 	cmd.Long = `Redeploy the grove stack on a running satellite VM.
@@ -69,7 +99,19 @@ Notes:
   - core is a library: its changes only reach binaries when dependent repos are
     rebuilt — include those dependents in --repos if only core moved.
   - the VM checkout is forced to the shipped tip; uncommitted VM changes to
-    tracked files are discarded.`
+    tracked files are discarded.
+  - --prebuilt cross-compiles the ship set locally (grove build --target,
+    default linux/amd64) and ships only the verified binaries — no VM-side
+    git or build. Installed shas are tracked in the VM's prebuilt-heads
+    overlay; dirty local trees still ship (recorded as <sha>-dirty) but are
+    flagged loudly. compositor is a library with no binaries and is never
+    shipped prebuilt.
+  - repos that link compositor (flow, tuimux, treemux, cx, skills, nav, nb,
+    hooks) cannot cross-compile to linux/amd64 yet — no linux compositor/
+    ghostty static libs exist — so under --prebuilt their local builds are
+    EXPECTED to fail; each is reported and dropped per-repo while the rest
+    ship. Use the source path (no --prebuilt) to deploy them until linux
+    compositor libs exist.`
 	cmd.Args = cobra.ExactArgs(1)
 	cmd.SilenceUsage = true
 	cmd.Flags().StringVar(&reposFlag, "repos", "", "Comma-separated repos to deploy; listed repos are forced even when already up-to-date (default: every changed repo)")
@@ -78,11 +120,26 @@ Notes:
 	cmd.Flags().StringVar(&remoteCodeDir, "remote-code-dir", defaultRemoteCodeDir, "Superrepo checkout on the VM")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Stop after printing the local-vs-VM delta table")
 	cmd.Flags().BoolVar(&assumeYes, "yes", false, "Skip the deploy and restart confirmation prompts")
+	cmd.Flags().BoolVar(&prebuilt, "prebuilt", false, "Cross-compile locally and ship verified binaries — no VM-side git or build")
+	cmd.Flags().StringVar(&targetFlag, "target", "linux/amd64", "Prebuilt cross-compile target as <goos>/<goarch> (the VM arch)")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		entry, ok := loadMergedSatellites()[name]
 		if !ok {
 			return fmt.Errorf("satellite %q not found in the registry (config or state) — run `grove satellite up %s` first", name, name)
+		}
+
+		// --prebuilt target (validated up front; --target is meaningless
+		// without --prebuilt).
+		var target orch.Target
+		if prebuilt {
+			t, err := orch.ParseTarget(targetFlag)
+			if err != nil {
+				return fmt.Errorf("--prebuilt: %w", err)
+			}
+			target = t
+		} else if cmd.Flags().Changed("target") {
+			return fmt.Errorf("--target only applies to --prebuilt (source mode builds on the VM)")
 		}
 
 		// Resolve the local ecosystem root.
@@ -116,14 +173,23 @@ Notes:
 			return err
 		}
 
-		// Local tips.
+		// Local tips (+ per-repo dirtiness in prebuilt mode: dirty trees are
+		// a supported dev loop but must be LOUD, and always ship).
 		local := map[string]repoTip{}
+		dirty := map[string]bool{}
 		for _, r := range repoSet {
 			tip, err := localRepoTip(filepath.Join(sourceAbs, r))
 			if err != nil {
 				return fmt.Errorf("read local HEAD of %s: %w", r, err)
 			}
 			local[r] = tip
+			if prebuilt {
+				d, err := localRepoDirty(filepath.Join(sourceAbs, r))
+				if err != nil {
+					return fmt.Errorf("read local dirtiness of %s: %w", r, err)
+				}
+				dirty[r] = d
+			}
 		}
 
 		// Pinned SSH transport from the registry entry.
@@ -137,14 +203,25 @@ Notes:
 			return fmt.Errorf("satellite %q: %w", name, err)
 		}
 
-		// (a) Remote HEADs → delta table.
+		// (a) Remote HEADs → delta table. In prebuilt mode the probe prefers
+		// the prebuilt-heads overlay (installed binaries can be newer than
+		// the checkout's git HEAD) and dirty local trees always ship.
 		fmt.Printf("Reading repo HEADs on %s (%s)...\n", name, ssh.dest())
-		out, err := ssh.outputScript(buildRemoteHeadsScript(remoteCodeDir, repoSet))
+		headsScript := buildRemoteHeadsScript(remoteCodeDir, repoSet)
+		if prebuilt {
+			headsScript = buildRemoteHeadsScriptPrebuilt(remoteCodeDir, repoSet)
+		}
+		out, err := ssh.outputScript(headsScript)
 		if err != nil {
 			return fmt.Errorf("read remote HEADs: %w", err)
 		}
 		remote := parseRemoteHeads(out)
-		deltas := computeSatelliteDelta(repoSet, local, remote, forced)
+		var deltas []repoDelta
+		if prebuilt {
+			deltas = computeSatellitePrebuiltDelta(repoSet, local, remote, forced, dirty)
+		} else {
+			deltas = computeSatelliteDelta(repoSet, local, remote, forced)
+		}
 		printSatelliteDelta(deltas)
 
 		updates := deltasToShip(deltas)
@@ -152,63 +229,97 @@ Notes:
 			fmt.Printf("\nwarning: compositor changed but is HELD — its zig build is slow and rarely needed.\n")
 			fmt.Printf("Include it explicitly to deploy it: --repos %s\n", strings.Join(append(deltaRepoNames(updates), "compositor"), ","))
 		}
+		if held := deltasWithStatus(deltas, deltaStatusHeldPrebuilt); len(held) > 0 {
+			fmt.Printf("\nnote: compositor changed but is a library with no binaries — it never ships in --prebuilt mode\n(use a source-mode upgrade to rebuild it and its consumers on the VM).\n")
+		}
 		for _, d := range updates {
 			if d.Repo == "core" {
 				fmt.Printf("\nnote: core is a library — its changes only reach binaries via dependent repo rebuilds;\ninclude the dependents (e.g. grove,daemon,sync,flow,nb) in --repos if they show up-to-date.\n")
 			}
+		}
+		dirtyShipped := deltaRepoNames(deltasWithStatus(deltas, deltaStatusDirty))
+		if len(dirtyShipped) > 0 {
+			fmt.Printf("\nWARNING: DIRTY working tree(s) ship as-is and are recorded as <sha>-dirty on the VM: %s\n", strings.Join(dirtyShipped, ", "))
 		}
 		if len(updates) == 0 {
 			fmt.Printf("\nSatellite %q is up to date with %s — nothing to do.\n", name, sourceAbs)
 			return nil
 		}
 		if dryRun {
-			fmt.Printf("\n(dry-run) would upgrade %d repo(s): %s\n", len(updates), strings.Join(deltaRepoNames(updates), ", "))
+			if prebuilt {
+				fmt.Printf("\n(dry-run) would cross-build for %s and install %d repo(s): %s\n", target, len(updates), strings.Join(deltaRepoNames(updates), ", "))
+			} else {
+				fmt.Printf("\n(dry-run) would upgrade %d repo(s): %s\n", len(updates), strings.Join(deltaRepoNames(updates), ", "))
+			}
 			return nil
 		}
 
 		if !assumeYes {
-			if !confirmYesNo(fmt.Sprintf("Ship, build, and install %d repo(s) on %q? (force-checkout discards uncommitted VM changes)", len(updates), name)) {
+			prompt := fmt.Sprintf("Ship, build, and install %d repo(s) on %q? (force-checkout discards uncommitted VM changes)", len(updates), name)
+			if prebuilt {
+				prompt = fmt.Sprintf("Cross-build for %s and install %d prebuilt repo(s) on %q?", target, len(updates), name)
+				if len(dirtyShipped) > 0 {
+					prompt = fmt.Sprintf("Cross-build for %s and install %d prebuilt repo(s) on %q — INCLUDING DIRTY TREES (%s)?", target, len(updates), name, strings.Join(dirtyShipped, ", "))
+				}
+			}
+			if !confirmYesNo(prompt) {
 				return fmt.Errorf("aborted")
 			}
 		}
 
-		// (b) Bundles → scp.
-		bundleDir, err := os.MkdirTemp("", "grove-satellite-bundles-")
-		if err != nil {
-			return err
-		}
-		defer func() { _ = os.RemoveAll(bundleDir) }()
-		var bundlePaths []string
-		for _, d := range updates {
-			if d.Status == deltaStatusForced {
-				continue // the VM already has the sha — the deploy script re-checkouts and rebuilds without a bundle
+		var deployErr error
+		var shippedRepos []string
+		if prebuilt {
+			// (b')–(e') Build locally with the grove build orchestrator,
+			// verify + package the target binaries, scp, and run the
+			// prebuilt install script (sha256-verify, install, record
+			// prebuilt-heads). Local build failures drop the repo from the
+			// ship set; if everything drops the VM is never touched.
+			shippedRepos, deployErr, err = deploySatellitePrebuilt(ssh, name, sourceAbs, target, updates, dirty)
+			if err != nil {
+				return err
 			}
-			bundlePath := filepath.Join(bundleDir, d.Repo+".bundle")
-			if err := createRepoBundle(filepath.Join(sourceAbs, d.Repo), bundlePath, d.Branch, d.RemoteSHA); err != nil {
-				return fmt.Errorf("bundle %s: %w", d.Repo, err)
-			}
-			bundlePaths = append(bundlePaths, bundlePath)
-		}
-		if len(bundlePaths) > 0 {
-			fmt.Printf("\nShipping %d bundle(s) to %s:%s ...\n", len(bundlePaths), name, satelliteStageDir)
-			if err := ssh.runCommand("mkdir -p " + satelliteStageDir); err != nil {
-				return fmt.Errorf("create remote stage dir: %w", err)
-			}
-			if err := ssh.scp(bundlePaths, satelliteStageDir+"/"); err != nil {
-				return fmt.Errorf("scp bundles: %w", err)
-			}
-		}
+		} else {
+			shippedRepos = deltaRepoNames(updates)
 
-		// (c)–(e) One generated remote script: fetch+checkout (self-healing),
-		// build, install (temp+mv, ETXTBSY-safe). Each repo is failure-isolated
-		// inside the script: a failed build records the repo and moves on, so
-		// every repo that DID build still gets installed — and we still restart
-		// below to put those binaries live. The script exits nonzero after its
-		// per-repo summary when anything failed.
-		fmt.Println("\nRunning remote deploy script (fetch, checkout, build, install)...")
-		deployErr := ssh.runScript(buildSatelliteDeployScript(remoteCodeDir, satelliteStageDir, updates))
-		if deployErr != nil {
-			fmt.Fprintln(os.Stderr, "\nwarning: deploy failed for some repos (per-repo summary above) — proceeding to restart so the repos that did build go live.")
+			// (b) Bundles → scp.
+			bundleDir, err := os.MkdirTemp("", "grove-satellite-bundles-")
+			if err != nil {
+				return err
+			}
+			defer func() { _ = os.RemoveAll(bundleDir) }()
+			var bundlePaths []string
+			for _, d := range updates {
+				if d.Status == deltaStatusForced {
+					continue // the VM already has the sha — the deploy script re-checkouts and rebuilds without a bundle
+				}
+				bundlePath := filepath.Join(bundleDir, d.Repo+".bundle")
+				if err := createRepoBundle(filepath.Join(sourceAbs, d.Repo), bundlePath, d.Branch, d.RemoteSHA); err != nil {
+					return fmt.Errorf("bundle %s: %w", d.Repo, err)
+				}
+				bundlePaths = append(bundlePaths, bundlePath)
+			}
+			if len(bundlePaths) > 0 {
+				fmt.Printf("\nShipping %d bundle(s) to %s:%s ...\n", len(bundlePaths), name, satelliteStageDir)
+				if err := ssh.runCommand("mkdir -p " + satelliteStageDir); err != nil {
+					return fmt.Errorf("create remote stage dir: %w", err)
+				}
+				if err := ssh.scp(bundlePaths, satelliteStageDir+"/"); err != nil {
+					return fmt.Errorf("scp bundles: %w", err)
+				}
+			}
+
+			// (c)–(e) One generated remote script: fetch+checkout (self-healing),
+			// build, install (temp+mv, ETXTBSY-safe). Each repo is failure-isolated
+			// inside the script: a failed build records the repo and moves on, so
+			// every repo that DID build still gets installed — and we still restart
+			// below to put those binaries live. The script exits nonzero after its
+			// per-repo summary when anything failed.
+			fmt.Println("\nRunning remote deploy script (fetch, checkout, build, install)...")
+			deployErr = ssh.runScript(buildSatelliteDeployScript(remoteCodeDir, satelliteStageDir, updates))
+			if deployErr != nil {
+				fmt.Fprintln(os.Stderr, "\nwarning: deploy failed for some repos (per-repo summary above) — proceeding to restart so the repos that did build go live.")
+			}
 		}
 
 		// (f) Restart, gated.
@@ -235,7 +346,7 @@ Notes:
 		}
 
 		// (g) Verified by the restart script (is-active); laptop half.
-		fmt.Printf("\nSatellite %q upgraded (%s).\n", name, strings.Join(deltaRepoNames(updates), ", "))
+		fmt.Printf("\nSatellite %q upgraded (%s).\n", name, strings.Join(shippedRepos, ", "))
 		printSatelliteNextSteps(false, entry.SyncLocalPort)
 		return nil
 	}
@@ -350,6 +461,16 @@ func localRepoTip(repoDir string) (repoTip, error) {
 	return repoTip{SHA: sha, Branch: branch}, nil
 }
 
+// localRepoDirty reports whether the repo's working tree has uncommitted
+// changes (git status --porcelain non-empty).
+func localRepoDirty(repoDir string) (bool, error) {
+	out, err := gitOutput(repoDir, "status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
+}
+
 func gitOutput(repoDir string, args ...string) (string, error) {
 	cmd := exec.Command("git", append([]string{"-C", repoDir}, args...)...) //nolint:gosec // G204: internal args
 	out, err := cmd.Output()
@@ -393,6 +514,11 @@ const (
 	deltaStatusHeld          = "held (zig; opt in via --repos)"
 	deltaStatusMissingRemote = "missing on VM"
 	deltaStatusRemoteError   = "remote error"
+	// prebuilt-only statuses: a DIRTY local tree always ships (loudly), and
+	// compositor — a library with no bin/ — is never shippable prebuilt,
+	// not even via --repos/--all.
+	deltaStatusDirty        = "DIRTY (always shipped)"
+	deltaStatusHeldPrebuilt = "held (library; no prebuilt bins)"
 )
 
 type repoDelta struct {
@@ -436,12 +562,37 @@ func computeSatelliteDelta(repos []string, local map[string]repoTip, remote map[
 	return deltas
 }
 
+// computeSatellitePrebuiltDelta is the --prebuilt variant of
+// computeSatelliteDelta: the remote sha comes from the prebuilt-heads overlay
+// when present (so it may carry a -dirty suffix and never match a clean local
+// sha — correctly re-shipping the clean build), a dirty local tree always
+// ships even at a matching HEAD, and compositor is never shippable (library,
+// no bin/) regardless of --repos/--all. MISSING/ERROR semantics are unchanged.
+func computeSatellitePrebuiltDelta(repos []string, local map[string]repoTip, remote map[string]string, forced bool, dirty map[string]bool) []repoDelta {
+	deltas := computeSatelliteDelta(repos, local, remote, forced)
+	for i := range deltas {
+		d := &deltas[i]
+		wouldShip := d.Status == deltaStatusUpdate || d.Status == deltaStatusForced || d.Status == deltaStatusHeld
+		if d.Repo == "compositor" {
+			if wouldShip {
+				d.Status = deltaStatusHeldPrebuilt
+			}
+			continue
+		}
+		if dirty[d.Repo] && (wouldShip || d.Status == deltaStatusUpToDate) {
+			d.Status = deltaStatusDirty
+		}
+	}
+	return deltas
+}
+
 // deltasToShip selects the repos the deploy actually ships: real updates plus
-// explicitly forced up-to-date repos, in input order.
+// explicitly forced up-to-date repos (and, prebuilt-only, dirty trees), in
+// input order.
 func deltasToShip(deltas []repoDelta) []repoDelta {
 	var out []repoDelta
 	for _, d := range deltas {
-		if d.Status == deltaStatusUpdate || d.Status == deltaStatusForced {
+		if d.Status == deltaStatusUpdate || d.Status == deltaStatusForced || d.Status == deltaStatusDirty {
 			out = append(out, d)
 		}
 	}
@@ -533,6 +684,24 @@ func buildRemoteHeadsScript(remoteCodeDir string, repos []string) string {
 	return b.String()
 }
 
+// buildRemoteHeadsScriptPrebuilt is the --prebuilt heads probe: per-repo sha
+// resolution prefers the prebuilt-heads overlay entry (installed binaries can
+// be newer than the checkout), falling back to the checkout's git HEAD with
+// the same MISSING/ERROR sentinels as the source probe. Still read-only.
+func buildRemoteHeadsScriptPrebuilt(remoteCodeDir string, repos []string) string {
+	var b strings.Builder
+	b.WriteString("set -u\n")
+	fmt.Fprintf(&b, "CODE=%s\n", remoteCodeDirExpr(remoteCodeDir))
+	fmt.Fprintf(&b, "HEADS=\"%s\"\n", satellitePrebuiltHeads)
+	// Last entry wins, mirroring the append-then-rewrite install flow.
+	b.WriteString("head_of() { [ -f \"$HEADS\" ] && awk -v r=\"$1\" '$1==r{s=$2} END{if(s)print s}' \"$HEADS\"; return 0; }\n")
+	for _, r := range repos {
+		fmt.Fprintf(&b, "s=\"$(head_of %s)\"\n", r)
+		fmt.Fprintf(&b, "if [ -n \"$s\" ]; then echo \"%s $s\"; elif [ -e \"$CODE/%s/.git\" ]; then echo \"%s $(git -C \"$CODE/%s\" rev-parse HEAD 2>/dev/null || echo ERROR)\"; else echo \"%s MISSING\"; fi\n", r, r, r, r, r)
+	}
+	return b.String()
+}
+
 // buildSatelliteDeployScript generates the single remote script covering steps
 // (c)-(e): fetch from the shipped bundles, force-checkout the tips (with the
 // bootstrap script's empty-worktree self-heal), build on the VM, and install
@@ -570,6 +739,7 @@ func buildSatelliteDeployScript(remoteCodeDir, stageDir string, updates []repoDe
 	fmt.Fprintf(&b, "CODE=%s\n", remoteCodeDirExpr(remoteCodeDir))
 	fmt.Fprintf(&b, "STAGE=%q\n", stageDir)
 	fmt.Fprintf(&b, "BIN_DIR=\"%s\"\n", satelliteUserBinDir)
+	fmt.Fprintf(&b, "HEADS=\"%s\"\n", satellitePrebuiltHeads)
 	b.WriteString(`LOG_DIR="$STAGE/build-logs"
 mkdir -p "$BIN_DIR" "$LOG_DIR" || exit 1
 
@@ -578,6 +748,11 @@ SUMMARY=""
 mark_failed() { FAILED_REPOS="$FAILED_REPOS $1"; }
 repo_failed() { case " $FAILED_REPOS " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 record() { SUMMARY="$SUMMARY  $1: $2"$'\n'; }
+
+clear_prebuilt_head() { # <repo> — a source build supersedes any prebuilt overlay entry
+  [ -f "$HEADS" ] || return 0
+  { grep -v "^$1 " "$HEADS" || true; } > "$HEADS.tmp" && mv "$HEADS.tmp" "$HEADS"
+}
 
 update_repo() { # <repo> <ref> <sha> — fetch from bundle (if shipped), force-checkout, self-heal
   local repo="$1" ref="$2" sha="$3"
@@ -665,6 +840,7 @@ build_install_repo() { # <repo> — failure-isolated: a failed build records and
   fi
   if install_bins "$repo"; then
     record "$repo" "built+installed"
+    clear_prebuilt_head "$repo"
   else
     echo "==> $repo: install FAILED — continuing with the remaining repos" >&2
     mark_failed "$repo"
@@ -732,6 +908,362 @@ sleep 2
 printf 'grove-syncd: %s\n' "$(sudo systemctl is-active grove-syncd)"
 printf 'groved: %s\n' "$(systemctl --user is-active groved)"
 `
+}
+
+// --- prebuilt deploys (--prebuilt): local cross-build, package, install ---
+
+// prebuiltBinary is one packaged executable and its content hash.
+type prebuiltBinary struct {
+	Name   string
+	SHA256 string
+}
+
+// prebuiltRepo is one repo's packaged payload. SHA is the local HEAD, with
+// "-dirty" appended when the working tree was dirty at build time.
+type prebuiltRepo struct {
+	Repo     string
+	SHA      string
+	Binaries []prebuiltBinary
+}
+
+// binNameRe keeps binary names safe to embed as bare words in the generated
+// install script and manifest lines (no spaces, no colons — the script packs
+// "<name>:<sha256>" args).
+var binNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+// prebuiltBinDir is where a `grove build --target` run left the target's
+// binaries: bin/<goos>_<goarch> for a cross target, plain bin/ when the
+// target IS the host (native builds get no GROVE_BUILD_OUT injection).
+func prebuiltBinDir(repoDir string, target orch.Target) string {
+	if target.IsNative() {
+		return filepath.Join(repoDir, "bin")
+	}
+	return filepath.Join(repoDir, filepath.FromSlash(target.OutDir()))
+}
+
+// collectPrebuiltBinaries gathers the regular executable files a build left
+// in the repo's target bin dir, hashing each with sha256. A missing dir is
+// not an error — it returns empty, which the caller turns into the hard
+// "Makefile ignores GROVE_BUILD_OUT" warning.
+func collectPrebuiltBinaries(repoDir string, target orch.Target) ([]prebuiltBinary, error) {
+	dir := prebuiltBinDir(repoDir, target)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var bins []prebuiltBinary
+	for _, e := range entries {
+		if !e.Type().IsRegular() || !binNameRe.MatchString(e.Name()) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || info.Mode().Perm()&0o111 == 0 {
+			continue
+		}
+		sum, err := fileSHA256(filepath.Join(dir, e.Name()))
+		if err != nil {
+			return nil, err
+		}
+		bins = append(bins, prebuiltBinary{Name: e.Name(), SHA256: sum})
+	}
+	return bins, nil
+}
+
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// buildPrebuiltManifest renders the manifest shipped alongside the archive:
+// one "<repo> <sha> <binary> <sha256>" line per binary (sha carries the
+// -dirty suffix for dirty trees).
+func buildPrebuiltManifest(repos []prebuiltRepo) string {
+	var b strings.Builder
+	for _, r := range repos {
+		for _, bin := range r.Binaries {
+			fmt.Fprintf(&b, "%s %s %s %s\n", r.Repo, r.SHA, bin.Name, bin.SHA256)
+		}
+	}
+	return b.String()
+}
+
+// writePrebuiltArchive tars the collected binaries as <repo>/<binary>
+// (preserving exec mode) and gzips the result to outPath.
+func writePrebuiltArchive(outPath, sourceAbs string, target orch.Target, repos []prebuiltRepo) (err error) {
+	f, err := os.Create(outPath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}()
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	for _, r := range repos {
+		dir := prebuiltBinDir(filepath.Join(sourceAbs, r.Repo), target)
+		for _, bin := range r.Binaries {
+			p := filepath.Join(dir, bin.Name)
+			info, err := os.Stat(p)
+			if err != nil {
+				return err
+			}
+			hdr, err := tar.FileInfoHeader(info, "")
+			if err != nil {
+				return err
+			}
+			hdr.Name = r.Repo + "/" + bin.Name
+			if err := tw.WriteHeader(hdr); err != nil {
+				return err
+			}
+			src, err := os.Open(p)
+			if err != nil {
+				return err
+			}
+			_, err = io.Copy(tw, src)
+			_ = src.Close()
+			if err != nil {
+				return err
+			}
+		}
+	}
+	if err := tw.Close(); err != nil {
+		return err
+	}
+	return gz.Close()
+}
+
+// buildSatellitePrebuiltInstallScript generates the remote install script for
+// --prebuilt, reusing the deploy script's idioms (set -uo pipefail, per-repo
+// failure isolation with record/repo summary, exit 1 keeps the stage dir):
+// untar the archive, then per repo verify EVERY binary's sha256 (one mismatch
+// excludes all of that repo's binaries), install user binaries via
+// copy-to-temp + mv (ETXTBSY-safe), grove-syncd via the sudo temp+mv variant
+// to /usr/local/bin, and on success rewrite the repo's prebuilt-heads line
+// atomically (tmp + mv). No git, no VM build, no bundles. Idempotent: a
+// re-run re-verifies and re-installs the same binaries.
+func buildSatellitePrebuiltInstallScript(stageDir string, repos []prebuiltRepo) string {
+	var b strings.Builder
+	b.WriteString("# generated by `grove satellite upgrade --prebuilt` — idempotent, per-repo failure-isolated\n")
+	b.WriteString("set -uo pipefail\n")
+	fmt.Fprintf(&b, "STAGE=%q\n", stageDir)
+	fmt.Fprintf(&b, "BIN_DIR=\"%s\"\n", satelliteUserBinDir)
+	fmt.Fprintf(&b, "HEADS=\"%s\"\n", satellitePrebuiltHeads)
+	fmt.Fprintf(&b, "ARCHIVE=\"$STAGE/%s\"\n", prebuiltArchiveName)
+	b.WriteString(`mkdir -p "$BIN_DIR" || exit 1
+tar -xzf "$ARCHIVE" -C "$STAGE" || exit 1
+
+FAILED_REPOS=""
+SUMMARY=""
+mark_failed() { FAILED_REPOS="$FAILED_REPOS $1"; }
+repo_failed() { case " $FAILED_REPOS " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+record() { SUMMARY="$SUMMARY  $1: $2"$'\n'; }
+
+record_head() { # <repo> <sha> — atomic overlay rewrite: tmp + mv
+  touch "$HEADS" || return 1
+  { grep -v "^$1 " "$HEADS" || true; echo "$1 $2"; } > "$HEADS.tmp" || return 1
+  mv "$HEADS.tmp" "$HEADS"
+}
+
+install_bin() { # <repo> <name> — copy-to-temp + mv (atomic; no ETXTBSY)
+  local repo="$1" b="$2" f
+  f="$STAGE/$repo/$b"
+  if [ "$b" = grove-syncd ]; then
+    # system binary under systemd; sudo temp+mv to /usr/local/bin
+    sudo cp "$f" /usr/local/bin/.grove-syncd.tmp \
+      && sudo chmod 0755 /usr/local/bin/.grove-syncd.tmp \
+      && sudo mv -f /usr/local/bin/.grove-syncd.tmp /usr/local/bin/grove-syncd \
+      && echo "installed grove-syncd -> /usr/local/bin"
+  else
+    cp "$f" "$BIN_DIR/.$b.tmp" && chmod 0755 "$BIN_DIR/.$b.tmp" \
+      && mv -f "$BIN_DIR/.$b.tmp" "$BIN_DIR/$b" \
+      && echo "installed $b -> $BIN_DIR"
+  fi
+}
+
+deploy_repo() { # <repo> <sha> <binary>:<sha256>... — verify ALL, then install, then record head
+  local repo="$1" sha="$2"
+  shift 2
+  local spec name sum
+  echo "==> $repo: verify + install ${sha:0:12}"
+  for spec in "$@"; do
+    name="${spec%%:*}"
+    sum="${spec##*:}"
+    if [ "$(sha256sum "$STAGE/$repo/$name" 2>/dev/null | awk '{print $1}')" != "$sum" ]; then
+      echo "==> $repo: sha256 MISMATCH for $name — no $repo binaries installed" >&2
+      mark_failed "$repo"
+      record "$repo" "sha256 mismatch ($name)"
+      return 0
+    fi
+  done
+  for spec in "$@"; do
+    name="${spec%%:*}"
+    if ! install_bin "$repo" "$name"; then
+      echo "==> $repo: install FAILED ($name) — continuing with the remaining repos" >&2
+      mark_failed "$repo"
+      record "$repo" "install FAILED ($name)"
+      return 0
+    fi
+  done
+  if record_head "$repo" "$sha"; then
+    record "$repo" "installed (${sha:0:12})"
+  else
+    echo "==> $repo: prebuilt-heads update FAILED" >&2
+    mark_failed "$repo"
+    record "$repo" "heads update FAILED"
+  fi
+  return 0
+}
+`)
+	b.WriteString("\n")
+	for _, r := range repos {
+		fmt.Fprintf(&b, "deploy_repo %s %s", r.Repo, r.SHA)
+		for _, bin := range r.Binaries {
+			fmt.Fprintf(&b, " %s:%s", bin.Name, bin.SHA256)
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString(`
+echo
+echo "=== prebuilt install summary ==="
+printf '%s' "$SUMMARY"
+if [ -n "$FAILED_REPOS" ]; then
+  echo "install FAILED for:$FAILED_REPOS (stage kept at $STAGE)" >&2
+  exit 1
+fi
+rm -rf "$STAGE"
+echo "prebuilt install complete"
+`)
+	return b.String()
+}
+
+// tailLines returns the last n non-empty-trimmed lines of s, for surfacing a
+// failed local build's output without dumping everything.
+func tailLines(s string, n int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// deploySatellitePrebuilt runs the --prebuilt deploy: cross-build the ship
+// set locally through the grove build orchestrator (wave-ordered, parallel —
+// satellite upgrade finally IS grove build), collect + hash the target
+// binaries, package manifest + tar.gz, scp them over the pinned connection,
+// and run the remote install script.
+//
+// Per-repo isolation mirrors source mode: a repo that fails to build locally
+// (or whose Makefile ignores GROVE_BUILD_OUT) is reported and dropped, not
+// fatal — but if NOTHING survives, it returns a fatal error before touching
+// the VM. The returned deployErr aggregates dropped repos and remote install
+// failures; fatal aborts the upgrade.
+func deploySatellitePrebuilt(ssh *satelliteSSH, satName, sourceAbs string, target orch.Target, updates []repoDelta, dirty map[string]bool) (shipped []string, deployErr error, fatal error) {
+	fmt.Printf("\nCross-building %d repo(s) for %s (grove build --target %s, wave-ordered)...\n", len(updates), target, target)
+	results, err := BuildReposForTarget(context.Background(), sourceAbs, deltaRepoNames(updates), target, 0)
+	if err != nil {
+		return nil, nil, fmt.Errorf("local cross-build: %w", err)
+	}
+	byRepo := map[string]orch.TaskResult{}
+	for _, r := range results {
+		byRepo[r.Job.Name] = r
+	}
+
+	var pkgRepos []prebuiltRepo
+	var dropped []string
+	for _, d := range updates {
+		res, ok := byRepo[d.Repo]
+		switch {
+		case !ok:
+			dropped = append(dropped, d.Repo)
+			fmt.Fprintf(os.Stderr, "warning: %s: no local build result — dropped from the ship set\n", d.Repo)
+			continue
+		case res.Err != nil:
+			dropped = append(dropped, d.Repo)
+			fmt.Fprintf(os.Stderr, "warning: %s: local build FAILED — dropped from the ship set\n%s\n", d.Repo, tailLines(string(res.Output), 40))
+			continue
+		case res.Skipped:
+			fmt.Printf("%s: no build recipe — nothing to ship\n", d.Repo)
+			continue
+		case res.Cached:
+			fmt.Printf("%s: build cached (%s already current)\n", d.Repo, target.Pair())
+		}
+		bins, err := collectPrebuiltBinaries(filepath.Join(sourceAbs, d.Repo), target)
+		if err != nil {
+			return nil, nil, fmt.Errorf("collect %s binaries: %w", d.Repo, err)
+		}
+		if len(bins) == 0 {
+			dropped = append(dropped, d.Repo)
+			fmt.Fprintf(os.Stderr, "WARNING: %s built for %s but produced no executable in %s — its Makefile ignores GROVE_BUILD_OUT; excluded from this prebuilt deploy\n", d.Repo, target, target.OutDir())
+			continue
+		}
+		sha := d.LocalSHA
+		if dirty[d.Repo] {
+			sha += "-dirty"
+		}
+		pkgRepos = append(pkgRepos, prebuiltRepo{Repo: d.Repo, SHA: sha, Binaries: bins})
+	}
+	if len(pkgRepos) == 0 {
+		return nil, nil, fmt.Errorf("no repos left to ship (all failed to build or produced no %s binaries) — VM untouched", target.OutDir())
+	}
+
+	// Package: manifest + one tar.gz in a local temp dir, then scp both.
+	pkgDir, err := os.MkdirTemp("", "grove-satellite-prebuilt-")
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = os.RemoveAll(pkgDir) }()
+	manifestPath := filepath.Join(pkgDir, prebuiltManifestName)
+	if err := os.WriteFile(manifestPath, []byte(buildPrebuiltManifest(pkgRepos)), 0o644); err != nil {
+		return nil, nil, err
+	}
+	archivePath := filepath.Join(pkgDir, prebuiltArchiveName)
+	if err := writePrebuiltArchive(archivePath, sourceAbs, target, pkgRepos); err != nil {
+		return nil, nil, fmt.Errorf("package prebuilt archive: %w", err)
+	}
+
+	binCount := 0
+	for _, r := range pkgRepos {
+		binCount += len(r.Binaries)
+	}
+	fmt.Printf("\nShipping %d binaries for %d repo(s) to %s:%s ...\n", binCount, len(pkgRepos), satName, satelliteStageDir)
+	if err := ssh.runCommand("mkdir -p " + satelliteStageDir); err != nil {
+		return nil, nil, fmt.Errorf("create remote stage dir: %w", err)
+	}
+	if err := ssh.scp([]string{manifestPath, archivePath}, satelliteStageDir+"/"); err != nil {
+		return nil, nil, fmt.Errorf("scp prebuilt payload: %w", err)
+	}
+
+	fmt.Println("\nRunning remote install script (verify sha256, install, record prebuilt-heads)...")
+	deployErr = ssh.runScript(buildSatellitePrebuiltInstallScript(satelliteStageDir, pkgRepos))
+	if deployErr != nil {
+		fmt.Fprintln(os.Stderr, "\nwarning: install failed for some repos (per-repo summary above) — proceeding to restart so the repos that did install go live.")
+	}
+	if len(dropped) > 0 {
+		dropErr := fmt.Errorf("%d repo(s) never shipped (local build/collect failures): %s", len(dropped), strings.Join(dropped, ", "))
+		if deployErr != nil {
+			deployErr = fmt.Errorf("%v; %w", dropErr, deployErr)
+		} else {
+			deployErr = dropErr
+		}
+	}
+	shipped = make([]string, 0, len(pkgRepos))
+	for _, r := range pkgRepos {
+		shipped = append(shipped, r.Repo)
+	}
+	return shipped, deployErr, nil
 }
 
 // --- pinned SSH transport ---
