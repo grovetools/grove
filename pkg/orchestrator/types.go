@@ -25,6 +25,12 @@ type OrchestratorOptions struct {
 	// authoritative host-wide cap. Falls back to the local worker pool
 	// when the daemon is unreachable or predates the build queue.
 	RemoteExec bool
+	// Target is the cross-compilation target (grove build --target). When
+	// set and non-native, jobs get the GROVE_TARGET_* env injected and
+	// task-result cache keys become "<verb>@<goos>_<goarch>" so cross and
+	// native builds never invalidate or false-hit each other. A zero or
+	// native target is a no-op.
+	Target Target
 }
 
 type TaskJob struct {

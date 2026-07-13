@@ -23,6 +23,16 @@ LDFLAGS = -ldflags="\
 -X '$(VERSION_PKG).Branch=$(GIT_BRANCH)' \
 -X '$(VERSION_PKG).BuildDate=$(BUILD_DATE)'"
 
+# --- Cross-compile contract (set by `grove build --target`) ---
+# GROVE_BUILD_OUT redirects output so cross binaries never clobber native bin/.
+# GROVE_TARGET_* are applied only to the final `go build`; codegen prereqs stay native.
+ifneq ($(strip $(GROVE_BUILD_OUT)),)
+BIN_DIR = $(GROVE_BUILD_OUT)
+endif
+ifneq ($(strip $(GROVE_TARGET_GOOS)),)
+GO_CROSS_ENV = GOOS=$(GROVE_TARGET_GOOS) GOARCH=$(GROVE_TARGET_GOARCH) CGO_ENABLED=0
+endif
+
 .PHONY: all build test clean fmt fmt-check vet lint run check dev build-all schema registry config-schema keys-registry keys-registry-check keys-audit help
 
 all: build
@@ -55,7 +65,7 @@ keys-audit:
 build: registry schema config-schema keys-registry
 	@mkdir -p $(BIN_DIR)
 	@echo "Building $(BINARY_NAME) version $(VERSION)..."
-	@go build $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) .
+	@$(GO_CROSS_ENV) go build $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) .
 
 test:
 	@echo "Running tests..."
