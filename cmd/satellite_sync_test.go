@@ -270,10 +270,11 @@ func TestRenderLaptopSyncWorkspacesRefusesPull(t *testing.T) {
 	}
 }
 
-// TestSatelliteRegistrySyncFields covers the registry surface: the new
-// sync_local_port/sync_remote_addr fields splice into grove.toml, round-trip
-// through the real loader, coexist with hand-written .provision AND .sync
-// subtables, and the [satellites.<name>.sync] block parses grove-side.
+// TestSatelliteRegistrySyncFields covers the registry surface post-split: the
+// sync_local_port/sync_remote_addr fields round-trip through the STATE file
+// (grove.toml keeps only the hand-written .provision/.sync subtables and is
+// never touched), the merged view carries the sync fields, and the
+// [satellites.<name>.sync] block still parses grove-side.
 func TestSatelliteRegistrySyncFields(t *testing.T) {
 	configDir := setupGroveHome(t)
 	tomlPath := filepath.Join(configDir, "grove.toml")
@@ -295,31 +296,28 @@ workspaces = ["cloud", "grovetools", "extra"]
 		SyncLocalPort:  8788,
 		SyncRemoteAddr: "127.0.0.1:8788",
 	}
-	if err := writeSatelliteRegistry("sat1", entry); err != nil {
-		t.Fatalf("writeSatelliteRegistry: %v", err)
+	if err := upsertSatelliteState("sat1", entry); err != nil {
+		t.Fatalf("upsertSatelliteState: %v", err)
 	}
 
+	// grove.toml stays byte-for-byte; the sync fields live in state only.
 	data, err := os.ReadFile(tomlPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(data)
-	for _, want := range []string{
-		"# hand-written config",
-		"[satellites.sat1.provision]",
-		`workspaces = ["cloud", "grovetools", "extra"]`,
-		"sync_local_port = 8788",
-		`sync_remote_addr = "127.0.0.1:8788"`,
-	} {
-		if !strings.Contains(text, want) {
-			t.Errorf("grove.toml missing %q after registry write:\n%s", want, text)
-		}
+	if string(data) != original {
+		t.Errorf("state upsert modified grove.toml:\n%s", data)
 	}
 
-	// Real-loader round trip (the daemon decodes the same shape) — the sync
-	// subtable must not break the entry decode, and the fields must load.
-	if got := loadSatellitesViaConfig(t)["sat1"]; got != entry {
-		t.Fatalf("loaded entry = %+v, want %+v", got, entry)
+	// Merged view (what the daemon's LoadRegistry and the CLI readers see):
+	// the state-only entry passes through complete, sync fields included,
+	// alongside the subtable-only config side — with no drift warning.
+	merged, warnings := mergeSatelliteEntries(loadSatellitesViaConfig(t), mustLoadSatelliteState(t))
+	if got := merged["sat1"]; got != entry {
+		t.Fatalf("merged entry = %+v, want %+v", got, entry)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected merge warnings: %v", warnings)
 	}
 
 	// Grove-side [satellites.<name>.sync] parse.
@@ -335,20 +333,14 @@ workspaces = ["cloud", "grovetools", "extra"]
 		t.Fatalf("sync workspaces = %v", opts.Workspaces)
 	}
 
-	// Upsert (re-provision) keeps both subtables and replaces the entry once.
+	// Upsert (re-provision) replaces the state entry in place.
 	entry.SyncLocalPort = 9000
-	if err := writeSatelliteRegistry("sat1", entry); err != nil {
+	if err := upsertSatelliteState("sat1", entry); err != nil {
 		t.Fatal(err)
 	}
-	data, _ = os.ReadFile(tomlPath)
-	if n := strings.Count(string(data), "[satellites.sat1]"); n != 1 {
-		t.Fatalf("expected exactly 1 entry table after upsert, got %d:\n%s", n, data)
-	}
-	if !strings.Contains(string(data), "[satellites.sat1.sync]") {
-		t.Fatalf("upsert destroyed the sync subtable:\n%s", data)
-	}
-	if got := loadSatellitesViaConfig(t)["sat1"]; got.SyncLocalPort != 9000 {
-		t.Fatalf("upserted sync_local_port = %d", got.SyncLocalPort)
+	state := mustLoadSatelliteState(t)
+	if len(state) != 1 || state["sat1"].SyncLocalPort != 9000 {
+		t.Fatalf("upserted state = %+v", state)
 	}
 }
 

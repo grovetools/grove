@@ -25,35 +25,38 @@ import (
 )
 
 // satelliteConfigEntry mirrors the daemon's satellite.SatelliteConfig on-disk
-// shape (the [satellites.<name>] table). It is redeclared here — rather than
-// importing the daemon package — because `grove satellite` only reads/writes
-// the grove config, and the yaml tags must match P7's SatelliteConfig so the
-// laptop daemon's LoadRegistry sees exactly what `up` writes.
+// shape. It is redeclared here — rather than importing the daemon package —
+// because `grove satellite` only reads/writes the grove config and the state
+// file. The yaml tags bind the [satellites.<name>] config tables (they must
+// match P7's SatelliteConfig so the laptop daemon's LoadRegistry decodes the
+// same keys); the json tags bind the CLI-owned provisioning state file
+// (satellites.json, see satellite_state.go) with the same field names.
 type satelliteConfigEntry struct {
-	SSHAddr string `yaml:"ssh_addr"`
-	User    string `yaml:"user"`
-	HostKey string `yaml:"host_key"`
+	SSHAddr string `yaml:"ssh_addr" json:"ssh_addr"`
+	User    string `yaml:"user" json:"user"`
+	HostKey string `yaml:"host_key" json:"host_key"`
 	// IdentityFile is the optional SSH private key `up --identity-file` was
 	// invoked with (empty = agent-only auth, matching SatelliteConfig).
-	IdentityFile string `yaml:"identity_file"`
+	IdentityFile string `yaml:"identity_file" json:"identity_file,omitempty"`
 	// SocketPath is the remote groved unix socket, probed post-bootstrap as
 	// /run/user/<uid>/grove/groved.sock. Written explicitly because the
 	// daemon's remoteSocketPath default guesses wrong on the real VM.
-	SocketPath string `yaml:"socket_path"`
+	SocketPath string `yaml:"socket_path" json:"socket_path,omitempty"`
 	// SyncLocalPort is the laptop-local port the daemon binds
 	// (127.0.0.1:<port>) and forwards to the VM's syncd over its pinned SSH
 	// connection. 0/absent = daemon sync forward off (fixed M2 contract with
 	// the daemon side).
-	SyncLocalPort int `yaml:"sync_local_port"`
+	SyncLocalPort int `yaml:"sync_local_port" json:"sync_local_port,omitempty"`
 	// SyncRemoteAddr is the VM-side syncd address the forward dials.
 	// Optional; the daemon defaults it to 127.0.0.1:8788.
-	SyncRemoteAddr string `yaml:"sync_remote_addr"`
+	SyncRemoteAddr string `yaml:"sync_remote_addr" json:"sync_remote_addr,omitempty"`
 }
 
-// newSatelliteCmd is the `grove satellite` noun. It wraps the PoC
-// terraform/bootstrap runbook (cloud/poc/grove-satellite) into VM lifecycle
-// verbs and writes the [satellites.<name>] registry entry P7's ConnManager
-// reads at daemon boot (M2 contract C1/C2).
+// newSatelliteCmd is the `grove satellite` noun. It wraps the embedded
+// terraform/bootstrap assets (grove/cmd/satelliteassets, formerly the
+// cloud/poc/grove-satellite runbook) into VM lifecycle verbs and writes the
+// [satellites.<name>] registry entry P7's ConnManager reads at daemon boot
+// (M2 contract C1/C2).
 //
 // Env exec-plugin seam (position, do NOT route through it): a satellite is
 // whole-host lifecycle with a registry side effect, whereas
@@ -77,10 +80,10 @@ resources via terraform.`
 	return cmd
 }
 
-// defaultTerraformDir returns the PoC terraform directory relative to cwd. The
-// checklist's position: resolve via a --tf-dir flag defaulting to the PoC path
-// rather than guessing a discovery mechanism.
-const defaultTerraformDir = "cloud/poc/grove-satellite/terraform"
+// tfDirFlagHelp documents --tf-dir, shared by up and down: empty (the
+// default) means the per-satellite state dir with the embedded target module
+// extracted into it; a value is the bring-your-own-module escape hatch.
+const tfDirFlagHelp = "Bring-your-own terraform module dir, used as-is (no embedded-module extraction or legacy-state migration; must honor grove/cmd/satelliteassets/CONTRACT.md). Default: the per-satellite state dir under ~/.local/state/grove/satellites/<name>/terraform"
 
 func newSatelliteUpCmd() *cobra.Command {
 	var (
@@ -88,6 +91,7 @@ func newSatelliteUpCmd() *cobra.Command {
 		sshUser        string
 		cidr           string
 		zone           string
+		target         string
 		tfDir          string
 		identityFile   string
 		assumeYes      bool
@@ -102,6 +106,18 @@ func newSatelliteUpCmd() *cobra.Command {
 	)
 	cmd := cli.NewStandardCommand("up <name>", "Provision a satellite VM (billable)")
 	cmd.Long = `Provision a satellite VM: terraform apply, host-key pin, bootstrap, registry.
+
+Infra inputs (--project, --zone, --ssh-user, --cidr, --identity-file,
+--target) default from a [satellites.<name>.infra] block in the same grove
+config; explicit
+flags override it. A successful 'up' writes the resolved values back into the
+block — and 'down' leaves the block in place — so only the very first
+provision of a name needs the flags:
+
+  [satellites.mysat.infra]
+  project = "my-gcp-project"
+  ssh_user = "grovedev"
+  cidr = "203.0.113.7/32"
 
 Optional provisioning inputs (GitHub auth, Claude Code, dotfiles, service
 account) come from a [satellites.<name>.provision] block in the same grove
@@ -134,12 +150,13 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 --sync-workspaces overriding; --sync-port 0 disables the whole sync half.`
 	cmd.Args = cobra.ExactArgs(1)
 	cmd.SilenceUsage = true
-	cmd.Flags().StringVar(&project, "project", "", "GCP project id (terraform var project_id) [required]")
-	cmd.Flags().StringVar(&sshUser, "ssh-user", "", "SSH login user on the VM (terraform var ssh_user) [required]")
-	cmd.Flags().StringVar(&cidr, "cidr", "", "CIDR allowed to reach :22 (default: your public IP /32 via ifconfig.me)")
-	cmd.Flags().StringVar(&zone, "zone", "", "GCP zone override (terraform var zone)")
-	cmd.Flags().StringVar(&tfDir, "tf-dir", defaultTerraformDir, "Path to the grove-satellite terraform directory")
-	cmd.Flags().StringVar(&identityFile, "identity-file", "", "SSH private key for the satellite (written to the registry as identity_file; default: agent-only auth)")
+	cmd.Flags().StringVar(&project, "project", "", "GCP project id (terraform var project_id) [required unless [satellites.<name>.infra] project is set]")
+	cmd.Flags().StringVar(&sshUser, "ssh-user", "", "SSH login user on the VM (terraform var ssh_user) [required unless [satellites.<name>.infra] ssh_user is set]")
+	cmd.Flags().StringVar(&cidr, "cidr", "", "CIDR allowed to reach :22 (default: [satellites.<name>.infra] cidr, else your public IP /32 via ifconfig.me)")
+	cmd.Flags().StringVar(&zone, "zone", "", "GCP zone override (terraform var zone; default: [satellites.<name>.infra] zone)")
+	cmd.Flags().StringVar(&target, "target", "", "Embedded infra target whose terraform module provisions the VM (default: [satellites.<name>.infra] target, else \"gcp\")")
+	cmd.Flags().StringVar(&tfDir, "tf-dir", "", tfDirFlagHelp)
+	cmd.Flags().StringVar(&identityFile, "identity-file", "", "SSH private key for the satellite (written to the registry as identity_file; default: [satellites.<name>.infra] identity_file, else agent-only auth)")
 	cmd.Flags().BoolVar(&assumeYes, "yes", false, "Skip the billable-resource confirmation prompt")
 	cmd.Flags().StringVar(&ghTokenCmd, "gh-token-cmd", "", "Local command whose stdout is the GitHub token piped to bootstrap (overrides provision config; empty disables)")
 	cmd.Flags().BoolVar(&claudeFlag, "claude", false, "Install Claude Code on the VM (overrides provision config)")
@@ -151,8 +168,35 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 	cmd.Flags().BoolVar(&reloadDaemon, "reload-daemon", false, "Run 'groved upgrade --global' at the end so the daemon loads the new registry + sync forward")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		name := args[0]
+
+		// Infra inputs: [satellites.<name>.infra] with flag overrides — the
+		// five infra flags' persistent config home (same flag>config stance
+		// as the provision block), so a repeat 0→1 after `down` (which keeps
+		// the subtable) retypes nothing. The required check runs on the
+		// MERGED values, making a flag-less `up <name>` valid once the block
+		// is populated — `up` writes the resolved values back below (5c').
+		infraCfg, infraInConfig, err := loadSatelliteInfra(name)
+		if err != nil {
+			return err
+		}
+		infra := mergeInfra(infraCfg, infraFlagOverrides{
+			Project: project, ProjectSet: cmd.Flags().Changed("project"),
+			Zone: zone, ZoneSet: cmd.Flags().Changed("zone"),
+			SSHUser: sshUser, SSHUserSet: cmd.Flags().Changed("ssh-user"),
+			CIDR: cidr, CIDRSet: cmd.Flags().Changed("cidr"),
+			IdentityFile: identityFile, IdentitySet: cmd.Flags().Changed("identity-file"),
+			Target: target, TargetSet: cmd.Flags().Changed("target"),
+		})
+		project, sshUser, cidr, zone, identityFile = infra.Project, infra.SSHUser, infra.CIDR, infra.Zone, infra.IdentityFile
 		if project == "" || sshUser == "" {
-			return fmt.Errorf("--project and --ssh-user are required")
+			return fmt.Errorf("--project and --ssh-user are required (or persist them in [satellites.%s.infra] — a successful `up` writes the block for you)", name)
+		}
+		// Infra target: validated against the embedded targets even when
+		// --tf-dir bypasses extraction (an unknown name in config is a typo
+		// either way). Empty resolves to the gcp default.
+		resolvedTarget, err := resolveSatelliteTarget(infra.Target)
+		if err != nil {
+			return err
 		}
 
 		// Provisioning options: [satellites.<name>.provision] with flag
@@ -208,14 +252,25 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 			}
 		}
 
-		tfAbs, err := filepath.Abs(tfDir)
+		// Terraform dir: the per-satellite state dir with the embedded
+		// target module extracted into it (module files overwritten every
+		// run, tfstate/tfvars/.terraform never touched; legacy worktree
+		// state migrated in first) — or, with --tf-dir, a BYO module dir
+		// used as-is.
+		tfAbs, err := resolveSatelliteTerraformDir(name, resolvedTarget, tfDir, os.Stdout)
 		if err != nil {
-			return fmt.Errorf("resolve --tf-dir: %w", err)
+			return err
 		}
 		if _, err := os.Stat(filepath.Join(tfAbs, "variables.tf")); err != nil {
-			return fmt.Errorf("terraform dir %q does not look like the grove-satellite PoC (no variables.tf); pass --tf-dir: %w", tfAbs, err)
+			return fmt.Errorf("terraform dir %q does not look like a grove-satellite module (no variables.tf; the contract is documented in grove/cmd/satelliteassets/CONTRACT.md): %w", tfAbs, err)
 		}
-		bootstrapScript := filepath.Join(filepath.Dir(tfAbs), "bootstrap", "satellite-bootstrap.sh")
+		// Bootstrap script: always the embedded copy (extracted next to the
+		// per-satellite terraform dir) so it can never skew from this CLI —
+		// even when --tf-dir brings a custom module.
+		bootstrapScript, err := extractSatelliteBootstrap(name)
+		if err != nil {
+			return fmt.Errorf("extract embedded bootstrap script: %w", err)
+		}
 
 		if !assumeYes {
 			if !confirmYesNo(fmt.Sprintf("Provision satellite %q — this creates BILLABLE GCP resources. Continue?", name)) {
@@ -292,9 +347,6 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		//    documented framing (raw single token, or KEY=VALUE lines when both
 		//    are present) — never argv. The script already fetches the laptop
 		//    sync token to ~/.config/grove/sync.token.
-		if _, err := os.Stat(bootstrapScript); err != nil {
-			return fmt.Errorf("bootstrap script not found at %q: %w", bootstrapScript, err)
-		}
 		provArgs, secretStdin := buildBootstrapProvision(prov, ghToken, claudeToken)
 		// The resolved sync workspaces drive the VM's pull-enabled sync.toml
 		// (bootstrap step 5). Always passed — an explicitly empty flag value
@@ -339,9 +391,28 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 			entry.SocketPath = socketPath
 		}
 
-		// 5c. Write the [satellites.<name>] registry entry.
-		if err := writeSatelliteRegistry(name, entry); err != nil {
-			return fmt.Errorf("write registry entry: %w", err)
+		// 5c. Upsert the satellite's entry in the CLI-owned provisioning
+		// state file (satellites.json under the state dir). This is STATE,
+		// not config: the daemon's LoadRegistry merges it with any
+		// [satellites.<name>] config table at boot (state wins for the
+		// machine-derived fields), so nothing is written into grove.toml.
+		if err := upsertSatelliteState(name, entry); err != nil {
+			return fmt.Errorf("write satellite state entry: %w", err)
+		}
+
+		// 5c'. Infra inputs write-back, config-respecting: when the merged
+		// config ALREADY carries a [satellites.<name>.infra] block (e.g. in a
+		// dotfiles fragment), grove never edits it — if the resolved values
+		// drifted from it, print the up-to-date block for the user to paste.
+		// Only when no block exists anywhere does `up` persist one into the
+		// global config so the next 0→1 needs zero flags (`down` leaves the
+		// subtable in place). Non-fatal either way: the VM is provisioned and
+		// registered.
+		infra.CIDR = cidr // may have been auto-detected after the merge
+		if infraInConfig {
+			fmt.Print(satelliteInfraDriftMessage(name, infraCfg, infra))
+		} else if err := writeSatelliteInfra(name, infra); err != nil {
+			fmt.Printf("warning: could not persist [satellites.%s.infra] defaults: %v\n", name, err)
 		}
 
 		// 5d. Config propagation: ship the fragment set assembled (and
@@ -371,6 +442,18 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 			if err := setupLaptopSyncConfig(laptopConfigDir, syncPort, resolvedSyncWorkspaces, os.Stdout); err != nil {
 				return fmt.Errorf("laptop sync setup (the VM is provisioned and registered; fix and re-run `grove satellite up %s`): %w", name, err)
 			}
+			// Live token check: the stat inside setupLaptopSyncConfig only
+			// proves a token FILE exists — a stale token from a previous VM
+			// passes it and the daemon then 401-loops silently. Probe this
+			// VM's syncd with the token over the pinned SSH transport (syncd
+			// is VM-loopback-only, and the daemon forward may not be up yet —
+			// the daemon reads its registry at boot). Bootstrap is being
+			// fixed to self-heal the stale-token case; this is the backstop.
+			fmt.Printf("Verifying the laptop sync token against %q's syncd...\n", name)
+			if err := verifySatelliteSyncTokenOverSSH(entry, filepath.Join(laptopConfigDir, syncTokenFileName)); err != nil {
+				return fmt.Errorf("laptop sync token verification (the VM is provisioned and registered; fix and re-run `grove satellite up %s`): %w", name, err)
+			}
+			fmt.Println("Laptop sync token verified against the VM's syncd.")
 		}
 
 		// 6. Next steps — the registry AND sync config load only at daemon
@@ -396,6 +479,7 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 
 func newSatelliteDownCmd() *cobra.Command {
 	var (
+		target       string
 		tfDir        string
 		assumeYes    bool
 		syncOriginID string
@@ -403,14 +487,32 @@ func newSatelliteDownCmd() *cobra.Command {
 	cmd := cli.NewStandardCommand("down <name>", "Destroy a satellite VM and remove its registry entry")
 	cmd.Args = cobra.ExactArgs(1)
 	cmd.SilenceUsage = true
-	cmd.Flags().StringVar(&tfDir, "tf-dir", defaultTerraformDir, "Path to the grove-satellite terraform directory")
+	cmd.Flags().StringVar(&target, "target", "", "Embedded infra target whose terraform module to extract for the destroy (default: [satellites.<name>.infra] target, else \"gcp\")")
+	cmd.Flags().StringVar(&tfDir, "tf-dir", "", tfDirFlagHelp)
 	cmd.Flags().BoolVar(&assumeYes, "yes", false, "Skip the destroy confirmation prompt")
 	cmd.Flags().StringVar(&syncOriginID, "sync-origin-id", "", "Satellite sync origin_id to deregister precisely (best-effort; see C19/C20)")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		tfAbs, err := filepath.Abs(tfDir)
+
+		// Resolve the terraform dir the same way `up` does: the per-name
+		// state dir (with legacy worktree tfstate migrated in and the
+		// embedded module re-extracted so destroy always has current .tf
+		// files), or --tf-dir as-is. The target comes from the same
+		// [satellites.<name>.infra] block, --target winning.
+		infraCfg, _, err := loadSatelliteInfra(name)
 		if err != nil {
-			return fmt.Errorf("resolve --tf-dir: %w", err)
+			return err
+		}
+		if cmd.Flags().Changed("target") {
+			infraCfg.Target = target
+		}
+		resolvedTarget, err := resolveSatelliteTarget(infraCfg.Target)
+		if err != nil {
+			return err
+		}
+		tfAbs, err := resolveSatelliteTerraformDir(name, resolvedTarget, tfDir, os.Stdout)
+		if err != nil {
+			return err
 		}
 
 		if !assumeYes {
@@ -434,14 +536,35 @@ func newSatelliteDownCmd() *cobra.Command {
 		if _, err := os.Stat(tfvarsPath); err != nil {
 			return fmt.Errorf("%s not found — `grove satellite up` writes it and terraform destroy needs project_id/ssh_user/allowed_ssh_cidr (no defaults in variables.tf); recreate it or run terraform destroy manually with -var flags: %w", tfvarsPath, err)
 		}
+		// init first: the per-name state dir starts without .terraform/ (a
+		// legacy migration copies only tfstate+tfvars, and extraction ships
+		// only module files). Idempotent and near-free when already
+		// initialized.
+		if err := runInherited(tfAbs, "terraform", "-chdir="+tfAbs, "init", "-input=false"); err != nil {
+			return fmt.Errorf("terraform init: %w", err)
+		}
 		destroyArgs := []string{"-chdir=" + tfAbs, "destroy", "-input=false", "-var", "vm_name=" + name}
 		if err := runInherited(tfAbs, "terraform", destroyArgs...); err != nil {
 			return fmt.Errorf("terraform destroy: %w", err)
 		}
 
-		// 3. Remove the [satellites.<name>] registry entry.
-		if err := removeSatelliteRegistry(name); err != nil {
-			return fmt.Errorf("remove registry entry: %w", err)
+		// 3. Remove the satellite's provisioning state entry, plus any LEGACY
+		// flat [satellites.<name>] entry an older `up` wrote into the global
+		// config (that removal is cleanup of CLI-written state, not user
+		// config — subtables like .infra/.provision/.sync always survive).
+		removedState, err := removeSatelliteState(name)
+		if err != nil {
+			return fmt.Errorf("remove satellite state entry: %w", err)
+		}
+		legacyRemoved, legacyErr := removeLegacySatelliteConfigEntry(name)
+		if legacyErr != nil {
+			fmt.Printf("warning: could not remove the legacy [satellites.%s] entry from the grove config: %v\n", name, legacyErr)
+		}
+		if legacyRemoved {
+			fmt.Printf("(removed legacy [satellites.%s] entry from the grove config)\n", name)
+		}
+		if !removedState && !legacyRemoved {
+			fmt.Printf("(no satellite state or registry entry for %q)\n", name)
 		}
 
 		fmt.Printf("\nSatellite %q destroyed and deregistered.\n", name)
@@ -472,11 +595,13 @@ func newSatelliteListCmd() *cobra.Command {
 	return cmd
 }
 
-// renderSatellites merges the configured registry entries with live ConnManager
-// health from the global daemon (client.GetSatelliteStatuses, the Store surface
-// P7 emits via the new GET /api/satellites read endpoint).
+// renderSatellites merges the registry entries (config ∪ state, the daemon's
+// LoadRegistry view) with live ConnManager health from the global daemon
+// (client.GetSatelliteStatuses, the Store surface P7 emits via the new GET
+// /api/satellites read endpoint). With the daemon unreachable the merged
+// registry view still renders every configured/provisioned satellite.
 func renderSatellites() error {
-	configured := loadConfiguredSatellites()
+	configured := loadMergedSatellites()
 
 	live := map[string]satelliteLiveStatus{}
 	client := daemon.New()
@@ -568,8 +693,9 @@ type satelliteLiveStatus struct {
 	forward   string
 }
 
-// loadConfiguredSatellites reads the [satellites.*] tables from the merged grove
-// config (the same source P7's LoadRegistry parses).
+// loadConfiguredSatellites reads the [satellites.*] tables from the merged
+// grove config — the CONFIG half of the registry only. Almost every caller
+// wants loadMergedSatellites (config ∪ state) instead.
 func loadConfiguredSatellites() map[string]satelliteConfigEntry {
 	cfg, err := config.LoadDefault()
 	if err != nil {
@@ -580,12 +706,12 @@ func loadConfiguredSatellites() map[string]satelliteConfigEntry {
 	return raw
 }
 
-// satelliteRegistryPath resolves the global config file the [satellites.*]
-// registry must land in: the SAME file core's loader (getXDGConfigPath in
-// core/config/config.go) will read back. The loader prefers ConfigDir/grove.toml
-// and only falls back to grove.yml when no grove.toml exists — so on a machine
-// with a grove.toml, writing the entry into grove.yml would make it silently
-// invisible to satellite.LoadRegistry and the whole up→daemon flow.
+// satelliteRegistryPath resolves the global config file the loader
+// (getXDGConfigPath in core/config/config.go) reads: ConfigDir/grove.toml,
+// falling back to grove.yml only when no grove.toml exists. `up` no longer
+// writes registry entries here (they live in the state file now); this path
+// still hosts the [satellites.<name>.infra] write-back and the legacy flat
+// entry cleanup `down` performs.
 func satelliteRegistryPath() (path string, isTOML bool, err error) {
 	configDir := paths.ConfigDir()
 	if configDir == "" {
@@ -598,111 +724,117 @@ func satelliteRegistryPath() (path string, isTOML bool, err error) {
 	return filepath.Join(configDir, "grove.yml"), false, nil
 }
 
-// writeSatelliteRegistry writes/updates the [satellites.<name>] entry in the
-// global config file the loader actually reads (see satelliteRegistryPath).
-// TOML configs get a targeted table splice (comment-preserving); YAML configs
-// use bootstrap.go's yaml.Node plumbing (LoadYAML → SetValue → SaveYAML).
-func writeSatelliteRegistry(name string, entry satelliteConfigEntry) error {
+// removeLegacySatelliteConfigEntry deletes a LEGACY flat [satellites.<name>]
+// entry from the global config file — cleanup for entries an older `up` wrote
+// before the config/state split. Subtables (.infra/.provision/.sync) are never
+// touched (removeSatelliteTOMLTable matches only the flat block). Reports
+// whether an entry was actually removed; an absent config file or absent
+// entry is a clean no-op.
+func removeLegacySatelliteConfigEntry(name string) (bool, error) {
 	path, isTOML, err := satelliteRegistryPath()
 	if err != nil {
-		return err
-	}
-	if isTOML {
-		return upsertSatelliteTOMLTable(path, name, entry)
-	}
-	yh := setup.NewYAMLHandler(setup.NewService(false))
-	root, err := yh.LoadYAML(path)
-	if err != nil {
-		return err
-	}
-	values := map[string]interface{}{
-		"ssh_addr": entry.SSHAddr,
-		"user":     entry.User,
-		"host_key": entry.HostKey,
-	}
-	if entry.IdentityFile != "" {
-		values["identity_file"] = entry.IdentityFile
-	}
-	if entry.SocketPath != "" {
-		values["socket_path"] = entry.SocketPath
-	}
-	if entry.SyncLocalPort != 0 {
-		values["sync_local_port"] = entry.SyncLocalPort
-	}
-	if entry.SyncRemoteAddr != "" {
-		values["sync_remote_addr"] = entry.SyncRemoteAddr
-	}
-	if err := setup.SetValue(root, values, "satellites", name); err != nil {
-		return err
-	}
-	return yh.SaveYAML(path, root)
-}
-
-// removeSatelliteRegistry deletes the [satellites.<name>] entry from whichever
-// global config file the loader reads (symmetric with writeSatelliteRegistry).
-func removeSatelliteRegistry(name string) error {
-	path, isTOML, err := satelliteRegistryPath()
-	if err != nil {
-		return err
+		return false, err
 	}
 	if isTOML {
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return err
+			return false, err
 		}
 		content, removed := removeSatelliteTOMLTable(string(data), name)
 		if !removed {
-			fmt.Printf("(no [satellites.%s] entry in grove config)\n", name)
-			return nil
+			return false, nil
 		}
-		return writeValidatedTOML(path, content)
+		return true, writeValidatedTOML(path, content)
+	}
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return false, nil
 	}
 	yh := setup.NewYAMLHandler(setup.NewService(false))
 	root, err := yh.LoadYAML(path)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !setup.DeleteValue(root, "satellites", name) {
-		fmt.Printf("(no [satellites.%s] entry in grove config)\n", name)
-		return nil
+		return false, nil
 	}
-	return yh.SaveYAML(path, root)
+	return true, yh.SaveYAML(path, root)
 }
 
-// upsertSatelliteTOMLTable replaces-or-appends the [satellites.<name>] table in
-// a TOML global config as a targeted text splice. go-toml/v2 does not
-// round-trip comments or formatting, so re-marshaling the whole file (the
-// setup.TOMLHandler approach) would destroy the user's grove.toml; instead only
-// the one table block is edited and the rest of the file is preserved
-// byte-for-byte.
-func upsertSatelliteTOMLTable(path, name string, entry satelliteConfigEntry) error {
+// upsertSatelliteInfraTOMLTable replaces-or-appends the
+// [satellites.<name>.infra] subtable with the same comment-preserving splice
+// stance as upsertSatelliteTOMLTable: only the one subtable block is edited —
+// [satellites.<name>] itself, its other subtables (.provision/.sync), and
+// every other satellite's blocks stay byte-for-byte.
+func upsertSatelliteInfraTOMLTable(path, name string, infra satelliteInfraConfig) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	content, _ := removeSatelliteTOMLTable(string(data), name)
+	content, _ := removeSatelliteTOMLSubtable(string(data), name, "infra")
 	if content != "" && !strings.HasSuffix(content, "\n") {
 		content += "\n"
 	}
-	var table strings.Builder
-	fmt.Fprintf(&table, "\n[satellites.%s]\nssh_addr = %q\nuser = %q\nhost_key = %q\n",
-		tomlTableKey(name), entry.SSHAddr, entry.User, entry.HostKey)
-	// Optional fields are omitted when empty so entries stay minimal and the
-	// daemon's defaults keep applying.
-	if entry.IdentityFile != "" {
-		fmt.Fprintf(&table, "identity_file = %q\n", entry.IdentityFile)
-	}
-	if entry.SocketPath != "" {
-		fmt.Fprintf(&table, "socket_path = %q\n", entry.SocketPath)
-	}
-	if entry.SyncLocalPort != 0 {
-		fmt.Fprintf(&table, "sync_local_port = %d\n", entry.SyncLocalPort)
-	}
-	if entry.SyncRemoteAddr != "" {
-		fmt.Fprintf(&table, "sync_remote_addr = %q\n", entry.SyncRemoteAddr)
-	}
-	content += table.String()
+	content += "\n" + renderSatelliteInfraTOML(name, infra)
 	return writeValidatedTOML(path, content)
+}
+
+// renderSatelliteInfraTOML renders the [satellites.<name>.infra] block —
+// shared between the config write-back (no block exists yet) and the drift
+// print (a user-owned block exists; grove prints the up-to-date block instead
+// of editing it). Empty fields are omitted so unset inputs (zone,
+// identity_file) do not pin empty strings as future defaults.
+func renderSatelliteInfraTOML(name string, infra satelliteInfraConfig) string {
+	var table strings.Builder
+	fmt.Fprintf(&table, "[satellites.%s.infra]\n", tomlTableKey(name))
+	if infra.Target != "" {
+		fmt.Fprintf(&table, "target = %q\n", infra.Target)
+	}
+	if infra.Project != "" {
+		fmt.Fprintf(&table, "project = %q\n", infra.Project)
+	}
+	if infra.Zone != "" {
+		fmt.Fprintf(&table, "zone = %q\n", infra.Zone)
+	}
+	if infra.SSHUser != "" {
+		fmt.Fprintf(&table, "ssh_user = %q\n", infra.SSHUser)
+	}
+	if infra.CIDR != "" {
+		fmt.Fprintf(&table, "cidr = %q\n", infra.CIDR)
+	}
+	if infra.IdentityFile != "" {
+		fmt.Fprintf(&table, "identity_file = %q\n", infra.IdentityFile)
+	}
+	return table.String()
+}
+
+// satelliteInfraDriftMessage compares the config's [satellites.<name>.infra]
+// block with the values this `up` actually resolved (flags + auto-detection
+// over config). When they differ, it returns the per-field drift plus the
+// up-to-date block for the user to paste — grove never edits a block the
+// config already carries (it may live in a read-only dotfiles fragment).
+// Empty when nothing drifted.
+func satelliteInfraDriftMessage(name string, fromConfig, resolved satelliteInfraConfig) string {
+	if fromConfig == resolved {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nnote: resolved infra inputs differ from your [satellites.%s.infra] config block.\n", name)
+	b.WriteString("grove does not edit existing config blocks — update yours if you want the new values:\n")
+	for _, f := range []struct{ key, cfg, res string }{
+		{"target", fromConfig.Target, resolved.Target},
+		{"project", fromConfig.Project, resolved.Project},
+		{"zone", fromConfig.Zone, resolved.Zone},
+		{"ssh_user", fromConfig.SSHUser, resolved.SSHUser},
+		{"cidr", fromConfig.CIDR, resolved.CIDR},
+		{"identity_file", fromConfig.IdentityFile, resolved.IdentityFile},
+	} {
+		if f.cfg != f.res {
+			fmt.Fprintf(&b, "  %s: %q -> %q\n", f.key, f.cfg, f.res)
+		}
+	}
+	b.WriteString("\nUp-to-date block:\n\n")
+	b.WriteString(renderSatelliteInfraTOML(name, resolved))
+	return b.String()
 }
 
 // writeValidatedTOML writes an edited TOML config back, refusing to persist
@@ -733,10 +865,27 @@ func tomlTableKey(name string) string {
 
 // removeSatelliteTOMLTable removes the [satellites.<name>] block — the header
 // line through the line before the next table header (or EOF) — from content.
-// Returns the edited content and whether a block was found.
+// The header regex requires "]" right after the name, so subtables like
+// [satellites.<name>.infra] or .provision are NOT matched (and, being table
+// headers themselves, also stop the skip) — which is exactly why they survive
+// a down/up cycle. Returns the edited content and whether a block was found.
 func removeSatelliteTOMLTable(content, name string) (string, bool) {
 	quoted := regexp.QuoteMeta(name)
 	header := regexp.MustCompile(`^\[\s*satellites\s*\.\s*(?:` + quoted + `|"` + quoted + `")\s*\]\s*(?:#.*)?$`)
+	return removeTOMLBlock(content, header)
+}
+
+// removeSatelliteTOMLSubtable is removeSatelliteTOMLTable for one
+// [satellites.<name>.<sub>] subtable block (e.g. sub = "infra").
+func removeSatelliteTOMLSubtable(content, name, sub string) (string, bool) {
+	quoted := regexp.QuoteMeta(name)
+	header := regexp.MustCompile(`^\[\s*satellites\s*\.\s*(?:` + quoted + `|"` + quoted + `")\s*\.\s*` + regexp.QuoteMeta(sub) + `\s*\]\s*(?:#.*)?$`)
+	return removeTOMLBlock(content, header)
+}
+
+// removeTOMLBlock removes the block whose header line matches header — the
+// header through the line before the next table header (or EOF).
+func removeTOMLBlock(content string, header *regexp.Regexp) (string, bool) {
 	lines := strings.Split(content, "\n")
 	out := make([]string, 0, len(lines))
 	removed := false

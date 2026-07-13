@@ -491,9 +491,10 @@ func TestCreateRepoBundle(t *testing.T) {
 	}
 }
 
-// TestSatelliteRegistryOptionalFields covers the `up` completeness fix: the
-// registry entry round-trips identity_file and socket_path through the real
-// config loader, and omits them from the TOML text when empty.
+// TestSatelliteRegistryOptionalFields covers the `up` completeness fix, now
+// through the STATE file: the entry round-trips identity_file and socket_path
+// through satellites.json, omits them from the JSON text when empty
+// (omitempty), and grove.toml is never touched.
 func TestSatelliteRegistryOptionalFields(t *testing.T) {
 	configDir := setupGroveHome(t)
 	tomlPath := filepath.Join(configDir, "grove.toml")
@@ -508,35 +509,39 @@ func TestSatelliteRegistryOptionalFields(t *testing.T) {
 		IdentityFile: "/Users/solair/.ssh/id_ed25519",
 		SocketPath:   "/run/user/1001/grove/groved.sock",
 	}
-	if err := writeSatelliteRegistry("sat-full", full); err != nil {
-		t.Fatalf("writeSatelliteRegistry: %v", err)
+	if err := upsertSatelliteState("sat-full", full); err != nil {
+		t.Fatalf("upsertSatelliteState: %v", err)
 	}
 	minimal := satelliteConfigEntry{
 		SSHAddr: "10.0.0.9:22",
 		User:    "u",
 		HostKey: "ssh-ed25519 AAAA",
 	}
-	if err := writeSatelliteRegistry("sat-min", minimal); err != nil {
-		t.Fatalf("writeSatelliteRegistry (minimal): %v", err)
+	if err := upsertSatelliteState("sat-min", minimal); err != nil {
+		t.Fatalf("upsertSatelliteState (minimal): %v", err)
 	}
 
-	sats := loadSatellitesViaConfig(t)
-	if got := sats["sat-full"]; got != full {
+	state := mustLoadSatelliteState(t)
+	if got := state["sat-full"]; got != full {
 		t.Fatalf("loaded sat-full = %+v, want %+v", got, full)
 	}
-	if got := sats["sat-min"]; got != minimal {
+	if got := state["sat-min"]; got != minimal {
 		t.Fatalf("loaded sat-min = %+v, want %+v", got, minimal)
 	}
 
-	data, err := os.ReadFile(tomlPath)
+	statePath, err := satelliteStatePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(data)
-	if !strings.Contains(text, `socket_path = "/run/user/1001/grove/groved.sock"`) {
+	if !strings.Contains(text, `"socket_path": "/run/user/1001/grove/groved.sock"`) {
 		t.Errorf("socket_path not written:\n%s", text)
 	}
-	if !strings.Contains(text, `identity_file = "/Users/solair/.ssh/id_ed25519"`) {
+	if !strings.Contains(text, `"identity_file": "/Users/solair/.ssh/id_ed25519"`) {
 		t.Errorf("identity_file not written:\n%s", text)
 	}
 	// The minimal entry stays minimal: exactly one of each optional key in the
@@ -547,7 +552,13 @@ func TestSatelliteRegistryOptionalFields(t *testing.T) {
 	if n := strings.Count(text, "socket_path"); n != 1 {
 		t.Errorf("socket_path appears %d times, want 1 (empty fields must be omitted):\n%s", n, text)
 	}
-	if !strings.Contains(text, "# keep me") {
-		t.Errorf("comment destroyed:\n%s", text)
+
+	// grove.toml untouched.
+	cfgData, err := os.ReadFile(tomlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(cfgData) != "# keep me\n" {
+		t.Errorf("grove.toml modified by state writes:\n%s", cfgData)
 	}
 }

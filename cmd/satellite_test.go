@@ -41,12 +41,12 @@ func loadSatellitesViaConfig(t *testing.T) map[string]satelliteConfigEntry {
 	return raw
 }
 
-// TestSatelliteRegistryTOMLVisibleToLoader covers B3: on a machine whose
-// global config is grove.toml, the registry entry written by `up` must land in
-// grove.toml (the file getXDGConfigPath resolves), not grove.yml (which the
-// loader never reads when grove.toml exists) — and the write must not clobber
-// the rest of the user's config.
-func TestSatelliteRegistryTOMLVisibleToLoader(t *testing.T) {
+// TestRemoveLegacySatelliteConfigEntryTOML covers `down`'s legacy cleanup: a
+// flat [satellites.<name>] entry an OLDER `up` wrote into grove.toml is
+// removed (that block is CLI-written state, not user config), while unrelated
+// tables, comments, and other satellites survive byte-for-byte — and an
+// absent entry is a clean no-op.
+func TestRemoveLegacySatelliteConfigEntryTOML(t *testing.T) {
 	configDir := setupGroveHome(t)
 	tomlPath := filepath.Join(configDir, "grove.toml")
 	original := `# my grove config — do not clobber
@@ -54,109 +54,77 @@ func TestSatelliteRegistryTOMLVisibleToLoader(t *testing.T) {
 ssh_addr = "10.0.0.9:22"
 user = "keep"
 host_key = "ssh-ed25519 OTHER"
+
+[satellites.sat1]
+ssh_addr = "203.0.113.7:22"
+user = "solair"
+host_key = "ssh-ed25519 AAAATESTKEY"
 `
 	if err := os.WriteFile(tomlPath, []byte(original), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	entry := satelliteConfigEntry{
-		SSHAddr: "203.0.113.7:22",
-		User:    "solair",
-		HostKey: "ssh-ed25519 AAAATESTKEY",
-	}
-	if err := writeSatelliteRegistry("sat1", entry); err != nil {
-		t.Fatalf("writeSatelliteRegistry: %v", err)
-	}
-
-	// The entry must be visible through the real config loader.
-	sats := loadSatellitesViaConfig(t)
-	got, ok := sats["sat1"]
-	if !ok {
-		t.Fatalf("satellites.sat1 not visible via config loader; got %v", sats)
-	}
-	if got != entry {
-		t.Fatalf("loaded entry = %+v, want %+v", got, entry)
-	}
-	if _, ok := sats["other"]; !ok {
-		t.Fatalf("pre-existing satellites.other was lost: %v", sats)
-	}
-
-	// The rest of the file (comments included) is preserved byte-for-byte.
-	data, err := os.ReadFile(tomlPath)
+	removed, err := removeLegacySatelliteConfigEntry("sat1")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("removeLegacySatelliteConfigEntry: %v", err)
 	}
-	if !strings.Contains(string(data), "# my grove config — do not clobber") {
-		t.Fatalf("comment was destroyed by registry write:\n%s", data)
-	}
-
-	// No stray grove.yml should have been written (the loader would ignore it).
-	if _, err := os.Stat(filepath.Join(configDir, "grove.yml")); !os.IsNotExist(err) {
-		t.Fatalf("registry write created grove.yml alongside grove.toml (stat err = %v)", err)
+	if !removed {
+		t.Fatal("expected the legacy sat1 entry to be reported removed")
 	}
 
-	// Upsert: re-provisioning the same name replaces the table, not duplicates it.
-	entry.SSHAddr = "203.0.113.8:22"
-	if err := writeSatelliteRegistry("sat1", entry); err != nil {
-		t.Fatalf("writeSatelliteRegistry (upsert): %v", err)
-	}
-	data, _ = os.ReadFile(tomlPath)
-	if n := strings.Count(string(data), "[satellites.sat1]"); n != 1 {
-		t.Fatalf("expected exactly 1 [satellites.sat1] table after upsert, got %d:\n%s", n, data)
-	}
-	if got := loadSatellitesViaConfig(t)["sat1"]; got.SSHAddr != "203.0.113.8:22" {
-		t.Fatalf("upsert not visible via loader: %+v", got)
-	}
-
-	// Removal round-trip.
-	if err := removeSatelliteRegistry("sat1"); err != nil {
-		t.Fatalf("removeSatelliteRegistry: %v", err)
-	}
-	sats = loadSatellitesViaConfig(t)
+	sats := loadSatellitesViaConfig(t)
 	if _, ok := sats["sat1"]; ok {
 		t.Fatalf("satellites.sat1 still present after removal: %v", sats)
 	}
 	if _, ok := sats["other"]; !ok {
 		t.Fatalf("removal dropped unrelated satellites.other: %v", sats)
 	}
-	data, _ = os.ReadFile(tomlPath)
+	data, _ := os.ReadFile(tomlPath)
 	if !strings.Contains(string(data), "# my grove config — do not clobber") {
-		t.Fatalf("comment was destroyed by registry removal:\n%s", data)
+		t.Fatalf("comment was destroyed by legacy removal:\n%s", data)
 	}
 
 	// Removing a nonexistent entry is a no-op, not an error.
-	if err := removeSatelliteRegistry("sat1"); err != nil {
-		t.Fatalf("removeSatelliteRegistry (absent): %v", err)
+	removed, err = removeLegacySatelliteConfigEntry("sat1")
+	if err != nil {
+		t.Fatalf("removeLegacySatelliteConfigEntry (absent): %v", err)
+	}
+	if removed {
+		t.Fatal("absent entry reported removed=true")
 	}
 }
 
-// TestSatelliteRegistryYAMLOnlyMachine pins the pre-B3 behavior for machines
-// without a grove.toml: the entry goes to grove.yml, which getXDGConfigPath
-// falls back to, so the loader still sees it.
-func TestSatelliteRegistryYAMLOnlyMachine(t *testing.T) {
+// TestRemoveLegacySatelliteConfigEntryYAML pins the YAML fallback: a legacy
+// entry in grove.yml (a machine that never had a grove.toml) is removed, and
+// a machine with NO global config file at all is a clean no-op — `down` must
+// never fail on the now-normal state-only layout.
+func TestRemoveLegacySatelliteConfigEntryYAML(t *testing.T) {
 	configDir := setupGroveHome(t)
 
-	entry := satelliteConfigEntry{
-		SSHAddr: "203.0.113.7:22",
-		User:    "solair",
-		HostKey: "ssh-ed25519 AAAATESTKEY",
+	// No config file at all: clean no-op.
+	removed, err := removeLegacySatelliteConfigEntry("sat1")
+	if err != nil {
+		t.Fatalf("removeLegacySatelliteConfigEntry (no config file): %v", err)
 	}
-	if err := writeSatelliteRegistry("sat1", entry); err != nil {
-		t.Fatalf("writeSatelliteRegistry: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(configDir, "grove.yml")); err != nil {
-		t.Fatalf("expected grove.yml to be written: %v", err)
+	if removed {
+		t.Fatal("no config file reported removed=true")
 	}
 
-	if got := loadSatellitesViaConfig(t)["sat1"]; got != entry {
-		t.Fatalf("loaded entry = %+v, want %+v", got, entry)
+	yamlPath := filepath.Join(configDir, "grove.yml")
+	original := "satellites:\n  sat1:\n    ssh_addr: \"203.0.113.7:22\"\n    user: solair\n    host_key: ssh-ed25519 AAAATESTKEY\n"
+	if err := os.WriteFile(yamlPath, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
-	if err := removeSatelliteRegistry("sat1"); err != nil {
-		t.Fatalf("removeSatelliteRegistry: %v", err)
+	removed, err = removeLegacySatelliteConfigEntry("sat1")
+	if err != nil {
+		t.Fatalf("removeLegacySatelliteConfigEntry (yaml): %v", err)
+	}
+	if !removed {
+		t.Fatal("expected the legacy yaml sat1 entry to be reported removed")
 	}
 	if sats := loadSatellitesViaConfig(t); len(sats) != 0 {
-		t.Fatalf("satellites still present after removal: %v", sats)
+		t.Fatalf("satellites still present after yaml removal: %v", sats)
 	}
 }
 

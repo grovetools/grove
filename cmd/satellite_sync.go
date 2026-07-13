@@ -36,6 +36,10 @@ const (
 	// syncTokenFileName is the laptop sync token's basename in the grove
 	// config dir — bootstrap step 7 fetches the VM-minted token there.
 	syncTokenFileName = "sync.token"
+	// syncTokenProbeStdinHeader is what the capabilities probe's remote curl
+	// reads from stdin (-H @-): the Authorization header line, minus the
+	// token itself.
+	syncTokenProbeStdinHeader = "Authorization: Bearer "
 	// syncConfigFileName is the sync client config basename (the same file
 	// core's config.SyncConfigPath resolves).
 	syncConfigFileName = "sync.toml"
@@ -164,6 +168,72 @@ func setupLaptopSyncConfig(configDir string, port int, workspaces []string, out 
 		return createLaptopSyncConfig(syncPath, port, tokenPath, workspaces, out)
 	}
 	return mergeLaptopSyncConfig(syncPath, port, workspaces, out)
+}
+
+// --- live sync-token verification (`up`'s backstop against a stale token) ---
+
+// syncTokenProbeCmd renders the VM-side capabilities probe (bootstrap's own
+// probe pattern): POST /sync/capabilities on the VM-loopback syncd, printing
+// only the HTTP status code. The Authorization header arrives on the remote
+// command's stdin (curl -H @-), so the token appears in NO argv — neither the
+// local ssh invocation's nor the remote curl process's.
+func syncTokenProbeCmd(remoteAddr string) string {
+	if remoteAddr == "" {
+		remoteAddr = defaultSyncRemoteAddr
+	}
+	return fmt.Sprintf(`curl -s -o /dev/null -w '%%{http_code}' -X POST -H @- -H 'Content-Type: application/json' -d '{}' http://%s/sync/capabilities`, remoteAddr)
+}
+
+// verifySatelliteSyncToken live-checks the laptop sync token against the VM's
+// syncd via runRemote (an exec-remote-command func — ssh.outputCommand in
+// production, a fake in tests). The stat in setupLaptopSyncConfig only proves
+// a token FILE exists; a stale token from a previous VM passes it vacuously
+// and the daemon then 401-loops silently — this probe is the backstop.
+// Decision logic:
+//   - 2xx      → token accepted.
+//   - 401/403  → the token is stale for THIS VM; error carries the
+//     fetch-a-fresh-token remediation.
+//   - probe/transport error → distinct network-failure message (not a token
+//     problem — curl exits nonzero when syncd is unreachable, so a dead syncd
+//     lands here too).
+//   - anything else → syncd answered but not usably; also not a token verdict.
+func verifySatelliteSyncToken(runRemote func(command, stdin string) (string, error), probeCmd, token, sshDest, tokenPath string) error {
+	status, err := runRemote(probeCmd, syncTokenProbeStdinHeader+token+"\n")
+	if err != nil {
+		return fmt.Errorf("could not run the sync capabilities probe on the VM (network/SSH/syncd failure, not a token verdict — check the VM and its grove-syncd service, then re-run): %w", err)
+	}
+	switch status = strings.TrimSpace(status); {
+	case strings.HasPrefix(status, "2"):
+		return nil
+	case status == "401" || status == "403":
+		return fmt.Errorf("the laptop sync token at %s is stale for this VM (syncd returned %s; the token is likely left over from a previous satellite, and the daemon would 401-loop silently)\n"+
+			"remediation — fetch the token this VM's bootstrap minted, then re-run:\n"+
+			"  ssh %s 'sudo cat /root/laptop-sync.token' > %s && chmod 600 %s",
+			tokenPath, status, sshDest, tokenPath, tokenPath)
+	default:
+		return fmt.Errorf("unexpected HTTP status %q from the VM syncd capabilities probe (syncd reachable but unhealthy?) — not a token verdict; check grove-syncd on the VM and re-run", status)
+	}
+}
+
+// verifySatelliteSyncTokenOverSSH wires verifySatelliteSyncToken to the pinned
+// SSH transport from the registry entry (same C2 never-TOFU stance as every
+// other remote step `up` runs). The token is read here and travels only on
+// the ssh process's stdin.
+func verifySatelliteSyncTokenOverSSH(entry satelliteConfigEntry, tokenPath string) error {
+	token, err := os.ReadFile(tokenPath)
+	if err != nil {
+		return fmt.Errorf("read laptop sync token %s: %w", tokenPath, err)
+	}
+	tmpDir, err := os.MkdirTemp("", "grove-satellite-sync-verify-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+	ssh, err := newSatelliteSSH(entry, tmpDir)
+	if err != nil {
+		return err
+	}
+	return verifySatelliteSyncToken(ssh.outputCommand, syncTokenProbeCmd(entry.SyncRemoteAddr), strings.TrimSpace(string(token)), ssh.dest(), tokenPath)
 }
 
 // createLaptopSyncConfig writes a fresh push-only sync.toml: server pointed at

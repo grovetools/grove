@@ -468,9 +468,9 @@ manifest); deletion stays manual.`
 	cmd.Flags().BoolVar(&diffMode, "diff", false, "Show unified diffs against the VM's current fragments; write nothing")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		entry, ok := loadConfiguredSatellites()[name]
+		entry, ok := loadMergedSatellites()[name]
 		if !ok {
-			return fmt.Errorf("no [satellites.%s] entry in the grove config — run `grove satellite up %s` first", name, name)
+			return fmt.Errorf("satellite %q not found in the registry (config or state) — run `grove satellite up %s` first", name, name)
 		}
 		prop, err := loadSatelliteConfigPropagation(name)
 		if err != nil {
