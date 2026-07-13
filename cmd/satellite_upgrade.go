@@ -107,11 +107,12 @@ Notes:
     flagged loudly. compositor is a library with no binaries and is never
     shipped prebuilt.
   - repos that link compositor (flow, tuimux, treemux, cx, skills, nav, nb,
-    hooks) cannot cross-compile to linux/amd64 yet — no linux compositor/
-    ghostty static libs exist — so under --prebuilt their local builds are
-    EXPECTED to fail; each is reported and dropped per-repo while the rest
-    ship. Use the source path (no --prebuilt) to deploy them until linux
-    compositor libs exist.`
+    hooks) cross-compile once compositor's per-target zig static libs exist
+    (zig/zig-out-<goos>-<goarch> + lib/ghostty-<goos>-<goarch> in the
+    compositor repo). grove build --target builds those automatically:
+    compositor's make build runs its zig-cross target in an earlier wave than
+    its dependents. compositor itself remains a library with no binaries and
+    is never shipped prebuilt.`
 	cmd.Args = cobra.ExactArgs(1)
 	cmd.SilenceUsage = true
 	cmd.Flags().StringVar(&reposFlag, "repos", "", "Comma-separated repos to deploy; listed repos are forced even when already up-to-date (default: every changed repo)")
