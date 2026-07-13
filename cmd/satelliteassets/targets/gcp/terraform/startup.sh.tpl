@@ -38,11 +38,17 @@ if ! command -v gcloud >/dev/null 2>&1 && [ ! -x /snap/bin/gcloud ]; then
   apt-get update -y
   apt-get install -y google-cloud-cli
 fi
-# Snap-shipped gcloud is invisible to non-login SSH shells (they read neither
-# profile.d nor /snap/bin); a /usr/local/bin symlink fixes that everywhere.
-if [ -x /snap/bin/gcloud ] && ! command -v gcloud >/dev/null 2>&1; then
-  ln -sf /snap/bin/gcloud /usr/local/bin/gcloud
-fi
+# Snap-shipped gcloud is invisible to non-login SSH shells and to shells
+# spawned under the groved unit (neither reads profile.d, and /snap/bin may
+# be absent from their PATH); a /usr/local/bin symlink fixes that everywhere.
+# Guard on the link target, NOT `command -v`: this startup context's own
+# PATH can already see /snap/bin, which must not suppress the link — that is
+# exactly how gcloud went missing for user shells on the 2026-07-13 rehearsal.
+for tool in gcloud gsutil bq; do
+  if [ -x "/snap/bin/$tool" ] && [ ! -e "/usr/local/bin/$tool" ]; then
+    ln -s "/snap/bin/$tool" "/usr/local/bin/$tool"
+  fi
+done
 
 # Go toolchain — latest stable (go.work needs >= 1.25; Go is backwards compatible)
 GO_VERSION=$(curl -fsSL 'https://go.dev/dl/?mode=json' | jq -r '.[0].version')
