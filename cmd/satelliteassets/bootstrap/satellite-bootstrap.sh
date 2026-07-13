@@ -380,7 +380,7 @@ Description=grove daemon (groved) — grove-satellite PoC
 ExecStart=%h/.local/share/grove/bin/groved start
 Restart=on-failure
 RestartSec=2
-Environment=PATH=%h/.local/share/grove/bin:%h/.grove/bin:%h/.local/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=%h/.local/share/grove/bin:%h/.grove/bin:%h/.local/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:/snap/bin
 
 [Install]
 WantedBy=default.target
@@ -438,6 +438,19 @@ export XDG_RUNTIME_DIR
 export CLAUDE_CODE_OAUTH_TOKEN="$GROVE_CLAUDE_TOKEN"
 systemctl --user import-environment CLAUDE_CODE_OAUTH_TOKEN || true
 systemctl --user try-restart groved 2>/dev/null || true
+# Interactive first-run: without ~/.claude.json claude walks the onboarding
+# flow (theme picker, then account login) even though CLAUDE_CODE_OAUTH_TOKEN
+# is set and valid — verified live on the 2026-07-13 rehearsal VM. Pre-marking
+# onboarding complete makes the first interactive run use the token straight
+# away. Merge, don't clobber: repeat bootstraps keep accumulated state.
+if [ -f "$HOME/.claude.json" ]; then
+  jq '. + {hasCompletedOnboarding: true}' "$HOME/.claude.json" > "$HOME/.claude.json.tmp" \
+    && mv "$HOME/.claude.json.tmp" "$HOME/.claude.json"
+else
+  printf '{"hasCompletedOnboarding": true}\n' > "$HOME/.claude.json"
+fi
+chmod 600 "$HOME/.claude.json"
+echo "claude onboarding pre-completed (interactive runs use the token)"
 claude --version
 echo "claude installed + token configured"
 REMOTE
