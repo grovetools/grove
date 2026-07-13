@@ -275,11 +275,14 @@ func TestRunTokenCommand(t *testing.T) {
 	}
 }
 
-// TestUpsertPreservesProvisionSubtable covers the splice invariant: rewriting
-// the [satellites.<name>] registry entry must leave a hand-written
-// [satellites.<name>.provision] subtable (and everything else) intact, and the
-// result must still parse as one coherent satellite through the real loader.
-func TestUpsertPreservesProvisionSubtable(t *testing.T) {
+// TestStateUpsertLeavesConfigUntouched covers the config/state split's core
+// invariant on the `up` path: writing a satellite's registry entry goes to
+// the state file ONLY — the user's grove.toml (legacy flat entry, provision
+// subtable, comments, other satellites) stays byte-for-byte. The merged view
+// then combines both sources per field: the state's machine-derived fields
+// win over the stale legacy block, the config's user-authored fields win over
+// the state snapshot — and the stale legacy block draws a drift warning.
+func TestStateUpsertLeavesConfigUntouched(t *testing.T) {
 	configDir := setupGroveHome(t)
 	tomlPath := filepath.Join(configDir, "grove.toml")
 	original := `# hand-written config
@@ -309,47 +312,40 @@ host_key = "ssh-ed25519 KEEP"
 		HostKey:    "ssh-ed25519 NEWKEY",
 		SocketPath: "/run/user/1001/grove/groved.sock",
 	}
-	if err := writeSatelliteRegistry("sat1", entry); err != nil {
-		t.Fatalf("writeSatelliteRegistry: %v", err)
+	if err := upsertSatelliteState("sat1", entry); err != nil {
+		t.Fatalf("upsertSatelliteState: %v", err)
 	}
 
+	// The user's config is untouched byte-for-byte.
 	data, err := os.ReadFile(tomlPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(data)
-	for _, keep := range []string{
-		"# hand-written config",
-		"[satellites.sat1.provision]",
-		"# provision comment",
-		`gh_token_cmd = "gh auth token"`,
-		"claude = true",
-		`service_account_email = "sa@proj.iam.gserviceaccount.com"`,
-		"[satellites.sat2]",
-	} {
-		if !strings.Contains(text, keep) {
-			t.Errorf("upsert destroyed %q:\n%s", keep, text)
-		}
-	}
-	if strings.Contains(text, "1.1.1.1") || strings.Contains(text, `user = "old"`) {
-		t.Errorf("stale registry entry not replaced:\n%s", text)
-	}
-	if n := strings.Count(text, "[satellites.sat1]"); n != 1 {
-		t.Errorf("expected exactly 1 [satellites.sat1] table, got %d:\n%s", n, text)
+	if string(data) != original {
+		t.Errorf("state upsert modified grove.toml:\n%s", data)
 	}
 
-	// The real loader still sees the updated entry AND the preserved provision
-	// block under the same satellite (super-table after sub-table is valid TOML).
-	sats := loadSatellitesViaConfig(t)
-	if got := sats["sat1"]; got != entry {
-		t.Fatalf("loaded sat1 = %+v, want %+v", got, entry)
+	// Merged view: state wins the machine-derived fields over the stale
+	// legacy block; config wins the user-authored ones; the conflict warns.
+	merged, warnings := mergeSatelliteEntries(loadSatellitesViaConfig(t), mustLoadSatelliteState(t))
+	got := merged["sat1"]
+	if got.SSHAddr != entry.SSHAddr || got.HostKey != entry.HostKey || got.SocketPath != entry.SocketPath {
+		t.Fatalf("state fields did not win over the legacy block: %+v", got)
 	}
-	if _, ok := sats["sat2"]; !ok {
-		t.Fatalf("sat2 lost: %v", sats)
+	if got.User != "old" {
+		t.Fatalf("config user did not win over the state snapshot: %+v", got)
 	}
+	if _, ok := merged["sat2"]; !ok {
+		t.Fatalf("sat2 lost from merged view: %v", merged)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "[satellites.sat1]") {
+		t.Fatalf("expected one stale-legacy-block warning for sat1, got %v", warnings)
+	}
+
+	// The provision block still loads alongside.
 	prov := loadProvisionViaConfig(t, "sat1")
 	if prov.GHTokenCmd != "gh auth token" || !prov.Claude || prov.ServiceAccountEmail != "sa@proj.iam.gserviceaccount.com" {
-		t.Fatalf("provision block no longer loads after upsert: %+v", prov)
+		t.Fatalf("provision block no longer loads: %+v", prov)
 	}
 }
 

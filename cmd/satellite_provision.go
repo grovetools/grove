@@ -2,8 +2,8 @@ package cmd
 
 // Provisioning options for `grove satellite up` — the [satellites.<name>.provision]
 // config block, its flag overrides, local token-command execution, and the
-// stdin-framing assembly for cloud/poc/grove-satellite/bootstrap/
-// satellite-bootstrap.sh.
+// stdin-framing assembly for the embedded bootstrap script
+// (grove/cmd/satelliteassets/bootstrap/satellite-bootstrap.sh).
 //
 // Secrets policy (mirrors the bootstrap script header): tokens are produced by
 // LOCAL commands (`gh_token_cmd`, `claude_token_cmd`), travel to the script on

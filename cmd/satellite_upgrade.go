@@ -80,9 +80,9 @@ Notes:
 	cmd.Flags().BoolVar(&assumeYes, "yes", false, "Skip the deploy and restart confirmation prompts")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		entry, ok := loadConfiguredSatellites()[name]
+		entry, ok := loadMergedSatellites()[name]
 		if !ok {
-			return fmt.Errorf("no [satellites.%s] entry in the grove config — run `grove satellite up %s` first", name, name)
+			return fmt.Errorf("satellite %q not found in the registry (config or state) — run `grove satellite up %s` first", name, name)
 		}
 
 		// Resolve the local ecosystem root.
@@ -825,6 +825,24 @@ func (s *satelliteSSH) outputScript(script string) (string, error) {
 	args := append(s.baseOptions(), "-p", s.port, s.dest(), "bash -s")
 	cmd := exec.Command("ssh", args...) //nolint:gosec // G204: registry/flag-derived
 	cmd.Stdin = strings.NewReader(script)
+	out, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
+			return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(ee.Stderr)))
+		}
+		return "", err
+	}
+	return string(out), nil
+}
+
+// outputCommand runs a single remote command with the given stdin payload
+// attached, capturing stdout (stderr surfaces in the error). This is how
+// secrets reach a remote command: on stdin, never argv (same policy as the
+// bootstrap framing).
+func (s *satelliteSSH) outputCommand(command, stdin string) (string, error) {
+	args := append(s.baseOptions(), "-p", s.port, s.dest(), command)
+	cmd := exec.Command("ssh", args...) //nolint:gosec // G204: registry/flag-derived
+	cmd.Stdin = strings.NewReader(stdin)
 	out, err := cmd.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {

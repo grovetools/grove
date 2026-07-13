@@ -1,0 +1,29 @@
+# Laptop-side sync config for the grove-satellite PoC.
+#
+# PUSH-ONLY by design: no `pull = true` here, so sync NEVER writes the
+# laptop's notebook tree — materialization happens only on the VM
+# (daemon/internal/daemon/sync/pull.go gates the entire pull pipeline on
+# per-workspace pull=true). A full backup also exists at
+# /tmp/grovetools-notebook-backup-<date>.tar.gz before first activation.
+#
+# The server is the VM's grove-syncd, reached over an SSH tunnel:
+#   ssh -N -L 8788:127.0.0.1:8788 <vm>
+# (loopback on both ends -> plain http is fine; the syncd client has no
+# self-signed-TLS support, and syncd itself refuses non-loopback binds
+# without real TLS.)
+#
+# Install: cp into ~/.config/grove/sync.toml, ensure the token minted by
+# satellite-bootstrap.sh is at ~/.config/grove/sync.token, then restart the
+# laptop groved (it registers the sync handler only at startup).
+
+server = "http://127.0.0.1:8788"
+token_command = "cat ~/.config/grove/sync.token"
+
+# Activation ladder rung 1: a small, low-stakes workspace first.
+[[workspaces]]
+name = "cloud"
+
+# Rung 2 — uncomment after rung 1 round-trips clean (push visible on VM,
+# no quarantine surprises, laptop tree untouched):
+# [[workspaces]]
+# name = "grovetools"
