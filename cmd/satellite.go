@@ -21,6 +21,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 
+	orch "github.com/grovetools/grove/pkg/orchestrator"
 	"github.com/grovetools/grove/pkg/setup"
 )
 
@@ -103,9 +104,21 @@ func newSatelliteUpCmd() *cobra.Command {
 		syncPort       int
 		syncWorkspaces string
 		reloadDaemon   bool
+		prebuilt       bool
+		prebuiltTarget string
+		sourceDir      string
 	)
 	cmd := cli.NewStandardCommand("up <name>", "Provision a satellite VM (billable)")
 	cmd.Long = `Provision a satellite VM: terraform apply, host-key pin, bootstrap, registry.
+
+Bootstrap mode: by default the VM clones the grovetools ecosystem and builds
+the grove stack from source. With --prebuilt the stack (grove, groved, flow,
+nb, treemux, tuimux, grove-syncd) is instead cross-compiled on the laptop
+(grove build --prebuilt-target, default linux/amd64), shipped over the pinned
+SSH connection, and installed before bootstrap runs — no VM-side git clone,
+make, Go, or zig for the grove stack. --source-dir picks the ecosystem worktree
+to build from (default: the go.work root above cwd). NOTE: the cross-compile
+target is --prebuilt-target, not --target (--target selects the infra module).
 
 Infra inputs (--project, --zone, --ssh-user, --cidr, --identity-file,
 --target) default from a [satellites.<name>.infra] block in the same grove
@@ -166,6 +179,13 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 	cmd.Flags().IntVar(&syncPort, "sync-port", defaultSyncLocalPort, "Laptop-local port the daemon binds and forwards to the VM's syncd (registry sync_local_port; 0 disables the sync forward and laptop sync setup)")
 	cmd.Flags().StringVar(&syncWorkspaces, "sync-workspaces", "", "Comma-separated workspaces to sync with the VM (overrides [satellites.<name>.sync] workspaces; default "+strings.Join(defaultSatelliteSyncWorkspaces, ",")+")")
 	cmd.Flags().BoolVar(&reloadDaemon, "reload-daemon", false, "Run 'groved upgrade --global' at the end so the daemon loads the new registry + sync forward")
+	cmd.Flags().BoolVar(&prebuilt, "prebuilt", false, "Provision from locally cross-compiled binaries instead of a VM-side git clone + source build: the grove stack (grove, groved, flow, nb, treemux, tuimux, grove-syncd) is built on the laptop, shipped over the pinned SSH connection, and installed before bootstrap")
+	// NOTE: the cross-compile target is --prebuilt-target, NOT --target:
+	// `up`'s existing --target selects the INFRA module (e.g. gcp), a different
+	// axis from the <goos>/<goarch> build target. (`satellite upgrade` has no
+	// infra --target, so there it is spelled --target.)
+	cmd.Flags().StringVar(&prebuiltTarget, "prebuilt-target", "linux/amd64", "Cross-compile target for --prebuilt as <goos>/<goarch> (the VM arch)")
+	cmd.Flags().StringVar(&sourceDir, "source-dir", "", "Local ecosystem worktree root the --prebuilt stack is cross-built from (default: the go.work root above cwd)")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
@@ -231,6 +251,42 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 			return err
 		}
 		resolvedSyncWorkspaces := resolveSatelliteSyncWorkspaces(syncOpts, syncWorkspaces, cmd.Flags().Changed("sync-workspaces"))
+
+		// Prebuilt-bootstrap inputs: validate NOW — before terraform — so a bad
+		// --prebuilt-target, a missing ecosystem worktree, or a missing
+		// grove-syncd unit aborts while the provision is still free (same
+		// fail-fast stance as the token commands). The cross-build itself runs
+		// after apply (it needs the VM to ship to). --prebuilt-target /
+		// --source-dir are meaningless without --prebuilt.
+		var prebuiltXTarget orch.Target
+		var sourceAbs string
+		if prebuilt {
+			t, err := orch.ParseTarget(prebuiltTarget)
+			if err != nil {
+				return fmt.Errorf("--prebuilt-target: %w", err)
+			}
+			prebuiltXTarget = t
+			if sourceDir == "" {
+				root, rerr := defaultUpgradeSourceDir()
+				if rerr != nil {
+					return rerr
+				}
+				sourceDir = root
+			}
+			if sourceAbs, err = filepath.Abs(sourceDir); err != nil {
+				return fmt.Errorf("resolve --source-dir: %w", err)
+			}
+			if err := validateSatellitePrebuiltStack(sourceAbs); err != nil {
+				return err
+			}
+		} else {
+			if cmd.Flags().Changed("prebuilt-target") {
+				return fmt.Errorf("--prebuilt-target only applies to --prebuilt")
+			}
+			if cmd.Flags().Changed("source-dir") {
+				return fmt.Errorf("--source-dir only applies to --prebuilt")
+			}
+		}
 
 		// Config propagation ([satellites.<name>].seed_fragments + .config):
 		// assemble + validate NOW — before terraform — so a denied/missing
@@ -342,6 +398,74 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 			return fmt.Errorf("ssh-keyscan host-key pin: %w", err)
 		}
 
+		// 3b. Prebuilt bootstrap: cross-build the grove stack locally, ship it
+		//     over a transport that PINS the host key just scanned (never TOFU,
+		//     C2), install the binaries + ship the grove-syncd systemd unit —
+		//     all BEFORE the bootstrap script runs, so grove-syncd + groved
+		//     exist on the VM when bootstrap's step 6/8 enable them under
+		//     systemd. On a fresh VM a partial install is a broken satellite
+		//     (unlike upgrade, where the old binaries keep running), so any
+		//     install failure aborts here rather than proceeding to bootstrap.
+		var syncdUnitRemotePath string
+		if prebuilt {
+			pinnedEntry := satelliteConfigEntry{SSHAddr: ip + ":22", User: sshUser, HostKey: hostKey}
+			if identityFile != "" {
+				pinnedEntry.IdentityFile = expandUserPath(identityFile)
+			}
+			shipDir, mkErr := os.MkdirTemp("", "grove-satellite-up-prebuilt-")
+			if mkErr != nil {
+				return mkErr
+			}
+			defer func() { _ = os.RemoveAll(shipDir) }()
+			ssh, sshErr := newSatelliteSSH(pinnedEntry, shipDir)
+			if sshErr != nil {
+				return fmt.Errorf("pinned ssh transport for prebuilt ship: %w", sshErr)
+			}
+			// sshd answering keyscan ≠ auth ready: on a fresh VM the guest
+			// agent writes authorized_keys from metadata seconds after boot.
+			if err := waitForSatelliteSSHAuth(ssh, 3*time.Minute); err != nil {
+				return err
+			}
+			// Ship the grove-syncd systemd unit sourced from the ecosystem
+			// worktree (no source tree on the VM to copy it from). Its remote
+			// path is handed to bootstrap via --syncd-unit.
+			if syncdUnitRemotePath, err = shipSatelliteSyncdUnit(ssh, sourceAbs); err != nil {
+				return fmt.Errorf("ship grove-syncd unit: %w", err)
+			}
+			// compositor is a library (no binaries) but grove/flow/nb/treemux/
+			// tuimux link its per-target zig static libs; cross-build it FIRST
+			// as its own wave so those libs exist before the ship set compiles.
+			// It is NOT in the ship set (deploySatellitePrebuilt would drop it as
+			// "no binaries"), so it cannot be built as part of that call. Cached
+			// per build@<target>, so a warm laptop re-runs cheaply. (This is why
+			// a fresh `up --prebuilt` works where `upgrade --prebuilt` assumes
+			// the libs already exist and holds compositor.)
+			fmt.Printf("Cross-building compositor's %s zig libraries (linked by the grove stack)...\n", prebuiltXTarget)
+			compResults, cErr := BuildReposForTarget(context.Background(), sourceAbs, []string{"compositor"}, prebuiltXTarget, 0)
+			if cErr != nil {
+				return fmt.Errorf("cross-build compositor libs: %w", cErr)
+			}
+			for _, r := range compResults {
+				if r.Err != nil {
+					return fmt.Errorf("cross-build compositor libs failed:\n%s", tailLines(string(r.Output), 40))
+				}
+			}
+			// Cross-build + package + scp + install the fixed prebuilt stack,
+			// reusing the exact machinery `satellite upgrade --prebuilt` uses.
+			updates, dirty, dErr := satellitePrebuiltStackDeltas(sourceAbs)
+			if dErr != nil {
+				return dErr
+			}
+			shipped, deployErr, fatal := deploySatellitePrebuilt(ssh, name, sourceAbs, prebuiltXTarget, updates, dirty)
+			if fatal != nil {
+				return fatal
+			}
+			if deployErr != nil {
+				return fmt.Errorf("prebuilt install failed on the fresh VM (nothing bootstrapped yet — fix and re-run `grove satellite up %s --prebuilt`, or `grove satellite down %s`): %w", name, name, deployErr)
+			}
+			fmt.Printf("Prebuilt grove stack installed on %q (%s).\n", name, strings.Join(shipped, ", "))
+		}
+
 		// 4. Bootstrap the VM (subprocess, inherited stdout/stderr). Provision
 		//    options become the script's flags; tokens ride stdin in its
 		//    documented framing (raw single token, or KEY=VALUE lines when both
@@ -352,6 +476,11 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		// (bootstrap step 5). Always passed — an explicitly empty flag value
 		// means "no sync workspaces" on the VM too.
 		provArgs = append(provArgs, "--workspaces", strings.Join(resolvedSyncWorkspaces, ","))
+		// Prebuilt mode: tell bootstrap to SKIP the clone/build/source-unit-copy
+		// steps and install the CLI-shipped grove-syncd unit instead.
+		if prebuilt {
+			provArgs = append(provArgs, "--prebuilt", "--syncd-unit", syncdUnitRemotePath)
+		}
 		bootstrapArgs := append([]string{bootstrapScript, sshUser + "@" + ip}, provArgs...)
 		if err := runInheritedWithStdin(tfAbs, secretStdin, "bash", bootstrapArgs...); err != nil {
 			return fmt.Errorf("satellite bootstrap: %w", err)
