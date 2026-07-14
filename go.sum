@@ -54,6 +54,9 @@ github.com/grovetools/core v0.6.3 h1:oM8jwAIcllZjfxWug6d5k1i/pz5ye8CBDuxT3Thc+HI
 github.com/grovetools/core v0.6.3/go.mod h1:IFPIeN4IpCiTP2rj9OIzJARRC6oyagWu/GzfV+IUJU0=
 github.com/grovetools/cx v0.6.0 h1:q7WF21WMuBcSZsZtCbEn5R9SwAzScx6B9q7r2+Kr9dE=
 github.com/grovetools/cx v0.6.0/go.mod h1:3JFu0OcgMMSe+P4RmspvkEobgS5hOwblIQZi7HmE/8c=
+github.com/grovetools/docgen v0.6.0/go.mod h1:g110pCApbBZrirx/OjD3efMohvKQpKVP+20WcIbCxTQ=
+github.com/grovetools/flow v0.6.3/go.mod h1:uuq3YbXpFn5pf1UTiFKUZD4tIhgDrEDJ10owT/WuUtc=
+github.com/grovetools/grove-anthropic v0.6.1/go.mod h1:WrUWjUF2vBmVEGQEZe9m6JuWA0lasZxVEFelOh/p8Ss=
 github.com/grovetools/tend v0.6.0 h1:LGz8CK3pPQC5RLw7BIaQcqHU66UqAYte39Ojlxo2GCk=
 github.com/grovetools/tend v0.6.0/go.mod h1:o36W0Kgx7ZmLUuutLH9afqgnaWahjXlV4rIVet2Adoc=
 github.com/hinshun/vt10x v0.0.0-20180809195222-d55458df857c/go.mod h1:DqJ97dSdRW1W22yXSB90986pcOyQ7r45iio1KN2ez1A=
@@ -131,6 +134,7 @@ github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e h1:JVG44RsyaB9T2KIHavM
 github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e/go.mod h1:RbqR21r5mrJuqunuUZ/Dhy/avygyECGrLceyNeo4LiM=
 golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2/go.mod h1:djNgcEr1/C05ACkg1iLfiJU5Ep61QUkGW8qpdssI0+w=
 golang.org/x/crypto v0.46.0 h1:cKRW/pmt1pKAfetfu+RCEvjvZkA9RimPbh7bhFjGVBU=
+golang.org/x/crypto v0.46.0/go.mod h1:Evb/oLKmMraqjZ2iQTwDwvCtJkczlDuTmdJXoZVzqU0=
 golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 h1:mgKeJMpvi0yx/sU5GsxQ7p6s2wtOnGAHZWCHUM4KGzY=
 golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546/go.mod h1:j/pmGrbnkbPtQfxEe5D0VQhZC6qKbfKifgD0oM7sR70=
 golang.org/x/mod v0.31.0 h1:HaW9xtz0+kOcWKwli0ZXy79Ix+UW/vOfmWI5QVd2tgI=

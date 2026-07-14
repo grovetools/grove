@@ -1,0 +1,19 @@
+# Satellite repo/worktree mirroring rules
+# Scopes the source behind `grove satellite repos push/pull` and
+# `grove satellite worktree push/pull`: the delta/bundle/ship engines, the
+# shared mirror machinery and pinned ssh/scp transport, the registry state
+# file, the VM-side worktree-path plumbing verb, and the satellite E2E
+# harness itself (endpoint seam, SSH simulator, real-VM provider, scenarios).
+# Changes here should trigger the satellite-* E2E scenarios.
+
+cmd/satellite_repos.go
+cmd/satellite_repos_pull.go
+cmd/satellite_mirror.go
+cmd/satellite_worktree.go
+cmd/satellite_state.go
+cmd/satellite_upgrade.go
+cmd/internal/worktree_path.go
+tests/scenarios_satellite.go
+tests/satellite_endpoint.go
+tests/satellite_sim.go
+tests/satellite_real.go

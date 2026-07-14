@@ -128,7 +128,7 @@ func TestCyclicGroups(t *testing.T) {
 	g.AddEdge("core", "tuimux")
 	g.AddEdge("tuimux", "compositor")
 	g.AddEdge("compositor", "core") // core/tuimux/compositor form a cycle
-	g.AddEdge("notify", "core")      // notify is acyclic
+	g.AddEdge("notify", "core")     // notify is acyclic
 
 	if !g.HasCycle() {
 		t.Fatal("HasCycle() = false, want true")

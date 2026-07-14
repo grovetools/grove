@@ -53,9 +53,9 @@ import (
 
 // Stage dirs, deliberately separate from the repos push/pull stages so a
 // concurrent repos operation can never eat a worktree bundle (and vice versa).
-const (
-	satelliteWorktreeStageDir     = "/tmp/grove-satellite-worktree"
-	satelliteWorktreePullStageDir = "/tmp/grove-satellite-worktree-pull"
+var (
+	satelliteWorktreeStageDir     = satelliteStageBase() + "/grove-satellite-worktree"
+	satelliteWorktreePullStageDir = satelliteStageBase() + "/grove-satellite-worktree-pull"
 )
 
 // deltaStatusNoBase is the worktree-push-only status for a repo whose BASE

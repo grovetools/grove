@@ -35,7 +35,7 @@ import (
 // bundle from an earlier failed run must never be mistaken for this run's),
 // and the laptop removes it after a fully successful pull — kept on failure
 // for postmortem, like push's stage.
-const satelliteReposPullStageDir = "/tmp/grove-satellite-repos-pull"
+var satelliteReposPullStageDir = satelliteStageBase() + "/grove-satellite-repos-pull"
 
 // deltaStatusFetch is the pull-only status for a VM head whose commit object
 // is absent from the laptop's object store: there is something to bring back.
