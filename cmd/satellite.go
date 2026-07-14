@@ -16,6 +16,7 @@ import (
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/daemon"
+	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/tui/components/table"
 	"github.com/pelletier/go-toml/v2"
@@ -178,7 +179,7 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 	cmd.Flags().StringVar(&serviceAccount, "service-account", "", "Service account email attached to the VM (terraform var service_account_email; overrides provision config; empty disables)")
 	cmd.Flags().IntVar(&syncPort, "sync-port", defaultSyncLocalPort, "Laptop-local port the daemon binds and forwards to the VM's syncd (registry sync_local_port; 0 disables the sync forward and laptop sync setup)")
 	cmd.Flags().StringVar(&syncWorkspaces, "sync-workspaces", "", "Comma-separated workspaces to sync with the VM (overrides [satellites.<name>.sync] workspaces; default "+strings.Join(defaultSatelliteSyncWorkspaces, ",")+")")
-	cmd.Flags().BoolVar(&reloadDaemon, "reload-daemon", false, "Run 'groved upgrade --global' at the end so the daemon loads the new registry + sync forward")
+	cmd.Flags().BoolVar(&reloadDaemon, "reload-daemon", false, "Run 'groved upgrade --global' at the end (a FULL daemon restart). Rarely needed now: the registry hot-reloads via the daemon API automatically; this remains for picking up a rebuilt groved binary or boot-only config (e.g. sync transport) in the same breath")
 	cmd.Flags().BoolVar(&prebuilt, "prebuilt", false, "Provision from locally cross-compiled binaries instead of a VM-side git clone + source build: the grove stack (grove, groved, flow, nb, treemux, tuimux, grove-syncd) is built on the laptop, shipped over the pinned SSH connection, and installed before bootstrap")
 	// NOTE: the cross-compile target is --prebuilt-target, NOT --target:
 	// `up`'s existing --target selects the INFRA module (e.g. gcp), a different
@@ -585,12 +586,19 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 			fmt.Println("Laptop sync token verified against the VM's syncd.")
 		}
 
-		// 6. Next steps — the registry AND sync config load only at daemon
-		//    boot (same constraint as sync transport registration in
-		//    groved.go). The daemon owns the sync forward now; there is no
-		//    manual tunnel step anymore.
+		// 6. Registry hot-reload + next steps. The FINAL step: POST the global
+		//    daemon's /api/satellites/reload so its ConnManager connects (and
+		//    binds the sync forward) right now — no agent-killing restart. The
+		//    sync TRANSPORT registration in groved.go still loads only at boot,
+		//    but the daemon-owned forward this entry uses does not depend on it.
+		//    Soft-fail: with no daemon running or an old groved (404), the next
+		//    steps below fall back to the manual reload instruction.
 		fmt.Printf("\nSatellite %q provisioned at %s.\n", name, ip)
-		printSatelliteNextSteps(true, syncPort)
+		summary, reloaded := reloadDaemonSatelliteRegistry()
+		if reloaded {
+			fmt.Printf("Daemon satellite registry hot-reloaded (%s).\n", formatReloadSummary(summary))
+		}
+		printSatelliteNextSteps(true, reloaded, syncPort)
 		fmt.Println()
 		fmt.Println("Note: the satellite's sync origin_id (C20) is minted per-install on the VM")
 		fmt.Println("and is disposable; the registry name above is the stable federation Origin (C6).")
@@ -696,10 +704,19 @@ func newSatelliteDownCmd() *cobra.Command {
 			fmt.Printf("(no satellite state or registry entry for %q)\n", name)
 		}
 
+		// 4. Registry hot-reload, the FINAL step: the daemon drops the dead
+		//    satellite's connection, sync port-forward, status entry, and
+		//    federated rows immediately. Soft-fail to the manual instruction
+		//    when the daemon isn't running or predates the endpoint.
 		fmt.Printf("\nSatellite %q destroyed and deregistered.\n", name)
-		fmt.Println("Restart the global daemon to drop its connection (the sync port-forward")
-		fmt.Println("disappears with the registry entry):")
-		fmt.Println("  groved upgrade --global")
+		if summary, ok := reloadDaemonSatelliteRegistry(); ok {
+			fmt.Printf("Daemon satellite registry hot-reloaded (%s); its connection and\n", formatReloadSummary(summary))
+			fmt.Println("sync port-forward are torn down.")
+		} else {
+			fmt.Println("Restart the global daemon to drop its connection (the sync port-forward")
+			fmt.Println("disappears with the registry entry):")
+			fmt.Println("  groved upgrade --global")
+		}
 		if configDir := paths.ConfigDir(); configDir != "" {
 			fmt.Println()
 			fmt.Printf("Note: the laptop sync config keeps its workspace entries (%s)\n", filepath.Join(configDir, syncConfigFileName))
@@ -757,6 +774,59 @@ func renderSatellites() error {
 		Rows(rows...)
 	fmt.Println(tbl.Render())
 	return nil
+}
+
+// reloadDaemonSatelliteRegistry POSTs the global daemon's satellite registry
+// hot-reload endpoint (POST /api/satellites/reload) so the ConnManager applies
+// a just-written state-file change — the final step of `up` and `down`, making
+// the agent-killing `groved upgrade --global` unnecessary for registry churn.
+//
+// It targets the GLOBAL socket explicitly rather than daemon.New(): under
+// GROVE_SCOPE (set inside treemux sessions) New() resolves a scoped daemon,
+// which has no ConnManager and rejects the endpoint. Best-effort by design:
+// ok=false — daemon not running (no socket), an old groved without the
+// endpoint (404), or a reload failure — means the caller falls back to
+// printing the manual reload instruction. Failures other than "not running"
+// print a one-line note so the downgrade isn't silent.
+func reloadDaemonSatelliteRegistry() (summary *models.SatelliteReloadSummary, ok bool) {
+	sock := paths.SocketPath("")
+	if _, err := os.Stat(sock); err != nil {
+		return nil, false // daemon not running — the normal soft-fail
+	}
+	client, err := daemon.NewRemoteClient(sock)
+	if err != nil {
+		return nil, false
+	}
+	defer func() { _ = client.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	summary, err = client.ReloadSatellites(ctx)
+	if err != nil {
+		fmt.Printf("(daemon registry hot-reload unavailable: %v)\n", err)
+		return nil, false
+	}
+	return summary, true
+}
+
+// formatReloadSummary renders a ReloadSummary as a compact one-liner for the
+// up/down output, e.g. "added: mysat" or "removed: mysat; unchanged: other".
+// Unchanged entries are elided (they are noise next to the verb's action);
+// an all-empty summary reads "no changes".
+func formatReloadSummary(s *models.SatelliteReloadSummary) string {
+	var parts []string
+	for _, group := range []struct {
+		label string
+		names []string
+	}{{"added", s.Added}, {"removed", s.Removed}, {"changed", s.Changed}} {
+		if len(group.names) > 0 {
+			parts = append(parts, group.label+": "+strings.Join(group.names, ", "))
+		}
+	}
+	if len(parts) == 0 {
+		return "no changes"
+	}
+	return strings.Join(parts, "; ")
 }
 
 // satelliteTableHeaders is the column contract for satelliteTableRows.
