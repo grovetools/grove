@@ -180,13 +180,17 @@ func TestBuildSatelliteReposPullBundleScript(t *testing.T) {
 // localPullTransport satisfies satelliteReposTransport by executing the
 // generated scripts with local bash and copying files instead of scp'ing —
 // the pull engine's full loop without a VM. failScpFor simulates a per-repo
-// transfer failure.
+// transfer failure. worktreePathAnswer is the canned reply to the worktree
+// verbs' `grove internal worktree-path` plumbing invocation (which cannot run
+// for real here — the test host's grove is not the fake VM's); empty
+// simulates a VM binary too old to know the verb (NOVERB).
 type localPullTransport struct {
-	t          *testing.T
-	scripts    []string
-	commands   []string
-	failScpFor map[string]bool
-	scpTo      [][]string // scp (laptop→VM) calls, one local-path slice per call
+	t                  *testing.T
+	scripts            []string
+	commands           []string
+	failScpFor         map[string]bool
+	scpTo              [][]string // scp (laptop→VM) calls, one local-path slice per call
+	worktreePathAnswer string
 }
 
 func (l *localPullTransport) dest() string { return "local-fake" }
@@ -194,6 +198,12 @@ func (l *localPullTransport) dest() string { return "local-fake" }
 func (l *localPullTransport) outputScript(script string) (string, error) {
 	l.t.Helper()
 	assertBashParses(l.t, script)
+	if strings.Contains(script, satelliteWorktreePathVerb) {
+		if l.worktreePathAnswer == "" {
+			return "NOVERB\n", nil
+		}
+		return l.worktreePathAnswer + "\n", nil
+	}
 	cmd := exec.Command("bash", "-s")
 	cmd.Stdin = strings.NewReader(script)
 	out, err := cmd.Output()
