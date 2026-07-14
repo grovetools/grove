@@ -112,6 +112,25 @@ func localRepoIsAncestor(repoDir, sha string) bool {
 	return exec.Command("git", "-C", repoDir, "merge-base", "--is-ancestor", sha, "HEAD").Run() == nil //nolint:gosec // G204: internal args
 }
 
+// localRepoHasObject reports whether the repo's object store holds sha as a
+// commit (any ref or no ref at all — refs/satellite/… included). This is the
+// push interlock's exact question: a VM head present locally is recoverable,
+// one absent locally would be destroyed by a force-checkout.
+func localRepoHasObject(repoDir, sha string) bool {
+	return exec.Command("git", "-C", repoDir, "cat-file", "-e", sha+"^{commit}").Run() == nil //nolint:gosec // G204: internal args
+}
+
+// localRefSHA resolves a fully-qualified local ref to its sha ("" and false
+// when the ref does not exist) — used to seed pull bundle-base candidates
+// from the previously fetched refs/satellite/… tip.
+func localRefSHA(repoDir, ref string) (string, bool) {
+	out, err := gitOutput(repoDir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	if err != nil || out == "" {
+		return "", false
+	}
+	return out, true
+}
+
 func gitOutput(repoDir string, args ...string) (string, error) {
 	cmd := exec.Command("git", append([]string{"-C", repoDir}, args...)...) //nolint:gosec // G204: internal args
 	out, err := cmd.Output()
