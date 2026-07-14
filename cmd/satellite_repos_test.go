@@ -80,37 +80,43 @@ workspaces = ["grove", "daemon", "core"]
 
 // TestComputeSatelliteMirrorDelta pins the mirror's status selection: matching
 // shas are up-to-date, missing repos SHIP, ancestor VM heads are plain
-// updates, non-ancestor heads are DIVERGED, ERROR skips — and the bundle base
-// is the VM sha only for the incremental (ancestor) case.
+// updates, ERROR skips — and divergence splits on the slice-2 interlock's
+// exact condition (VM head OBJECT present locally, not ancestry): fetched
+// divergence ships, unfetched divergence is HELD (or FORCED with --force).
+// The bundle base is the VM sha only for the incremental (ancestor) case.
 func TestComputeSatelliteMirrorDelta(t *testing.T) {
-	repos := []string{"same", "behind", "diverged", "absent", "broken"}
+	repos := []string{"same", "behind", "fetched", "unfetched", "absent", "broken"}
 	local := map[string]repoTip{
-		"same":     {SHA: "c1", Branch: "main"},
-		"behind":   {SHA: "c2", Branch: "main"},
-		"diverged": {SHA: "c3", Branch: ""}, // detached
-		"absent":   {SHA: "c4", Branch: "main"},
-		"broken":   {SHA: "c5", Branch: "main"},
+		"same":      {SHA: "c1", Branch: "main"},
+		"behind":    {SHA: "c2", Branch: "main"},
+		"fetched":   {SHA: "c3", Branch: ""}, // detached
+		"unfetched": {SHA: "c6", Branch: "main"},
+		"absent":    {SHA: "c4", Branch: "main"},
+		"broken":    {SHA: "c5", Branch: "main"},
 	}
 	remote := map[string]string{
-		"same":     "c1",
-		"behind":   "old2", // ancestor of local tip
-		"diverged": "old3", // NOT an ancestor
-		"absent":   "MISSING",
-		"broken":   "ERROR",
+		"same":      "c1",
+		"behind":    "old2", // ancestor of local tip
+		"fetched":   "old3", // NOT an ancestor, but present locally (pulled earlier)
+		"unfetched": "old6", // NOT an ancestor and NOT present locally
+		"absent":    "MISSING",
+		"broken":    "ERROR",
 	}
 	isAncestor := func(repo, sha string) bool { return repo == "behind" }
+	hasObject := func(repo, sha string) bool { return repo == "fetched" }
 
-	deltas := computeSatelliteMirrorDelta(repos, local, remote, isAncestor)
+	deltas := computeSatelliteMirrorDelta(repos, local, remote, isAncestor, hasObject, false)
 	byRepo := map[string]repoDelta{}
 	for _, d := range deltas {
 		byRepo[d.Repo] = d
 	}
 	want := map[string]string{
-		"same":     deltaStatusUpToDate,
-		"behind":   deltaStatusUpdate,
-		"diverged": deltaStatusDiverged,
-		"absent":   deltaStatusMissingRemote,
-		"broken":   deltaStatusRemoteError,
+		"same":      deltaStatusUpToDate,
+		"behind":    deltaStatusUpdate,
+		"fetched":   deltaStatusDiverged,
+		"unfetched": deltaStatusHeldUnfetched,
+		"absent":    deltaStatusMissingRemote,
+		"broken":    deltaStatusRemoteError,
 	}
 	for repo, status := range want {
 		if byRepo[repo].Status != status {
@@ -118,23 +124,135 @@ func TestComputeSatelliteMirrorDelta(t *testing.T) {
 		}
 	}
 
-	// Ship set: updates + missing + diverged, in input order; never
-	// up-to-date or remote-error.
+	// Ship set: updates + fetched-diverged + missing, in input order; never
+	// up-to-date, remote-error, or HELD (per-repo isolation: the held repo
+	// drops out, everything else still ships).
 	ship := mirrorDeltasToShip(deltas)
-	if names := strings.Join(deltaRepoNames(ship), ","); names != "behind,diverged,absent" {
-		t.Fatalf("mirror ship set = %q, want behind,diverged,absent", names)
+	if names := strings.Join(deltaRepoNames(ship), ","); names != "behind,fetched,absent" {
+		t.Fatalf("mirror ship set = %q, want behind,fetched,absent", names)
+	}
+
+	// --force flips ONLY the unfetched-diverged repo into a (loud) discard
+	// ship; everything else is unchanged.
+	forced := computeSatelliteMirrorDelta(repos, local, remote, isAncestor, hasObject, true)
+	byRepoForced := map[string]repoDelta{}
+	for _, d := range forced {
+		byRepoForced[d.Repo] = d
+	}
+	if got := byRepoForced["unfetched"].Status; got != deltaStatusForcedDiverged {
+		t.Errorf("forced delta[unfetched].Status = %q, want %q", got, deltaStatusForcedDiverged)
+	}
+	for _, repo := range []string{"same", "behind", "fetched", "absent", "broken"} {
+		if byRepoForced[repo].Status != want[repo] {
+			t.Errorf("forced delta[%s].Status = %q, want %q (force must not change it)", repo, byRepoForced[repo].Status, want[repo])
+		}
+	}
+	if names := strings.Join(deltaRepoNames(mirrorDeltasToShip(forced)), ","); names != "behind,fetched,unfetched,absent" {
+		t.Fatalf("forced mirror ship set = %q, want behind,fetched,unfetched,absent", names)
 	}
 
 	// Bundle base: incremental for the ancestor update, full ("") for
-	// missing and diverged.
+	// missing, diverged, and forced.
 	if got := mirrorBundleBaseSHA(byRepo["behind"]); got != "old2" {
 		t.Errorf("behind bundle base = %q, want old2 (incremental)", got)
 	}
-	if got := mirrorBundleBaseSHA(byRepo["diverged"]); got != "" {
-		t.Errorf("diverged bundle base = %q, want \"\" (full bundle)", got)
+	if got := mirrorBundleBaseSHA(byRepo["fetched"]); got != "" {
+		t.Errorf("fetched bundle base = %q, want \"\" (full bundle)", got)
 	}
 	if got := mirrorBundleBaseSHA(byRepo["absent"]); got != "" {
 		t.Errorf("absent bundle base = %q, want \"\" (full bundle)", got)
+	}
+	if got := mirrorBundleBaseSHA(byRepoForced["unfetched"]); got != "" {
+		t.Errorf("forced bundle base = %q, want \"\" (full bundle)", got)
+	}
+}
+
+// TestSatelliteMirrorInterlockRealGit exercises the interlock condition with
+// real git plumbing: a VM-side commit unknown to the laptop holds the repo;
+// after that commit's object is fetched locally (exactly what `repos pull`
+// does, simulated with a bundle fetched into refs/satellite/…), the SAME
+// divergence flips to shippable — object presence, not ancestry, decides.
+func TestSatelliteMirrorInterlockRealGit(t *testing.T) {
+	for _, tool := range []string{"bash", "git"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("%s not on PATH", tool)
+		}
+	}
+	root := t.TempDir()
+	laptop := filepath.Join(root, "laptop", "grove")
+	vm := filepath.Join(root, "vm", "grove")
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		out, err := gitOutput(dir, args...)
+		if err != nil {
+			t.Fatalf("git %v in %s: %v", args, dir, err)
+		}
+		return out
+	}
+	for _, dir := range []string{laptop, vm} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git(laptop, "init", "-b", "main")
+	git(laptop, "config", "user.email", "t@t")
+	git(laptop, "config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(laptop, "f"), []byte("base"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(laptop, "add", ".")
+	git(laptop, "commit", "-m", "base")
+
+	// VM = clone of the laptop, plus an agent commit the laptop never saw.
+	git(filepath.Dir(vm), "clone", "-q", laptop, vm)
+	git(vm, "config", "user.email", "vm@vm")
+	git(vm, "config", "user.name", "vm")
+	if err := os.WriteFile(filepath.Join(vm, "agent.txt"), []byte("agent work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(vm, "add", ".")
+	git(vm, "commit", "-m", "agent commit")
+	vmSHA := git(vm, "rev-parse", "HEAD")
+
+	// Laptop moves on independently → true divergence.
+	if err := os.WriteFile(filepath.Join(laptop, "local.txt"), []byte("local work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(laptop, "add", ".")
+	git(laptop, "commit", "-m", "local commit")
+	localSHA := git(laptop, "rev-parse", "HEAD")
+
+	compute := func() repoDelta {
+		t.Helper()
+		deltas := computeSatelliteMirrorDelta(
+			[]string{"grove"},
+			map[string]repoTip{"grove": {SHA: localSHA, Branch: "main"}},
+			map[string]string{"grove": vmSHA},
+			func(_, sha string) bool { return localRepoIsAncestor(laptop, sha) },
+			func(_, sha string) bool { return localRepoHasObject(laptop, sha) },
+			false)
+		return deltas[0]
+	}
+
+	// Before any pull: the VM head object is unknown locally → HELD.
+	if d := compute(); d.Status != deltaStatusHeldUnfetched {
+		t.Fatalf("pre-pull status = %q, want %q", d.Status, deltaStatusHeldUnfetched)
+	}
+
+	// Simulate `repos pull`: bundle the VM tip, fetch it into refs/satellite.
+	bundlePath := filepath.Join(root, "grove.bundle")
+	git(vm, "bundle", "create", bundlePath, "HEAD")
+	if err := fetchSatelliteBundle(laptop, bundlePath, "refs/satellite/sat1/main"); err != nil {
+		t.Fatalf("fetchSatelliteBundle: %v", err)
+	}
+
+	// Same divergence, but the object is now local → ships as diverged
+	// (still not an ancestor — ancestry is NOT the interlock condition).
+	if localRepoIsAncestor(laptop, vmSHA) {
+		t.Fatal("test setup broken: VM sha must not be an ancestor of the local tip")
+	}
+	if d := compute(); d.Status != deltaStatusDiverged {
+		t.Fatalf("post-pull status = %q, want %q", d.Status, deltaStatusDiverged)
 	}
 }
 

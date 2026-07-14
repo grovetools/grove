@@ -579,7 +579,11 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 			mirrorRepos := resolveSatelliteMirrorRepos(nil, false, reposCfg, resolvedSyncWorkspaces)
 			if len(mirrorRepos) > 0 {
 				fmt.Printf("\nMirroring %d repo(s) to %q...\n", len(mirrorRepos), name)
-				if err := pushSatelliteReposOverSSH(name, entry, sourceAbs, defaultRemoteCodeDir, mirrorRepos, false, false, true); err != nil {
+				// force=false: a fresh VM has every repo MISSING (bootstrap
+				// seeds no checkouts), so the unfetched-commits interlock
+				// never triggers here — and if it somehow did (re-run against
+				// a VM someone committed on), holding is the right call.
+				if err := pushSatelliteReposOverSSH(name, entry, sourceAbs, defaultRemoteCodeDir, mirrorRepos, false, false, true, false); err != nil {
 					fmt.Printf("warning: repo mirror failed: %v\n", err)
 					fmt.Printf("  retry with: grove satellite repos push %s\n", name)
 				}

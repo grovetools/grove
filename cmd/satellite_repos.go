@@ -1,7 +1,9 @@
 package cmd
 
 // `grove satellite repos push` — the git-native laptop→VM repo mirror
-// (slice 1). Ships the laptop's PRIMARY checkout tips (committed state only,
+// (slice 1; the slice-2 divergence interlock lives in
+// computeSatelliteMirrorDelta, and the VM→laptop return path in
+// satellite_repos_pull.go). Ships the laptop's PRIMARY checkout tips (committed state only,
 // including unpushed commits) as ancestor-checked git bundles over the pinned
 // SSH transport, then fetches + force-checkouts them under the VM's flat
 // ~/code/grovetools/<repo> layout — the same bundle/probe/delta machinery
@@ -35,11 +37,25 @@ import (
 // Deliberately separate from the upgrade stage dir.
 const satelliteReposStageDir = "/tmp/grove-satellite-repos"
 
-// deltaStatusDiverged is the mirror-only status for a VM head that is neither
-// missing nor an ancestor of the local tip: shipping means a full bundle and
-// a force-checkout that DISCARDS the VM-side commits. Slice 1 warns loudly
-// and proceeds; slice 2 adds the refuse-on-unfetched-VM-commits interlock.
-const deltaStatusDiverged = "update (DIVERGED — VM commits discarded)"
+// Mirror-only divergence statuses (a VM head that is neither missing nor an
+// ancestor of the local tip). The slice-2 interlock splits divergence on ONE
+// precise condition — is the VM head OBJECT present locally? — because that,
+// not ancestry, decides whether pushing loses history:
+//
+//   - object present locally (a prior `repos pull` fetched it into
+//     refs/satellite/<name>/…, or it arrived via any other fetch): this is
+//     ordinary divergence of already-fetched history. Local moved on after
+//     the pull; force-checkouting the VM to the laptop tip discards nothing
+//     the laptop doesn't hold. Ships as deltaStatusDiverged.
+//   - object NOT present locally: the VM has commits the laptop has never
+//     fetched — pushing would destroy them forever. Held
+//     (deltaStatusHeldUnfetched) unless --force, which restores the old
+//     discard behavior loudly (deltaStatusForcedDiverged).
+const (
+	deltaStatusDiverged       = "update (diverged — VM commits fetched locally)"
+	deltaStatusHeldUnfetched  = "held (VM has unfetched commits — run 'grove satellite repos pull', or --force)"
+	deltaStatusForcedDiverged = "update (FORCED — VM commits DISCARDED)"
+)
 
 // --- [satellites.<name>.repos] config ---
 
@@ -96,12 +112,23 @@ func resolveSatelliteMirrorRepos(requested []string, flagSet bool, reposCfg sate
 // --- delta (pure) ---
 
 // computeSatelliteMirrorDelta diffs local tips against the VM's checkout HEADs
-// for the mirror. Unlike the upgrade delta there is no force bit and no
-// compositor hold: a matching sha is up-to-date, a missing repo SHIPS (git
-// init + full bundle), and a VM head that is neither missing nor an ancestor
-// of the local tip is flagged DIVERGED — shipping it discards the VM-side
-// commits. isAncestor probes the LOCAL repo (injected for testability).
-func computeSatelliteMirrorDelta(repos []string, local map[string]repoTip, remote map[string]string, isAncestor func(repo, sha string) bool) []repoDelta {
+// for the mirror. Unlike the upgrade delta there is no compositor hold: a
+// matching sha is up-to-date, a missing repo SHIPS (git init + full bundle),
+// and a VM head that is neither missing nor an ancestor of the local tip is
+// divergent. The divergence decision (the slice-2 interlock) hinges on object
+// PRESENCE, not ancestry:
+//
+//   - hasObject(repo, sha) true → the VM head was already fetched to the
+//     laptop (typically by `repos pull` into refs/satellite/…) — pushing is
+//     safe, ships as deltaStatusDiverged (full bundle + force-checkout).
+//   - hasObject false → the VM holds commits the laptop has never seen;
+//     held (deltaStatusHeldUnfetched) unless force, which ships them into
+//     oblivion as deltaStatusForcedDiverged.
+//
+// A fresh VM (every repo MISSING) never reaches the divergence arm, so `up
+// --prebuilt`'s post-bootstrap mirror is unaffected by the interlock.
+// isAncestor and hasObject probe the LOCAL repo (injected for testability).
+func computeSatelliteMirrorDelta(repos []string, local map[string]repoTip, remote map[string]string, isAncestor, hasObject func(repo, sha string) bool, force bool) []repoDelta {
 	deltas := make([]repoDelta, 0, len(repos))
 	for _, r := range repos {
 		tip := local[r]
@@ -116,13 +143,21 @@ func computeSatelliteMirrorDelta(repos []string, local map[string]repoTip, remot
 			d.Status = deltaStatusUpToDate
 		default:
 			d.RemoteSHA = sha
-			// TODO(slice-2): the divergence decision point. Slice 2 replaces
-			// warn-and-discard with a refuse-on-unfetched-VM-commits interlock
-			// (fetch the VM's commits back, or require an explicit --force).
-			if isAncestor(r, sha) {
+			switch {
+			case isAncestor(r, sha):
 				d.Status = deltaStatusUpdate
-			} else {
+			case hasObject(r, sha):
+				// Divergence of FETCHED history: the VM head object exists
+				// locally, so its commits are recoverable on the laptop
+				// (refs/satellite/… after a pull). NOT blocked — this is the
+				// ordinary state right after `repos pull` + local work.
 				d.Status = deltaStatusDiverged
+			case force:
+				d.Status = deltaStatusForcedDiverged
+			default:
+				// The VM head object is absent locally: unfetched VM commits.
+				// Refuse — pull them back (or --force) first.
+				d.Status = deltaStatusHeldUnfetched
 			}
 		}
 		deltas = append(deltas, d)
@@ -132,12 +167,13 @@ func computeSatelliteMirrorDelta(repos []string, local map[string]repoTip, remot
 
 // mirrorDeltasToShip selects the repos the mirror actually ships: updates,
 // missing-on-VM repos (init + full bundle), and diverged repos (full bundle +
-// discarding force-checkout, warned about by the caller), in input order.
+// force-checkout — fetched-divergence or --force, warned about by the
+// caller), in input order. Held repos (unfetched VM commits) never ship.
 func mirrorDeltasToShip(deltas []repoDelta) []repoDelta {
 	var out []repoDelta
 	for _, d := range deltas {
 		switch d.Status {
-		case deltaStatusUpdate, deltaStatusMissingRemote, deltaStatusDiverged:
+		case deltaStatusUpdate, deltaStatusMissingRemote, deltaStatusDiverged, deltaStatusForcedDiverged:
 			out = append(out, d)
 		}
 	}
@@ -146,8 +182,8 @@ func mirrorDeltasToShip(deltas []repoDelta) []repoDelta {
 
 // mirrorBundleBaseSHA picks the bundle base for a shipped delta: incremental
 // from the VM's head for a plain update (the ancestor check already passed),
-// full bundle ("" base) for missing and diverged repos — a diverged VM head
-// is useless as a base, and re-probing it locally would just re-fail.
+// full bundle ("" base) for missing and diverged/forced repos — a diverged
+// VM head is useless as a base, and re-probing it locally would just re-fail.
 func mirrorBundleBaseSHA(d repoDelta) string {
 	if d.Status == deltaStatusUpdate {
 		return d.RemoteSHA
@@ -302,7 +338,7 @@ echo "repos push complete"
 // pushSatelliteReposOverSSH wires pushSatelliteRepos to the pinned transport
 // from the registry entry (same C2 never-TOFU stance as every other remote
 // satellite step).
-func pushSatelliteReposOverSSH(name string, entry satelliteConfigEntry, sourceAbs, remoteCodeDir string, repos []string, strict, dryRun, assumeYes bool) error {
+func pushSatelliteReposOverSSH(name string, entry satelliteConfigEntry, sourceAbs, remoteCodeDir string, repos []string, strict, dryRun, assumeYes, force bool) error {
 	tmpDir, err := os.MkdirTemp("", "grove-satellite-repos-")
 	if err != nil {
 		return err
@@ -312,7 +348,7 @@ func pushSatelliteReposOverSSH(name string, entry satelliteConfigEntry, sourceAb
 	if err != nil {
 		return fmt.Errorf("satellite %q: %w", name, err)
 	}
-	return pushSatelliteRepos(ssh, name, sourceAbs, remoteCodeDir, repos, strict, dryRun, assumeYes)
+	return pushSatelliteRepos(ssh, name, sourceAbs, remoteCodeDir, repos, strict, dryRun, assumeYes, force)
 }
 
 // pushSatelliteRepos mirrors the laptop's committed repo tips onto the VM:
@@ -322,8 +358,10 @@ func pushSatelliteReposOverSSH(name string, entry satelliteConfigEntry, sourceAb
 // loudly and ship their HEAD, never working-tree content. strict=false skips
 // (with a notice) resolved repo names that are not local git checkouts —
 // config-derived workspace names may not all be code repos; an explicit
-// --repos list is always strict.
-func pushSatelliteRepos(ssh *satelliteSSH, name, sourceAbs, remoteCodeDir string, repos []string, strict, dryRun, assumeYes bool) error {
+// --repos list is always strict. force restores the pre-interlock behavior
+// for repos whose VM head is unknown locally: ship anyway, DISCARDING the
+// unfetched VM commits (loudly).
+func pushSatelliteRepos(ssh *satelliteSSH, name, sourceAbs, remoteCodeDir string, repos []string, strict, dryRun, assumeYes, force bool) error {
 	if len(repos) == 0 {
 		fmt.Println("No repos to mirror (empty repo set) — nothing to do.")
 		return nil
@@ -384,15 +422,30 @@ func pushSatelliteRepos(ssh *satelliteSSH, name, sourceAbs, remoteCodeDir string
 		return fmt.Errorf("read remote HEADs: %w", err)
 	}
 	remote := parseRemoteHeads(out)
-	deltas := computeSatelliteMirrorDelta(mirror, local, remote, func(repo, sha string) bool {
-		return localRepoIsAncestor(filepath.Join(sourceAbs, repo), sha)
-	})
+	deltas := computeSatelliteMirrorDelta(mirror, local, remote,
+		func(repo, sha string) bool { return localRepoIsAncestor(filepath.Join(sourceAbs, repo), sha) },
+		func(repo, sha string) bool { return localRepoHasObject(filepath.Join(sourceAbs, repo), sha) },
+		force)
 	printSatelliteDelta(deltas)
 
+	if held := deltasWithStatus(deltas, deltaStatusHeldUnfetched); len(held) > 0 {
+		fmt.Printf("\nHELD (unfetched VM commits): %s\n", strings.Join(deltaRepoNames(held), ", "))
+		fmt.Println("The VM holds commits the laptop has never fetched — pushing would destroy them.")
+		fmt.Printf("Fetch them back first (safe; writes refs/satellite/%s/… only):\n", name)
+		fmt.Printf("  grove satellite repos pull %s\n", name)
+		fmt.Println("or re-run push with --force to DISCARD the VM-side commits.")
+	}
 	if diverged := deltasWithStatus(deltas, deltaStatusDiverged); len(diverged) > 0 {
-		fmt.Printf("\nWARNING: VM-side commits will be DISCARDED for: %s\n", strings.Join(deltaRepoNames(diverged), ", "))
-		fmt.Println("Their VM heads are neither missing nor ancestors of the local tips; the mirror")
-		fmt.Println("force-checkouts the laptop tip. Fetch those commits off the VM first if they matter.")
+		fmt.Printf("\nnote: diverged but already fetched: %s\n", strings.Join(deltaRepoNames(diverged), ", "))
+		fmt.Println("Their VM heads are not ancestors of the local tips, but those commits are")
+		fmt.Printf("present locally (refs/satellite/%s/… after a pull) — the mirror force-checkouts\n", name)
+		fmt.Println("the laptop tip; nothing is lost.")
+	}
+	if forced := deltasWithStatus(deltas, deltaStatusForcedDiverged); len(forced) > 0 {
+		fmt.Printf("\nWARNING: --force: VM-side commits will be DISCARDED for: %s\n", strings.Join(deltaRepoNames(forced), ", "))
+		fmt.Println("Their VM heads hold commits the laptop has NEVER fetched; the mirror")
+		fmt.Printf("force-checkouts the laptop tip and the commits are gone. `grove satellite repos pull %s`\n", name)
+		fmt.Println("first would have saved them.")
 	}
 	if errored := deltasWithStatus(deltas, deltaStatusRemoteError); len(errored) > 0 {
 		fmt.Printf("\nnote: unreadable VM HEAD for %s — skipped (inspect the VM checkout manually).\n", strings.Join(deltaRepoNames(errored), ", "))
@@ -412,8 +465,8 @@ func pushSatelliteRepos(ssh *satelliteSSH, name, sourceAbs, remoteCodeDir string
 		fmt.Printf("\nSatellite %q mirror is up to date with %s — converging root files only.\n", name, sourceAbs)
 	} else if !assumeYes {
 		prompt := fmt.Sprintf("Mirror %d repo(s) onto %q? (force-checkout discards uncommitted VM changes)", len(updates), name)
-		if diverged := deltasWithStatus(deltas, deltaStatusDiverged); len(diverged) > 0 {
-			prompt = fmt.Sprintf("Mirror %d repo(s) onto %q — DISCARDING VM commits in %s?", len(updates), name, strings.Join(deltaRepoNames(diverged), ", "))
+		if forced := deltasWithStatus(deltas, deltaStatusForcedDiverged); len(forced) > 0 {
+			prompt = fmt.Sprintf("Mirror %d repo(s) onto %q — DISCARDING unfetched VM commits in %s?", len(updates), name, strings.Join(deltaRepoNames(forced), ", "))
 		}
 		if !confirmYesNo(prompt) {
 			return fmt.Errorf("aborted")
@@ -453,6 +506,11 @@ func pushSatelliteRepos(ssh *satelliteSSH, name, sourceAbs, remoteCodeDir string
 	if len(updates) > 0 {
 		fmt.Printf("\nSatellite %q mirrored (%s).\n", name, strings.Join(deltaRepoNames(updates), ", "))
 	}
+	// Held repos are per-repo isolated (everything else shipped above), but
+	// the run as a whole did NOT converge — exit nonzero so callers notice.
+	if held := deltasWithStatus(deltas, deltaStatusHeldUnfetched); len(held) > 0 {
+		return fmt.Errorf("%d repo(s) held (unfetched VM commits): %s — run `grove satellite repos pull %s` first, or push with --force", len(held), strings.Join(deltaRepoNames(held), ", "), name)
+	}
 	return nil
 }
 
@@ -461,6 +519,7 @@ func pushSatelliteRepos(ssh *satelliteSSH, name, sourceAbs, remoteCodeDir string
 func newSatelliteReposCmd() *cobra.Command {
 	cmd := cli.NewStandardCommand("repos", "Mirror laptop repo checkouts onto a satellite VM")
 	cmd.AddCommand(newSatelliteReposPushCmd())
+	cmd.AddCommand(newSatelliteReposPullCmd())
 	return cmd
 }
 
@@ -471,6 +530,7 @@ func newSatelliteReposPushCmd() *cobra.Command {
 		remoteCodeDir string
 		dryRun        bool
 		assumeYes     bool
+		force         bool
 	)
 	cmd := cli.NewStandardCommand("push <name>", "Ship local git repo tips to the VM as bundles and check them out")
 	cmd.Long = `Mirror the laptop's repo checkouts onto a satellite VM, git-natively.
@@ -492,9 +552,13 @@ the resolved [satellites.<name>.sync] workspaces (default cloud,grovetools):
 Notes:
   - COMMITTED state only: dirty working trees ship their HEAD, never
     uncommitted content (a loud warning tells you so).
-  - a VM head that diverged from the local tip is force-checked-out to the
-    laptop tip, DISCARDING the VM-side commits — warned loudly; slice 2 adds
-    a refusal interlock.
+  - a repo whose VM head holds commits the laptop has NEVER fetched is HELD
+    (not shipped; the other repos still ship): run
+    'grove satellite repos pull <name>' to fetch them into
+    refs/satellite/<name>/…, or pass --force to discard them.
+  - a VM head that merely diverged from the local tip but is already present
+    locally (i.e. previously pulled) is force-checked-out to the laptop tip —
+    nothing is lost; the commits stay reachable via refs/satellite/<name>/….
   - idempotent and cheap to re-run: matching shas ship no bundles.`
 	cmd.Args = cobra.ExactArgs(1)
 	cmd.SilenceUsage = true
@@ -503,6 +567,7 @@ Notes:
 	cmd.Flags().StringVar(&remoteCodeDir, "remote-code-dir", defaultRemoteCodeDir, "Ecosystem root on the VM")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Stop after printing the local-vs-VM delta table")
 	cmd.Flags().BoolVar(&assumeYes, "yes", false, "Skip the mirror confirmation prompt")
+	cmd.Flags().BoolVar(&force, "force", false, "Ship repos whose VM heads hold unfetched commits, DISCARDING those commits")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		entry, ok := loadMergedSatellites()[name]
@@ -539,7 +604,7 @@ Notes:
 
 		// An explicit --repos list is strict (unknown names are errors, like
 		// upgrade's --repos); config-derived sets skip non-repos with a notice.
-		return pushSatelliteReposOverSSH(name, entry, sourceAbs, remoteCodeDir, repos, flagSet, dryRun, assumeYes)
+		return pushSatelliteReposOverSSH(name, entry, sourceAbs, remoteCodeDir, repos, flagSet, dryRun, assumeYes, force)
 	}
 	return cmd
 }

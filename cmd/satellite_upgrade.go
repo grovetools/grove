@@ -1135,6 +1135,21 @@ func (s *satelliteSSH) scp(localPaths []string, remoteDir string) error {
 	return nil
 }
 
+// scpFrom is scp's return direction: fetch remote files into localDir with
+// the same pinned options (`repos pull` brings bundles back this way).
+func (s *satelliteSSH) scpFrom(remotePaths []string, localDir string) error {
+	args := append(s.baseOptions(), "-q", "-P", s.port)
+	for _, p := range remotePaths {
+		args = append(args, s.dest()+":"+p)
+	}
+	args = append(args, localDir)
+	cmd := exec.Command("scp", args...) //nolint:gosec // G204: registry/flag-derived
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // --- `up` completeness helpers ---
 
 // probeSatelliteSocketPath derives the remote groved socket path from the VM's
