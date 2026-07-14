@@ -72,6 +72,11 @@ func AllScenarios() []*harness.Scenario {
 		SatelliteReposInterlockScenario(),
 		SatelliteWorktreeScenario(),
 		SatelliteVintageGuardScenario(),
+		SatelliteConfigPushScenario(),
+		SatelliteRegistryMergeScenario(),
+		SatelliteHostKeyPinScenario(),
+		SatelliteUpgradeScenario(),
+		SatelliteReposFlagMatrixScenario(),
 	}
 }
 

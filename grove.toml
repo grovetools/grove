@@ -21,6 +21,11 @@ scenarios = [
   "satellite-repos-interlock-pull",
   "satellite-worktree-push-pull-ff",
   "satellite-worktree-vintage-guard",
+  "satellite-config-push",
+  "satellite-status-list-registry",
+  "satellite-hostkey-pin",
+  "satellite-upgrade-dry-run",
+  "satellite-repos-flag-matrix",
 ]
 
 [[hooks.on_stop]]

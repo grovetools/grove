@@ -17,3 +17,6 @@ tests/scenarios_satellite.go
 tests/satellite_endpoint.go
 tests/satellite_sim.go
 tests/satellite_real.go
+cmd/satellite_config.go
+cmd/satellite.go
+tests/scenarios_satellite_verbs.go
