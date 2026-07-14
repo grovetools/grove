@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/models"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -259,5 +260,30 @@ func TestSatelliteTableRowsForward(t *testing.T) {
 	rows = satelliteTableRows(map[string]satelliteConfigEntry{"sat-cfg": {SSHAddr: "203.0.113.9:22"}}, nil)
 	if got := rows[0][forwardIdx]; got != "-" {
 		t.Fatalf("Forward cell for configured-only satellite = %q, want %q", got, "-")
+	}
+}
+
+// TestFormatReloadSummary pins the one-liner `up`/`down` print after the
+// registry hot-reload POST: action groups only when non-empty, unchanged
+// elided, and an all-empty summary reading "no changes".
+func TestFormatReloadSummary(t *testing.T) {
+	cases := []struct {
+		name string
+		in   models.SatelliteReloadSummary
+		want string
+	}{
+		{"added only", models.SatelliteReloadSummary{Added: []string{"mysat"}}, "added: mysat"},
+		{"removed only", models.SatelliteReloadSummary{Removed: []string{"mysat"}}, "removed: mysat"},
+		{
+			"mixed, unchanged elided",
+			models.SatelliteReloadSummary{Changed: []string{"a", "b"}, Unchanged: []string{"c"}},
+			"changed: a, b",
+		},
+		{"empty", models.SatelliteReloadSummary{}, "no changes"},
+	}
+	for _, tc := range cases {
+		if got := formatReloadSummary(&tc.in); got != tc.want {
+			t.Errorf("%s: formatReloadSummary = %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }

@@ -348,7 +348,7 @@ Notes:
 
 		// (g) Verified by the restart script (is-active); laptop half.
 		fmt.Printf("\nSatellite %q upgraded (%s).\n", name, strings.Join(shippedRepos, ", "))
-		printSatelliteNextSteps(false, entry.SyncLocalPort)
+		printSatelliteNextSteps(false, false, entry.SyncLocalPort)
 		return nil
 	}
 	return cmd
@@ -1449,14 +1449,29 @@ func expandUserPath(p string) string {
 
 // printSatelliteNextSteps is the laptop-half block `up` and `upgrade` end
 // with. The laptop sync half (token, push-only sync.toml, registry forward
-// fields) is automated by `up` now, and the daemon owns the syncd forward —
-// so the only remaining step is a daemon reload; there is no tunnel line.
-func printSatelliteNextSteps(freshProvision bool, syncPort int) {
+// fields) is automated by `up`, the daemon owns the syncd forward, and `up`
+// now hot-reloads the daemon's registry as its final step — registryReloaded
+// says whether that POST landed. Only when it didn't (daemon not running, or
+// an old groved without /api/satellites/reload) does a manual daemon reload
+// remain as a step; there is no tunnel line either way.
+func printSatelliteNextSteps(freshProvision, registryReloaded bool, syncPort int) {
 	fmt.Println()
 	fmt.Println("Next steps (laptop side):")
-	if freshProvision {
-		fmt.Println("  1. Reload the laptop daemon — the satellite registry and sync config")
-		fmt.Println("     load only at boot:")
+	if freshProvision && registryReloaded {
+		fmt.Println("  - Nothing to reload: the daemon picked up the registry entry and is")
+		fmt.Println("    connecting now (ConnManager backoff covers a still-booting VM).")
+		if syncPort != 0 {
+			fmt.Printf("    (it binds 127.0.0.1:%d and forwards note-sync to the VM's\n", syncPort)
+			fmt.Println("     syncd over its pinned SSH connection — no manual tunnel)")
+			fmt.Println("    Caveat: the laptop sync ENGINE config (sync.toml) still loads only")
+			fmt.Println("    at daemon boot — if this `up` created it for the first time, run")
+			fmt.Println("    `groved upgrade --global` once so notes start pushing.")
+		}
+		fmt.Println("  - Verify the connection:")
+		fmt.Println("       grove satellite status")
+	} else if freshProvision {
+		fmt.Println("  1. Reload the laptop daemon (it was not running, or predates the")
+		fmt.Println("     registry hot-reload endpoint):")
 		fmt.Println("       groved upgrade --global   # or restart your groved service")
 		if syncPort != 0 {
 			fmt.Printf("     (it then binds 127.0.0.1:%d and forwards note-sync to the VM's\n", syncPort)
