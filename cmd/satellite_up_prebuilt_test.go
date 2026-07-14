@@ -183,7 +183,7 @@ func TestBootstrapScriptEmbedsPrebuiltBranches(t *testing.T) {
 		"--prebuilt)",
 		"--syncd-unit)",
 		"requires --syncd-unit",
-		"skipping ecosystem clone",
+		"seeding minimal ecosystem skeleton",
 		"prebuilt binaries OK",
 		"GROVE_SYNCD_UNIT",
 	} {

@@ -193,16 +193,37 @@ git config --global user.email "grove-satellite@localhost"
 REMOTE
 
 if $PREBUILT; then
-  log "[3/8] prebuilt: skipping ecosystem clone (grove stack shipped by 'grove satellite up --prebuilt')"
+  log "[3/8] prebuilt: seeding minimal ecosystem skeleton (no source clone)"
   # grove.toml (step 5) points [groves.grovetools].path at ~/code/grovetools.
-  # In prebuilt mode there is no source clone, so create the dir EMPTY: groved
-  # then resolves the grove definition to an existing path and starts cleanly
-  # (a pure sync+federation satellite needs no source tree to run notebook
-  # jobs). Keeping grove.toml identical avoids config drift between modes.
-  rsh <<'REMOTE'
+  # In prebuilt mode there is no source clone, but an EMPTY dir is not enough:
+  # groved's workspace discovery (core classifyWorkspaceRoot) only yields
+  # nodes for children carrying .git or their own grove config, and the sync
+  # handler derives its watch set from those nodes — with zero discovered
+  # workspaces the pull pipelines never start and nothing materializes on the
+  # VM. Seed the smallest layout discovery accepts: a wildcard ecosystem
+  # manifest plus one git-init'd placeholder dir per subscribed workspace
+  # (matching the source clone's <eco>/<workspace> shape). The workspace list
+  # rides stdin's first line, same framing as step 5 — the heredoc stays
+  # fully quoted and the names were charset-validated above.
+  {
+    printf '%s\n' "$WORKSPACES"
+    cat <<'REMOTE'
 set -euo pipefail
 mkdir -p "$HOME/code/grovetools"
+if [ ! -f "$HOME/code/grovetools/grove.toml" ]; then
+  printf 'workspaces = ["*"]\n' > "$HOME/code/grovetools/grove.toml"
+fi
+WS_LIST=()
+if [ -n "$GROVE_SYNC_WORKSPACES" ]; then
+  IFS=',' read -ra WS_LIST <<< "$GROVE_SYNC_WORKSPACES"
+fi
+for ws in ${WS_LIST[@]+"${WS_LIST[@]}"}; do
+  d="$HOME/code/grovetools/$ws"
+  mkdir -p "$d"
+  [ -d "$d/.git" ] || git -C "$d" init -q
+done
 REMOTE
+  } | "${SSH[@]}" 'IFS= read -r GROVE_SYNC_WORKSPACES; export GROVE_SYNC_WORKSPACES; exec bash -l -s'
 else
 log "[3/8] cloning grovetools ecosystem (superrepo + submodules, pinned SHAs)"
 rsh <<'REMOTE'
