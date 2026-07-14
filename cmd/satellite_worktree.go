@@ -9,9 +9,9 @@ package cmd
 //         BRANCH tip from the laptop's plan worktree (committed state only)
 //         and, VM-side, fetch it into the mirrored BASE repo (which must
 //         already exist — `repos push` creates it) and create-or-update a
-//         real git worktree for it under the VM's LEGACY worktree layout:
+//         real git worktree for it under the VM's XDG worktree layout:
 //
-//           <remote-code-dir>/.grove-worktrees/<worktree>/<repo>
+//           <VM WorktreesDir()>/<DirIdentifier(remote-code-dir)>/<worktree>/<repo>
 //
 //         plus the container's synthetic grove.toml and .grove/workspace
 //         marker, so the VM-side flow executor resolves it exactly like a
@@ -23,27 +23,30 @@ package cmd
 //         the laptop's plan-worktree repos, and optionally --ff the laptop
 //         checkout when that is provably safe.
 //
-// WHY THE LEGACY LAYOUT ON THE VM: flow's determineWorkDir resolves a job's
-// worktree via workspace.ResolveWorktreePathByName, whose on-disk probe
-// (FindWorktreePath) checks the legacy base <gitRoot>/.grove-worktrees/<name>
-// FIRST, before the XDG base. The XDG base's path embeds
-// sha256(NormalizeForLookup(abs gitRoot)) — a hash of the VM-side canonical
-// path (symlink- and case-normalized against the VM's filesystem), which the
-// laptop cannot compute faithfully in generated shell, and asking the VM's
-// installed grove binary to compute it would tie this verb to the VM's binary
-// vintage (chicken-and-egg with `satellite upgrade`). The legacy layout is a
-// pure deterministic join, documented in core layout.go as supported
-// indefinitely, and is probed first — so a worktree created there is found by
-// the VM-side executor unconditionally, with no registry entry needed.
+// WHO COMPUTES THE VM-SIDE PATH: the XDG container path embeds
+// workspace.DirIdentifier(gitRoot) = pathutil.WorktreeID — a sanitized
+// basename plus sha256(NormalizeForLookup(abs gitRoot))[:8], normalized
+// (symlinks, case) against the VM's OWN filesystem — which the laptop cannot
+// reproduce faithfully in generated shell without duplicating that logic (and
+// drifting from it). So both verbs first ask the VM's installed grove binary
+// via the hidden plumbing verb `grove internal worktree-path` (existing
+// worktree resolves legacy-then-XDG exactly like core FindWorktreePath; a new
+// one lands in the XDG layout), and use the single returned path everywhere.
+// This deliberately couples the verbs to the VM's binary vintage: `worktree
+// push` already requires a provisioned satellite with mirrored repos, and a
+// missing/too-old binary fails the whole run with a pointer at
+// `grove satellite upgrade --prebuilt` (resolveRemoteWorktreeContainer). The
+// returned path is validated laptop-side (absolute, single line, conservative
+// charset) before it is embedded into any generated script.
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/grovetools/core/cli"
-	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/worktreeregistry"
 	"github.com/spf13/cobra"
 )
@@ -68,6 +71,86 @@ type satelliteWorktreeHead struct {
 	BaseSHA string
 }
 
+// --- VM-side container resolution (the plumbing handshake) ---
+
+// satelliteWorktreePathVerb is the hidden plumbing verb (under `grove
+// internal`) that computes the VM-side worktree path with the VM's own core
+// functions. The literal doubles as the fake-transport interception marker in
+// tests.
+const satelliteWorktreePathVerb = "internal worktree-path"
+
+// buildSatelliteWorktreePathScript emits the container-resolution script: ask
+// the VM's installed grove binary where the plan worktree lives (existing,
+// either layout) or would be created (XDG layout). Non-login ssh shells lack
+// the grove bin dir, so the script exports satelliteRemotePATH first (same
+// idiom as the upgrade deploy script). Sentinels instead of failures so the
+// laptop can produce a precise vintage error:
+//
+//	NOGROVE: no grove binary on the VM's PATH
+//	NOVERB : grove exists but does not know the plumbing verb (too old)
+func buildSatelliteWorktreePathScript(remoteCodeDir, worktreeName string) string {
+	var b strings.Builder
+	b.WriteString("set -u\n")
+	fmt.Fprintf(&b, "export PATH=\"%s\"\n", satelliteRemotePATH)
+	fmt.Fprintf(&b, "CODE=%s\n", remoteCodeDirExpr(remoteCodeDir))
+	b.WriteString("if ! command -v grove >/dev/null 2>&1; then echo NOGROVE; exit 0; fi\n")
+	fmt.Fprintf(&b, "if OUT=\"$(grove %s --git-root \"$CODE\" --name %q 2>/dev/null)\"; then printf '%%s\\n' \"$OUT\"; else echo NOVERB; fi\n",
+		satelliteWorktreePathVerb, worktreeName)
+	return b.String()
+}
+
+// remoteWorktreePathRe is the conservative charset a plumbing-returned VM
+// worktree path must match before it is embedded in a generated script:
+// absolute, and nothing a shell could interpret (no whitespace, quotes,
+// backslashes, $, backticks, …). The XDG layout only produces [A-Za-z0-9._-]
+// components under $HOME-rooted bases, so this loses nothing real.
+var remoteWorktreePathRe = regexp.MustCompile(`^/[A-Za-z0-9._/-]+$`)
+
+// validateRemoteWorktreePath vets a plumbing-returned path as DATA before it
+// becomes part of a script: non-empty, single line, absolute, conservative
+// charset, no ".." components.
+func validateRemoteWorktreePath(p string) error {
+	if p == "" {
+		return fmt.Errorf("empty worktree path")
+	}
+	if strings.ContainsAny(p, "\n\r") {
+		return fmt.Errorf("multi-line worktree path %q", p)
+	}
+	if !remoteWorktreePathRe.MatchString(p) {
+		return fmt.Errorf("worktree path %q is not an absolute path in the safe charset [A-Za-z0-9._/-]", p)
+	}
+	for _, part := range strings.Split(p, "/") {
+		if part == ".." {
+			return fmt.Errorf("worktree path %q contains a '..' component", p)
+		}
+	}
+	return nil
+}
+
+// resolveRemoteWorktreeContainer asks the VM where the plan worktree
+// container lives (or should be created) via the plumbing verb, and validates
+// the answer. A missing binary or unknown verb fails the WHOLE run — the
+// container path is per-plan, not per-repo, so a stale VM binary affects
+// every repo identically and a clear "upgrade first" error beats partial
+// state — with a pointer at `grove satellite upgrade --prebuilt`.
+func resolveRemoteWorktreeContainer(transport satelliteReposTransport, name, remoteCodeDir, worktreeName string) (string, error) {
+	out, err := transport.outputScript(buildSatelliteWorktreePathScript(remoteCodeDir, worktreeName))
+	if err != nil {
+		return "", fmt.Errorf("resolve VM worktree path: %w", err)
+	}
+	p := strings.TrimSpace(out)
+	switch p {
+	case "NOGROVE":
+		return "", fmt.Errorf("satellite %q has no grove binary on the VM's PATH — the worktree verbs need it to compute the VM-side worktree layout; run `grove satellite upgrade %s --prebuilt` first", name, name)
+	case "NOVERB":
+		return "", fmt.Errorf("satellite %q runs a grove binary too old for `grove %s` — run `grove satellite upgrade %s --prebuilt` first", name, satelliteWorktreePathVerb, name)
+	}
+	if err := validateRemoteWorktreePath(p); err != nil {
+		return "", fmt.Errorf("satellite %q returned an unusable VM worktree path: %w (run `grove satellite upgrade %s --prebuilt` if the VM's grove is stale)", name, err, name)
+	}
+	return p, nil
+}
+
 // --- probe (script + parser) ---
 
 // buildSatelliteWorktreeHeadsScript emits the read-only worktree probe: one
@@ -77,11 +160,15 @@ type satelliteWorktreeHead struct {
 //	NOBASE  - : the base repo is not mirrored on the VM
 //	MISSING <base-sha>: base present, plan worktree absent (push creates it)
 //	ERROR: an unreadable HEAD
-func buildSatelliteWorktreeHeadsScript(remoteCodeDir, worktreeName string, repos []string) string {
+//
+// remoteWT is the plumbing-resolved (and validated) VM container path — the
+// SAME path the push script uses, so probe and create/update can never
+// disagree about where the worktree lives.
+func buildSatelliteWorktreeHeadsScript(remoteCodeDir, remoteWT string, repos []string) string {
 	var b strings.Builder
 	b.WriteString("set -u\n")
 	fmt.Fprintf(&b, "CODE=%s\n", remoteCodeDirExpr(remoteCodeDir))
-	fmt.Fprintf(&b, "WT=\"$CODE/%s/%s\"\n", paths.LegacyWorktreeDirName, worktreeName)
+	fmt.Fprintf(&b, "WT=%q\n", remoteWT)
 	for _, r := range repos {
 		fmt.Fprintf(&b,
 			"if [ ! -e \"$CODE/%s/.git\" ]; then echo \"%s NOBASE -\"; "+
@@ -176,12 +263,16 @@ func worktreeBundleBaseSHA(d repoDelta, baseSHA string) string {
 // and per-repo failure isolation as the repos push script; the stage dir is
 // removed only on full success. Idempotent: re-running with the same shas
 // re-fetches no-ops and re-checkouts the same tips.
-func buildSatelliteWorktreePushScript(remoteCodeDir, worktreeName, planName, stageDir string, updates []repoDelta, allRepos []string) string {
+//
+// remoteWT is the plumbing-resolved (and validated) VM container path — the
+// XDG container for a fresh plan worktree; whatever FindWorktreePath returned
+// for an existing one.
+func buildSatelliteWorktreePushScript(remoteCodeDir, remoteWT, worktreeName, planName, stageDir string, updates []repoDelta, allRepos []string) string {
 	var b strings.Builder
 	b.WriteString("# generated by `grove satellite worktree push` — idempotent, per-repo failure-isolated\n")
 	b.WriteString("set -uo pipefail\n")
 	fmt.Fprintf(&b, "CODE=%s\n", remoteCodeDirExpr(remoteCodeDir))
-	fmt.Fprintf(&b, "WT=\"$CODE/%s/%s\"\n", paths.LegacyWorktreeDirName, worktreeName)
+	fmt.Fprintf(&b, "WT=%q\n", remoteWT)
 	fmt.Fprintf(&b, "STAGE=%q\n", stageDir)
 	b.WriteString(`mkdir -p "$WT" || exit 1
 
@@ -359,9 +450,18 @@ func pushSatelliteWorktree(transport satelliteReposTransport, name, containerAbs
 		fmt.Println("The push ships COMMITTED state only (HEAD) — uncommitted changes do NOT reach the VM.")
 	}
 
+	// Resolve the VM-side container path with the VM's own grove binary (the
+	// XDG layout's identifier hash can only be computed there); a missing or
+	// too-old binary fails the run with an upgrade pointer.
+	remoteWT, err := resolveRemoteWorktreeContainer(transport, name, remoteCodeDir, worktreeName)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("VM plan worktree container: %s\n", remoteWT)
+
 	// Probe VM worktree (and base) heads → interlocked delta.
 	fmt.Printf("Reading plan-worktree HEADs on %s (%s)...\n", name, transport.dest())
-	out, err := transport.outputScript(buildSatelliteWorktreeHeadsScript(remoteCodeDir, worktreeName, mirror))
+	out, err := transport.outputScript(buildSatelliteWorktreeHeadsScript(remoteCodeDir, remoteWT, mirror))
 	if err != nil {
 		return fmt.Errorf("read remote worktree HEADs: %w", err)
 	}
@@ -442,7 +542,7 @@ func pushSatelliteWorktree(transport satelliteReposTransport, name, containerAbs
 	}
 
 	fmt.Println("\nRunning remote worktree script (base fetch, worktree add/checkout, container files)...")
-	script := buildSatelliteWorktreePushScript(remoteCodeDir, worktreeName, planName, satelliteWorktreeStageDir, updates, mirror)
+	script := buildSatelliteWorktreePushScript(remoteCodeDir, remoteWT, worktreeName, planName, satelliteWorktreeStageDir, updates, mirror)
 	if err := transport.runScript(script); err != nil {
 		return fmt.Errorf("remote worktree script failed (per-repo summary above; stage kept at %s): %w", satelliteWorktreeStageDir, err)
 	}
@@ -466,13 +566,6 @@ func pushSatelliteWorktree(transport satelliteReposTransport, name, containerAbs
 }
 
 // --- the pull engine ---
-
-// remoteWorktreeContainerDir renders the VM-side plan worktree container path
-// under the legacy layout (a plain string join; remoteCodeDirExpr expands a
-// leading ~ at script-generation time).
-func remoteWorktreeContainerDir(remoteCodeDir, worktreeName string) string {
-	return remoteCodeDir + "/" + paths.LegacyWorktreeDirName + "/" + worktreeName
-}
 
 // pullSatelliteWorktreeOverSSH wires pullSatelliteWorktree to the pinned
 // transport from the registry entry.
@@ -503,7 +596,12 @@ func pullSatelliteWorktree(transport satelliteReposTransport, name, containerAbs
 	if !repoNameRe.MatchString(worktreeName) {
 		return fmt.Errorf("invalid worktree name %q (allowed: A-Za-z0-9._-)", worktreeName)
 	}
-	remoteWT := remoteWorktreeContainerDir(remoteCodeDir, worktreeName)
+	// Same plumbing resolution as push, so pull probes exactly the container
+	// push created (legacy-then-XDG for an existing worktree).
+	remoteWT, err := resolveRemoteWorktreeContainer(transport, name, remoteCodeDir, worktreeName)
+	if err != nil {
+		return err
+	}
 	outcomes, pullErr := pullSatelliteRepos(transport, name, containerAbs, remoteWT, stageDir, repos, false, dryRun)
 	if dryRun || !ff {
 		if !dryRun && pullErr == nil && len(outcomes) > 0 {
@@ -729,13 +827,16 @@ func newSatelliteWorktreePushCmd() *cobra.Command {
 For each repo in the plan worktree's repo set, the laptop worktree checkout's
 HEAD (committed state only) ships as a git bundle over the pinned SSH
 transport; VM-side it is fetched into the mirrored BASE repo and checked out
-as a real git worktree under the VM's legacy layout:
+as a real git worktree under the VM's XDG worktree layout:
 
-  <remote-code-dir>/.grove-worktrees/<worktree>/<repo>
+  <VM worktrees dir>/<repo identifier>/<worktree>/<repo>
 
-which is exactly where the VM-side flow executor resolves a job's worktree —
-so dispatched jobs run inside it. The container's synthetic grove.toml and
-.grove/workspace marker are seeded alongside.
+The container path is computed ON the VM by its installed grove binary
+('grove internal worktree-path' plumbing) — the same core resolution the
+VM-side flow executor uses, so dispatched jobs run inside it. The container's
+synthetic grove.toml and .grove/workspace marker are seeded alongside. A VM
+grove binary that is missing or predates the plumbing verb fails the push —
+run 'grove satellite upgrade --prebuilt' first.
 
 The base repos must already be mirrored ('grove satellite repos push'); a repo
 without a base is held with a pointer. A VM worktree holding commits the

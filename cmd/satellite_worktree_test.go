@@ -8,14 +8,93 @@ import (
 	"testing"
 )
 
+// TestBuildSatelliteWorktreePathScript pins the container-resolution
+// handshake: PATH export for non-login ssh shells, the plumbing verb
+// invocation against the VM's grove binary, and the NOGROVE/NOVERB vintage
+// sentinels.
+func TestBuildSatelliteWorktreePathScript(t *testing.T) {
+	script := buildSatelliteWorktreePathScript("~/code/grovetools", "plan-x")
+	for _, want := range []string{
+		`export PATH="` + satelliteRemotePATH + `"`,
+		`CODE="$HOME/code/grovetools"`,
+		`command -v grove >/dev/null 2>&1; then echo NOGROVE`,
+		`grove internal worktree-path --git-root "$CODE" --name "plan-x"`,
+		`else echo NOVERB`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("worktree-path script missing %q:\n%s", want, script)
+		}
+	}
+	assertBashParses(t, script)
+}
+
+// TestValidateRemoteWorktreePath pins the treat-it-as-data validation of the
+// plumbing verb's answer before it is embedded in generated scripts.
+func TestValidateRemoteWorktreePath(t *testing.T) {
+	for _, good := range []string{
+		"/home/grove/.local/share/grove/worktrees/grovetools-ab12cd34/plan-x",
+		"/srv/code/wt-1",
+	} {
+		if err := validateRemoteWorktreePath(good); err != nil {
+			t.Errorf("validateRemoteWorktreePath(%q) = %v, want nil", good, err)
+		}
+	}
+	for _, bad := range []string{
+		"",
+		"relative/path",
+		"~/worktrees/plan-x",
+		"/has space/plan-x",
+		"/two\nlines",
+		`/dollar/$HOME/plan-x`,
+		"/subshell/$(boom)",
+		"/back`tick`/x",
+		`/quote"d/x`,
+		"/dotdot/../etc/passwd",
+	} {
+		if err := validateRemoteWorktreePath(bad); err == nil {
+			t.Errorf("validateRemoteWorktreePath(%q) = nil, want error", bad)
+		}
+	}
+}
+
+// TestResolveRemoteWorktreeContainerVintageGuard pins the whole-run vintage
+// guard: NOVERB (old binary), NOGROVE (no binary), and an unusable path all
+// fail with a `grove satellite upgrade --prebuilt` pointer; a good answer
+// passes through verbatim.
+func TestResolveRemoteWorktreeContainerVintageGuard(t *testing.T) {
+	cases := []struct {
+		answer  string
+		wantErr string
+	}{
+		{"", "too old"}, // the fake maps "" to NOVERB
+		{"NOGROVE", "no grove binary"},
+		{"NOVERB", "too old"},
+		{"not/absolute", "unusable"},
+		{"/ok/wt/plan-x", ""},
+	}
+	for _, tc := range cases {
+		transport := &localPullTransport{t: t, worktreePathAnswer: tc.answer}
+		got, err := resolveRemoteWorktreeContainer(transport, "sat1", "~/code/grovetools", "plan-x")
+		if tc.wantErr == "" {
+			if err != nil || got != tc.answer {
+				t.Errorf("answer %q: got (%q, %v), want (%q, nil)", tc.answer, got, err, tc.answer)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), tc.wantErr) || !strings.Contains(err.Error(), "grove satellite upgrade sat1 --prebuilt") {
+			t.Errorf("answer %q: err = %v, want mention of %q and the upgrade pointer", tc.answer, err, tc.wantErr)
+		}
+	}
+}
+
 // TestBuildSatelliteWorktreeHeadsScriptAndParse checks the worktree probe's
 // content (base-vs-worktree existence branches with sentinels) and the
 // parser's decode, including the "-"/"ERROR" base-sha → "" mapping.
 func TestBuildSatelliteWorktreeHeadsScriptAndParse(t *testing.T) {
-	script := buildSatelliteWorktreeHeadsScript("~/code/grovetools", "plan-x", []string{"grove", "nb"})
+	script := buildSatelliteWorktreeHeadsScript("~/code/grovetools", "/home/u/.local/share/grove/worktrees/grovetools-ab12cd34/plan-x", []string{"grove", "nb"})
 	for _, want := range []string{
 		`CODE="$HOME/code/grovetools"`,
-		`WT="$CODE/.grove-worktrees/plan-x"`,
+		`WT="/home/u/.local/share/grove/worktrees/grovetools-ab12cd34/plan-x"`,
 		`echo "grove NOBASE -"`,
 		`echo "nb NOBASE -"`,
 		`grove MISSING $(git -C "$CODE/grove" rev-parse HEAD`,
@@ -140,11 +219,11 @@ func TestBuildSatelliteWorktreePushScript(t *testing.T) {
 		{Repo: "grove", Branch: "plan-x", LocalSHA: "aaa111", Status: deltaStatusMissingRemote},
 		{Repo: "det", Branch: "", LocalSHA: "bbb222", Status: deltaStatusUpdate},
 	}
-	script := buildSatelliteWorktreePushScript("~/code/grovetools", "plan-x", "plan-x", "/tmp/wt-stage", updates, []string{"grove", "det", "nb"})
+	script := buildSatelliteWorktreePushScript("~/code/grovetools", "/home/u/.local/share/grove/worktrees/grovetools-ab12cd34/plan-x", "plan-x", "plan-x", "/tmp/wt-stage", updates, []string{"grove", "det", "nb"})
 	for _, want := range []string{
 		"set -uo pipefail", // NOT -e: per-repo isolation
 		`CODE="$HOME/code/grovetools"`,
-		`WT="$CODE/.grove-worktrees/plan-x"`,
+		`WT="/home/u/.local/share/grove/worktrees/grovetools-ab12cd34/plan-x"`,
 		`STAGE="/tmp/wt-stage"`,
 		`run 'grove satellite repos push' first`, // base-missing refusal
 		`git -C "$base" fetch "$STAGE/$repo.bundle" "$ref"`,
@@ -296,8 +375,22 @@ func TestSatelliteWorktreeEngineExecution(t *testing.T) {
 	}
 
 	repos := []string{"agentrepo", "quietrepo", "nobaserepo"}
-	transport := &localPullTransport{t: t}
-	vmWT := filepath.Join(vmCode, ".grove-worktrees", "plan-x")
+	// The fake VM's XDG container — what `grove internal worktree-path`
+	// prints on the VM (WorktreesDir()/<identifier>/<name>); deliberately
+	// OUTSIDE vmCode, as the XDG layout is out-of-repo.
+	vmWT := filepath.Join(root, "xdg-worktrees", "vm-code-ab12cd34", "plan-x")
+	transport := &localPullTransport{t: t, worktreePathAnswer: vmWT}
+
+	// --- vintage guard: a VM grove binary that is missing the plumbing verb
+	// fails the whole run (both verbs) with an upgrade pointer ---
+	transport.worktreePathAnswer = "" // the fake answers NOVERB
+	if err := pushSatelliteWorktree(transport, "sat1", laptopWT, vmCode, "plan-x", "plan-x", pushStage, repos, true, true, false); err == nil || !strings.Contains(err.Error(), "--prebuilt") {
+		t.Fatalf("push against an old VM binary must point at upgrade --prebuilt, got %v", err)
+	}
+	if err := pullSatelliteWorktree(transport, "sat1", laptopWT, vmCode, "plan-x", pullStage, repos, true, false); err == nil || !strings.Contains(err.Error(), "--prebuilt") {
+		t.Fatalf("pull against an old VM binary must point at upgrade --prebuilt, got %v", err)
+	}
+	transport.worktreePathAnswer = vmWT
 
 	// --- dry-run: nothing lands on the "VM" ---
 	if err := pushSatelliteWorktree(transport, "sat1", laptopWT, vmCode, "plan-x", "plan-x", pushStage, repos, true, true, false); err != nil {
