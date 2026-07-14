@@ -183,7 +183,7 @@ func TestBootstrapScriptEmbedsPrebuiltBranches(t *testing.T) {
 		"--prebuilt)",
 		"--syncd-unit)",
 		"requires --syncd-unit",
-		"seeding minimal ecosystem skeleton",
+		"preparing empty ecosystem root (repos arrive via 'grove satellite repos push')",
 		"prebuilt binaries OK",
 		"GROVE_SYNCD_UNIT",
 	} {

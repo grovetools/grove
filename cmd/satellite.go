@@ -75,6 +75,7 @@ from and dispatches to over SSH (M2). 'up' is billable — it creates cloud
 resources via terraform.`
 	cmd.AddCommand(newSatelliteUpCmd())
 	cmd.AddCommand(newSatelliteUpgradeCmd())
+	cmd.AddCommand(newSatelliteReposCmd())
 	cmd.AddCommand(newSatelliteConfigCmd())
 	cmd.AddCommand(newSatelliteDownCmd())
 	cmd.AddCommand(newSatelliteStatusCmd())
@@ -252,6 +253,16 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 			return err
 		}
 		resolvedSyncWorkspaces := resolveSatelliteSyncWorkspaces(syncOpts, syncWorkspaces, cmd.Flags().Changed("sync-workspaces"))
+
+		// Repo-mirror inputs ([satellites.<name>.repos], falling back to the
+		// sync workspaces): loaded NOW — before terraform — so a malformed
+		// block aborts while the provision is still free. The mirror itself
+		// runs after bootstrap (prebuilt mode only; source mode clones the
+		// real ecosystem).
+		reposCfg, err := loadSatelliteReposOptions(name)
+		if err != nil {
+			return err
+		}
 
 		// Prebuilt-bootstrap inputs: validate NOW — before terraform — so a bad
 		// --prebuilt-target, a missing ecosystem worktree, or a missing
@@ -554,6 +565,24 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 			if err := pushSatelliteConfigOverSSH(name, entry, configPushFiles, false); err != nil {
 				fmt.Printf("warning: config push failed: %v\n", err)
 				fmt.Printf("  retry with: grove satellite config push %s\n", name)
+			}
+		}
+
+		// 5d'. Repo mirror (prebuilt only — source mode cloned the real
+		// ecosystem in bootstrap step 3): ship the laptop's committed repo
+		// tips as git bundles and force-checkout them under ~/code/grovetools,
+		// seeding the ecosystem root files. Real repos satisfy workspace
+		// discovery — this replaces the old bootstrap placeholder skeleton.
+		// Non-fatal: the VM is provisioned and registered; a transport hiccup
+		// here is retried with the verb.
+		if prebuilt {
+			mirrorRepos := resolveSatelliteMirrorRepos(nil, false, reposCfg, resolvedSyncWorkspaces)
+			if len(mirrorRepos) > 0 {
+				fmt.Printf("\nMirroring %d repo(s) to %q...\n", len(mirrorRepos), name)
+				if err := pushSatelliteReposOverSSH(name, entry, sourceAbs, defaultRemoteCodeDir, mirrorRepos, false, false, true); err != nil {
+					fmt.Printf("warning: repo mirror failed: %v\n", err)
+					fmt.Printf("  retry with: grove satellite repos push %s\n", name)
+				}
 			}
 		}
 
