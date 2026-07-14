@@ -130,14 +130,16 @@ noise
 }
 
 // TestComputeSatelliteWorktreeDelta pins the worktree push's status
-// selection: NOBASE held, missing worktree ships, matching sha up-to-date,
-// and the shared slice-2 divergence arms (ancestor update / fetched-diverged
-// / held-unfetched / forced) — plus the bundle-base choice per status.
+// selection: NOBASE held, missing worktree ships, a missing worktree whose
+// plan tip IS the base tip ships bundle-less, matching sha up-to-date, and
+// the shared slice-2 divergence arms (ancestor update / fetched-diverged /
+// held-unfetched / forced) — plus the bundle-base choice per status.
 func TestComputeSatelliteWorktreeDelta(t *testing.T) {
-	repos := []string{"nobase", "missing", "same", "ahead", "pulled", "unfetched", "broken"}
+	repos := []string{"nobase", "missing", "fresh", "same", "ahead", "pulled", "unfetched", "broken"}
 	local := map[string]repoTip{
 		"nobase":    {SHA: "l1", Branch: "plan-x"},
 		"missing":   {SHA: "l2", Branch: "plan-x"},
+		"fresh":     {SHA: "l8", Branch: "plan-x"},
 		"same":      {SHA: "l3", Branch: "plan-x"},
 		"ahead":     {SHA: "l4", Branch: "plan-x"},
 		"pulled":    {SHA: "l5", Branch: "plan-x"},
@@ -147,6 +149,7 @@ func TestComputeSatelliteWorktreeDelta(t *testing.T) {
 	remote := map[string]satelliteWorktreeHead{
 		"nobase":    {WTSHA: "NOBASE"},
 		"missing":   {WTSHA: "MISSING", BaseSHA: "base2"},
+		"fresh":     {WTSHA: "MISSING", BaseSHA: "l8"}, // plan tip == base tip: nothing to bundle
 		"same":      {WTSHA: "l3", BaseSHA: "base3"},
 		"ahead":     {WTSHA: "old4", BaseSHA: "base4"}, // ancestor of local tip
 		"pulled":    {WTSHA: "vm5", BaseSHA: "base5"},  // diverged, but fetched locally
@@ -164,6 +167,7 @@ func TestComputeSatelliteWorktreeDelta(t *testing.T) {
 	want := map[string]string{
 		"nobase":    deltaStatusNoBase,
 		"missing":   deltaStatusMissingRemote,
+		"fresh":     deltaStatusCreateNoBundle,
 		"same":      deltaStatusUpToDate,
 		"ahead":     deltaStatusUpdate,
 		"pulled":    deltaStatusDiverged,
@@ -189,9 +193,14 @@ func TestComputeSatelliteWorktreeDelta(t *testing.T) {
 			}
 		}
 	}
-	// Ship set: missing + update + diverged (never NOBASE or held-unfetched).
+	// Ship set: missing + bundle-less create + update + diverged (never
+	// NOBASE or held-unfetched). The bundle-less create is worktree-only:
+	// the mirror's own ship set must not pick it up.
+	if names := strings.Join(deltaRepoNames(worktreeDeltasToShip(deltas)), ","); names != "missing,fresh,ahead,pulled" {
+		t.Fatalf("ship set = %q, want missing,fresh,ahead,pulled", names)
+	}
 	if names := strings.Join(deltaRepoNames(mirrorDeltasToShip(deltas)), ","); names != "missing,ahead,pulled" {
-		t.Fatalf("ship set = %q, want missing,ahead,pulled", names)
+		t.Fatalf("mirror ship set = %q, want missing,ahead,pulled", names)
 	}
 	// Bundle bases: update rides the VM worktree head; a missing worktree
 	// rides the VM BASE repo head (hex-guarded); diverged ships full.
@@ -297,8 +306,10 @@ func TestSatelliteWorktreeFFDecision(t *testing.T) {
 //
 //  1. push creates real VM worktrees (branch checked out at the shipped sha)
 //     attached to the mirrored base repos, plus the container grove.toml and
-//     marker; a repo without a VM base repo is held with a repos-push
-//     pointer while the others still ship.
+//     marker; a repo whose plan branch still sits at the base tip ships NO
+//     bundle yet still gets its VM worktree; a repo without a VM base repo
+//     is held with a repos-push pointer while the others still ship. The
+//     injected stage dir is honored throughout.
 //  2. a re-push is an idempotent no-op (no bundles shipped).
 //  3. VM-side "agent" commits make the next push HOLD (unfetched), worktree
 //     pull fetches them into refs/satellite/… without touching local
@@ -348,8 +359,10 @@ func TestSatelliteWorktreeEngineExecution(t *testing.T) {
 
 	// Laptop plan worktree: two repos on the plan branch (the container in
 	// production holds linked worktrees; plain repos have the same shape for
-	// the engine — a .git and a checked-out branch). A third repo has no VM
-	// base and must be held.
+	// the engine — a .git and a checked-out branch). A third repo's plan
+	// branch sits EXACTLY at the base tip (no plan commits yet — the common
+	// fresh-plan case): nothing to bundle, but the VM worktree must still be
+	// created. A fourth repo has no VM base and must be held.
 	agentLaptop := mkRepo(laptopWT, "agentrepo", "main")
 	commit(agentLaptop, "a.txt", "base", "base")
 	git(agentLaptop, "checkout", "-q", "-b", "plan-x")
@@ -358,6 +371,9 @@ func TestSatelliteWorktreeEngineExecution(t *testing.T) {
 	commit(quietLaptop, "q.txt", "base", "base")
 	git(quietLaptop, "checkout", "-q", "-b", "plan-x")
 	quietPlanSHA := commit(quietLaptop, "q2.txt", "plan work", "plan c1")
+	freshLaptop := mkRepo(laptopWT, "freshrepo", "main")
+	freshBaseSHA := commit(freshLaptop, "f.txt", "base", "base")
+	git(freshLaptop, "checkout", "-q", "-b", "plan-x") // no plan commits: tip == base tip
 	nobaseLaptop := mkRepo(laptopWT, "nobaserepo", "plan-x")
 	commit(nobaseLaptop, "n.txt", "base", "base")
 
@@ -366,7 +382,7 @@ func TestSatelliteWorktreeEngineExecution(t *testing.T) {
 	if err := os.MkdirAll(vmCode, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"agentrepo", "quietrepo"} {
+	for _, name := range []string{"agentrepo", "quietrepo", "freshrepo"} {
 		src := filepath.Join(laptopWT, name)
 		dst := filepath.Join(vmCode, name)
 		git(vmCode, "clone", "-q", "--branch", "main", src, dst)
@@ -374,7 +390,7 @@ func TestSatelliteWorktreeEngineExecution(t *testing.T) {
 		git(dst, "config", "user.name", "vm")
 	}
 
-	repos := []string{"agentrepo", "quietrepo", "nobaserepo"}
+	repos := []string{"agentrepo", "quietrepo", "freshrepo", "nobaserepo"}
 	// The fake VM's XDG container — what `grove internal worktree-path`
 	// prints on the VM (WorktreesDir()/<identifier>/<name>); deliberately
 	// OUTSIDE vmCode, as the XDG layout is out-of-repo.
@@ -405,7 +421,7 @@ func TestSatelliteWorktreeEngineExecution(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "nobaserepo") || !strings.Contains(err.Error(), "repos push") {
 		t.Fatalf("push with a baseless repo must fail pointing at repos push, got %v", err)
 	}
-	for repo, wantSHA := range map[string]string{"agentrepo": agentPlanSHA, "quietrepo": quietPlanSHA} {
+	for repo, wantSHA := range map[string]string{"agentrepo": agentPlanSHA, "quietrepo": quietPlanSHA, "freshrepo": freshBaseSHA} {
 		dir := filepath.Join(vmWT, repo)
 		if got := git(dir, "rev-parse", "HEAD"); got != wantSHA {
 			t.Errorf("VM worktree %s HEAD = %q, want %q", repo, got, wantSHA)
@@ -413,6 +429,40 @@ func TestSatelliteWorktreeEngineExecution(t *testing.T) {
 		if got := git(dir, "rev-parse", "--abbrev-ref", "HEAD"); got != "plan-x" {
 			t.Errorf("VM worktree %s branch = %q, want plan-x", repo, got)
 		}
+	}
+	// freshrepo (plan tip == base tip) shipped NO bundle — the VM base repo
+	// already holds every object; the others did.
+	var staged []string
+	for _, call := range transport.scpTo {
+		for _, p := range call {
+			staged = append(staged, filepath.Base(p))
+		}
+	}
+	if containsString(staged, "freshrepo.bundle") {
+		t.Errorf("freshrepo must ship no bundle (plan tip == base tip): staged %v", staged)
+	}
+	for _, want := range []string{"agentrepo.bundle", "quietrepo.bundle"} {
+		if !containsString(staged, want) {
+			t.Errorf("expected %s in the staged bundles, got %v", want, staged)
+		}
+	}
+	// The engine honors the INJECTED stage dir: the remote stage is created
+	// at pushStage and the generated script stages there too — never at the
+	// package-level default.
+	if !containsString(transport.commands, "mkdir -p "+pushStage) {
+		t.Errorf("push must create the injected stage dir %q, commands: %v", pushStage, transport.commands)
+	}
+	stageRef := 0
+	for _, s := range transport.scripts {
+		if strings.Contains(s, "STAGE="+`"`+pushStage+`"`) {
+			stageRef++
+		}
+		if strings.Contains(s, satelliteWorktreeStageDir) && satelliteWorktreeStageDir != pushStage {
+			t.Errorf("push script references the package-level stage dir %q instead of the injected %q", satelliteWorktreeStageDir, pushStage)
+		}
+	}
+	if stageRef == 0 {
+		t.Errorf("no push script references the injected stage dir %q", pushStage)
 	}
 	// Base repo checkouts stay on main, untouched.
 	if got := git(filepath.Join(vmCode, "agentrepo"), "rev-parse", "--abbrev-ref", "HEAD"); got != "main" {
@@ -432,13 +482,17 @@ func TestSatelliteWorktreeEngineExecution(t *testing.T) {
 		}
 	}
 
-	// --- push 2 (repos that have bases): idempotent no-op, no bundles ---
+	// --- push 2 (repos that have bases): idempotent no-op, no bundles —
+	// including freshrepo, whose VM worktree now exists at its (base) tip ---
 	scpBefore := len(transport.scpTo)
-	if err := pushSatelliteWorktree(transport, "sat1", laptopWT, vmCode, "plan-x", "plan-x", pushStage, []string{"agentrepo", "quietrepo"}, false, true, false); err != nil {
+	if err := pushSatelliteWorktree(transport, "sat1", laptopWT, vmCode, "plan-x", "plan-x", pushStage, []string{"agentrepo", "quietrepo", "freshrepo"}, false, true, false); err != nil {
 		t.Fatalf("idempotent re-push: %v", err)
 	}
 	if len(transport.scpTo) != scpBefore {
 		t.Fatalf("idempotent re-push must ship no bundles: %v", transport.scpTo)
+	}
+	if got := git(filepath.Join(vmWT, "freshrepo"), "rev-parse", "HEAD"); got != freshBaseSHA {
+		t.Errorf("idempotent re-push moved freshrepo's VM worktree: %q, want %q", got, freshBaseSHA)
 	}
 
 	// --- VM agent commits → push holds; pull fetches; push then proceeds ---
