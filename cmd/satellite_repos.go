@@ -174,15 +174,25 @@ func mirrorDivergenceStatus(repo, sha string, isAncestor, hasObject func(repo, s
 	}
 }
 
-// mirrorDeltasToShip selects the repos the mirror actually ships: updates,
-// missing-on-VM repos (init + full bundle), and diverged repos (full bundle +
-// force-checkout — fetched-divergence or --force, warned about by the
-// caller), in input order. Held repos (unfetched VM commits) never ship.
+// mirrorDeltaShips reports whether one delta is in the mirror's ship set:
+// updates, missing-on-VM repos (init + full bundle), and diverged repos (full
+// bundle + force-checkout — fetched-divergence or --force, warned about by
+// the caller). Held repos (unfetched VM commits) never ship.
+func mirrorDeltaShips(d repoDelta) bool {
+	switch d.Status {
+	case deltaStatusUpdate, deltaStatusMissingRemote, deltaStatusDiverged, deltaStatusForcedDiverged:
+		return true
+	default:
+		return false
+	}
+}
+
+// mirrorDeltasToShip selects the repos the mirror actually ships
+// (mirrorDeltaShips), in input order.
 func mirrorDeltasToShip(deltas []repoDelta) []repoDelta {
 	var out []repoDelta
 	for _, d := range deltas {
-		switch d.Status {
-		case deltaStatusUpdate, deltaStatusMissingRemote, deltaStatusDiverged, deltaStatusForcedDiverged:
+		if mirrorDeltaShips(d) {
 			out = append(out, d)
 		}
 	}

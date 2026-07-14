@@ -479,6 +479,12 @@ git rev-parse HEAD`, code))
 	).WithTeardown(satelliteTeardownSteps()...)
 }
 
+// satQuietRepo is the extra plan-worktree repo that gets NO plan commit: its
+// plan branch sits exactly at the mirrored base tip, exercising the
+// bundle-less create arm of `worktree push` (nothing to bundle — the VM base
+// already has every object — yet the VM worktree must still be created).
+const satQuietRepo = "gamma"
+
 // SatelliteWorktreeScenario: ship a plan worktree to the satellite, let an
 // "agent" commit there, and fast-forward the laptop worktree back with
 // `worktree pull --ff`.
@@ -486,13 +492,40 @@ func SatelliteWorktreeScenario() *harness.Scenario {
 	steps := satelliteSetupSteps(true, false)
 	steps = append(steps,
 		satStep("Initial repos push (worktrees attach to base mirrors)", pushFixtureRepos),
-		satStep("Create the laptop plan worktree", func(ctx *harness.Context) error {
-			return createPlanWorktreeFixture(ctx, satFixtureRepos)
+		satStep("Seed a quiet repo (no plan commits) and mirror its base", func(ctx *harness.Context) error {
+			codeDir := ctx.GetString(satKeyCodeDir)
+			dir := filepath.Join(codeDir, satQuietRepo)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return err
+			}
+			if _, err := gitOut(ctx, dir, "init", "-q", "-b", "main"); err != nil {
+				return err
+			}
+			if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# "+satQuietRepo+"\n"), 0o644); err != nil {
+				return err
+			}
+			if _, err := gitOut(ctx, dir, "add", "-A"); err != nil {
+				return err
+			}
+			if _, err := gitOut(ctx, dir, "commit", "-q", "-m", "feat: initial "+satQuietRepo+" fixture"); err != nil {
+				return err
+			}
+			ep := satEndpoint(ctx)
+			result := groveSatellite(ctx, "repos", "push", ep.Name(),
+				"--repos", satQuietRepo,
+				"--source-dir", codeDir,
+				"--remote-code-dir", ep.RemoteCodeDir(),
+				"--yes")
+			ctx.ShowCommandOutput("grove satellite repos push (quiet repo)", result.Stdout, result.Stderr)
+			return ctx.Check("quiet repo base mirrored", result.AssertSuccess())
 		}),
-		// Every repo gets a plan commit: a worktree branch sitting exactly at
-		// the mirrored base tip trips a known production edge ("Refusing to
-		// create empty bundle" — worktreeBundleBaseSHA assumes the plan tip
-		// moved past the base).
+		satStep("Create the laptop plan worktree", func(ctx *harness.Context) error {
+			return createPlanWorktreeFixture(ctx, append(append([]string{}, satFixtureRepos...), satQuietRepo))
+		}),
+		// Only the fixture repos get plan commits; the quiet repo's plan
+		// branch stays exactly at the mirrored base tip, so this push
+		// exercises the bundle-less create arm end-to-end (formerly the
+		// "Refusing to create empty bundle" defect).
 		satStep("Commit laptop plan work in each repo", func(ctx *harness.Context) error {
 			for _, repo := range satFixtureRepos {
 				dir := filepath.Join(planContainer(ctx), repo)
@@ -545,11 +578,27 @@ func SatelliteWorktreeScenario() *harness.Scenario {
 			if err != nil {
 				return err
 			}
+			// The quiet repo shipped no bundle (its plan branch sits at the
+			// base tip), but its VM worktree must exist at that sha anyway.
+			localQuiet, err := gitOut(ctx, filepath.Join(planContainer(ctx), satQuietRepo), "rev-parse", "HEAD")
+			if err != nil {
+				return err
+			}
+			vmQuietHead, err := satExecOut(ctx, fmt.Sprintf(`git -C "%s/%s" rev-parse HEAD`, vmWT, satQuietRepo))
+			if err != nil {
+				return fmt.Errorf("quiet repo's VM worktree missing after the bundle-less push: %w", err)
+			}
+			vmQuietBranch, err := satExecOut(ctx, fmt.Sprintf(`git -C "%s/%s" rev-parse --abbrev-ref HEAD`, vmWT, satQuietRepo))
+			if err != nil {
+				return err
+			}
 			return ctx.Verify(func(v *verify.Collector) {
 				v.True("plumbing path is absolute", strings.HasPrefix(vmWT, "/"))
 				v.Equal("VM container + marker exist at the plumbing path", "present", vmStat)
 				v.Equal("VM worktree alpha at the laptop plan tip", localAlpha, vmHead)
 				v.Equal("VM worktree alpha on the plan branch", ctx.GetString(satKeyPlan), vmBranch)
+				v.Equal("VM worktree "+satQuietRepo+" created at the base tip (bundle-less)", localQuiet, vmQuietHead)
+				v.Equal("VM worktree "+satQuietRepo+" on the plan branch", ctx.GetString(satKeyPlan), vmQuietBranch)
 			})
 		}),
 		satStep("Make an agent commit in the VM worktree", func(ctx *harness.Context) error {

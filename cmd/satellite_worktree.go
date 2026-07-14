@@ -63,6 +63,15 @@ var (
 // to. Never ships; `repos push` creates the base first.
 const deltaStatusNoBase = "held (no base repo on VM — run 'grove satellite repos push' first)"
 
+// deltaStatusCreateNoBundle is the worktree-push-only status for a repo whose
+// plan branch tip IS the VM base repo's tip: the common fresh-plan case where
+// a plan spans several repos but this one has no plan commits yet. Every
+// object is already VM-side (the worktree attaches to the base's object
+// store), so no bundle ships — bundling would produce an empty range and
+// `git bundle create` refuses those — but the repo still SHIPS: the remote
+// script must create/checkout the VM worktree at that sha.
+const deltaStatusCreateNoBundle = "create (no bundle — VM base has the objects)"
+
 // satelliteWorktreeHead is one probed VM repo for the worktree push: the plan
 // worktree's HEAD (or the NOBASE/MISSING/ERROR sentinels) and the base
 // repo's HEAD ("" when unknown) — the latter only seeds bundle bases.
@@ -203,7 +212,9 @@ func parseSatelliteWorktreeHeads(out string) map[string]satelliteWorktreeHead {
 // the VM plan worktree's HEADs. Same interlock as the repo mirror
 // (mirrorDivergenceStatus — object presence decides held vs shippable), with
 // two worktree-specific arms: a missing BASE repo is held with a pointer to
-// `repos push`, and a missing plan worktree ships (the script creates it).
+// `repos push`, and a missing plan worktree ships (the script creates it) —
+// bundle-less (deltaStatusCreateNoBundle) when the plan tip IS the base tip,
+// since the VM then already holds every object the worktree needs.
 // isAncestor and hasObject probe the LAPTOP worktree repo (injected for
 // testability; linked worktrees share the primary's object store, so a
 // `repos pull` also flips this interlock).
@@ -217,6 +228,9 @@ func computeSatelliteWorktreeDelta(repos []string, local map[string]repoTip, rem
 			d.Status = deltaStatusNoBase
 		case head.WTSHA == "MISSING":
 			d.Status = deltaStatusMissingRemote
+			if head.BaseSHA != "" && head.BaseSHA == tip.SHA {
+				d.Status = deltaStatusCreateNoBundle
+			}
 		case head.WTSHA == "ERROR":
 			d.Status = deltaStatusRemoteError
 		case head.WTSHA == tip.SHA:
@@ -229,6 +243,20 @@ func computeSatelliteWorktreeDelta(repos []string, local map[string]repoTip, rem
 		deltas = append(deltas, d)
 	}
 	return deltas
+}
+
+// worktreeDeltasToShip selects the repos the worktree push actually ships, in
+// input order: the mirror's ship set (mirrorDeltaShips) plus the
+// worktree-only bundle-less create arm — those repos transfer no bundle, but
+// the remote script still creates/checkouts their VM worktree.
+func worktreeDeltasToShip(deltas []repoDelta) []repoDelta {
+	var out []repoDelta
+	for _, d := range deltas {
+		if mirrorDeltaShips(d) || d.Status == deltaStatusCreateNoBundle {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // worktreeBundleBaseSHA picks the bundle base for a shipped worktree delta:
@@ -496,7 +524,7 @@ func pushSatelliteWorktree(transport satelliteReposTransport, name, containerAbs
 		fmt.Printf("\nnote: unreadable VM HEAD for %s — skipped (inspect the VM worktree manually).\n", strings.Join(deltaRepoNames(errored), ", "))
 	}
 
-	updates := mirrorDeltasToShip(deltas)
+	updates := worktreeDeltasToShip(deltas)
 	if dryRun {
 		if len(updates) == 0 {
 			fmt.Printf("\n(dry-run) VM plan worktree %q is up to date — nothing to ship.\n", worktreeName)
@@ -526,25 +554,33 @@ func pushSatelliteWorktree(transport satelliteReposTransport, name, containerAbs
 		defer func() { _ = os.RemoveAll(bundleDir) }()
 		var bundlePaths []string
 		for _, d := range updates {
+			if d.Status == deltaStatusCreateNoBundle {
+				// The VM base repo's tip IS this sha: every object is already
+				// there, and an incremental bundle would be empty (git
+				// refuses those). The script still creates the worktree.
+				continue
+			}
 			bundlePath := filepath.Join(bundleDir, d.Repo+".bundle")
 			if err := createRepoBundle(filepath.Join(containerAbs, d.Repo), bundlePath, d.Branch, worktreeBundleBaseSHA(d, remote[d.Repo].BaseSHA)); err != nil {
 				return fmt.Errorf("bundle %s: %w", d.Repo, err)
 			}
 			bundlePaths = append(bundlePaths, bundlePath)
 		}
-		fmt.Printf("\nShipping %d bundle(s) to %s:%s ...\n", len(bundlePaths), name, satelliteWorktreeStageDir)
-		if err := transport.runCommand("mkdir -p " + satelliteWorktreeStageDir); err != nil {
-			return fmt.Errorf("create remote stage dir: %w", err)
-		}
-		if err := transport.scp(bundlePaths, satelliteWorktreeStageDir+"/"); err != nil {
-			return fmt.Errorf("scp bundles: %w", err)
+		if len(bundlePaths) > 0 {
+			fmt.Printf("\nShipping %d bundle(s) to %s:%s ...\n", len(bundlePaths), name, stageDir)
+			if err := transport.runCommand("mkdir -p " + stageDir); err != nil {
+				return fmt.Errorf("create remote stage dir: %w", err)
+			}
+			if err := transport.scp(bundlePaths, stageDir+"/"); err != nil {
+				return fmt.Errorf("scp bundles: %w", err)
+			}
 		}
 	}
 
 	fmt.Println("\nRunning remote worktree script (base fetch, worktree add/checkout, container files)...")
-	script := buildSatelliteWorktreePushScript(remoteCodeDir, remoteWT, worktreeName, planName, satelliteWorktreeStageDir, updates, mirror)
+	script := buildSatelliteWorktreePushScript(remoteCodeDir, remoteWT, worktreeName, planName, stageDir, updates, mirror)
 	if err := transport.runScript(script); err != nil {
-		return fmt.Errorf("remote worktree script failed (per-repo summary above; stage kept at %s): %w", satelliteWorktreeStageDir, err)
+		return fmt.Errorf("remote worktree script failed (per-repo summary above; stage kept at %s): %w", stageDir, err)
 	}
 	if len(updates) > 0 {
 		fmt.Printf("\nPlan worktree %q pushed to %q (%s).\n", worktreeName, name, strings.Join(deltaRepoNames(updates), ", "))
