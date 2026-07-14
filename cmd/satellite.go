@@ -76,6 +76,7 @@ resources via terraform.`
 	cmd.AddCommand(newSatelliteUpCmd())
 	cmd.AddCommand(newSatelliteUpgradeCmd())
 	cmd.AddCommand(newSatelliteReposCmd())
+	cmd.AddCommand(newSatelliteWorktreeCmd())
 	cmd.AddCommand(newSatelliteConfigCmd())
 	cmd.AddCommand(newSatelliteDownCmd())
 	cmd.AddCommand(newSatelliteStatusCmd())

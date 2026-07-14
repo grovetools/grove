@@ -186,6 +186,7 @@ type localPullTransport struct {
 	scripts    []string
 	commands   []string
 	failScpFor map[string]bool
+	scpTo      [][]string // scp (laptop→VM) calls, one local-path slice per call
 }
 
 func (l *localPullTransport) dest() string { return "local-fake" }
@@ -216,6 +217,25 @@ func (l *localPullTransport) runScript(script string) error {
 func (l *localPullTransport) runCommand(command string) error {
 	l.commands = append(l.commands, command)
 	return exec.Command("bash", "-c", command).Run()
+}
+
+// scp copies laptop-side files INTO the fake VM (used by the worktree push
+// engine; the pull engine never calls it).
+func (l *localPullTransport) scp(localPaths []string, remoteDir string) error {
+	l.scpTo = append(l.scpTo, append([]string(nil), localPaths...))
+	if err := os.MkdirAll(remoteDir, 0o755); err != nil {
+		return err
+	}
+	for _, p := range localPaths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(remoteDir, filepath.Base(p)), data, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (l *localPullTransport) scpFrom(remotePaths []string, localDir string) error {
@@ -322,7 +342,7 @@ func TestSatelliteReposPullEngineExecution(t *testing.T) {
 	transport := &localPullTransport{t: t}
 
 	// --- dry-run: no stage dir, no refs, no scripts beyond the probe ---
-	if err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, true); err != nil {
+	if _, err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, true); err != nil {
 		t.Fatalf("dry-run pull: %v", err)
 	}
 	if _, err := os.Stat(stage); !os.IsNotExist(err) {
@@ -336,7 +356,7 @@ func TestSatelliteReposPullEngineExecution(t *testing.T) {
 	}
 
 	// --- real pull ---
-	if err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, false); err != nil {
+	if _, err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, false); err != nil {
 		t.Fatalf("pull: %v", err)
 	}
 	// Branch-mapped ref carries the VM tip.
@@ -384,7 +404,7 @@ func TestSatelliteReposPullEngineExecution(t *testing.T) {
 
 	// --- idempotent re-pull: everything up-to-date, no bundle script runs ---
 	before := len(transport.scripts)
-	if err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, false); err != nil {
+	if _, err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, false); err != nil {
 		t.Fatalf("re-pull: %v", err)
 	}
 	if len(transport.scripts) != before {
@@ -397,7 +417,7 @@ func TestSatelliteReposPullEngineExecution(t *testing.T) {
 	// --- incremental follow-up: more VM commits; the bundle request seeds
 	// its bases from the previous satellite ref (and the local tip) ---
 	agentVMSHA2 := commit(agentVM, "w3.txt", "three", "agent c3")
-	if err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, false); err != nil {
+	if _, err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, false); err != nil {
 		t.Fatalf("incremental pull: %v", err)
 	}
 	if got, ok := localRefSHA(agentLaptop, "refs/satellite/sat1/agent-work"); !ok || got != agentVMSHA2 {
@@ -414,7 +434,7 @@ func TestSatelliteReposPullEngineExecution(t *testing.T) {
 	git(detVM, "checkout", "-q", "--detach", "HEAD")
 	detVMSHA2 := commit(detVM, "d3.txt", "more vm work", "detached vm commit 2")
 	transport.failScpFor = map[string]bool{"agentrepo": true}
-	err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, false)
+	_, err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, false)
 	if err == nil || !strings.Contains(err.Error(), "agentrepo") {
 		t.Fatalf("failed transfer must surface the repo, got %v", err)
 	}
@@ -439,12 +459,12 @@ func TestSatelliteReposPullStrictness(t *testing.T) {
 	root := t.TempDir()
 	transport := &localPullTransport{t: t}
 	// Strict: unknown name is an error before any transport use.
-	err := pullSatelliteRepos(transport, "sat1", root, root, filepath.Join(root, "stage"), []string{"nope"}, true, false)
+	_, err := pullSatelliteRepos(transport, "sat1", root, root, filepath.Join(root, "stage"), []string{"nope"}, true, false)
 	if err == nil || !strings.Contains(err.Error(), "nope") {
 		t.Fatalf("strict pull with a non-repo must error, got %v", err)
 	}
 	// Non-strict: skipped with a notice, nothing to do, no error.
-	if err := pullSatelliteRepos(transport, "sat1", root, root, filepath.Join(root, "stage"), []string{"nope"}, false, false); err != nil {
+	if _, err := pullSatelliteRepos(transport, "sat1", root, root, filepath.Join(root, "stage"), []string{"nope"}, false, false); err != nil {
 		t.Fatalf("non-strict pull must skip non-repos, got %v", err)
 	}
 	if len(transport.scripts) != 0 {
