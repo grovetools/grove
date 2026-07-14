@@ -143,26 +143,35 @@ func computeSatelliteMirrorDelta(repos []string, local map[string]repoTip, remot
 			d.Status = deltaStatusUpToDate
 		default:
 			d.RemoteSHA = sha
-			switch {
-			case isAncestor(r, sha):
-				d.Status = deltaStatusUpdate
-			case hasObject(r, sha):
-				// Divergence of FETCHED history: the VM head object exists
-				// locally, so its commits are recoverable on the laptop
-				// (refs/satellite/… after a pull). NOT blocked — this is the
-				// ordinary state right after `repos pull` + local work.
-				d.Status = deltaStatusDiverged
-			case force:
-				d.Status = deltaStatusForcedDiverged
-			default:
-				// The VM head object is absent locally: unfetched VM commits.
-				// Refuse — pull them back (or --force) first.
-				d.Status = deltaStatusHeldUnfetched
-			}
+			d.Status = mirrorDivergenceStatus(r, sha, isAncestor, hasObject, force)
 		}
 		deltas = append(deltas, d)
 	}
 	return deltas
+}
+
+// mirrorDivergenceStatus is the slice-2 interlock's shared divergence arm (a
+// VM head that is neither missing nor equal to the local tip), reused by the
+// repo mirror and the plan-worktree push (satellite_worktree.go):
+//
+//   - isAncestor(repo, sha): plain update (the VM is simply behind).
+//   - hasObject(repo, sha): divergence of FETCHED history — the VM head object
+//     exists locally (refs/satellite/… after a pull), so its commits are
+//     recoverable on the laptop. NOT blocked; ships as a force-checkout.
+//   - force: ships anyway, DISCARDING the unfetched VM commits (loudly).
+//   - otherwise: the VM head object is absent locally — unfetched VM commits.
+//     Held; pull them back (or --force) first.
+func mirrorDivergenceStatus(repo, sha string, isAncestor, hasObject func(repo, sha string) bool, force bool) string {
+	switch {
+	case isAncestor(repo, sha):
+		return deltaStatusUpdate
+	case hasObject(repo, sha):
+		return deltaStatusDiverged
+	case force:
+		return deltaStatusForcedDiverged
+	default:
+		return deltaStatusHeldUnfetched
+	}
 }
 
 // mirrorDeltasToShip selects the repos the mirror actually ships: updates,

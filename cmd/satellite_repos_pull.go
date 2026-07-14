@@ -140,15 +140,27 @@ func satellitePullRef(satName, branch string) (string, error) {
 	if branch == "" {
 		branch = "detached"
 	}
+	if err := validateBranchRefSegments(branch); err != nil {
+		return "", err
+	}
+	return "refs/satellite/" + satName + "/" + branch, nil
+}
+
+// validateBranchRefSegments checks that a branch name is safe both as a local
+// ref suffix and as an argument embedded in generated remote shell:
+// slash-nested segments of safe characters, no "..", no dot-leading segments,
+// no ".lock" suffixes. Shared by the pull ref mapping (VM branches off the
+// wire) and the worktree push script generation (laptop worktree branches).
+func validateBranchRefSegments(branch string) error {
 	if strings.Contains(branch, "..") {
-		return "", fmt.Errorf("VM branch %q is not usable as a local ref segment", branch)
+		return fmt.Errorf("branch %q is not usable as a ref segment", branch)
 	}
 	for _, seg := range strings.Split(branch, "/") {
 		if seg == "" || strings.HasPrefix(seg, ".") || strings.HasSuffix(seg, ".lock") || !satellitePullRefSegRe.MatchString(seg) {
-			return "", fmt.Errorf("VM branch %q is not usable as a local ref segment", branch)
+			return fmt.Errorf("branch %q is not usable as a ref segment", branch)
 		}
 	}
-	return "refs/satellite/" + satName + "/" + branch, nil
+	return nil
 }
 
 // --- VM-side bundle script (pure; exercised by unit tests) ---
@@ -242,15 +254,29 @@ func fetchSatelliteBundle(repoDir, bundlePath, ref string) error {
 
 // --- the pull engine ---
 
-// satelliteReposTransport is the slice of the pinned SSH transport the pull
-// engine needs (satisfied by *satelliteSSH). An interface so tests — and,
-// later, plan-scoped callers — can run the engine against a local fake.
+// satelliteReposTransport is the slice of the pinned SSH transport the
+// pull/worktree engines need (satisfied by *satelliteSSH). An interface so
+// tests — and the plan-scoped worktree callers — can run the engines against
+// a local fake.
 type satelliteReposTransport interface {
 	dest() string
 	outputScript(script string) (string, error)
 	runScript(script string) error
 	runCommand(command string) error
+	scp(localPaths []string, remoteDir string) error
 	scpFrom(remotePaths []string, localDir string) error
+}
+
+// satellitePullOutcome is one repo's result of a pull: the VM head that is
+// now guaranteed present in the local object store, the VM's checked-out
+// branch ("" = detached), and the refs/satellite/… ref this pull wrote (""
+// when the head was already local and nothing was fetched). The worktree
+// pull's --ff pass consumes these.
+type satellitePullOutcome struct {
+	Repo   string
+	Branch string
+	SHA    string
+	Ref    string
 }
 
 // pullSatelliteReposOverSSH wires pullSatelliteRepos to the pinned transport
@@ -265,7 +291,8 @@ func pullSatelliteReposOverSSH(name string, entry satelliteConfigEntry, sourceAb
 	if err != nil {
 		return fmt.Errorf("satellite %q: %w", name, err)
 	}
-	return pullSatelliteRepos(ssh, name, sourceAbs, remoteCodeDir, satelliteReposPullStageDir, repos, strict, dryRun)
+	_, err = pullSatelliteRepos(ssh, name, sourceAbs, remoteCodeDir, satelliteReposPullStageDir, repos, strict, dryRun)
+	return err
 }
 
 // pullSatelliteRepos fetches VM-side commits back into the laptop repos:
@@ -277,17 +304,23 @@ func pullSatelliteReposOverSSH(name string, entry satelliteConfigEntry, sourceAb
 // removed only after a fully successful pull. Idempotent: a re-pull with
 // nothing new probes, prints, and fetches no bundles. dryRun stops after the
 // delta table, creating and transferring nothing.
-func pullSatelliteRepos(transport satelliteReposTransport, name, sourceAbs, remoteCodeDir, stageDir string, repos []string, strict, dryRun bool) error {
+//
+// The returned outcomes cover every repo whose VM head is KNOWN-LOCAL after
+// the call — already-up-to-date repos (Ref "") plus successfully fetched ones
+// (Ref set) — so plan-scoped callers (`satellite worktree pull --ff`) can act
+// on them; they are valid even when an error is also returned (per-repo
+// isolation: the successes stand). Empty on dry runs.
+func pullSatelliteRepos(transport satelliteReposTransport, name, sourceAbs, remoteCodeDir, stageDir string, repos []string, strict, dryRun bool) ([]satellitePullOutcome, error) {
 	if !repoNameRe.MatchString(name) {
-		return fmt.Errorf("invalid satellite name %q for ref mapping (allowed: A-Za-z0-9._-)", name)
+		return nil, fmt.Errorf("invalid satellite name %q for ref mapping (allowed: A-Za-z0-9._-)", name)
 	}
 	if len(repos) == 0 {
 		fmt.Println("No repos to pull (empty repo set) — nothing to do.")
-		return nil
+		return nil, nil
 	}
 	for _, r := range repos {
 		if !repoNameRe.MatchString(r) {
-			return fmt.Errorf("invalid repo name %q (allowed: A-Za-z0-9._-)", r)
+			return nil, fmt.Errorf("invalid repo name %q (allowed: A-Za-z0-9._-)", r)
 		}
 	}
 
@@ -298,7 +331,7 @@ func pullSatelliteRepos(transport satelliteReposTransport, name, sourceAbs, remo
 	for _, r := range repos {
 		if _, err := os.Stat(filepath.Join(sourceAbs, r, ".git")); err != nil {
 			if strict {
-				return fmt.Errorf("--repos %q: no git repo %s/%s to pull into", r, sourceAbs, r)
+				return nil, fmt.Errorf("--repos %q: no git repo %s/%s to pull into", r, sourceAbs, r)
 			}
 			fmt.Printf("(%s: not a git repo under %s — skipped)\n", r, sourceAbs)
 			continue
@@ -307,14 +340,14 @@ func pullSatelliteRepos(transport satelliteReposTransport, name, sourceAbs, remo
 	}
 	if len(mirror) == 0 {
 		fmt.Printf("No pullable repos under %s — nothing to do.\n", sourceAbs)
-		return nil
+		return nil, nil
 	}
 
 	local := map[string]repoTip{}
 	for _, r := range mirror {
 		tip, err := localRepoTip(filepath.Join(sourceAbs, r))
 		if err != nil {
-			return fmt.Errorf("read local HEAD of %s: %w", r, err)
+			return nil, fmt.Errorf("read local HEAD of %s: %w", r, err)
 		}
 		local[r] = tip
 	}
@@ -323,7 +356,7 @@ func pullSatelliteRepos(transport satelliteReposTransport, name, sourceAbs, remo
 	fmt.Printf("Reading repo HEADs on %s (%s)...\n", name, transport.dest())
 	out, err := transport.outputScript(buildRemoteHeadsBranchesScript(remoteCodeDir, mirror))
 	if err != nil {
-		return fmt.Errorf("read remote HEADs: %w", err)
+		return nil, fmt.Errorf("read remote HEADs: %w", err)
 	}
 	remote := parseRemoteHeadsBranches(out)
 	deltas := computeSatellitePullDelta(mirror, local, remote, func(repo, sha string) bool {
@@ -338,6 +371,12 @@ func pullSatelliteRepos(transport satelliteReposTransport, name, sourceAbs, remo
 		fmt.Printf("\nnote: unreadable VM HEAD for %s — skipped (inspect the VM checkout manually).\n", strings.Join(deltaRepoNames(errored), ", "))
 	}
 
+	// Up-to-date repos are already valid outcomes: their VM head is local.
+	var outcomes []satellitePullOutcome
+	for _, d := range deltasWithStatus(deltas, deltaStatusUpToDate) {
+		outcomes = append(outcomes, satellitePullOutcome{Repo: d.Repo, Branch: d.Branch, SHA: d.RemoteSHA})
+	}
+
 	fetches := deltasWithStatus(deltas, deltaStatusFetch)
 	if dryRun {
 		if len(fetches) == 0 {
@@ -345,11 +384,11 @@ func pullSatelliteRepos(transport satelliteReposTransport, name, sourceAbs, remo
 		} else {
 			fmt.Printf("\n(dry-run) would pull %d repo(s): %s\n", len(fetches), strings.Join(deltaRepoNames(fetches), ", "))
 		}
-		return nil
+		return nil, nil
 	}
 	if len(fetches) == 0 {
 		fmt.Printf("\nNothing new on %q — every VM head is already in the local object store.\n", name)
-		return nil
+		return outcomes, nil
 	}
 
 	// Ref mapping + bundle-base candidates. Bases (in preference order): the
@@ -394,7 +433,7 @@ func pullSatelliteRepos(transport satelliteReposTransport, name, sourceAbs, remo
 
 		bundleDir, err := os.MkdirTemp("", "grove-satellite-pull-bundles-")
 		if err != nil {
-			return err
+			return outcomes, err
 		}
 		defer func() { _ = os.RemoveAll(bundleDir) }()
 
@@ -418,6 +457,7 @@ func pullSatelliteRepos(transport satelliteReposTransport, name, sourceAbs, remo
 				continue
 			}
 			pulled = append(pulled, p.delta.Repo)
+			outcomes = append(outcomes, satellitePullOutcome{Repo: p.delta.Repo, Branch: p.delta.Branch, SHA: p.delta.RemoteSHA, Ref: p.ref})
 
 			// Per-repo summary: ref written, sha range, integration hints.
 			// Local branch heads were NOT moved — merging is the user's call.
@@ -432,13 +472,13 @@ func pullSatelliteRepos(transport satelliteReposTransport, name, sourceAbs, remo
 	}
 
 	if len(failed) > 0 {
-		return fmt.Errorf("repos pull failed for: %s (VM stage kept at %s)", strings.Join(failed, ", "), stageDir)
+		return outcomes, fmt.Errorf("repos pull failed for: %s (VM stage kept at %s)", strings.Join(failed, ", "), stageDir)
 	}
 	if err := transport.runCommand("rm -rf " + stageDir); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not remove the VM stage dir %s: %v (the next pull recreates it fresh)\n", stageDir, err)
 	}
 	fmt.Printf("\nSatellite %q pulled (%s) — local branches untouched.\n", name, strings.Join(pulled, ", "))
-	return nil
+	return outcomes, nil
 }
 
 // --- the verb ---
