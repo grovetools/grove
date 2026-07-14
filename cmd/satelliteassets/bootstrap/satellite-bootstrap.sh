@@ -24,6 +24,19 @@
 #                          Default: cloud,grovetools. An empty value means no
 #                          sync workspaces. `grove satellite up` passes this
 #                          from its resolved [satellites.<name>.sync] config.
+#   --prebuilt             prebuilt-binaries mode: the grove stack (grove,
+#                          groved, flow, nb, treemux, tuimux, grove-syncd) was
+#                          cross-compiled on the laptop and installed on the VM
+#                          by `grove satellite up --prebuilt` BEFORE this script
+#                          runs. Skips the ecosystem clone (step 3), the VM-side
+#                          build (step 4), and the grove-syncd build+source-unit
+#                          copy (step 6); everything else (config, tokens,
+#                          systemd, claude, dotfiles) runs unchanged. Requires
+#                          --syncd-unit.
+#   --syncd-unit <path>    remote path to the grove-syncd.service systemd unit
+#                          the CLI shipped (sourced from sync/systemd/
+#                          grove-syncd.service). Only used with --prebuilt,
+#                          where there is no source tree to copy the unit from.
 #
 # Secrets policy: nothing secret in argv, terraform vars, or instance
 # metadata. Tokens are piped via stdin. Sync tokens are minted ON the VM;
@@ -46,7 +59,7 @@ set -euo pipefail
 CLAUDE_INSTALL_URL="https://claude.ai/install.sh"
 
 usage() {
-  echo "usage: $0 <ssh-destination> [--gh-token-stdin] [--claude] [--claude-token-stdin] [--dotfiles-repo <url>] [--workspaces <a,b>]" >&2
+  echo "usage: $0 <ssh-destination> [--gh-token-stdin] [--claude] [--claude-token-stdin] [--dotfiles-repo <url>] [--workspaces <a,b>] [--prebuilt --syncd-unit <path>]" >&2
   exit 2
 }
 
@@ -58,6 +71,8 @@ CLAUDE=false
 CLAUDE_TOKEN_STDIN=false
 DOTFILES_REPO=""
 WORKSPACES="cloud,grovetools"
+PREBUILT=false
+SYNCD_UNIT=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --gh-token-stdin) GH_TOKEN_STDIN=true ;;
@@ -76,10 +91,25 @@ while [ $# -gt 0 ]; do
       WORKSPACES="$2"
       shift
       ;;
+    --prebuilt) PREBUILT=true ;;
+    --syncd-unit)
+      [ $# -ge 2 ] || usage
+      SYNCD_UNIT="$2"
+      shift
+      ;;
     *) usage ;;
   esac
   shift
 done
+
+# Prebuilt mode installs the grove stack from laptop-cross-compiled binaries
+# (done by `grove satellite up --prebuilt` before this script runs) and needs
+# the grove-syncd systemd unit shipped alongside — there is no source tree on
+# the VM to copy it from.
+if $PREBUILT && [ -z "$SYNCD_UNIT" ]; then
+  echo "--prebuilt requires --syncd-unit <remote-path> (the CLI ships the grove-syncd unit)" >&2
+  exit 2
+fi
 
 # Workspace names end up in remote paths and generated TOML — restrict them to
 # a safe character class before anything ships. Empty --workspaces = none.
@@ -162,6 +192,18 @@ git config --global user.name "grove-satellite"
 git config --global user.email "grove-satellite@localhost"
 REMOTE
 
+if $PREBUILT; then
+  log "[3/8] prebuilt: skipping ecosystem clone (grove stack shipped by 'grove satellite up --prebuilt')"
+  # grove.toml (step 5) points [groves.grovetools].path at ~/code/grovetools.
+  # In prebuilt mode there is no source clone, so create the dir EMPTY: groved
+  # then resolves the grove definition to an existing path and starts cleanly
+  # (a pure sync+federation satellite needs no source tree to run notebook
+  # jobs). Keeping grove.toml identical avoids config drift between modes.
+  rsh <<'REMOTE'
+set -euo pipefail
+mkdir -p "$HOME/code/grovetools"
+REMOTE
+else
 log "[3/8] cloning grovetools ecosystem (superrepo + submodules, pinned SHAs)"
 rsh <<'REMOTE'
 set -euo pipefail
@@ -186,7 +228,28 @@ git config --file .gitmodules --get-regexp '^submodule\..*\.path$' \
       fi
     done
 REMOTE
+fi
 
+if $PREBUILT; then
+  log "[4/8] prebuilt: verifying shipped grove stack binaries (no VM-side build)"
+  rsh <<'REMOTE'
+set -euo pipefail
+# The binaries were cross-compiled on the laptop and installed by
+# `grove satellite up --prebuilt` before this script ran; just confirm they
+# landed so a broken install fails here rather than at systemd-enable time.
+BIN_DIR="$HOME/.local/share/grove/bin"
+missing=""
+for b in grove groved flow nb treemux tuimux; do
+  [ -x "$BIN_DIR/$b" ] || missing="$missing $b"
+done
+if [ -n "$missing" ]; then
+  echo "MISSING prebuilt binaries in $BIN_DIR:$missing" >&2
+  echo "'grove satellite up --prebuilt' installs them before bootstrap — check its install summary" >&2
+  exit 1
+fi
+echo "prebuilt binaries OK: grove groved flow nb treemux tuimux"
+REMOTE
+else
 log "[4/8] building grove + ecosystem tools (grove build; slowest step)"
 rsh <<'REMOTE'
 set -euo pipefail
@@ -229,6 +292,7 @@ if [ -n "$missing" ]; then
 fi
 echo "required binaries OK: grove groved flow nb treemux tuimux"
 REMOTE
+fi
 
 log "[5/8] VM grove configuration (grove.toml, sync.toml, notebook dirs)"
 # The workspace list rides stdin's first line (same pattern as the dotfiles
@@ -277,6 +341,43 @@ REMOTE
 } | "${SSH[@]}" 'IFS= read -r GROVE_SYNC_WORKSPACES; export GROVE_SYNC_WORKSPACES; exec bash -l -s'
 
 log "[6/8] grove-syncd: build (CGO fts5), install, migrate, mint tokens, systemd"
+if $PREBUILT; then
+  # Prebuilt: grove-syncd is already installed to /usr/local/bin by
+  # `grove satellite up --prebuilt`, and there is no source tree to copy the
+  # systemd unit from — the CLI shipped it, and its remote path arrives on
+  # stdin's first line (same off-argv pattern as step 5's workspace list). The
+  # migrate / token-mint / enable / health-check remainder is identical to
+  # source mode.
+  {
+    printf '%s\n' "$SYNCD_UNIT"
+    cat <<'REMOTE'
+set -euo pipefail
+sudo mkdir -p /var/lib/grove-syncd
+sudo /usr/local/bin/grove-syncd --data-dir /var/lib/grove-syncd migrate
+# VM's own token (used by groved via sync.toml token_command)
+if [ ! -f "$HOME/.config/grove/sync.token" ]; then
+  sudo /usr/local/bin/grove-syncd --data-dir /var/lib/grove-syncd token create "vm-$(hostname)" > "$HOME/.config/grove/sync.token.tmp"
+  mv "$HOME/.config/grove/sync.token.tmp" "$HOME/.config/grove/sync.token"
+  chmod 600 "$HOME/.config/grove/sync.token"
+fi
+# Laptop token: minted here (before the service starts), stashed root-only;
+# step 7 fetches and deletes it.
+if [ ! -f /root/laptop-sync.token ] && ! sudo test -f /root/laptop-sync.token.fetched; then
+  sudo sh -c '/usr/local/bin/grove-syncd --data-dir /var/lib/grove-syncd token create laptop > /root/laptop-sync.token && chmod 600 /root/laptop-sync.token'
+fi
+# Unit shipped by the CLI (sourced verbatim from sync/systemd/grove-syncd.service).
+sudo cp "$GROVE_SYNCD_UNIT" /etc/systemd/system/grove-syncd.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now grove-syncd
+sleep 2
+curl -fsS http://127.0.0.1:8788/healthz >/dev/null
+echo "syncd healthy"
+curl -fsS -X POST -H "Authorization: Bearer $(cat "$HOME/.config/grove/sync.token")" \
+  -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8788/sync/capabilities >/dev/null
+echo "vm token accepted"
+REMOTE
+  } | "${SSH[@]}" 'IFS= read -r GROVE_SYNCD_UNIT; export GROVE_SYNCD_UNIT; exec bash -l -s'
+else
 rsh <<'REMOTE'
 set -euo pipefail
 cd "$HOME/code/grovetools/sync"
@@ -305,6 +406,7 @@ curl -fsS -X POST -H "Authorization: Bearer $(cat "$HOME/.config/grove/sync.toke
   -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8788/sync/capabilities >/dev/null
 echo "vm token accepted"
 REMOTE
+fi
 
 log "[7/8] fetching laptop sync token"
 LOCAL_TOKEN_FILE="$HOME/.config/grove/sync.token"
