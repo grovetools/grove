@@ -35,7 +35,7 @@ import (
 // satelliteReposStageDir is the remote staging dir the mirror's bundles are
 // scp'd into; the push script removes it on success, so re-runs stay clean.
 // Deliberately separate from the upgrade stage dir.
-const satelliteReposStageDir = "/tmp/grove-satellite-repos"
+var satelliteReposStageDir = satelliteStageBase() + "/grove-satellite-repos"
 
 // Mirror-only divergence statuses (a VM head that is neither missing nor an
 // ancestor of the local tip). The slice-2 interlock splits divergence on ONE

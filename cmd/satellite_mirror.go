@@ -22,6 +22,19 @@ import (
 // defaultRemoteCodeDir is where satellite-bootstrap.sh clones the superrepo.
 const defaultRemoteCodeDir = "~/code/grovetools"
 
+// satelliteStageBase is the base directory for the VM-side staging dirs the
+// repos/worktree verbs ship bundles through. Default /tmp (matching the
+// provisioned VMs). GROVE_SATELLITE_STAGE_BASE overrides it — the satellite
+// E2E simulator runs in sandboxed environments where /tmp is not writable,
+// and its "VM" shares the local filesystem, so the laptop-side override
+// propagates consistently into the generated scripts and scp destinations.
+func satelliteStageBase() string {
+	if base := os.Getenv("GROVE_SATELLITE_STAGE_BASE"); base != "" {
+		return base
+	}
+	return "/tmp"
+}
+
 // repoNameRe keeps repo names safe to embed as bare words in the generated
 // remote scripts (they come from local directory listings, --repos flags, or
 // config workspace lists).

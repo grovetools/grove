@@ -65,6 +65,13 @@ func AllScenarios() []*harness.Scenario {
 		KeysValidateScenario(),
 		KeysHelpScenario(),
 		KeysIntegrationScenario(),
+
+		// Satellite simulation scenarios (local SSH sim by default; a real
+		// VM under TEND_SATELLITE_REAL=1 — see tests/satellite_endpoint.go)
+		SatelliteReposPushScenario(),
+		SatelliteReposInterlockScenario(),
+		SatelliteWorktreeScenario(),
+		SatelliteVintageGuardScenario(),
 	}
 }
 

@@ -373,18 +373,18 @@ func NormalizeAction(name string) string {
 		// are canonical, not deviant: "/"-filter IS search, and result-nav j/k
 		// IS up/down. Recognizing them here lets the deliberate memory-view /
 		// nav rekeys land clean with zero rebinds.
-		"filter":       "search",  // nav-history, nav-windows /=filter
-		"focus search": "search",  // memory-view /=focus_search
-		"open result":  "confirm", // memory-view enter=open_result
-		"exit search":  "back",    // memory-view esc=exit_search
-		"cancel chord": "back",    // treemux/tuimux esc=cancel_chord
-		"result up":    "up",      // memory-view k/up=result_up
-		"result down":  "down",    // memory-view j/down=result_down
-		"confirm move": "confirm", // nav-manage enter=confirm_move
-		"switch":       "confirm", // nav-windows enter=switch (primary row action)
-		"open":         "confirm", // nav-*/hooks o/enter=open (primary row action)
-		"toggle expand": "fold toggle", // cx-view enter/space=toggle_expand
-		"toggle exclude": "exclude",    // cx-view x=toggle_exclude (dedupes with exclude)
+		"filter":         "search",      // nav-history, nav-windows /=filter
+		"focus search":   "search",      // memory-view /=focus_search
+		"open result":    "confirm",     // memory-view enter=open_result
+		"exit search":    "back",        // memory-view esc=exit_search
+		"cancel chord":   "back",        // treemux/tuimux esc=cancel_chord
+		"result up":      "up",          // memory-view k/up=result_up
+		"result down":    "down",        // memory-view j/down=result_down
+		"confirm move":   "confirm",     // nav-manage enter=confirm_move
+		"switch":         "confirm",     // nav-windows enter=switch (primary row action)
+		"open":           "confirm",     // nav-*/hooks o/enter=open (primary row action)
+		"toggle expand":  "fold toggle", // cx-view enter/space=toggle_expand
+		"toggle exclude": "exclude",     // cx-view x=toggle_exclude (dedupes with exclude)
 	}
 	// Alias lookup on the FULL form first, so multi-word aliases win before
 	// suffix-stripping can mangle them (e.g. "select session" → "confirm").

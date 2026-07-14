@@ -13,6 +13,16 @@ format = "json"
 [context]
 default_rules = "dev-no-tests"
 
+[[test_scopes]]
+name = "satellite-e2e"
+rules = ".cx/satellite-e2e.rules"
+scenarios = [
+  "satellite-repos-push-roundtrip",
+  "satellite-repos-interlock-pull",
+  "satellite-worktree-push-pull-ff",
+  "satellite-worktree-vintage-guard",
+]
+
 [[hooks.on_stop]]
 name = "Auto-format"
 command = "make fmt; CODE=$?; grove internal task-report . fmt $CODE; exit $CODE"
