@@ -10,6 +10,7 @@ import (
 
 	coreenv "github.com/grovetools/core/pkg/env"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/util/pathutil"
 	"github.com/sirupsen/logrus"
 
 	"github.com/grovetools/grove/pkg/envdrift"
@@ -67,6 +68,18 @@ func EnumerateWorktreeStates(root *workspace.WorkspaceNode) ([]WorktreeState, er
 		// its own row) and per-worktree ecosystem checkouts. Subprojects and
 		// their worktrees are not independent deployment targets.
 		if node.Kind != workspace.KindEcosystemRoot && node.Kind != workspace.KindEcosystemWorktree {
+			continue
+		}
+		// Discovery (workspace.GetProjects / GetProjectByPath) promotes ANY
+		// directory under a worktree base to a KindEcosystemWorktree node,
+		// including stateless dirs left behind under the XDG worktrees base.
+		// If such a dir surfaced here it would join the active slug list in
+		// collectSlugs and mask a real host-orphan from `grove env prune`.
+		// Require a live marker (a .grove/workspace file) or a git-worktree
+		// registration (a .git FILE, not a dir) before treating a worktree
+		// node as active. The ecosystem root is exempt — it is a full clone,
+		// not a base-dir entry.
+		if node.Kind == workspace.KindEcosystemWorktree && !isActiveWorktreeDir(node.Path) {
 			continue
 		}
 		if !belongsToEcosystem(node, root) {
@@ -129,10 +142,35 @@ func belongsToEcosystem(node, root *workspace.WorkspaceNode) bool {
 	return false
 }
 
-// pathsEqual compares two filesystem paths for equality after normalising
-// case — macOS-safe, and a no-op for paths that already match literally.
+// pathsEqual compares two filesystem paths for equality. It delegates to
+// pathutil.ComparePaths, which resolves symlinks before comparing (and
+// lowercases on case-insensitive filesystems) — this is what keeps
+// belongsToEcosystem from dropping every node in a /var → /private/var
+// symlinked environment, which would empty the active list and make
+// `grove env prune` bail. The EqualFold string compare is kept only as a
+// fallback when normalization errors (e.g. the path no longer exists).
 func pathsEqual(a, b string) bool {
+	if match, err := pathutil.ComparePaths(a, b); err == nil {
+		return match
+	}
 	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
+}
+
+// isActiveWorktreeDir reports whether a directory discovered under a worktree
+// base is a real, live worktree rather than a stateless leftover dir. A dir
+// counts as active only if it carries grove's .grove/workspace marker (written
+// at worktree creation) OR a git-worktree registration — a .git FILE (the
+// gitfile pointer a linked worktree gets), not a .git directory. Bare/empty
+// dirs under the XDG worktrees base satisfy neither and are classified as
+// orphans so `grove env prune` can detect them.
+func isActiveWorktreeDir(path string) bool {
+	if _, err := os.Stat(filepath.Join(path, ".grove", "workspace")); err == nil {
+		return true
+	}
+	if fi, err := os.Stat(filepath.Join(path, ".git")); err == nil && !fi.IsDir() {
+		return true
+	}
+	return false
 }
 
 // readStateFile loads .grove/env/state.json from a worktree. Missing or
