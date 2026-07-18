@@ -1797,6 +1797,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "CommandPalette", Keys: []string{"<leader> space"}, Description: "open command palette", Enabled: true, ConfigKey: "command_palette"},
 					{Name: "NeedsYouQueue", Keys: []string{"<leader> !"}, Description: "open needs-you queue", Enabled: true, ConfigKey: "needs_you_queue"},
 					{Name: "CloseOverlay", Keys: []string{"<leader> x"}, Description: "close active overlay (when an overlay is open)", Enabled: true, ConfigKey: "close_overlay"},
+					{Name: "BackButton", Keys: []string{"<leader> b"}, Description: "back to previous session (last workspace)", Enabled: true, ConfigKey: "back_button"},
 				},
 			},
 			{
