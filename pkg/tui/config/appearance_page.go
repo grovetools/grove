@@ -119,11 +119,13 @@ func effectiveFocusSpec(lc *config.LayeredConfig, ov *previewOverrides) focusPre
 			thickness = n
 		}
 	}
+	// Thickness is visual weight, not cell footprint: only 1 (thin) and
+	// 2 (thick) render distinctly, mirroring tuimux's focusThickness clamp.
 	if thickness < 1 {
 		thickness = 1
 	}
-	if thickness > 4 {
-		thickness = 4
+	if thickness > 2 {
+		thickness = 2
 	}
 
 	c := theme.DefaultTheme.Colors
@@ -136,29 +138,36 @@ func effectiveFocusSpec(lc *config.LayeredConfig, ov *previewOverrides) focusPre
 }
 
 // gutterGlyph mirrors tuimux ViewPane's thickness-to-glyph mapping for the
-// gutter focus style: 1 → "▎", 2 → "▌", 3+ → that many "█" columns.
+// gutter focus style: 1 → "▎" (thin), 2+ → "▌" (thick). The footprint is
+// always exactly one column — thickness only changes glyph weight.
 func gutterGlyph(thickness int) string {
-	switch {
-	case thickness <= 1:
-		return "▎"
-	case thickness == 2:
+	if thickness >= 2 {
 		return "▌"
-	default:
-		return strings.Repeat("█", thickness)
 	}
+	return "▎"
+}
+
+// borderGlyphs mirrors tuimux ViewPane's weight-based border set: light
+// box-drawing at thickness 1, heavy at thickness 2+.
+func borderGlyphs(thickness int) (tl, hz, tr, vt, bl, br string) {
+	if thickness >= 2 {
+		return "┏", "━", "┓", "┃", "┗", "┛"
+	}
+	return "┌", "─", "┐", "│", "└", "┘"
 }
 
 // renderFocusPreview is a PURE renderer of a two-pane focus-indicator swatch
 // (focused left pane, unfocused right pane) that mimics the three styles of
 // tuimux's ViewPane without touching *Model/*PaneNode:
 //
-//   - gutter: a per-line colored bar on each pane's left edge, glyph chosen
-//     by thickness; a lipgloss.NoColor color renders as spaces (unfocused
-//     indicator hidden), matching ViewPane's isNone branch.
+//   - gutter: a per-line colored bar on each pane's left edge — always one
+//     column wide, glyph weight chosen by thickness; a lipgloss.NoColor color
+//     renders as spaces (indicator hidden), matching ViewPane's isNone branch.
 //   - title: an inverted (background-colored) title bar above each pane.
-//   - border: a mid-split vertical separator between the panes whose
-//     focused-adjacent half takes the active color, matching ViewPane's
-//     simpleSplit/mid := node.H/2 behavior.
+//   - border: a four-edge frame around each pane — light glyphs at thickness
+//     1, heavy at 2 — drawn in the active color on the focused pane and the
+//     inactive color on the unfocused pane; a NoColor color renders the frame
+//     as blank reserved spaces, matching ViewPane's border branch.
 func renderFocusPreview(spec focusPreviewSpec, width int) string {
 	t := theme.DefaultTheme
 
@@ -174,25 +183,7 @@ func renderFocusPreview(spec focusPreviewSpec, width int) string {
 	focused := renderFocusPreviewPane("focused", true, spec, paneW, paneH)
 	unfocused := renderFocusPreviewPane("unfocused", false, spec, paneW, paneH)
 
-	var body string
-	if spec.Style == "border" {
-		activeStyle := lipgloss.NewStyle().Foreground(spec.ActiveColor)
-		inactiveStyle := lipgloss.NewStyle().Foreground(spec.InactiveColor)
-		mid := paneH / 2
-		var sep []string
-		for i := 0; i < paneH; i++ {
-			// Focused pane is the left leaf: its half of the separator
-			// (top, i < mid) takes the active color.
-			style := inactiveStyle
-			if i < mid {
-				style = activeStyle
-			}
-			sep = append(sep, style.Render("│"))
-		}
-		body = lipgloss.JoinHorizontal(lipgloss.Top, focused, strings.Join(sep, "\n"), unfocused)
-	} else {
-		body = lipgloss.JoinHorizontal(lipgloss.Top, focused, " ", unfocused)
-	}
+	body := lipgloss.JoinHorizontal(lipgloss.Top, focused, " ", unfocused)
 
 	header := t.Muted.Render("Preview")
 	return lipgloss.NewStyle().MaxWidth(width).Render(header + "\n" + body)
@@ -227,7 +218,7 @@ func renderFocusPreviewPane(label string, isActive bool, spec focusPreviewSpec, 
 		var gutterLines []string
 		for i := 0; i < h; i++ {
 			if isNone {
-				gutterLines = append(gutterLines, strings.Repeat(" ", spec.Thickness))
+				gutterLines = append(gutterLines, " ")
 			} else {
 				gutterLines = append(gutterLines, lipgloss.NewStyle().Foreground(color).Render(gutterGlyph(spec.Thickness)))
 			}
@@ -241,8 +232,22 @@ func renderFocusPreviewPane(label string, isActive bool, spec focusPreviewSpec, 
 			Align(lipgloss.Center).
 			Render(label)
 		return lipgloss.JoinVertical(lipgloss.Left, title, content)
-	default: // border: panes are plain, the separator between them carries the indicator
-		return content
+	default: // border: a four-edge frame around the pane, blank when NoColor
+		_, isNone := color.(lipgloss.NoColor)
+		tl, hz, tr, vt, bl, br := borderGlyphs(spec.Thickness)
+		var top, bottom, side string
+		if isNone {
+			blank := strings.Repeat(" ", w+2)
+			top, bottom, side = blank, blank, " "
+		} else {
+			frameStyle := lipgloss.NewStyle().Foreground(color)
+			top = frameStyle.Render(tl + strings.Repeat(hz, w) + tr)
+			bottom = frameStyle.Render(bl + strings.Repeat(hz, w) + br)
+			side = frameStyle.Render(vt)
+		}
+		sideCol := strings.TrimSuffix(strings.Repeat(side+"\n", h), "\n")
+		middle := lipgloss.JoinHorizontal(lipgloss.Top, sideCol, content, sideCol)
+		return lipgloss.JoinVertical(lipgloss.Left, top, middle, bottom)
 	}
 }
 
@@ -311,7 +316,7 @@ func AppearanceSettings() []Setting {
 		{
 			ID:          "focus_style",
 			Label:       "Focus style",
-			Description: "How the focused pane is marked: colored side bar (gutter), inverted header (title), or highlighted separators (border)",
+			Description: "How the focused pane is marked: colored side bar (gutter), inverted header (title), or a full frame around the pane (border)",
 			Path:        []string{"tui", "focus", "style"},
 			Control:     ControlSelect,
 			Options:     []string{"gutter", "title", "border"},
@@ -354,7 +359,7 @@ func AppearanceSettings() []Setting {
 		{
 			ID:          "focus_thickness",
 			Label:       "Focus thickness",
-			Description: "Indicator width in cells, 1–4 (gutter/title styles)",
+			Description: "Indicator weight: 1 (thin) or 2 (thick) — never changes pane layout",
 			Path:        []string{"tui", "focus", "thickness"},
 			Control:     ControlInt,
 			Read: func(lc *config.LayeredConfig) string {
