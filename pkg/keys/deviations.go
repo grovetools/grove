@@ -24,6 +24,7 @@ var IntentionalDeviations = []Deviation{
 	{TUI: "gemini-cache", Key: "i", Action: "confirm", Reason: "i=inspect aliases to confirm; enter also bound; clashes with nb edit-search"},
 	// flow / tend / cx
 	{TUI: "flow-plan-add", Key: "ctrl+g", Action: "toggle claw", Reason: "ctrl+g reserved for cancel/clear; plan-add uses it for claw toggle"},
+	{TUI: "flow-status", Key: "cn", Action: "rename", Reason: "rename migrated into the c… change namespace; chord-only per E4 (R stays canonical elsewhere)"},
 	{TUI: "tend-sessions", Key: "X", Action: "kill", Reason: "X reserved for archive; kills debug session instead"},
 	{TUI: "cx-view", Key: ".", Action: "toggle ignored", Reason: "'.' means focus-selected elsewhere; toggles ignored files here"},
 	// git-viewer-changes
