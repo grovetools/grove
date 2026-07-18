@@ -87,42 +87,38 @@ func TestThemesPageRegistration(t *testing.T) {
 
 	pages := m.pager.Pages()
 	if len(pages) != 5 {
-		t.Fatalf("expected 5 pages (4 layers + themes), got %d", len(pages))
+		t.Fatalf("expected 5 pages (appearance, layout, keys, themes, data), got %d", len(pages))
 	}
-	tp, ok := pages[len(pages)-1].(*ThemesPage)
+	tp, ok := pages[3].(*ThemesPage)
 	if !ok {
-		t.Fatalf("expected last page to be *ThemesPage, got %T", pages[len(pages)-1])
+		t.Fatalf("expected page 4 to be *ThemesPage, got %T", pages[3])
 	}
 	if tp.TabID() != "themes" {
 		t.Errorf("TabID = %q, want %q", tp.TabID(), "themes")
-	}
-	if len(m.layerPages) != 4 {
-		t.Fatalf("expected 4 layer pages, got %d", len(m.layerPages))
 	}
 	if len(tp.items) == 0 {
 		t.Error("themes page has no items — palette registry appears empty")
 	}
 }
 
-// TestActiveLayerPageIndexSafety verifies that activating the non-LayerPage
-// Themes tab does not map the pager index into layerPages (the hazard called
-// out by the plan verifier).
+// TestActiveLayerPageIndexSafety verifies that activeLayerPage resolves by
+// type (unwrapping the DataPage), never by pager index: curated stubs and
+// the Themes tab yield nil, the Data tab yields the wrapped LayerPage.
 func TestActiveLayerPageIndexSafety(t *testing.T) {
 	m, _ := newTestModel(t)
 
-	// Layer tabs resolve to their typed page.
-	for i, want := range m.layerPages {
-		m.pager.SetActive(i)
-		if got := m.activeLayerPage(); got != want {
-			t.Errorf("tab %d: activeLayerPage = %p, want %p", i, got, want)
+	// Curated stub tabs and the Themes tab have no layer page.
+	for _, idx := range []int{0, 1, 2, 3} {
+		m.pager.SetActive(idx)
+		if got := m.activeLayerPage(); got != nil {
+			t.Errorf("tab %d: activeLayerPage = %v, want nil", idx, got)
 		}
 	}
 
-	// Themes tab (index 4) is not a LayerPage: must resolve to nil, not
-	// panic or return an arbitrary layer page.
+	// The Data tab (index 4) resolves to the DataPage's inner LayerPage.
 	m.pager.SetActive(4)
-	if got := m.activeLayerPage(); got != nil {
-		t.Errorf("activeLayerPage on Themes tab = %v, want nil", got)
+	if got := m.activeLayerPage(); got != m.dataPage.inner {
+		t.Errorf("activeLayerPage on Data tab = %p, want %p", got, m.dataPage.inner)
 	}
 
 	// refreshAllPages must handle the mixed page set without panicking.

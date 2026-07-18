@@ -89,8 +89,9 @@ func TestDeleteFlowRemovesKeyFromLayerFile(t *testing.T) {
 	m := New(layered, setup.NewYAMLHandler(svc), setup.NewTOMLHandler(svc), grovekeymap.NewConfigKeyMap(nil))
 	m.workspacePath = filepath.Dir(path)
 
-	// Project page is index 3; grab its audit row directly.
-	node := findAuditNode(m.layerPages[3])
+	// Retarget the Data page at the Project layer and grab its audit row.
+	m.dataPage.inner.SetLayer(config.SourceProject, "Project")
+	node := findAuditNode(m.dataPage.inner)
 	if node == nil {
 		t.Fatal("expected an audit row for the orphan key")
 	}
@@ -144,7 +145,8 @@ func TestDeleteCancelLeavesFileUntouched(t *testing.T) {
 	m := New(layered, setup.NewYAMLHandler(svc), setup.NewTOMLHandler(svc), grovekeymap.NewConfigKeyMap(nil))
 	m.workspacePath = filepath.Dir(path)
 
-	node := findAuditNode(m.layerPages[3])
+	m.dataPage.inner.SetLayer(config.SourceProject, "Project")
+	node := findAuditNode(m.dataPage.inner)
 	if node == nil {
 		t.Fatal("expected an audit row for the orphan key")
 	}

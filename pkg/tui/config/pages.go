@@ -57,6 +57,11 @@ type LayerPage struct {
 	filters    *FilterState
 	keys       grovekeymap.ConfigKeyMap
 
+	// cycleHint, when non-empty, is appended to the filter-state line in
+	// the footer. Set by the wrapping DataPage to advertise its
+	// layer-cycler key; empty for standalone layer pages.
+	cycleHint string
+
 	// Vim chord state
 	lastZPress time.Time // For zR/zM/zo/zc
 	lastGPress time.Time // For gg
@@ -96,6 +101,16 @@ func NewLayerPage(name string, layer config.ConfigSource, layered *config.Layere
 
 func (p *LayerPage) Name() string               { return p.name }
 func (p *LayerPage) Layer() config.ConfigSource { return p.layer }
+
+// SetLayer retargets the page at a different config layer. The cursor is
+// reset and the tree/audit content re-derived via Refresh (which already
+// keys everything off p.layer). Used by DataPage's layer cycler.
+func (p *LayerPage) SetLayer(layer config.ConfigSource, name string) {
+	p.layer = layer
+	p.name = name
+	p.cursor = 0
+	p.Refresh(p.config)
+}
 
 func (p *LayerPage) Init() tea.Cmd { return nil }
 
@@ -613,7 +628,11 @@ func (p *LayerPage) renderFilterState() string {
 		sortLabel = "alphabetical"
 	}
 
-	return t.Muted.Render(fmt.Sprintf("[v:%s] [m:%s] [s:%s]", viewIcon, maturityIcon, sortLabel))
+	state := fmt.Sprintf("[v:%s] [m:%s] [s:%s]", viewIcon, maturityIcon, sortLabel)
+	if p.cycleHint != "" {
+		state += " " + p.cycleHint
+	}
+	return t.Muted.Render(state)
 }
 
 // rebuildNodeList flattens the tree and applies filters.
@@ -662,7 +681,14 @@ func LayerPageTitle(layer config.ConfigSource, layered *config.LayeredConfig) st
 	var contextPath string
 	switch layer {
 	case config.SourceGlobal:
-		contextPath = setup.GlobalTOMLConfigPath()
+		// Prefer the resolved file path (mirrors renderFooter); fall back
+		// to the default global location when the config has none.
+		if layered != nil && layered.FilePaths != nil {
+			contextPath = layered.FilePaths[config.SourceGlobal]
+		}
+		if contextPath == "" {
+			contextPath = setup.GlobalTOMLConfigPath()
+		}
 	case config.SourceEcosystem:
 		if layered != nil && layered.FilePaths != nil {
 			contextPath = layered.FilePaths[config.SourceEcosystem]

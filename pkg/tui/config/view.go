@@ -478,6 +478,8 @@ func LayerDisplayName(source coreconfig.ConfigSource) string {
 		return "Env*"
 	case coreconfig.SourceEcosystem:
 		return "Ecosystem"
+	case coreconfig.SourceProjectNotebook:
+		return "Notebook"
 	case coreconfig.SourceProject:
 		return "Project"
 	case coreconfig.SourceOverride:
