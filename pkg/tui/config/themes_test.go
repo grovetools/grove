@@ -86,8 +86,8 @@ func TestThemesPageRegistration(t *testing.T) {
 	m, _ := newTestModel(t)
 
 	pages := m.pager.Pages()
-	if len(pages) != 5 {
-		t.Fatalf("expected 5 pages (appearance, layout, keys, themes, data), got %d", len(pages))
+	if len(pages) != 6 {
+		t.Fatalf("expected 6 pages (appearance, layout, keys, themes, notebook, data), got %d", len(pages))
 	}
 	tp, ok := pages[3].(*ThemesPage)
 	if !ok {
@@ -107,16 +107,16 @@ func TestThemesPageRegistration(t *testing.T) {
 func TestActiveLayerPageIndexSafety(t *testing.T) {
 	m, _ := newTestModel(t)
 
-	// Curated stub tabs and the Themes tab have no layer page.
-	for _, idx := range []int{0, 1, 2, 3} {
+	// Curated tabs and the Themes tab have no layer page.
+	for _, idx := range []int{0, 1, 2, 3, 4} {
 		m.pager.SetActive(idx)
 		if got := m.activeLayerPage(); got != nil {
 			t.Errorf("tab %d: activeLayerPage = %v, want nil", idx, got)
 		}
 	}
 
-	// The Data tab (index 4) resolves to the DataPage's inner LayerPage.
-	m.pager.SetActive(4)
+	// The Data tab (index 5) resolves to the DataPage's inner LayerPage.
+	m.pager.SetActive(5)
 	if got := m.activeLayerPage(); got != m.dataPage.inner {
 		t.Errorf("activeLayerPage on Data tab = %p, want %p", got, m.dataPage.inner)
 	}

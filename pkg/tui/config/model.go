@@ -156,16 +156,17 @@ func New(
 
 	width, height := 80, 24 // Initial dummy size
 
-	// Curated pages: Appearance, Layout, and Keys are the task-shaped tabs;
-	// Themes is the existing gallery; Data is the raw per-layer tree
-	// collapsed into one tab with a layer cycler.
+	// Curated pages: Appearance, Layout, Keys, and Notebook are the
+	// task-shaped tabs; Themes is the existing gallery; Data is the raw
+	// per-layer tree collapsed into one tab with a layer cycler.
 	appearancePage := NewCuratedPage("Appearance", AppearanceSettings(), layered, keys, width, height, CuratedOpts{})
 	layoutPage := NewCuratedPage("Layout", LayoutSettings(), layered, keys, width, height, CuratedOpts{})
 	keysPage := NewCuratedPage("Keys", KeysSettings(), layered, keys, width, height, CuratedOpts{})
 	themesPage := NewThemesPage(layered, keys, width, height)
+	notebookPage := NewCuratedPage("Notebook", NotebookSettings(), layered, keys, width, height, CuratedOpts{})
 	dataPage := NewDataPage(layered, filters, keys, width, height)
 
-	pages := []pager.Page{appearancePage, layoutPage, keysPage, themesPage, dataPage}
+	pages := []pager.Page{appearancePage, layoutPage, keysPage, themesPage, notebookPage, dataPage}
 
 	pagerKeys := newPagerKeyMap(keys)
 
@@ -186,7 +187,7 @@ func New(
 		pager:        pgr,
 		dataPage:     dataPage,
 		themesPage:   themesPage,
-		curatedPages: []*CuratedPage{appearancePage, layoutPage, keysPage},
+		curatedPages: []*CuratedPage{appearancePage, layoutPage, keysPage, notebookPage},
 		keysPage:     keysPage,
 		input:        ti,
 		layered:      layered,
@@ -290,7 +291,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.setting.WriteTransform != nil {
 			typed = msg.setting.WriteTransform(typed)
 		}
-		if err := SaveGlobalSetting(m.tomlHandler, m.yamlHandler, m.layered, msg.setting.Path, typed); err != nil {
+		// Settings with a Save hook own their persistence (multi-key /
+		// dynamically targeted writes); everything else is the single typed
+		// global write at the setting's static Path.
+		if msg.setting.Save != nil {
+			if err := msg.setting.Save(m.tomlHandler, m.yamlHandler, m.layered, typed); err != nil {
+				m.statusMsg = fmt.Sprintf("Error: %v", err)
+				return m, nil
+			}
+		} else if err := SaveGlobalSetting(m.tomlHandler, m.yamlHandler, m.layered, msg.setting.Path, typed); err != nil {
 			m.statusMsg = fmt.Sprintf("Error: %v", err)
 			return m, nil
 		}

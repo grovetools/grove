@@ -67,6 +67,7 @@ func TestNewSinglePageShape(t *testing.T) {
 		"appearance": "appearance",
 		"layout":     "layout",
 		"keys":       "keys",
+		"notebook":   "notebook",
 	} {
 		m, _, _ := newSinglePageTestModel(t, pageID, SinglePageOpts{})
 		if got := len(m.pager.Pages()); got != 1 {
