@@ -105,7 +105,7 @@ func TestAppearanceDefaultsDisplayed(t *testing.T) {
 }
 
 // TestGutterGlyphByThickness pins the ViewPane glyph mapping the swatch
-// mimics: 1 → "▎", 2 → "▌", 3+ → that many "█".
+// mimics: 1 → "▎" (thin), 2+ → "▌" (thick) — always exactly one column.
 func TestGutterGlyphByThickness(t *testing.T) {
 	cases := []struct {
 		thickness int
@@ -113,12 +113,27 @@ func TestGutterGlyphByThickness(t *testing.T) {
 	}{
 		{1, "▎"},
 		{2, "▌"},
-		{3, "███"},
-		{4, "████"},
+		{3, "▌"},
+		{4, "▌"},
 	}
 	for _, tc := range cases {
 		if got := gutterGlyph(tc.thickness); got != tc.want {
 			t.Errorf("gutterGlyph(%d) = %q, want %q", tc.thickness, got, tc.want)
+		}
+	}
+}
+
+// TestBorderGlyphsByThickness pins the weight-based border set the swatch
+// mimics: light box-drawing at thickness 1, heavy at 2+.
+func TestBorderGlyphsByThickness(t *testing.T) {
+	tl, hz, tr, vt, bl, br := borderGlyphs(1)
+	if got := tl + hz + tr + vt + bl + br; got != "┌─┐│└┘" {
+		t.Errorf("borderGlyphs(1) = %q, want light set", got)
+	}
+	for _, thickness := range []int{2, 3} {
+		tl, hz, tr, vt, bl, br = borderGlyphs(thickness)
+		if got := tl + hz + tr + vt + bl + br; got != "┏━┓┃┗┛" {
+			t.Errorf("borderGlyphs(%d) = %q, want heavy set", thickness, got)
 		}
 	}
 }
@@ -166,8 +181,8 @@ func TestRenderFocusPreviewGutter(t *testing.T) {
 }
 
 // TestRenderFocusPreviewTitleAndBorder: title renders a bar with the pane
-// labels and no gutter glyphs; border renders the mid-split vertical
-// separator between the panes.
+// labels and no gutter glyphs; border renders a four-edge frame around each
+// pane — light at thickness 1, heavy at 2, blank (reserved) for NoColor.
 func TestRenderFocusPreviewTitleAndBorder(t *testing.T) {
 	title := renderFocusPreview(focusPreviewSpec{
 		Style:         "title",
@@ -182,23 +197,70 @@ func TestRenderFocusPreviewTitleAndBorder(t *testing.T) {
 		t.Error("title style: unexpected gutter glyph")
 	}
 
+	// Both colors real: both panes carry a light frame → each corner glyph
+	// appears once per pane.
 	border := renderFocusPreview(focusPreviewSpec{
 		Style:         "border",
 		Thickness:     1,
 		ActiveColor:   lipgloss.Color("6"),
 		InactiveColor: lipgloss.Color("8"),
 	}, 80)
-	if got := strings.Count(border, "│"); got != 4 {
-		t.Errorf("border style: %d separator cells, want 4 (one per pane line)", got)
+	for _, g := range []string{"┌", "┐", "└", "┘"} {
+		if got := strings.Count(border, g); got != 2 {
+			t.Errorf("border both colored: %d %q corners, want 2 (one per pane)", got, g)
+		}
+	}
+	if strings.Contains(border, "┏") {
+		t.Error("border thickness 1: heavy glyphs rendered")
 	}
 	if strings.Contains(border, "▎") {
 		t.Error("border style: unexpected gutter glyph")
+	}
+
+	// Thickness 2 switches to the heavy set.
+	heavy := renderFocusPreview(focusPreviewSpec{
+		Style:         "border",
+		Thickness:     2,
+		ActiveColor:   lipgloss.Color("6"),
+		InactiveColor: lipgloss.Color("8"),
+	}, 80)
+	if got := strings.Count(heavy, "┏"); got != 2 {
+		t.Errorf("border thickness 2: %d ┏ corners, want 2", got)
+	}
+	if strings.Contains(heavy, "┌") {
+		t.Error("border thickness 2: light glyphs rendered")
+	}
+
+	// NoColor inactive: only the focused pane's frame is visible; the
+	// unfocused frame is blank but still reserved (pane blocks stay the
+	// same size, so the two panes still render side by side).
+	noneInactive := renderFocusPreview(focusPreviewSpec{
+		Style:         "border",
+		Thickness:     1,
+		ActiveColor:   lipgloss.Color("6"),
+		InactiveColor: lipgloss.NoColor{},
+	}, 80)
+	for _, g := range []string{"┌", "┐", "└", "┘"} {
+		if got := strings.Count(noneInactive, g); got != 1 {
+			t.Errorf("border none inactive: %d %q corners, want 1 (focused pane only)", got, g)
+		}
+	}
+
+	// NoColor active too: no frame glyphs anywhere.
+	allNone := renderFocusPreview(focusPreviewSpec{
+		Style:         "border",
+		Thickness:     1,
+		ActiveColor:   lipgloss.NoColor{},
+		InactiveColor: lipgloss.NoColor{},
+	}, 80)
+	if strings.ContainsAny(allNone, "┌┐└┘┏┓┗┛│┃─━") {
+		t.Error("border all none: frame glyphs still rendered")
 	}
 }
 
 // TestEffectiveFocusSpecOverrides: preview overrides beat the layered
 // config, "none" resolves to lipgloss.NoColor, and thickness is clamped to
-// the schema's 1–4.
+// the effective 1–2 weight range.
 func TestEffectiveFocusSpecOverrides(t *testing.T) {
 	ov := newPreviewOverrides()
 
@@ -220,8 +282,8 @@ func TestEffectiveFocusSpecOverrides(t *testing.T) {
 	if _, isNone := spec.ActiveColor.(lipgloss.NoColor); !isNone {
 		t.Errorf("override active \"none\" = %v, want NoColor", spec.ActiveColor)
 	}
-	if spec.Thickness != 4 {
-		t.Errorf("thickness 9 clamped to %d, want 4", spec.Thickness)
+	if spec.Thickness != 2 {
+		t.Errorf("thickness 9 clamped to %d, want 2", spec.Thickness)
 	}
 
 	ov.clear("focus_style")
