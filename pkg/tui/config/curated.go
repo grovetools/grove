@@ -31,7 +31,9 @@ const (
 	ControlSelect
 	// ControlText is free-form text input. Writes a string.
 	ControlText
-	// ControlColor is a color name/hex input. Writes a string.
+	// ControlColor is a color name/hex input. Writes a string. Currently
+	// unused — the focus color rows became ControlSelect enums over the
+	// theme resolver's names — but kept for future free-form color rows.
 	ControlColor
 	// ControlInt is numeric input. Writes a Go int.
 	ControlInt

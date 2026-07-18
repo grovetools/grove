@@ -47,16 +47,18 @@ var buildConflictStack = func() *keybind.Stack {
 
 // keyConflictChecker lazily builds the keybinding stack (first captured
 // candidate pays the collector cost, once per page instance) and holds the
-// per-setting warning notes the capture rows' PreviewFn renders. Warn, don't
+// per-setting captured candidates (raw bubbletea form) the capture rows'
+// PreviewFn turns into a status line: neutral for the status quo (the row's
+// default or currently saved key), a conflict warning otherwise. Warn, don't
 // block: a conflicting candidate can still be committed.
 type keyConflictChecker struct {
-	stack *keybind.Stack
-	built bool
-	notes map[string]string
+	stack      *keybind.Stack
+	built      bool
+	candidates map[string]string
 }
 
 func newKeyConflictChecker() *keyConflictChecker {
-	return &keyConflictChecker{notes: make(map[string]string)}
+	return &keyConflictChecker{candidates: make(map[string]string)}
 }
 
 func (c *keyConflictChecker) ensure() *keybind.Stack {
@@ -67,17 +69,42 @@ func (c *keyConflictChecker) ensure() *keybind.Stack {
 	return c.stack
 }
 
-// conflictNote formats the warning for a captured candidate key (raw
-// bubbletea form): who already owns it — layer + action, e.g. `C-B is
-// backward-char (Shell, default)` — and a SuggestAlternatives "try instead"
-// line. FindBindingForKey's layer order skips the tuimux layers, so they are
+// rawKeyDisplay converts a normalized key ("C-M-B") to the raw bubbletea
+// spelling the page persists and displays everywhere ("ctrl+alt+b") — the
+// conflict note speaks one dialect, and it's the one the user's config file
+// stores.
+func rawKeyDisplay(normalized string) string {
+	var mods strings.Builder
+	rest := normalized
+	for {
+		switch {
+		case strings.HasPrefix(rest, "C-"):
+			mods.WriteString("ctrl+")
+			rest = rest[2:]
+		case strings.HasPrefix(rest, "M-"):
+			mods.WriteString("alt+")
+			rest = rest[2:]
+		case strings.HasPrefix(rest, "S-"):
+			mods.WriteString("shift+")
+			rest = rest[2:]
+		default:
+			return mods.String() + strings.ToLower(rest)
+		}
+	}
+}
+
+// conflictNote formats the status line for a captured candidate key, spoken
+// entirely in raw bubbletea spelling ("ctrl+b") — normalization is used only
+// to query the stack. conflict reports whether the key is already taken
+// (Warning styling) as opposed to looking free (informational).
+// FindBindingForKey's layer order skips the tuimux layers, so they are
 // probed explicitly; without that a clash with tuimux's own global/leader
 // binds would go unreported.
-func conflictNote(stack *keybind.Stack, rawKey string) string {
-	normalized := keybind.Normalize(rawKey, "tuimux")
+func conflictNote(stack *keybind.Stack, rawKey string) (note string, conflict bool) {
 	if stack == nil {
-		return ""
+		return "", false
 	}
+	normalized := keybind.Normalize(rawKey, "tuimux")
 	b := stack.FindBindingForKey(normalized)
 	if b == nil {
 		for _, layer := range []keybind.Layer{keybind.LayerTuimuxGlobal, keybind.LayerTuimuxLeader} {
@@ -88,13 +115,17 @@ func conflictNote(stack *keybind.Stack, rawKey string) string {
 		}
 	}
 	if b == nil {
-		return normalized + " looks free — no conflicts found"
+		return rawKey + " looks free — no conflicts found", false
 	}
-	note := fmt.Sprintf("%s is %s (%s, %s)", normalized, b.Action, b.Layer, b.Provenance)
+	note = fmt.Sprintf("%s is taken by %s: %s (%s binding)", rawKey, b.Layer, b.Action, b.Provenance)
 	if alts := stack.SuggestAlternatives(normalized, 3); len(alts) > 0 {
-		note += " — try instead: " + strings.Join(alts, ", ")
+		shown := make([]string, 0, len(alts))
+		for _, a := range alts {
+			shown = append(shown, rawKeyDisplay(a))
+		}
+		note += " — alternatives: " + strings.Join(shown, ", ")
 	}
-	return note
+	return note, true
 }
 
 // BindingRow is one row of the Keys page's read-only effective-bindings
@@ -222,18 +253,46 @@ func effectiveChord(lc *config.LayeredConfig, get func(*config.TUIConfig) string
 func KeysSettings() []Setting {
 	chk := newKeyConflictChecker()
 
+	readLeader := func(lc *config.LayeredConfig) string {
+		return effectiveChord(lc, func(t *config.TUIConfig) string { return t.LeaderKey }, defaultLeaderKey)
+	}
+	readAction := func(lc *config.LayeredConfig) string {
+		return effectiveChord(lc, func(t *config.TUIConfig) string { return t.ActionKey }, defaultActionKey)
+	}
+
 	check := func(id string) func(string) {
-		return func(v string) { chk.notes[id] = conflictNote(chk.ensure(), v) }
+		return func(v string) {
+			chk.candidates[id] = v
+			chk.ensure() // pay the collector cost at stage time, not render time
+		}
 	}
 	uncheck := func(id string) func(*config.LayeredConfig) {
-		return func(*config.LayeredConfig) { delete(chk.notes, id) }
+		return func(*config.LayeredConfig) { delete(chk.candidates, id) }
 	}
-	capturePreview := func(id, def, tomlKey string) func(*config.LayeredConfig, int) string {
+	// capturePreview renders the capture row's helper block. A staged
+	// candidate that matches the shipped default or the currently saved key
+	// gets a neutral status-quo line — re-picking what you already have is
+	// never scolded with a conflict warning, even though the default leader
+	// (ctrl+b) does collide with readline's backward-char.
+	capturePreview := func(id, def, tomlKey, label string, current func(*config.LayeredConfig) string) func(*config.LayeredConfig, int) string {
 		t := theme.DefaultTheme
-		return func(_ *config.LayeredConfig, width int) string {
+		return func(lc *config.LayeredConfig, width int) string {
 			var lines []string
-			if note := chk.notes[id]; note != "" {
-				lines = append(lines, t.Warning.Render(note))
+			if raw := chk.candidates[id]; raw != "" {
+				switch {
+				case raw == def:
+					lines = append(lines, t.Muted.Render(raw+" — the default "+label))
+				case raw == current(lc):
+					lines = append(lines, t.Muted.Render(raw+" — already your "+label))
+				default:
+					if note, conflict := conflictNote(chk.ensure(), raw); note != "" {
+						style := t.Muted
+						if conflict {
+							style = t.Warning
+						}
+						lines = append(lines, style.Render(note))
+					}
+				}
 			}
 			lines = append(lines,
 				t.Muted.Render("enter captures the next keystroke • backspace resets to the default ("+def+")"),
@@ -251,10 +310,8 @@ func KeysSettings() []Setting {
 			Path:        []string{"tui", "leader_key"},
 			Control:     ControlKeyCapture,
 			Options:     []string{defaultLeaderKey},
-			Read: func(lc *config.LayeredConfig) string {
-				return effectiveChord(lc, func(t *config.TUIConfig) string { return t.LeaderKey }, defaultLeaderKey)
-			},
-			PreviewFn:   capturePreview("leader", defaultLeaderKey, "tui.leader_key"),
+			Read:        readLeader,
+			PreviewFn:   capturePreview("leader", defaultLeaderKey, "tui.leader_key", "leader key", readLeader),
 			Preview:     check("leader"),
 			Revert:      uncheck("leader"),
 			ApplyDomain: embed.SettingDomainLeaderKey,
@@ -266,10 +323,8 @@ func KeysSettings() []Setting {
 			Path:        []string{"tui", "action_key"},
 			Control:     ControlKeyCapture,
 			Options:     []string{defaultActionKey},
-			Read: func(lc *config.LayeredConfig) string {
-				return effectiveChord(lc, func(t *config.TUIConfig) string { return t.ActionKey }, defaultActionKey)
-			},
-			PreviewFn:   capturePreview("action_key", defaultActionKey, "tui.action_key"),
+			Read:        readAction,
+			PreviewFn:   capturePreview("action_key", defaultActionKey, "tui.action_key", "action key", readAction),
 			Preview:     check("action_key"),
 			Revert:      uncheck("action_key"),
 			ApplyDomain: embed.SettingDomainActionKey,

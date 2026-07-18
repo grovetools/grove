@@ -24,6 +24,50 @@ const (
 	defaultIconsMode          = "nerd"
 )
 
+// Thickness select labels. The TOML schema stores an int (1=thin, 2=thick);
+// the UI cycles words because only those two weights render distinctly.
+const (
+	focusThicknessThin  = "thin"
+	focusThicknessThick = "thick"
+)
+
+// focusColorOptions is the closed set the focus color rows cycle through:
+// exactly the names core's theme resolver (theme.Colors.ResolveColor)
+// understands, plus "none" — a first-class choice meaning "no visible
+// indicator". Common picks first; keep in sync with ResolveColor's switch.
+var focusColorOptions = []string{
+	"cyan", "accent", "blue", "violet", "pink",
+	"green", "yellow", "orange", "red",
+	"border", "muted_text", "light_text", "dark_text",
+	"selected_background", "subtle_background", "very_subtle_background",
+	"none",
+}
+
+// thicknessLabel maps the persisted TOML int onto the select's word:
+// 1 → thin, 2+ → thick (the runtime clamps anything above 2 to thick).
+func thicknessLabel(n int) string {
+	if n >= 2 {
+		return focusThicknessThick
+	}
+	return focusThicknessThin
+}
+
+// thicknessValue maps a select label (or a legacy numeric string, e.g. a
+// staged preview from an old config) onto the 1/2 weight int the TOML
+// schema stores.
+func thicknessValue(v string) int {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case focusThicknessThick:
+		return 2
+	case focusThicknessThin:
+		return 1
+	}
+	if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n >= 2 {
+		return 2
+	}
+	return 1
+}
+
 // previewOverrides holds transient per-setting candidate values staged by
 // the CuratedPage preview lifecycle (Setting.Preview/Revert hooks write and
 // clear them). The focus swatch reads through it so a cycled-but-uncommitted
@@ -114,10 +158,8 @@ func effectiveFocusSpec(lc *config.LayeredConfig, ov *previewOverrides) focusPre
 	if v, ok := ov.get("focus_inactive_color"); ok && v != "" {
 		inactiveName = v
 	}
-	if v, ok := ov.get("focus_thickness"); ok {
-		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
-			thickness = n
-		}
+	if v, ok := ov.get("focus_thickness"); ok && v != "" {
+		thickness = thicknessValue(v)
 	}
 	// Thickness is visual weight, not cell footprint: only 1 (thin) and
 	// 2 (thick) render distinctly, mirroring tuimux's focusThickness clamp.
@@ -331,9 +373,10 @@ func AppearanceSettings() []Setting {
 		{
 			ID:          "focus_active_color",
 			Label:       "Focus active color",
-			Description: "Indicator color for the focused pane — a theme color name (cyan, accent, …) or #hex",
+			Description: "Indicator color for the focused pane — theme colors, or \"none\" for no visible focus cue",
 			Path:        []string{"tui", "focus", "active_color"},
-			Control:     ControlColor,
+			Control:     ControlSelect,
+			Options:     focusColorOptions,
 			Read: func(lc *config.LayeredConfig) string {
 				return focusField(lc, func(fc *config.FocusConfig) string { return fc.ActiveColor }, defaultFocusActiveColor)
 			},
@@ -347,7 +390,8 @@ func AppearanceSettings() []Setting {
 			Label:       "Focus inactive color",
 			Description: "Indicator color for unfocused panes — \"none\" hides it entirely",
 			Path:        []string{"tui", "focus", "inactive_color"},
-			Control:     ControlColor,
+			Control:     ControlSelect,
+			Options:     focusColorOptions,
 			Read: func(lc *config.LayeredConfig) string {
 				return focusField(lc, func(fc *config.FocusConfig) string { return fc.InactiveColor }, defaultFocusInactiveColor)
 			},
@@ -359,11 +403,20 @@ func AppearanceSettings() []Setting {
 		{
 			ID:          "focus_thickness",
 			Label:       "Focus thickness",
-			Description: "Indicator weight: 1 (thin) or 2 (thick) — never changes pane layout",
+			Description: "Indicator weight: thin or thick — never changes pane layout",
 			Path:        []string{"tui", "focus", "thickness"},
-			Control:     ControlInt,
+			Control:     ControlSelect,
+			Options:     []string{focusThicknessThin, focusThicknessThick},
 			Read: func(lc *config.LayeredConfig) string {
-				return strconv.Itoa(focusThicknessValue(lc))
+				return thicknessLabel(focusThicknessValue(lc))
+			},
+			// The select stores a word; the TOML schema stores the 1/2
+			// weight int (the A1 typed-write rule — see keys_page pane_nav).
+			WriteTransform: func(v interface{}) interface{} {
+				if s, ok := v.(string); ok {
+					return thicknessValue(s)
+				}
+				return v
 			},
 			PreviewFn:   focusSwatch,
 			Preview:     stage("focus_thickness"),
