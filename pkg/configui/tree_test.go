@@ -179,3 +179,45 @@ func TestInferFieldType(t *testing.T) {
 		})
 	}
 }
+
+func TestLabelDisplayNameOverride(t *testing.T) {
+	// The [claude] extension section renders as "Agent Settings" in the
+	// Configuration Editor; every other field keeps its raw key.
+	claude := FieldMeta{Path: []string{"claude"}}
+	if got := claude.Label(); got != "Agent Settings" {
+		t.Errorf("expected claude section label %q, got %q", "Agent Settings", got)
+	}
+	plain := FieldMeta{Path: []string{"workspaces"}}
+	if got := plain.Label(); got != "workspaces" {
+		t.Errorf("expected plain field label %q, got %q", "workspaces", got)
+	}
+}
+
+func TestGeneratedSchemaHasClaudeSection(t *testing.T) {
+	// The claude fragment must be composed into the generated schema as a
+	// top-level object section with the expanded managed fields present.
+	meta, ok := FieldsByPath["claude"]
+	if !ok {
+		t.Fatal("expected generated schema to contain a top-level 'claude' section")
+	}
+	if meta.Type != FieldObject {
+		t.Errorf("expected claude section to be an object, got %v", meta.Type)
+	}
+	want := map[string]bool{
+		"permissions": false, "sandbox": false, "model": false,
+		"effortLevel": false, "editorMode": false, "tui": false,
+		"skipDangerousModePermissionPrompt": false, "skipWorkflowUsageWarning": false,
+		"agentPushNotifEnabled": false, "enabledPlugins": false,
+	}
+	for _, child := range meta.Children {
+		key := child.Path[len(child.Path)-1]
+		if _, tracked := want[key]; tracked {
+			want[key] = true
+		}
+	}
+	for key, seen := range want {
+		if !seen {
+			t.Errorf("expected claude section child %q in generated schema", key)
+		}
+	}
+}

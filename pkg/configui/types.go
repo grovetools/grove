@@ -134,11 +134,23 @@ type FieldMeta struct {
 	StatusReplacedBy string      `json:"status_replaced_by,omitempty"`
 }
 
+// displayNameOverrides maps a full config path to the human-friendly label the
+// TUI shows instead of the raw key. Used for top-level sections whose config
+// key is not self-explanatory (the [claude] extension renders as "Agent
+// Settings" in the Configuration Editor sidebar). The generator does not emit
+// schema titles into FieldMeta, so this is the label seam.
+var displayNameOverrides = map[string]string{
+	"claude": "Agent Settings",
+}
+
 // Label returns a human-readable label for the field.
-// Uses the last path component, converted to title case.
+// Uses the last path component, unless a display-name override applies.
 func (f FieldMeta) Label() string {
 	if len(f.Path) == 0 {
 		return ""
+	}
+	if name, ok := displayNameOverrides[f.FullPath()]; ok {
+		return name
 	}
 	return f.Path[len(f.Path)-1]
 }
