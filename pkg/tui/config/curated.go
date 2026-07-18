@@ -90,6 +90,14 @@ type Setting struct {
 	// Domain of the embed.SettingAppliedMsg emitted after a save). Empty
 	// means no live apply (startup-only settings).
 	ApplyDomain string
+	// WriteTransform, when set, maps the control's typed value (the
+	// TypedValue result — already a Go bool/int/string) to the value
+	// actually persisted at Path. Used for inverted-presentation rows: the
+	// Layout page's "Show Home on startup" negates its bool into
+	// tui.hide_splash_on_startup, whose Read shows the inverse. The result
+	// must stay correctly Go-typed for the TOML file (the A1 hazard).
+	// nil means the typed value is written as-is.
+	WriteTransform func(v interface{}) interface{}
 }
 
 // TypedValue converts the control's string form into the Go-typed value that
@@ -125,10 +133,6 @@ type setSettingMsg struct {
 	setting Setting
 	value   string
 }
-
-// LayoutSettings returns the Layout page's setting descriptors. Phase 4
-// populates it (drawer orientation/expanded, rail expanded, home-on-startup).
-func LayoutSettings() []Setting { return nil }
 
 // KeysSettings returns the Keys page's setting descriptors. Phase 5
 // populates it (leader/action capture, pane-nav choice).
