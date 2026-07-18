@@ -824,6 +824,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "Bottom", Keys: []string{"G"}, Description: "bottom", Enabled: true, ConfigKey: "bottom"},
 					{Name: "NextPage", Keys: []string{"tab"}, Description: "next page", Enabled: true, ConfigKey: "next_page"},
 					{Name: "PrevPage", Keys: []string{"shift+tab"}, Description: "prev page", Enabled: true, ConfigKey: "prev_page"},
+					{Name: "CycleLayer", Keys: []string{"L"}, Description: "cycle layer", Enabled: true, ConfigKey: "cycle_layer"},
 					{Name: "Tab1", Keys: []string{"1"}, Description: "tab 1", Enabled: true, ConfigKey: "tab1"},
 					{Name: "Tab2", Keys: []string{"2"}, Description: "tab 2", Enabled: true, ConfigKey: "tab2"},
 					{Name: "Tab3", Keys: []string{"3"}, Description: "tab 3", Enabled: true, ConfigKey: "tab3"},
