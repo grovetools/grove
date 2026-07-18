@@ -92,9 +92,12 @@ type Model struct {
 	themesPage *ThemesPage
 
 	// curatedPages tracks the CuratedPage tabs so refreshAllPages can
-	// re-point them at a reloaded config. Empty while Appearance/Layout/
-	// Keys are stubs; Phases 3–5 register their real pages here.
+	// re-point them at a reloaded config.
 	curatedPages []*CuratedPage
+
+	// keysPage is the Keys curated page (3rd tab), kept separately so
+	// SetBindingsProvider can target it.
+	keysPage *CuratedPage
 
 	input textinput.Model
 
@@ -153,12 +156,12 @@ func New(
 
 	width, height := 80, 24 // Initial dummy size
 
-	// Curated pages: Appearance (Phase 3) and Layout (Phase 4) are real;
-	// Keys stays a stub until Phase 5; Themes is the existing gallery; Data
-	// is the raw per-layer tree collapsed into one tab with a layer cycler.
+	// Curated pages: Appearance, Layout, and Keys are the task-shaped tabs;
+	// Themes is the existing gallery; Data is the raw per-layer tree
+	// collapsed into one tab with a layer cycler.
 	appearancePage := NewCuratedPage("Appearance", AppearanceSettings(), layered, keys, width, height, CuratedOpts{})
 	layoutPage := NewCuratedPage("Layout", LayoutSettings(), layered, keys, width, height, CuratedOpts{})
-	keysPage := newStubPage("Keys", "keys", "Key settings coming soon", width, height)
+	keysPage := NewCuratedPage("Keys", KeysSettings(), layered, keys, width, height, CuratedOpts{})
 	themesPage := NewThemesPage(layered, keys, width, height)
 	dataPage := NewDataPage(layered, filters, keys, width, height)
 
@@ -195,7 +198,8 @@ func New(
 		pager:        pgr,
 		dataPage:     dataPage,
 		themesPage:   themesPage,
-		curatedPages: []*CuratedPage{appearancePage, layoutPage},
+		curatedPages: []*CuratedPage{appearancePage, layoutPage, keysPage},
+		keysPage:     keysPage,
 		input:        ti,
 		layered:      layered,
 		yamlHandler:  yamlHandler,
@@ -352,6 +356,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// While the active page owns raw key input — an inline editor open or a
+	// key capture in progress (CuratedPage.IsTextEntryActive) — every key
+	// belongs to the page: the quit/help/filter matches below would
+	// otherwise swallow typed characters or the captured chord (q, ?, …).
+	if ti, ok := m.pager.Active().(pager.PageWithTextInput); ok && ti.IsTextEntryActive() {
+		var cmd tea.Cmd
+		m.pager, cmd = m.pager.Update(msg)
+		return m, cmd
+	}
+
 	// Quit -> emit CloseRequestMsg instead of tea.Quit. When embedded the
 	// host process keeps running, so drop any live theme preview first.
 	if key.Matches(msg, m.keys.Base.Quit) {
