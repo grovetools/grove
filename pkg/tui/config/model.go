@@ -91,6 +91,11 @@ type Model struct {
 	// themesPage is the bespoke theme-gallery page (4th tab).
 	themesPage *ThemesPage
 
+	// curatedPages tracks the CuratedPage tabs so refreshAllPages can
+	// re-point them at a reloaded config. Empty while Appearance/Layout/
+	// Keys are stubs; Phases 3–5 register their real pages here.
+	curatedPages []*CuratedPage
+
 	input textinput.Model
 
 	// Layered config state
@@ -274,6 +279,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.statusMsg = fmt.Sprintf("Theme %q saved to %s!", msg.name, LayerDisplayName(config.SourceGlobal))
+		return m, nil
+
+	case setSettingMsg:
+		// Persist a curated setting to the global layer — the applyThemeMsg
+		// pattern generalized. Writes are TYPED per the setting's ControlKind
+		// (a bool/int written as a quoted string fails core's strict TOML
+		// decode and silently drops the whole global config on next load).
+		typed, err := msg.setting.TypedValue(msg.value)
+		if err != nil {
+			m.statusMsg = fmt.Sprintf("Error: %v", err)
+			return m, nil
+		}
+		if err := SaveGlobalSetting(m.tomlHandler, m.yamlHandler, m.layered, msg.setting.Path, typed); err != nil {
+			m.statusMsg = fmt.Sprintf("Error: %v", err)
+			return m, nil
+		}
+		if err := m.reloadConfig(); err != nil {
+			m.statusMsg = fmt.Sprintf("Error reloading: %v", err)
+			return m, nil
+		}
+		m.statusMsg = fmt.Sprintf("%s saved to %s!", msg.setting.Label, LayerDisplayName(config.SourceGlobal))
+		// Notify the host (treemux) so it can hot-apply the change via its
+		// setters. Standalone `grove config` has no handler — the message is
+		// inert there. Settings without an ApplyDomain (startup-only) skip it.
+		if domain := msg.setting.ApplyDomain; domain != "" {
+			final := m.layered.Final
+			return m, func() tea.Msg {
+				return embed.SettingAppliedMsg{Domain: domain, Config: final}
+			}
+		}
 		return m, nil
 
 	case deleteNodeMsg:
@@ -737,15 +772,56 @@ func (m *Model) availableLayers() []config.ConfigSource {
 	return layers
 }
 
+// SaveGlobalSetting writes a single value at path into the global grove
+// config file (the layer every curated setting saves to). value must
+// already be Go-typed — bool/int/string per the setting's ControlKind (see
+// Setting.TypedValue) — because TOML values are typed: a bool written as a
+// quoted "true" fails core's strict decode and the loader silently drops
+// the ENTIRE global config (see treemux/cmd/welcome_prefs.go for the
+// documented hazard and the typed-write precedent).
+//
+// Exported so spec 23's onboarding can persist essentials directly without
+// constructing a full Model; Model.saveToLayer routes its global-layer case
+// through it.
+func SaveGlobalSetting(tomlHandler *setup.TOMLHandler, yamlHandler *setup.YAMLHandler, layered *config.LayeredConfig, path []string, value interface{}) error {
+	targetPath := ""
+	if layered != nil && layered.FilePaths != nil {
+		targetPath = layered.FilePaths[config.SourceGlobal]
+	}
+	if targetPath == "" {
+		targetPath = setup.GlobalTOMLConfigPath()
+	}
+	if targetPath == "" {
+		return fmt.Errorf("cannot resolve global config path")
+	}
+
+	if strings.ToLower(filepath.Ext(targetPath)) != ".toml" {
+		// Legacy grove.yml global config: the YAML node writer is already
+		// type-aware (createValueNode tags bool/int scalars).
+		root, err := yamlHandler.LoadYAML(targetPath)
+		if err != nil {
+			return err
+		}
+		if err := setup.SetValue(root, value, path...); err != nil {
+			return err
+		}
+		return yamlHandler.SaveYAML(targetPath, root)
+	}
+
+	data, err := tomlHandler.LoadTOML(targetPath)
+	if err != nil {
+		return err
+	}
+	setTomlValue(data, value, path...)
+	return tomlHandler.SaveTOML(targetPath, data)
+}
+
 // saveToLayer saves a value to the specified layer's config file.
 func (m *Model) saveToLayer(path []string, value string, layer config.ConfigSource) error {
 	var targetPath string
 	switch layer {
 	case config.SourceGlobal:
-		targetPath = m.layered.FilePaths[config.SourceGlobal]
-		if targetPath == "" {
-			targetPath = setup.GlobalTOMLConfigPath()
-		}
+		return SaveGlobalSetting(m.tomlHandler, m.yamlHandler, m.layered, path, value)
 	case config.SourceEcosystem:
 		targetPath = m.layered.FilePaths[config.SourceEcosystem]
 		if targetPath == "" {
@@ -790,8 +866,10 @@ func (m *Model) saveToYAML(filePath string, path []string, value string) error {
 	return m.yamlHandler.SaveYAML(filePath, root)
 }
 
-// setTomlValue sets a value in a nested TOML map using a path.
-func setTomlValue(data map[string]interface{}, value string, path ...string) {
+// setTomlValue sets a value in a nested TOML map using a path. The value is
+// stored as-is, so callers with typed data (curated settings) pass Go
+// bool/int values while the raw tree editor passes strings.
+func setTomlValue(data map[string]interface{}, value interface{}, path ...string) {
 	if len(path) == 0 {
 		return
 	}
@@ -841,6 +919,9 @@ func (m *Model) refreshAllPages() {
 	}
 	if m.themesPage != nil {
 		m.themesPage.Refresh(m.layered)
+	}
+	for _, cp := range m.curatedPages {
+		cp.Refresh(m.layered)
 	}
 }
 
