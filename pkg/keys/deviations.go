@@ -62,6 +62,29 @@ var IntentionalDeviations = []Deviation{
 	// residual `edit` consistency failure clears.
 	{TUI: "grove-release", Key: "R", Action: "reset", Reason: "R reserved for rename; resets all LLM rules (mnemonic partner of r=edit rules)"},
 	{TUI: "grove-release", Key: "r", Action: "edit", Reason: "canonical edit is e; r=edit LLM rules keeps the r/R edit/reset mnemonic pair"},
+	// nav Phase-5 chord migration: nav-sessionize's column toggles moved into
+	// the t… toggle namespace. Three of the mnemonic chords collide with
+	// nb-browser's t… members that toggle a different thing (tb=artifacts,
+	// tc=columns, tp=preview there). Both sides are the honest mnemonic for
+	// their own TUI (branch/cx/paths), so the cross-TUI "different meanings"
+	// advisory is deliberate, not drift.
+	{TUI: "nav-sessionize", Key: "tb", Action: "toggle branch", Reason: "t… namespace mnemonic for branch column; nb-browser tb toggles artifacts"},
+	{TUI: "nav-sessionize", Key: "tc", Action: "toggle cx", Reason: "t… namespace mnemonic for cx column; nb-browser tc toggles columns"},
+	{TUI: "nav-sessionize", Key: "tp", Action: "toggle paths", Reason: "t… namespace mnemonic for paths column; nb-browser tp toggles preview"},
+	// nav Phase-5 goto namespace: nav-windows g<digit> jumps to the tmux
+	// window INDEX (0-based, hence the extra g0) while nav-history/nav-manage
+	// g<digit> jump to the list ROW. Same gesture, honestly different target
+	// nouns — allowlist the windows side so g1…g9 don't read as semantic
+	// conflicts against "jump to row".
+	{TUI: "nav-windows", Key: "g1", Action: "window", Reason: "goto chord jumps to tmux window index; history/manage g<digit> jump to row"},
+	{TUI: "nav-windows", Key: "g2", Action: "window", Reason: "goto chord jumps to tmux window index; history/manage g<digit> jump to row"},
+	{TUI: "nav-windows", Key: "g3", Action: "window", Reason: "goto chord jumps to tmux window index; history/manage g<digit> jump to row"},
+	{TUI: "nav-windows", Key: "g4", Action: "window", Reason: "goto chord jumps to tmux window index; history/manage g<digit> jump to row"},
+	{TUI: "nav-windows", Key: "g5", Action: "window", Reason: "goto chord jumps to tmux window index; history/manage g<digit> jump to row"},
+	{TUI: "nav-windows", Key: "g6", Action: "window", Reason: "goto chord jumps to tmux window index; history/manage g<digit> jump to row"},
+	{TUI: "nav-windows", Key: "g7", Action: "window", Reason: "goto chord jumps to tmux window index; history/manage g<digit> jump to row"},
+	{TUI: "nav-windows", Key: "g8", Action: "window", Reason: "goto chord jumps to tmux window index; history/manage g<digit> jump to row"},
+	{TUI: "nav-windows", Key: "g9", Action: "window", Reason: "goto chord jumps to tmux window index; history/manage g<digit> jump to row"},
 }
 
 // isIntentional reports whether (tui, key, normAction) is an allowlisted

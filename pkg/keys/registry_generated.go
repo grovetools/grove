@@ -1198,9 +1198,15 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "Up", Keys: []string{"k", "up"}, Description: "up", Enabled: true, ConfigKey: "up"},
 					{Name: "Down", Keys: []string{"j", "down"}, Description: "down", Enabled: true, ConfigKey: "down"},
-					{Name: "jump to row", Keys: []string{"g"}, Description: "jump to row", Enabled: true, ConfigKey: "jump_to_row"},
+					{Name: "Top", Keys: []string{"gg"}, Description: "top", Enabled: true, ConfigKey: "top"},
 					{Name: "GoToSessionize", Keys: []string{","}, Description: "focus group", Enabled: true, ConfigKey: "go_to_sessionize"},
 					{Name: "FocusCurrent", Keys: []string{"."}, Description: "focus ecosystem", Enabled: true, ConfigKey: "focus_current"},
+				},
+			},
+			{
+				Name: "Goto (g…)",
+				Bindings: []BindingEntry{
+					{Name: "JumpToRow", Keys: []string{"g1", "g2", "g3", "g4", "g5", "g6", "g7", "g8", "g9"}, Description: "jump to row", Enabled: true, ConfigKey: "jump_to_row"},
 				},
 			},
 			{
@@ -1248,10 +1254,15 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "PageDown", Keys: []string{"ctrl+d", "pgdown"}, Description: "page down", Enabled: true, ConfigKey: "page_down"},
 					{Name: "Top", Keys: []string{"gg"}, Description: "top", Enabled: true, ConfigKey: "top"},
 					{Name: "Bottom", Keys: []string{"G"}, Description: "bottom", Enabled: true, ConfigKey: "bottom"},
-					{Name: "jump to row", Keys: []string{"g"}, Description: "jump to row", Enabled: true, ConfigKey: "jump_to_row"},
 					{Name: "Open", Keys: []string{"o", "enter"}, Description: "switch to session", Enabled: true, ConfigKey: "open"},
 					{Name: "GoToSessionize", Keys: []string{","}, Description: "focus group", Enabled: true, ConfigKey: "go_to_sessionize"},
 					{Name: "FocusCurrent", Keys: []string{"."}, Description: "focus ecosystem", Enabled: true, ConfigKey: "focus_current"},
+				},
+			},
+			{
+				Name: "Goto (g…)",
+				Bindings: []BindingEntry{
+					{Name: "JumpToRow", Keys: []string{"g1", "g2", "g3", "g4", "g5", "g6", "g7", "g8", "g9"}, Description: "jump to row", Enabled: true, ConfigKey: "jump_to_row"},
 				},
 			},
 			{
@@ -1375,19 +1386,19 @@ var TUIRegistry = []TUIRegistryEntry{
 				},
 			},
 			{
-				Name: "Columns",
+				Name: "Toggle (t…)",
 				Bindings: []BindingEntry{
-					{Name: "ToggleCx", Keys: []string{"c"}, Description: "toggle cx column", Enabled: true, ConfigKey: "toggle_cx"},
-					{Name: "ToggleGitStatus", Keys: []string{"s"}, Description: "toggle git status", Enabled: true, ConfigKey: "toggle_git_status"},
-					{Name: "ToggleBranch", Keys: []string{"b"}, Description: "toggle branch names", Enabled: true, ConfigKey: "toggle_branch"},
-					{Name: "ToggleNoteCounts", Keys: []string{"n"}, Description: "toggle note counts", Enabled: true, ConfigKey: "toggle_note_counts"},
-					{Name: "TogglePlanStats", Keys: []string{"f"}, Description: "toggle flow plans", Enabled: true, ConfigKey: "toggle_plan_stats"},
-					{Name: "ToggleHold", Keys: []string{"H"}, Description: "toggle on-hold", Enabled: true, ConfigKey: "toggle_hold"},
-					{Name: "TogglePaths", Keys: []string{"p"}, Description: "toggle full paths", Enabled: true, ConfigKey: "toggle_paths"},
-					{Name: "ToggleRelease", Keys: []string{"r"}, Description: "toggle release", Enabled: true, ConfigKey: "toggle_release"},
-					{Name: "ToggleBinary", Keys: []string{"y"}, Description: "toggle tool/version", Enabled: true, ConfigKey: "toggle_binary"},
-					{Name: "ToggleLink", Keys: []string{"l"}, Description: "toggle remote", Enabled: true, ConfigKey: "toggle_link"},
-					{Name: "ToggleTaskResults", Keys: []string{"v"}, Description: "toggle validation matrix", Enabled: true, ConfigKey: "toggle_task_results"},
+					{Name: "ToggleCx", Keys: []string{"tc"}, Description: "toggle cx column", Enabled: true, ConfigKey: "toggle_cx"},
+					{Name: "ToggleGitStatus", Keys: []string{"ts"}, Description: "toggle git status", Enabled: true, ConfigKey: "toggle_git_status"},
+					{Name: "ToggleBranch", Keys: []string{"tb"}, Description: "toggle branch names", Enabled: true, ConfigKey: "toggle_branch"},
+					{Name: "ToggleNoteCounts", Keys: []string{"tn"}, Description: "toggle note counts", Enabled: true, ConfigKey: "toggle_note_counts"},
+					{Name: "TogglePlanStats", Keys: []string{"tf"}, Description: "toggle flow plans", Enabled: true, ConfigKey: "toggle_plan_stats"},
+					{Name: "ToggleHold", Keys: []string{"th"}, Description: "toggle on-hold", Enabled: true, ConfigKey: "toggle_hold"},
+					{Name: "TogglePaths", Keys: []string{"tp"}, Description: "toggle full paths", Enabled: true, ConfigKey: "toggle_paths"},
+					{Name: "ToggleRelease", Keys: []string{"tr"}, Description: "toggle release", Enabled: true, ConfigKey: "toggle_release"},
+					{Name: "ToggleBinary", Keys: []string{"ty"}, Description: "toggle tool/version", Enabled: true, ConfigKey: "toggle_binary"},
+					{Name: "ToggleLink", Keys: []string{"tl"}, Description: "toggle remote", Enabled: true, ConfigKey: "toggle_link"},
+					{Name: "ToggleTaskResults", Keys: []string{"tv"}, Description: "toggle validation matrix", Enabled: true, ConfigKey: "toggle_task_results"},
 				},
 			},
 			{
@@ -1419,7 +1430,13 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "Up", Keys: []string{"k", "up"}, Description: "up", Enabled: true, ConfigKey: "up"},
 					{Name: "Down", Keys: []string{"j", "down"}, Description: "down", Enabled: true, ConfigKey: "down"},
-					{Name: "jump to window", Keys: []string{"g"}, Description: "jump to window", Enabled: true, ConfigKey: "jump_to_window"},
+					{Name: "Top", Keys: []string{"gg"}, Description: "top", Enabled: true, ConfigKey: "top"},
+				},
+			},
+			{
+				Name: "Goto (g…)",
+				Bindings: []BindingEntry{
+					{Name: "JumpToWindow", Keys: []string{"g0", "g1", "g2", "g3", "g4", "g5", "g6", "g7", "g8", "g9"}, Description: "jump to window", Enabled: true, ConfigKey: "jump_to_window"},
 				},
 			},
 			{
