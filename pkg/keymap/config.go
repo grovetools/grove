@@ -22,6 +22,7 @@ type ConfigKeyMap struct {
 	Collapse           key.Binding // Left/h to collapse
 	NextPage           key.Binding // Tab to next page
 	PrevPage           key.Binding // Shift+Tab to prev page
+	CycleLayer         key.Binding // L to cycle the Data page's config layer
 	Preview            key.Binding // Toggle preview mode
 	ViewMode           key.Binding // Toggle view (configured/all)
 	MaturityFilter     key.Binding // Cycle maturity filter forward
@@ -84,6 +85,12 @@ func NewConfigKeyMap(cfg *config.Config) ConfigKeyMap {
 			key.WithKeys("shift+tab"),
 			key.WithHelp("shift+tab", "prev page"),
 		),
+		// "L" (not "l"): lowercase l is claimed by tree expand, and the
+		// z-fold chords own the z-prefixed vocabulary.
+		CycleLayer: key.NewBinding(
+			key.WithKeys("L"),
+			key.WithHelp("L", "cycle layer"),
+		),
 		Preview: key.NewBinding(
 			key.WithKeys("p"),
 			key.WithHelp("p", "toggle preview"),
@@ -139,7 +146,7 @@ func (k ConfigKeyMap) ShortHelp() []key.Binding {
 func (k ConfigKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		// Page navigation
-		{k.NextPage, k.PrevPage},
+		{k.NextPage, k.PrevPage, k.CycleLayer},
 		// Navigation
 		{k.Base.Up, k.Base.Down, k.Base.PageUp, k.Base.PageDown},
 		// Tree navigation
@@ -163,7 +170,7 @@ func (k ConfigKeyMap) Sections() []keymap.Section {
 	return []keymap.Section{
 		keymap.NavigationSection(
 			k.Up, k.Down, k.PageUp, k.PageDown, k.Top, k.Bottom,
-			k.NextPage, k.PrevPage,
+			k.NextPage, k.PrevPage, k.CycleLayer,
 			k.Tab1, k.Tab2, k.Tab3, k.Tab4, k.Tab5,
 		),
 		keymap.NewSection("Tree Actions",

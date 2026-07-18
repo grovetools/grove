@@ -18,13 +18,15 @@ func runeKey(r rune) tea.KeyMsg {
 }
 
 // newConfigModel builds a config Model with the given keymap over a temp
-// project layer. The Global layer page (schema-driven, index 0) is active.
+// project layer, with the Data tab active on its Global layer (the
+// schema-driven tree the layer-page key tests exercise).
 func newConfigModel(t *testing.T, keys grovekeymap.ConfigKeyMap) Model {
 	t.Helper()
 	layered, path := writeProjectLayer(t)
 	svc := setup.NewService(false)
 	m := New(layered, setup.NewYAMLHandler(svc), setup.NewTOMLHandler(svc), keys)
 	m.workspacePath = filepath.Dir(path)
+	m.pager.SetActive(4) // Data tab
 	return m
 }
 

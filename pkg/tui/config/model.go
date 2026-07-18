@@ -83,14 +83,12 @@ func saveUIStateToDisk(state uiState) {
 type Model struct {
 	pager pager.Model
 
-	// layerPages keeps typed references to the pages so we can call
-	// LayerPage-specific methods (Refresh, IsZChordPending, etc.).
-	// NOTE: this slice is intentionally NOT index-aligned with the pager's
-	// page list (the Themes page is a non-LayerPage tab); resolve the
+	// dataPage is the single Data tab (last): one LayerPage retargeted
+	// across the four config layers by the L cycle key. Resolve the
 	// active layer page via activeLayerPage(), never by pager index.
-	layerPages []*LayerPage
+	dataPage *DataPage
 
-	// themesPage is the bespoke theme-gallery page (5th tab).
+	// themesPage is the bespoke theme-gallery page (4th tab).
 	themesPage *ThemesPage
 
 	input textinput.Model
@@ -150,21 +148,16 @@ func New(
 
 	width, height := 80, 24 // Initial dummy size
 
-	layerPages := []*LayerPage{
-		NewLayerPage("Global", config.SourceGlobal, layered, filters, keys, width, height),
-		NewLayerPage("Ecosystem", config.SourceEcosystem, layered, filters, keys, width, height),
-		NewLayerPage("Notebook", config.SourceProjectNotebook, layered, filters, keys, width, height),
-		NewLayerPage("Project", config.SourceProject, layered, filters, keys, width, height),
-	}
-
+	// Curated pages (Appearance/Layout/Keys) are stubs until Phase 2 of
+	// the curated-config plan lands; Themes is the existing gallery; Data
+	// is the raw per-layer tree collapsed into one tab with a layer cycler.
+	appearancePage := newStubPage("Appearance", "appearance", "Appearance settings coming soon", width, height)
+	layoutPage := newStubPage("Layout", "layout", "Layout settings coming soon", width, height)
+	keysPage := newStubPage("Keys", "keys", "Key settings coming soon", width, height)
 	themesPage := NewThemesPage(layered, keys, width, height)
+	dataPage := NewDataPage(layered, filters, keys, width, height)
 
-	// Build pager.Page slice from the typed pages, plus the Themes page.
-	pages := make([]pager.Page, 0, len(layerPages)+1)
-	for _, lp := range layerPages {
-		pages = append(pages, lp)
-	}
-	pages = append(pages, themesPage)
+	pages := []pager.Page{appearancePage, layoutPage, keysPage, themesPage, dataPage}
 
 	pagerKeys := pager.KeyMap{
 		Tab1:    keys.Base.Tab1,
@@ -195,7 +188,7 @@ func New(
 
 	m := Model{
 		pager:       pgr,
-		layerPages:  layerPages,
+		dataPage:    dataPage,
 		themesPage:  themesPage,
 		input:       ti,
 		layered:     layered,
@@ -208,7 +201,7 @@ func New(
 	}
 
 	// Focus the first page
-	layerPages[0].Focus()
+	pages[0].Focus()
 
 	return m
 }
@@ -839,11 +832,12 @@ func (m *Model) saveUIState() {
 }
 
 // refreshAllPages refreshes all pages to apply new filters/sorting and the
-// reloaded config. It intentionally iterates the typed page references (not
+// reloaded config. It intentionally uses the typed page references (not
 // the pager's index space) so non-LayerPage tabs are handled explicitly.
+// The curated stub pages have no config-derived content to refresh.
 func (m *Model) refreshAllPages() {
-	for _, page := range m.layerPages {
-		page.Refresh(m.layered)
+	if m.dataPage != nil {
+		m.dataPage.Refresh(m.layered)
 	}
 	if m.themesPage != nil {
 		m.themesPage.Refresh(m.layered)
@@ -867,13 +861,18 @@ func (m *Model) reloadConfig() error {
 	return nil
 }
 
-// activeLayerPage returns the active LayerPage (typed), or nil when the
-// active tab is not a layer page (e.g. the Themes page). Resolved by type
-// assertion on the pager's active page rather than by index so the pager's
-// page list and m.layerPages never need to stay index-aligned.
+// activeLayerPage returns the LayerPage backing the active tab, or nil when
+// the active tab has no layer page (stubs, Themes). The Data tab wraps its
+// LayerPage in a DataPage, so the assertion unwraps it; a bare *LayerPage
+// is also handled in case one is ever registered directly.
 func (m *Model) activeLayerPage() *LayerPage {
-	lp, _ := m.pager.Active().(*LayerPage)
-	return lp
+	switch p := m.pager.Active().(type) {
+	case *DataPage:
+		return p.inner
+	case *LayerPage:
+		return p
+	}
+	return nil
 }
 
 // GetLayerFilePath returns the file path for a given layer.
