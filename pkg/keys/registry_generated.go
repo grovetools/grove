@@ -675,6 +675,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "Tab1", Keys: []string{"1"}, Description: "tab 1", Enabled: true, ConfigKey: "tab1"},
 					{Name: "Tab2", Keys: []string{"2"}, Description: "tab 2", Enabled: true, ConfigKey: "tab2"},
 					{Name: "Tab3", Keys: []string{"3"}, Description: "tab 3", Enabled: true, ConfigKey: "tab3"},
+					{Name: "Tab4", Keys: []string{"4"}, Description: "tab 4", Enabled: true, ConfigKey: "tab4"},
 				},
 			},
 			{
@@ -724,6 +725,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "Tab1", Keys: []string{"1"}, Description: "tab 1", Enabled: true, ConfigKey: "tab1"},
 					{Name: "Tab2", Keys: []string{"2"}, Description: "tab 2", Enabled: true, ConfigKey: "tab2"},
 					{Name: "Tab3", Keys: []string{"3"}, Description: "tab 3", Enabled: true, ConfigKey: "tab3"},
+					{Name: "Tab4", Keys: []string{"4"}, Description: "tab 4", Enabled: true, ConfigKey: "tab4"},
 				},
 			},
 			{
@@ -773,6 +775,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "Tab1", Keys: []string{"1"}, Description: "tab 1", Enabled: true, ConfigKey: "tab1"},
 					{Name: "Tab2", Keys: []string{"2"}, Description: "tab 2", Enabled: true, ConfigKey: "tab2"},
 					{Name: "Tab3", Keys: []string{"3"}, Description: "tab 3", Enabled: true, ConfigKey: "tab3"},
+					{Name: "Tab4", Keys: []string{"4"}, Description: "tab 4", Enabled: true, ConfigKey: "tab4"},
 				},
 			},
 			{
@@ -1733,6 +1736,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "PanelNav", Keys: []string{"<action> f"}, Description: "jump to Nav panel", Enabled: true, ConfigKey: "panel_nav"},
 					{Name: "PanelGit", Keys: []string{"<action> c"}, Description: "jump to Git panel", Enabled: true, ConfigKey: "panel_git"},
+					{Name: "PanelGitworktree", Keys: []string{"<action> C"}, Description: "jump to Changes panel", Enabled: true, ConfigKey: "panel_gitworktree"},
 					{Name: "PanelShell", Keys: []string{"<action> o"}, Description: "jump to Shell panel", Enabled: true, ConfigKey: "panel_shell"},
 					{Name: "PanelPlan", Keys: []string{"<action> p"}, Description: "jump to Plan panel", Enabled: true, ConfigKey: "panel_plan"},
 					{Name: "PanelNotebook", Keys: []string{"<action> n"}, Description: "jump to Notebook panel", Enabled: true, ConfigKey: "panel_notebook"},
