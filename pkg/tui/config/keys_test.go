@@ -26,7 +26,7 @@ func newConfigModel(t *testing.T, keys grovekeymap.ConfigKeyMap) Model {
 	svc := setup.NewService(false)
 	m := New(layered, setup.NewYAMLHandler(svc), setup.NewTOMLHandler(svc), keys)
 	m.workspacePath = filepath.Dir(path)
-	m.pager.SetActive(4) // Data tab
+	m.pager.SetActive(5) // Data tab
 	return m
 }
 

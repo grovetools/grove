@@ -239,6 +239,13 @@ func expandPath(path string) string {
 	return path
 }
 
+// ExpandPath expands a leading ~ to the user's home directory — the write-
+// side inverse of AbbreviatePath, exported for callers that persist paths
+// entered in the ~-abbreviated display dialect (the config TUI's path rows).
+func ExpandPath(path string) string {
+	return expandPath(path)
+}
+
 // AbbreviatePath replaces the home directory with ~ for display
 func AbbreviatePath(path string) string {
 	homeDir, err := os.UserHomeDir()

@@ -115,6 +115,17 @@ type Setting struct {
 	// must stay correctly Go-typed for the TOML file (the A1 hazard).
 	// nil means the typed value is written as-is.
 	WriteTransform func(v interface{}) interface{}
+	// Save, when set, REPLACES the single static-Path global write for
+	// settings whose persistence is plural or dynamically targeted (the
+	// Notebook page writes one definition's root_dir — which definition
+	// depends on the current default rule — may point the rule at it, and
+	// creates the directory). It receives the Model's layer handlers plus
+	// the typed (post-WriteTransform) value; file writes should route
+	// through SaveGlobalSetting so the typed-TOML rule holds. The commit
+	// path treats it exactly like the Path write — error surfaced in the
+	// status line (no reload), else reload + SettingAppliedMsg — so panel
+	// and onboarding behavior stay identical. Path is ignored when set.
+	Save func(tomlHandler *setup.TOMLHandler, yamlHandler *setup.YAMLHandler, layered *config.LayeredConfig, value interface{}) error
 }
 
 // TypedValue converts the control's string form into the Go-typed value that
