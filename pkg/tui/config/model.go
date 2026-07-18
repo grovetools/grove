@@ -153,10 +153,10 @@ func New(
 
 	width, height := 80, 24 // Initial dummy size
 
-	// Curated pages (Appearance/Layout/Keys) are stubs until Phase 2 of
-	// the curated-config plan lands; Themes is the existing gallery; Data
-	// is the raw per-layer tree collapsed into one tab with a layer cycler.
-	appearancePage := newStubPage("Appearance", "appearance", "Appearance settings coming soon", width, height)
+	// Curated pages: Appearance is real (Phase 3); Layout/Keys stay stubs
+	// until Phases 4–5; Themes is the existing gallery; Data is the raw
+	// per-layer tree collapsed into one tab with a layer cycler.
+	appearancePage := NewCuratedPage("Appearance", AppearanceSettings(), layered, keys, width, height, CuratedOpts{})
 	layoutPage := newStubPage("Layout", "layout", "Layout settings coming soon", width, height)
 	keysPage := newStubPage("Keys", "keys", "Key settings coming soon", width, height)
 	themesPage := NewThemesPage(layered, keys, width, height)
@@ -192,17 +192,18 @@ func New(
 	ti.Width = 50
 
 	m := Model{
-		pager:       pgr,
-		dataPage:    dataPage,
-		themesPage:  themesPage,
-		input:       ti,
-		layered:     layered,
-		yamlHandler: yamlHandler,
-		tomlHandler: tomlHandler,
-		filters:     filters,
-		keys:        keys,
-		help:        help.NewBuilder().WithKeys(keys).WithTitle("Configuration Editor").Build(),
-		state:       viewList,
+		pager:        pgr,
+		dataPage:     dataPage,
+		themesPage:   themesPage,
+		curatedPages: []*CuratedPage{appearancePage},
+		input:        ti,
+		layered:      layered,
+		yamlHandler:  yamlHandler,
+		tomlHandler:  tomlHandler,
+		filters:      filters,
+		keys:         keys,
+		help:         help.NewBuilder().WithKeys(keys).WithTitle("Configuration Editor").Build(),
+		state:        viewList,
 	}
 
 	// Focus the first page

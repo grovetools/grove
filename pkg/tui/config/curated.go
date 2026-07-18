@@ -70,8 +70,22 @@ type Setting struct {
 	// config. nil renders as unset.
 	Read func(*config.LayeredConfig) string
 	// PreviewFn renders an optional live preview block below the list (e.g.
-	// the focus-style two-pane swatch). nil means no preview.
-	PreviewFn func(width int) string
+	// the focus-style two-pane swatch). It receives the layered config so a
+	// pure renderer can show effective values without capturing page state.
+	// nil means no preview.
+	PreviewFn func(layered *config.LayeredConfig, width int) string
+	// Preview applies a transient in-process effect for a candidate value —
+	// cycled with h/l on selects, or typed into the inline editor — before
+	// anything is written (e.g. theme.SetIcons for the icons row, or a
+	// preview-override for the focus swatch). Also invoked on commit so
+	// standalone `grove config` (where SettingAppliedMsg is inert) still
+	// applies the effect in-process. nil means no live preview effect.
+	Preview func(value string)
+	// Revert undoes the Preview effect when the candidate is abandoned
+	// (esc, cursor move, page blur) — the ThemesPage.RevertPreview pattern.
+	// It receives the layered config so it can restore the persisted
+	// baseline. nil means nothing to undo.
+	Revert func(layered *config.LayeredConfig)
 	// ApplyDomain names the host's live-apply seam for this setting (the
 	// Domain of the embed.SettingAppliedMsg emitted after a save). Empty
 	// means no live apply (startup-only settings).
@@ -112,10 +126,6 @@ type setSettingMsg struct {
 	value   string
 }
 
-// AppearanceSettings returns the Appearance page's setting descriptors.
-// Phase 3 populates it (theme link, focus style/colors/thickness, icons).
-func AppearanceSettings() []Setting { return nil }
-
 // LayoutSettings returns the Layout page's setting descriptors. Phase 4
 // populates it (drawer orientation/expanded, rail expanded, home-on-startup).
 func LayoutSettings() []Setting { return nil }
@@ -148,6 +158,13 @@ type CuratedPage struct {
 	editing bool
 	input   textinput.Model
 
+	// pendingIdx/pendingValue hold an uncommitted candidate value staged by
+	// h/l cycling on a select row (ThemesPage's preview-then-commit
+	// lifecycle). -1 means nothing is staged. Enter commits the candidate;
+	// esc, moving the cursor, or leaving the page reverts it.
+	pendingIdx   int
+	pendingValue string
+
 	layered *config.LayeredConfig
 	keys    grovekeymap.ConfigKeyMap
 	width   int
@@ -173,14 +190,15 @@ func NewCuratedPage(name string, settings []Setting, layered *config.LayeredConf
 	ti.Width = 40
 
 	return &CuratedPage{
-		name:     name,
-		tabID:    strings.ToLower(name),
-		settings: filterSettings(settings, opts),
-		input:    ti,
-		layered:  layered,
-		keys:     keys,
-		width:    width,
-		height:   height,
+		name:       name,
+		tabID:      strings.ToLower(name),
+		settings:   filterSettings(settings, opts),
+		input:      ti,
+		layered:    layered,
+		keys:       keys,
+		width:      width,
+		height:     height,
+		pendingIdx: -1,
 	}
 }
 
@@ -232,9 +250,11 @@ func (p *CuratedPage) Focus() tea.Cmd {
 	return nil
 }
 
-// Blur implements pager.Page. Leaving the page cancels any open editor.
+// Blur implements pager.Page. Leaving the page cancels any open editor and
+// reverts any staged (previewed but uncommitted) candidate value.
 func (p *CuratedPage) Blur() {
 	p.active = false
+	p.clearPending(true)
 	p.stopEditing()
 }
 
@@ -275,6 +295,64 @@ func (p *CuratedPage) stopEditing() {
 	p.input.Blur()
 }
 
+// pendingFor returns the staged candidate for setting index i, or "".
+func (p *CuratedPage) pendingFor(i int) string {
+	if p.pendingIdx == i {
+		return p.pendingValue
+	}
+	return ""
+}
+
+// stagePending records a candidate value for the setting at index i and
+// applies its live preview effect, without committing anything.
+func (p *CuratedPage) stagePending(i int, s Setting, value string) {
+	p.pendingIdx = i
+	p.pendingValue = value
+	if s.Preview != nil {
+		s.Preview(value)
+	}
+}
+
+// clearPending drops any staged candidate. When revert is true the owning
+// setting's Revert hook restores the persisted baseline (esc/cursor-move/
+// blur); commits pass false because the previewed effect is now the saved
+// state.
+func (p *CuratedPage) clearPending(revert bool) {
+	if p.pendingIdx < 0 {
+		return
+	}
+	idx := p.pendingIdx
+	p.pendingIdx = -1
+	p.pendingValue = ""
+	if revert && idx < len(p.settings) && p.settings[idx].Revert != nil {
+		p.settings[idx].Revert(p.layered)
+	}
+}
+
+// cyclePending advances the current select row's staged candidate by dir and
+// applies its live preview — the ThemesPage setCursor preview pattern mapped
+// onto option cycling. No-op for non-select rows.
+func (p *CuratedPage) cyclePending(dir int) {
+	s := p.currentSetting()
+	if s == nil || s.Control != ControlSelect || len(s.Options) == 0 {
+		return
+	}
+	base := p.pendingFor(p.cursor)
+	if base == "" {
+		base = p.currentValue(*s)
+	}
+	idx := -1
+	for i, opt := range s.Options {
+		if opt == base {
+			idx = i
+			break
+		}
+	}
+	n := len(s.Options)
+	next := s.Options[((idx+dir)%n+n)%n]
+	p.stagePending(p.cursor, *s, next)
+}
+
 // Update implements pager.Page.
 func (p *CuratedPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 	if !p.active {
@@ -292,18 +370,28 @@ func (p *CuratedPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 	switch {
 	case key.Matches(keyMsg, p.keys.Up):
 		if p.cursor > 0 {
+			p.clearPending(true)
 			p.cursor--
 		}
 	case key.Matches(keyMsg, p.keys.Down):
 		if p.cursor < len(p.settings)-1 {
+			p.clearPending(true)
 			p.cursor++
 		}
 	case key.Matches(keyMsg, p.keys.Top):
+		p.clearPending(true)
 		p.cursor = 0
 	case key.Matches(keyMsg, p.keys.Bottom):
 		if len(p.settings) > 0 {
+			p.clearPending(true)
 			p.cursor = len(p.settings) - 1
 		}
+	case key.Matches(keyMsg, p.keys.Expand):
+		p.cyclePending(1)
+	case key.Matches(keyMsg, p.keys.Collapse):
+		p.cyclePending(-1)
+	case key.Matches(keyMsg, p.keys.Cancel):
+		p.clearPending(true)
 	case key.Matches(keyMsg, p.keys.Edit), key.Matches(keyMsg, p.keys.Toggle):
 		if s := p.currentSetting(); s != nil {
 			return p, p.activate(*s)
@@ -313,9 +401,10 @@ func (p *CuratedPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 }
 
 // activate performs the enter/space action for a setting, per control kind:
-// bools commit their toggled value immediately, selects cycle to the next
-// option and commit, text-ish kinds open the inline editor, links switch the
-// pager tab. Key capture is inert until Phase 5 wires the capture mode.
+// bools commit their toggled value immediately, selects commit the staged
+// (h/l-previewed) candidate if one exists or cycle to the next option and
+// commit, text-ish kinds open the inline editor, links switch the pager tab.
+// Key capture is inert until Phase 5 wires the capture mode.
 func (p *CuratedPage) activate(s Setting) tea.Cmd {
 	switch s.Control {
 	case ControlBool:
@@ -323,10 +412,13 @@ func (p *CuratedPage) activate(s Setting) tea.Cmd {
 		if p.currentValue(s) == "true" {
 			next = "false"
 		}
-		return commitSetting(s, next)
+		return p.commitWithPreview(s, next)
 	case ControlSelect:
 		if len(s.Options) == 0 {
 			return nil
+		}
+		if staged := p.pendingFor(p.cursor); staged != "" {
+			return p.commitWithPreview(s, staged)
 		}
 		current := p.currentValue(s)
 		next := s.Options[0]
@@ -336,7 +428,7 @@ func (p *CuratedPage) activate(s Setting) tea.Cmd {
 				break
 			}
 		}
-		return commitSetting(s, next)
+		return p.commitWithPreview(s, next)
 	case ControlText, ControlColor, ControlInt:
 		p.editing = true
 		p.input.SetValue(p.currentValue(s))
@@ -352,29 +444,49 @@ func (p *CuratedPage) activate(s Setting) tea.Cmd {
 	return nil
 }
 
+// commitWithPreview applies the setting's in-process preview effect for the
+// final value (so standalone `grove config` — where SettingAppliedMsg has no
+// handler — still live-applies icons etc.), drops the staged candidate
+// WITHOUT reverting (the previewed effect is becoming the saved state), and
+// emits the persistence request.
+func (p *CuratedPage) commitWithPreview(s Setting, value string) tea.Cmd {
+	if s.Preview != nil {
+		s.Preview(value)
+	}
+	p.clearPending(false)
+	return commitSetting(s, value)
+}
+
 // commitSetting emits the persistence request for a new value.
 func commitSetting(s Setting, value string) tea.Cmd {
 	return func() tea.Msg { return setSettingMsg{setting: s, value: value} }
 }
 
-// updateEditing handles keys while the inline text editor is open.
+// updateEditing handles keys while the inline text editor is open. Settings
+// with a Preview hook see every keystroke as a staged candidate (live color/
+// thickness in the focus swatch); esc reverts it, enter commits it.
 func (p *CuratedPage) updateEditing(keyMsg tea.KeyMsg) (pager.Page, tea.Cmd) {
 	switch {
 	case key.Matches(keyMsg, p.keys.Cancel):
+		p.clearPending(true)
 		p.stopEditing()
 		return p, nil
 	case key.Matches(keyMsg, p.keys.Confirm):
 		s := p.currentSetting()
 		if s == nil {
+			p.clearPending(true)
 			p.stopEditing()
 			return p, nil
 		}
 		value := p.input.Value()
 		p.stopEditing()
-		return p, commitSetting(*s, value)
+		return p, p.commitWithPreview(*s, value)
 	}
 	var cmd tea.Cmd
 	p.input, cmd = p.input.Update(keyMsg)
+	if s := p.currentSetting(); s != nil && s.Preview != nil {
+		p.stagePending(p.cursor, *s, p.input.Value())
+	}
 	return p, cmd
 }
 
@@ -397,7 +509,7 @@ func (p *CuratedPage) View() string {
 
 	var lines []string
 	for i, s := range p.settings {
-		lines = append(lines, p.renderRow(s, labelWidth, i == p.cursor))
+		lines = append(lines, p.renderRow(s, labelWidth, i == p.cursor, p.pendingFor(i)))
 	}
 
 	if s := p.currentSetting(); s != nil {
@@ -408,7 +520,7 @@ func (p *CuratedPage) View() string {
 			lines = append(lines, "", p.input.View())
 		}
 		if s.PreviewFn != nil {
-			lines = append(lines, "", s.PreviewFn(p.width))
+			lines = append(lines, "", s.PreviewFn(p.layered, p.width))
 		}
 	}
 
@@ -416,8 +528,10 @@ func (p *CuratedPage) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, body, p.renderCuratedFooter())
 }
 
-// renderRow renders one setting row: cursor, label, current value.
-func (p *CuratedPage) renderRow(s Setting, labelWidth int, selected bool) string {
+// renderRow renders one setting row: cursor, label, current value. A staged
+// (previewed, uncommitted) candidate replaces the value with a highlighted
+// "candidate (preview)" marker until it is committed or reverted.
+func (p *CuratedPage) renderRow(s Setting, labelWidth int, selected bool, pending string) string {
 	t := theme.DefaultTheme
 
 	cursor := "  "
@@ -436,6 +550,8 @@ func (p *CuratedPage) renderRow(s Setting, labelWidth int, selected bool) string
 	switch {
 	case s.Control == ControlLink:
 		value = t.Path.Render("→ " + firstOption(s))
+	case pending != "":
+		value = t.Highlight.Render(pending) + " " + t.Muted.Render("(preview)")
 	case value == "":
 		value = t.Muted.Render("(unset)")
 	default:
@@ -456,9 +572,12 @@ func firstOption(s Setting) string {
 // renderCuratedFooter renders the key-hint footer.
 func (p *CuratedPage) renderCuratedFooter() string {
 	t := theme.DefaultTheme
-	hints := "enter: change • j/k: browse"
-	if p.editing {
+	hints := "enter: change • h/l: preview options • j/k: browse"
+	switch {
+	case p.editing:
 		hints = "enter: save • esc: cancel"
+	case p.pendingIdx >= 0:
+		hints = "enter: apply & save • esc: revert • h/l: preview options"
 	}
 	return lipgloss.NewStyle().PaddingTop(1).Render(t.Muted.Render(hints))
 }
