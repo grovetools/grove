@@ -465,15 +465,6 @@ var SchemaFields = []FieldMeta{
 		Namespace:   "flow",
 	},
 	{
-		Path:        []string{"api_key_command"},
-		Type:        FieldString,
-		Description: "Shell command to retrieve API key (e.g. gcloud secrets or 1password)",
-		Layer:       config.SourceGlobal,
-		Priority:    60,
-		Important:   true,
-		Namespace:   "gemini",
-	},
-	{
 		Path:        []string{"level"},
 		Type:        FieldSelect,
 		Description: "Minimum log level (debug/info/warn/error)",
@@ -490,6 +481,15 @@ var SchemaFields = []FieldMeta{
 		Priority:    60,
 		Important:   true,
 		Namespace:   "flow",
+	},
+	{
+		Path:        []string{"api_key_command"},
+		Type:        FieldString,
+		Description: "Shell command to retrieve API key (e.g. gcloud secrets or 1password)",
+		Layer:       config.SourceGlobal,
+		Priority:    60,
+		Important:   true,
+		Namespace:   "gemini",
 	},
 	{
 		Path:        []string{"system_level"},
@@ -706,6 +706,14 @@ var SchemaFields = []FieldMeta{
 		Namespace:   "flow",
 	},
 	{
+		Path:        []string{"max_consecutive_steps"},
+		Type:        FieldInt,
+		Description: "Maximum consecutive steps before requiring user input",
+		Layer:       config.SourceGlobal,
+		Priority:    85,
+		Namespace:   "flow",
+	},
+	{
 		Path:        []string{"component_filtering"},
 		Type:        FieldObject,
 		Description: "Rules for filtering logs by component",
@@ -741,14 +749,6 @@ var SchemaFields = []FieldMeta{
 		},
 	},
 	{
-		Path:        []string{"max_consecutive_steps"},
-		Type:        FieldInt,
-		Description: "Maximum consecutive steps before requiring user input",
-		Layer:       config.SourceGlobal,
-		Priority:    85,
-		Namespace:   "flow",
-	},
-	{
 		Path:        []string{"show_current_project"},
 		Type:        FieldBool,
 		Description: "Always show logs from current project regardless of filters",
@@ -780,6 +780,211 @@ var SchemaFields = []FieldMeta{
 		Priority:    100,
 	},
 	{
+		Path:        []string{"claude"},
+		Type:        FieldObject,
+		Description: "Claude Code agent settings grove propagates into each workspace/worktree's .claude/settings.local.json (permissions, sandbox, model, plugins, folder-trust).",
+		Layer:       config.SourceEcosystem,
+		Priority:    150,
+		Important:   true,
+		Children: []FieldMeta{
+			{
+				Path:        []string{"claude", "agentPushNotifEnabled"},
+				Type:        FieldBool,
+				Description: "When true, enable Claude Code push notifications for agent sessions",
+			},
+			{
+				Path:        []string{"claude", "allowGroveTools"},
+				Type:        FieldBool,
+				Description: "When true, allow all canonical grove ecosystem CLIs (grove, flow, cx, nb, ...) via Bash rules for both the installed tool and its worktree-built ./bin binary",
+			},
+			{
+				Path:        []string{"claude", "autoMode"},
+				Type:        FieldObject,
+				Description: "Claude Code auto-mode classifier sections consulted by the auto permission mode",
+				Children: []FieldMeta{
+					{
+						Path:        []string{"claude", "autoMode", "allow"},
+						Type:        FieldArray,
+						Description: "Auto-mode allow section; use \"$defaults\" to splice in Claude's built-ins",
+					},
+					{
+						Path:        []string{"claude", "autoMode", "environment"},
+						Type:        FieldArray,
+						Description: "Auto-mode environment section; use \"$defaults\" to splice in Claude's built-ins",
+					},
+					{
+						Path:        []string{"claude", "autoMode", "hard_deny"},
+						Type:        FieldArray,
+						Description: "Auto-mode hard_deny section; use \"$defaults\" to splice in Claude's built-ins",
+					},
+					{
+						Path:        []string{"claude", "autoMode", "soft_deny"},
+						Type:        FieldArray,
+						Description: "Auto-mode soft_deny section; use \"$defaults\" to splice in Claude's built-ins",
+					},
+				},
+			},
+			{
+				Path:        []string{"claude", "editorMode"},
+				Type:        FieldString,
+				Description: "Claude Code editor mode (e.g. vim, normal); free-form passthrough, empty means unset",
+			},
+			{
+				Path:        []string{"claude", "effortLevel"},
+				Type:        FieldString,
+				Description: "Claude Code reasoning effort level (e.g. high, medium, low); free-form passthrough, empty means unset",
+			},
+			{
+				Path:        []string{"claude", "enabledPlugins"},
+				Type:        FieldMap,
+				Description: "Claude Code enabledPlugins map (plugin identifier -> enabled); merged per key across layers",
+			},
+			{
+				Path:        []string{"claude", "inherit"},
+				Type:        FieldBool,
+				Description: "When false, this block's arrays replace (rather than union with) lower cascade layers",
+			},
+			{
+				Path:        []string{"claude", "manageTrust"},
+				Type:        FieldBool,
+				Description: "When true, grove manages Claude folder-trust in ~/.claude.json (seed on worktree creation, prune orphans on daemon reconcile); opt-in, default off",
+			},
+			{
+				Path:        []string{"claude", "model"},
+				Type:        FieldString,
+				Description: "Claude Code model (alias like opus/sonnet or a full model ID); free-form passthrough, empty means unset",
+			},
+			{
+				Path:        []string{"claude", "permissions"},
+				Type:        FieldObject,
+				Description: "Claude Code permissions configuration",
+				Children: []FieldMeta{
+					{
+						Path:        []string{"claude", "permissions", "allow"},
+						Type:        FieldArray,
+						Description: "List of Claude Code permission rules to allow without prompting",
+					},
+					{
+						Path:        []string{"claude", "permissions", "defaultMode"},
+						Type:        FieldString,
+						Description: "Claude Code default permission mode; commonly default, acceptEdits, plan, bypassPermissions, or auto; free-form passthrough, empty means unset",
+					},
+					{
+						Path:        []string{"claude", "permissions", "deny"},
+						Type:        FieldArray,
+						Description: "List of Claude Code permission rules to deny",
+					},
+				},
+			},
+			{
+				Path:        []string{"claude", "protectConfig"},
+				Type:        FieldBool,
+				Description: "When true, deny sandbox+native writes to grove config files so a sandboxed agent cannot edit the config that sandboxes it; false actively strips those grove-owned entries",
+			},
+			{
+				Path:        []string{"claude", "sandbox"},
+				Type:        FieldObject,
+				Description: "Claude Code sandbox configuration",
+				Children: []FieldMeta{
+					{
+						Path:        []string{"claude", "sandbox", "allowUnsandboxedCommands"},
+						Type:        FieldBool,
+						Description: "When false, ignore the Bash dangerouslyDisableSandbox escape hatch so every command must run sandboxed",
+					},
+					{
+						Path:        []string{"claude", "sandbox", "autoAllowBashIfSandboxed"},
+						Type:        FieldBool,
+						Description: "Auto-allow Bash commands when sandboxed",
+					},
+					{
+						Path:        []string{"claude", "sandbox", "enabled"},
+						Type:        FieldBool,
+						Description: "Enable OS-level sandboxing of tool calls",
+					},
+					{
+						Path:        []string{"claude", "sandbox", "excludedCommands"},
+						Type:        FieldArray,
+						Description: "Named commands allowed to run unsandboxed (the vetted replacement for the blanket per-call escape hatch)",
+					},
+					{
+						Path:        []string{"claude", "sandbox", "failIfUnavailable"},
+						Type:        FieldBool,
+						Description: "Fail if sandboxing is requested but unavailable",
+					},
+					{
+						Path:        []string{"claude", "sandbox", "filesystem"},
+						Type:        FieldObject,
+						Description: "Filesystem sandbox configuration",
+						Children: []FieldMeta{
+							{
+								Path:        []string{"claude", "sandbox", "filesystem", "allowWrite"},
+								Type:        FieldArray,
+								Description: "Directories the sandbox allows writing to",
+							},
+							{
+								Path:        []string{"claude", "sandbox", "filesystem", "denyRead"},
+								Type:        FieldArray,
+								Description: "Paths the OS sandbox forbids reading from",
+							},
+							{
+								Path:        []string{"claude", "sandbox", "filesystem", "denyWrite"},
+								Type:        FieldArray,
+								Description: "Paths the OS sandbox forbids writing to (Bash/child-process writes), enforced even under bypassPermissions",
+							},
+						},
+					},
+					{
+						Path:        []string{"claude", "sandbox", "network"},
+						Type:        FieldObject,
+						Description: "Network sandbox configuration",
+						Children: []FieldMeta{
+							{
+								Path:        []string{"claude", "sandbox", "network", "allowAllUnixSockets"},
+								Type:        FieldBool,
+								Description: "When true, allow connecting AND binding unix-domain sockets at any path (coarse; opens docker.sock/SSH/GPG agents)",
+							},
+							{
+								Path:        []string{"claude", "sandbox", "network", "allowLocalBinding"},
+								Type:        FieldBool,
+								Description: "When true, allow binding localhost TCP ports",
+							},
+							{
+								Path:        []string{"claude", "sandbox", "network", "allowUnixSockets"},
+								Type:        FieldArray,
+								Description: "Unix-domain socket paths the sandbox allows connecting to (connect-only, per path)",
+							},
+							{
+								Path:        []string{"claude", "sandbox", "network", "allowedDomains"},
+								Type:        FieldArray,
+								Description: "Domains the sandbox allows network access to",
+							},
+						},
+					},
+				},
+			},
+			{
+				Path:        []string{"claude", "skipDangerousModePermissionPrompt"},
+				Type:        FieldBool,
+				Description: "When true, skip Claude Code's confirmation prompt for the dangerous bypass mode (useful for headless agents)",
+			},
+			{
+				Path:        []string{"claude", "skipWorkflowUsageWarning"},
+				Type:        FieldBool,
+				Description: "When true, skip Claude Code's workflow usage warning",
+			},
+			{
+				Path:        []string{"claude", "tui"},
+				Type:        FieldString,
+				Description: "Claude Code tui setting (terminal UI selector); free-form passthrough, empty means unset",
+			},
+			{
+				Path:        []string{"claude", "useAutoModeDuringPlan"},
+				Type:        FieldBool,
+				Description: "When true, apply the auto-mode classifier during plan mode to auto-approve safe read-only calls",
+			},
+		},
+	},
+	{
 		Path:        []string{"api_key"},
 		Type:        FieldString,
 		Description: "Direct API key for Google Gemini",
@@ -789,13 +994,6 @@ var SchemaFields = []FieldMeta{
 		Important:   true,
 		Hint:        "Consider using api_key_command to fetch from a secrets manager",
 		Namespace:   "gemini",
-	},
-	{
-		Path:        []string{"agent_target"},
-		Type:        FieldString,
-		Description: "Agent launch target: auto/native/tmux",
-		Priority:    1000,
-		Namespace:   "flow",
 	},
 	{
 		Path:             []string{"search_paths"},
@@ -808,6 +1006,13 @@ var SchemaFields = []FieldMeta{
 		StatusSince:      "v0.5.0",
 		StatusTarget:     "v1.0.0",
 		StatusReplacedBy: "groves",
+	},
+	{
+		Path:        []string{"agent_target"},
+		Type:        FieldString,
+		Description: "Agent launch target: auto/native/tmux",
+		Priority:    1000,
+		Namespace:   "flow",
 	},
 }
 
@@ -826,9 +1031,9 @@ var FieldsByPath = map[string]*FieldMeta{
 	"environments":                     &SchemaFields[10],
 	"tui":                              &SchemaFields[11],
 	"flow.interactive_provider":        &SchemaFields[12],
-	"gemini.api_key_command":           &SchemaFields[13],
-	"logging.level":                    &SchemaFields[14],
-	"flow.oneshot_model":               &SchemaFields[15],
+	"logging.level":                    &SchemaFields[13],
+	"flow.oneshot_model":               &SchemaFields[14],
+	"gemini.api_key_command":           &SchemaFields[15],
 	"logging.system_level":             &SchemaFields[16],
 	"flow.agent_env":                   &SchemaFields[17],
 	"logging.report_caller":            &SchemaFields[18],
@@ -839,15 +1044,16 @@ var FieldsByPath = map[string]*FieldMeta{
 	"context":                          &SchemaFields[23],
 	"logging.groups":                   &SchemaFields[24],
 	"flow.run_init_by_default":         &SchemaFields[25],
-	"logging.component_filtering":      &SchemaFields[26],
-	"flow.max_consecutive_steps":       &SchemaFields[27],
+	"flow.max_consecutive_steps":       &SchemaFields[26],
+	"logging.component_filtering":      &SchemaFields[27],
 	"logging.show_current_project":     &SchemaFields[28],
 	"flow.recipes":                     &SchemaFields[29],
 	"logging.log_startup":              &SchemaFields[30],
 	"version":                          &SchemaFields[31],
-	"gemini.api_key":                   &SchemaFields[32],
-	"flow.agent_target":                &SchemaFields[33],
+	"claude":                           &SchemaFields[32],
+	"gemini.api_key":                   &SchemaFields[33],
 	"search_paths":                     &SchemaFields[34],
+	"flow.agent_target":                &SchemaFields[35],
 }
 
 // ImportantFields contains only fields marked as important/key configuration options.
@@ -855,8 +1061,9 @@ var ImportantFields = []*FieldMeta{
 	&SchemaFields[0],
 	&SchemaFields[1],
 	&SchemaFields[12],
-	&SchemaFields[13],
+	&SchemaFields[14],
 	&SchemaFields[15],
 	&SchemaFields[19],
 	&SchemaFields[32],
+	&SchemaFields[33],
 }
