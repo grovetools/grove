@@ -39,8 +39,9 @@ func TestNormalizeTuimuxChord(t *testing.T) {
 }
 
 // TestConflictNoteSyntheticStack: conflict lookup against a hand-built
-// stack — layer + action surfaced, alternatives suggested, tuimux layers
-// probed explicitly, free keys reported as free.
+// stack — layer + action surfaced in raw bubbletea spelling, modified-only
+// alternatives suggested, tuimux layers probed explicitly, free keys
+// reported as free (not as conflicts).
 func TestConflictNoteSyntheticStack(t *testing.T) {
 	stack := keybind.NewStack()
 	stack.AddBinding(keybind.Binding{
@@ -58,26 +59,61 @@ func TestConflictNoteSyntheticStack(t *testing.T) {
 		Provenance: keybind.ProvenanceUserConfig,
 	})
 
-	note := conflictNote(stack, "ctrl+b")
-	for _, want := range []string{"C-B", "backward-char", "Shell", "default"} {
+	note, conflict := conflictNote(stack, "ctrl+b")
+	if !conflict {
+		t.Errorf("ctrl+b not reported as a conflict: %s", note)
+	}
+	for _, want := range []string{"ctrl+b is taken by", "backward-char", "Shell", "default"} {
 		if !strings.Contains(note, want) {
 			t.Errorf("conflict note missing %q: %s", want, note)
 		}
 	}
-	if !strings.Contains(note, "try instead") {
-		t.Errorf("conflict note has no alternatives line: %s", note)
+	// The message speaks raw bubbletea spelling throughout — no normalized
+	// C-B forms leak into the user-facing copy.
+	if strings.Contains(note, "C-B") {
+		t.Errorf("normalized spelling leaked into note: %s", note)
+	}
+	idx := strings.Index(note, "alternatives: ")
+	if idx < 0 {
+		t.Fatalf("conflict note has no alternatives line: %s", note)
+	}
+	for _, alt := range strings.Split(note[idx+len("alternatives: "):], ", ") {
+		if !strings.Contains(alt, "+") {
+			t.Errorf("alternative %q carries no modifier (bare keys are useless leaders): %s", alt, note)
+		}
 	}
 
 	// FindBindingForKey's layer order skips the tuimux layers; the checker
 	// must still surface a clash with tuimux's own global binds.
-	tuimuxNote := conflictNote(stack, "ctrl+x")
-	if !strings.Contains(tuimuxNote, "popup") || !strings.Contains(tuimuxNote, "Tuimux Global") {
+	tuimuxNote, tuimuxConflict := conflictNote(stack, "ctrl+x")
+	if !tuimuxConflict || !strings.Contains(tuimuxNote, "popup") || !strings.Contains(tuimuxNote, "Tuimux Global") {
 		t.Errorf("tuimux-layer conflict not surfaced: %s", tuimuxNote)
 	}
 
-	free := conflictNote(stack, "ctrl+y")
-	if !strings.Contains(free, "looks free") {
-		t.Errorf("free key not reported as free: %s", free)
+	free, freeConflict := conflictNote(stack, "ctrl+y")
+	if freeConflict {
+		t.Errorf("free key reported as a conflict: %s", free)
+	}
+	if !strings.Contains(free, "ctrl+y looks free") {
+		t.Errorf("free key not reported as free in raw spelling: %s", free)
+	}
+}
+
+// TestRawKeyDisplay pins the normalized→bubbletea spelling used for
+// suggestion display.
+func TestRawKeyDisplay(t *testing.T) {
+	cases := map[string]string{
+		"C-B":   "ctrl+b",
+		"M-B":   "alt+b",
+		"C-M-B": "ctrl+alt+b",
+		"S-B":   "shift+b",
+		"B":     "b",
+		"Enter": "enter",
+	}
+	for in, want := range cases {
+		if got := rawKeyDisplay(in); got != want {
+			t.Errorf("rawKeyDisplay(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
@@ -244,6 +280,64 @@ func TestKeysCaptureConflictWarning(t *testing.T) {
 	_, _ = p.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if strings.Contains(p.View(), "transpose-chars") {
 		t.Error("conflict warning survived revert")
+	}
+}
+
+// TestKeysCaptureDefaultNotScolded: re-capturing the shipped default leader
+// (ctrl+b) must never produce a conflict warning — even though it genuinely
+// collides with readline's backward-char — only a neutral status-quo line.
+func TestKeysCaptureDefaultNotScolded(t *testing.T) {
+	m, _, _ := newCuratedTestModel(t)
+	stack := keybind.NewStack()
+	stack.AddBinding(keybind.Binding{
+		Key:        "C-B",
+		Layer:      keybind.LayerShell,
+		Source:     "bash",
+		Action:     "backward-char",
+		Provenance: keybind.ProvenanceDefault,
+	})
+	syntheticStack(t, stack)
+	p := NewCuratedPage("Keys", KeysSettings(), m.layered, grovekeymap.NewConfigKeyMap(nil), 100, 40, CuratedOpts{})
+	p.Focus()
+
+	_, _ = p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = p.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+
+	view := p.View()
+	if strings.Contains(view, "taken by") || strings.Contains(view, "backward-char") {
+		t.Errorf("re-picking the default leader was scolded with a conflict:\n%s", view)
+	}
+	if !strings.Contains(view, "the default leader key") {
+		t.Errorf("neutral default note missing:\n%s", view)
+	}
+}
+
+// TestKeysCaptureCurrentValueNotScolded: re-capturing the currently saved
+// leader is the status quo, not a conflict — neutral note only.
+func TestKeysCaptureCurrentValueNotScolded(t *testing.T) {
+	stack := keybind.NewStack()
+	stack.AddBinding(keybind.Binding{
+		Key:        "C-T",
+		Layer:      keybind.LayerShell,
+		Source:     "bash",
+		Action:     "transpose-chars",
+		Provenance: keybind.ProvenanceDefault,
+	})
+	syntheticStack(t, stack)
+
+	lc := &config.LayeredConfig{Final: &config.Config{TUI: &config.TUIConfig{LeaderKey: "ctrl+t"}}}
+	p := NewCuratedPage("Keys", KeysSettings(), lc, grovekeymap.NewConfigKeyMap(nil), 100, 40, CuratedOpts{})
+	p.Focus()
+
+	_, _ = p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = p.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+
+	view := p.View()
+	if strings.Contains(view, "taken by") || strings.Contains(view, "transpose-chars") {
+		t.Errorf("re-picking the saved leader was scolded with a conflict:\n%s", view)
+	}
+	if !strings.Contains(view, "already your leader key") {
+		t.Errorf("neutral status-quo note missing:\n%s", view)
 	}
 }
 

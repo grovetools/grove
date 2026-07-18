@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/core/tui/theme"
 
@@ -41,9 +42,9 @@ func TestAppearanceSettingsRows(t *testing.T) {
 	wants := []wantRow{
 		{"theme", "", ControlLink, "", []string{"themes"}},
 		{"focus_style", "tui.focus.style", ControlSelect, embed.SettingDomainFocus, []string{"gutter", "title", "border"}},
-		{"focus_active_color", "tui.focus.active_color", ControlColor, embed.SettingDomainFocus, nil},
-		{"focus_inactive_color", "tui.focus.inactive_color", ControlColor, embed.SettingDomainFocus, nil},
-		{"focus_thickness", "tui.focus.thickness", ControlInt, embed.SettingDomainFocus, nil},
+		{"focus_active_color", "tui.focus.active_color", ControlSelect, embed.SettingDomainFocus, focusColorOptions},
+		{"focus_inactive_color", "tui.focus.inactive_color", ControlSelect, embed.SettingDomainFocus, focusColorOptions},
+		{"focus_thickness", "tui.focus.thickness", ControlSelect, embed.SettingDomainFocus, []string{"thin", "thick"}},
 		{"icons", "tui.icons", ControlSelect, embed.SettingDomainIcons, []string{"nerd", "ascii"}},
 	}
 
@@ -84,13 +85,13 @@ func TestAppearanceSettingsRows(t *testing.T) {
 
 // TestAppearanceDefaultsDisplayed: with an empty layered config every row
 // reads the shipped default, so cycling starts from what the app actually
-// uses (gutter/cyan/none/1, nerd icons).
+// uses (gutter/cyan/none/thin, nerd icons).
 func TestAppearanceDefaultsDisplayed(t *testing.T) {
 	wants := map[string]string{
 		"focus_style":          "gutter",
 		"focus_active_color":   "cyan",
 		"focus_inactive_color": "none",
-		"focus_thickness":      "1",
+		"focus_thickness":      "thin",
 		"icons":                "nerd",
 	}
 	for _, s := range AppearanceSettings() {
@@ -286,6 +287,16 @@ func TestEffectiveFocusSpecOverrides(t *testing.T) {
 		t.Errorf("thickness 9 clamped to %d, want 2", spec.Thickness)
 	}
 
+	// The select's word labels drive the preview too.
+	ov.set("focus_thickness", "thick")
+	if spec = effectiveFocusSpec(nil, ov); spec.Thickness != 2 {
+		t.Errorf("thickness \"thick\" = %d, want 2", spec.Thickness)
+	}
+	ov.set("focus_thickness", "thin")
+	if spec = effectiveFocusSpec(nil, ov); spec.Thickness != 1 {
+		t.Errorf("thickness \"thin\" = %d, want 1", spec.Thickness)
+	}
+
 	ov.clear("focus_style")
 	if spec = effectiveFocusSpec(nil, ov); spec.Style != "gutter" {
 		t.Errorf("cleared override: style = %q, want gutter", spec.Style)
@@ -444,16 +455,142 @@ func TestAppearanceWriteThrough(t *testing.T) {
 		t.Errorf("style displayed = %q, want title", got)
 	}
 
-	m3, applied := applySetting(t, m2, *thicknessRow, "3")
+	m3, applied := applySetting(t, m2, *thicknessRow, "thick")
 	if applied == nil || applied.Domain != embed.SettingDomainFocus {
 		t.Fatalf("thickness: applied = %+v, want focus domain", applied)
 	}
 	final := m3.layered.Final
-	if final.TUI == nil || final.TUI.Focus == nil || final.TUI.Focus.Thickness != 3 || final.TUI.Focus.Style != "title" {
-		t.Errorf("reloaded Final focus = %+v, want style=title thickness=3", final.TUI)
+	if final.TUI == nil || final.TUI.Focus == nil || final.TUI.Focus.Thickness != 2 || final.TUI.Focus.Style != "title" {
+		t.Errorf("reloaded Final focus = %+v, want style=title thickness=2 (thick)", final.TUI)
+	}
+	if got := thicknessRow.Read(m3.layered); got != "thick" {
+		t.Errorf("thickness displayed = %q, want thick", got)
 	}
 	if final.TUI.Theme != "kanagawa-dark" {
 		t.Error("seeded theme lost — global file dropped by a mistyped write")
+	}
+}
+
+// TestThicknessLabelValueMapping pins the word↔int seam: the select shows
+// thin/thick, the TOML schema stores 1/2, and legacy values (ints above 2,
+// numeric strings from old staged previews) collapse onto the same range.
+func TestThicknessLabelValueMapping(t *testing.T) {
+	labelCases := map[int]string{0: "thin", 1: "thin", 2: "thick", 3: "thick", 9: "thick"}
+	for n, want := range labelCases {
+		if got := thicknessLabel(n); got != want {
+			t.Errorf("thicknessLabel(%d) = %q, want %q", n, got, want)
+		}
+	}
+	valueCases := map[string]int{
+		"thin": 1, "thick": 2, "Thick": 2, " thick ": 2,
+		"1": 1, "2": 2, "3": 2, "9": 2,
+		"": 1, "bogus": 1,
+	}
+	for v, want := range valueCases {
+		if got := thicknessValue(v); got != want {
+			t.Errorf("thicknessValue(%q) = %d, want %d", v, got, want)
+		}
+	}
+}
+
+// TestFocusThicknessWriteTransform: the thickness row's WriteTransform maps
+// the select's word onto the Go int the TOML file must store (the A1 rule —
+// a quoted "thin" would fail core's strict decode).
+func TestFocusThicknessWriteTransform(t *testing.T) {
+	var row *Setting
+	settings := AppearanceSettings()
+	for i := range settings {
+		if settings[i].ID == "focus_thickness" {
+			row = &settings[i]
+		}
+	}
+	if row == nil {
+		t.Fatal("focus_thickness row missing")
+	}
+	if row.WriteTransform == nil {
+		t.Fatal("focus_thickness has no WriteTransform")
+	}
+	typed, err := row.TypedValue("thin")
+	if err != nil {
+		t.Fatalf("TypedValue(thin): %v", err)
+	}
+	if got := row.WriteTransform(typed); got != 1 {
+		t.Errorf("thin writes %#v, want int 1", got)
+	}
+	typed, _ = row.TypedValue("thick")
+	if got := row.WriteTransform(typed); got != 2 {
+		t.Errorf("thick writes %#v, want int 2", got)
+	}
+}
+
+// TestFocusColorOptionsMatchResolver: every focus color option is a name
+// core's theme resolver actually understands — an option the resolver would
+// silently fall back on must never be offered — and "none" is a first-class
+// choice resolving to NoColor.
+func TestFocusColorOptionsMatchResolver(t *testing.T) {
+	sentinel := lipgloss.Color("#010203")
+	c := theme.DefaultTheme.Colors
+	seen := make(map[string]bool)
+	hasNone := false
+	for _, name := range focusColorOptions {
+		if seen[name] {
+			t.Errorf("duplicate option %q", name)
+		}
+		seen[name] = true
+		resolved := c.ResolveColor(name, sentinel)
+		if resolved == sentinel {
+			t.Errorf("option %q not understood by theme.Colors.ResolveColor", name)
+		}
+		if name == "none" {
+			hasNone = true
+			if _, isNone := resolved.(lipgloss.NoColor); !isNone {
+				t.Errorf("\"none\" resolved to %#v, want NoColor", resolved)
+			}
+		}
+	}
+	if !hasNone {
+		t.Error("\"none\" missing from focusColorOptions")
+	}
+	if focusColorOptions[0] != "cyan" {
+		t.Errorf("first option = %q, want cyan (the shipped active default)", focusColorOptions[0])
+	}
+}
+
+// TestFocusColorUnknownValueSurfaced: a saved color outside the enum (e.g. a
+// hex someone typed into the file) is surfaced as the current selection
+// rather than crashing, and cycling replaces it with a real option.
+func TestFocusColorUnknownValueSurfaced(t *testing.T) {
+	lc := &config.LayeredConfig{Final: &config.Config{TUI: &config.TUIConfig{
+		Focus: &config.FocusConfig{ActiveColor: "#ff5500"},
+	}}}
+
+	settings := AppearanceSettings()
+	var row Setting
+	idx := -1
+	for i, s := range settings {
+		if s.ID == "focus_active_color" {
+			row, idx = s, i
+		}
+	}
+	if idx < 0 {
+		t.Fatal("focus_active_color row missing")
+	}
+	if got := row.Read(lc); got != "#ff5500" {
+		t.Fatalf("Read = %q, want the raw hex surfaced", got)
+	}
+
+	p := NewCuratedPage("Appearance", settings, lc, grovekeymap.NewConfigKeyMap(nil), 80, 24, CuratedOpts{})
+	p.Focus()
+	for i := 0; i < idx; i++ {
+		_, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	}
+	if s := p.currentSetting(); s == nil || s.ID != "focus_active_color" {
+		t.Fatalf("cursor not on focus_active_color: %+v", p.currentSetting())
+	}
+	// Cycling from an unknown value stages the first enum option.
+	_, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	if got := p.pendingFor(p.cursor); got != focusColorOptions[0] {
+		t.Errorf("cycle from unknown staged %q, want %q", got, focusColorOptions[0])
 	}
 }
 
