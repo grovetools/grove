@@ -104,8 +104,10 @@ func TestDetectShadowedPrefixes_Synthetic(t *testing.T) {
 }
 
 // TestDetectShadowedPrefixes_Registry runs the check over the live registry. The
-// expected set is {core-logs/y, nb-browser/y, nav-manage/g}; drift-tolerant —
-// if the live registry differs the expectation (not the predicate) is adjusted.
+// expected set is {core-logs/y, nav-manage/g}; drift-tolerant — if the live
+// registry differs the expectation (not the predicate) is adjusted. nb-browser/y
+// was removed in Phase 4: Confirm dropped its `y` half and Copy moved to `yy`, so
+// nb-browser no longer shadows its own yy chord.
 func TestDetectShadowedPrefixes_Registry(t *testing.T) {
 	got := DetectShadowedPrefixes()
 	t.Logf("registry prefix shadowings: %d", len(got))
@@ -114,7 +116,7 @@ func TestDetectShadowedPrefixes_Registry(t *testing.T) {
 	for _, s := range got {
 		have[s.TUI+"/"+s.Key] = true
 	}
-	want := []string{"core-logs/y", "nb-browser/y", "nav-manage/g"}
+	want := []string{"core-logs/y", "nav-manage/g"}
 	for _, w := range want {
 		if !have[w] {
 			t.Errorf("expected registry shadowing %q, not found in %+v", w, got)

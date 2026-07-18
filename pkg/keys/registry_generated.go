@@ -1462,12 +1462,12 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Actions",
 				Bindings: []BindingEntry{
-					{Name: "Confirm", Keys: []string{"enter", "y"}, Description: "confirm", Enabled: true, ConfigKey: "confirm"},
+					{Name: "Confirm", Keys: []string{"enter"}, Description: "confirm", Enabled: true, ConfigKey: "confirm"},
 					{Name: "Cancel", Keys: []string{"ctrl+g"}, Description: "cancel", Enabled: true, ConfigKey: "cancel"},
 					{Name: "Back", Keys: []string{"esc"}, Description: "back", Enabled: true, ConfigKey: "back"},
 					{Name: "Edit", Keys: []string{"e"}, Description: "edit", Enabled: true, ConfigKey: "edit"},
 					{Name: "Delete", Keys: []string{"dd"}, Description: "delete", Enabled: true, ConfigKey: "delete"},
-					{Name: "Yank", Keys: []string{"yy"}, Description: "yank", Enabled: true, ConfigKey: "yank"},
+					{Name: "Yank", Keys: []string{"yy"}, Description: "yank", Enabled: false, ConfigKey: "yank"},
 					{Name: "Rename", Keys: []string{"R"}, Description: "rename", Enabled: false, ConfigKey: "rename"},
 					{Name: "Refresh", Keys: []string{"ctrl+r"}, Description: "refresh", Enabled: false, ConfigKey: "refresh"},
 					{Name: "CopyPath", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true, ConfigKey: "copy_path"},
@@ -1496,7 +1496,6 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "View",
 				Bindings: []BindingEntry{
 					{Name: "SwitchView", Keys: []string{"tab"}, Description: "switch view", Enabled: true, ConfigKey: "switch_view"},
-					{Name: "TogglePreview", Keys: []string{"v"}, Description: "preview", Enabled: true, ConfigKey: "toggle_preview"},
 				},
 			},
 			{
@@ -1516,8 +1515,13 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "ClearFocus", Keys: []string{"ctrl+g"}, Description: "clear focus", Enabled: true, ConfigKey: "clear_focus"},
 					{Name: "FocusSelected", Keys: []string{"."}, Description: "focus selected", Enabled: true, ConfigKey: "focus_selected"},
 					{Name: "FocusRecent", Keys: []string{"f"}, Description: "focus recent", Enabled: true, ConfigKey: "focus_recent"},
-					{Name: "FocusArchive", Keys: []string{","}, Description: "archive view (.archive/.closed)", Enabled: true, ConfigKey: "focus_archive"},
-					{Name: "JumpToArtifacts", Keys: []string{";"}, Description: "jump to job artifacts", Enabled: true, ConfigKey: "jump_to_artifacts"},
+				},
+			},
+			{
+				Name: "Goto (g…)",
+				Bindings: []BindingEntry{
+					{Name: "JumpToArtifacts", Keys: []string{"ga"}, Description: "goto job artifacts", Enabled: true, ConfigKey: "jump_to_artifacts"},
+					{Name: "FocusArchive", Keys: []string{"gv"}, Description: "goto archive view", Enabled: true, ConfigKey: "focus_archive"},
 				},
 			},
 			{
@@ -1530,13 +1534,14 @@ var TUIRegistry = []TUIRegistryEntry{
 				},
 			},
 			{
-				Name: "Toggle",
+				Name: "Toggle (t…)",
 				Bindings: []BindingEntry{
-					{Name: "ToggleArchives", Keys: []string{"A"}, Description: "toggle archives", Enabled: true, ConfigKey: "toggle_archives"},
-					{Name: "ToggleArtifacts", Keys: []string{"b"}, Description: "toggle artifacts", Enabled: true, ConfigKey: "toggle_artifacts"},
-					{Name: "ToggleGlobal", Keys: []string{"~"}, Description: "toggle global", Enabled: true, ConfigKey: "toggle_global"},
-					{Name: "ToggleHold", Keys: []string{"H"}, Description: "toggle on-hold", Enabled: true, ConfigKey: "toggle_hold"},
-					{Name: "ToggleColumns", Keys: []string{"V"}, Description: "toggle columns", Enabled: true, ConfigKey: "toggle_columns"},
+					{Name: "ToggleArchives", Keys: []string{"ta"}, Description: "toggle archives", Enabled: true, ConfigKey: "toggle_archives"},
+					{Name: "ToggleArtifacts", Keys: []string{"tb"}, Description: "toggle artifacts", Enabled: true, ConfigKey: "toggle_artifacts"},
+					{Name: "ToggleGlobal", Keys: []string{"tg"}, Description: "toggle global", Enabled: true, ConfigKey: "toggle_global"},
+					{Name: "ToggleHold", Keys: []string{"th"}, Description: "toggle on-hold", Enabled: true, ConfigKey: "toggle_hold"},
+					{Name: "ToggleColumns", Keys: []string{"tc"}, Description: "toggle columns", Enabled: true, ConfigKey: "toggle_columns"},
+					{Name: "TogglePreview", Keys: []string{"tp"}, Description: "toggle preview", Enabled: true, ConfigKey: "toggle_preview"},
 				},
 			},
 			{
@@ -1556,7 +1561,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "Clipboard",
 				Bindings: []BindingEntry{
 					{Name: "Cut", Keys: []string{"x"}, Description: "cut selected", Enabled: true, ConfigKey: "cut"},
-					{Name: "Copy", Keys: []string{"y", "c"}, Description: "copy selected", Enabled: true, ConfigKey: "copy"},
+					{Name: "Copy", Keys: []string{"yy"}, Description: "copy selected", Enabled: true, ConfigKey: "copy"},
 					{Name: "Paste", Keys: []string{"p"}, Description: "paste from clipboard", Enabled: true, ConfigKey: "paste"},
 					{Name: "Archive", Keys: []string{"X"}, Description: "archive selected", Enabled: true, ConfigKey: "archive"},
 				},

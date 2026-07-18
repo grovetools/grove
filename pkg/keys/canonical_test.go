@@ -63,15 +63,17 @@ func TestAnalyzePrefixSquatters_Registry(t *testing.T) {
 	for _, s := range sq {
 		have[s.TUI+"/"+s.Key] = true
 	}
-	// flow-status was the Phase-3 pilot: its v/c/t/z flat squatters were
-	// vacated onto v…/c… namespace chords, so it is intentionally NO LONGER a
-	// squatter. core-logs/v (toggle_preview) stands in as the representative
-	// flat-view squatter until later phases restructure it too.
+	// flow-status (Phase 3) and nb-browser (Phase 4) were migrated: their flat
+	// v/c/t/g squatters were vacated onto namespace chords, so they are
+	// intentionally NO LONGER squatters. core-logs/v (toggle_preview) stands in
+	// as the representative flat-view squatter, and nav-sessionize/c (toggle_cx)
+	// as the representative flat-change squatter, until later phases restructure
+	// them too.
 	want := []string{
 		"core-logs/v",
 		"memory-view/t",
 		"nav-history/g",
-		"nb-browser/c",
+		"nav-sessionize/c",
 	}
 	for _, w := range want {
 		if !have[w] {
