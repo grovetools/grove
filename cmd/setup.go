@@ -1215,50 +1215,11 @@ func (m *setupModel) generateYAMLConfig() ([]byte, string) {
 }
 
 func (m *setupModel) setupEcosystemFiles() {
-	// Create ecosystem directory
-	_ = m.service.MkdirAll(m.ecosystemPath, 0o755)
-
-	// Create grove.yml or grove.toml for ecosystem based on format selection
+	format := setup.ManifestYAML
 	if m.configFormat == formatTOML {
-		groveTOMLContent := fmt.Sprintf(`name = "%s"
-description = "A Grove ecosystem"
-workspaces = ["*"]
-`, m.ecosystemName)
-		_ = m.service.WriteFile(filepath.Join(m.ecosystemPath, "grove.toml"), []byte(groveTOMLContent), 0o600)
-	} else {
-		groveYMLContent := fmt.Sprintf(`name: %s
-description: A Grove ecosystem
-workspaces:
-  - "*"
-`, m.ecosystemName)
-		_ = m.service.WriteFile(filepath.Join(m.ecosystemPath, "grove.yml"), []byte(groveYMLContent), 0o600)
+		format = setup.ManifestTOML
 	}
-
-	// Create .gitignore
-	gitignoreContent := `# OS files
-.DS_Store
-Thumbs.db
-
-# Editor files
-*.swp
-*.swo
-*~
-`
-	_ = m.service.WriteFile(filepath.Join(m.ecosystemPath, ".gitignore"), []byte(gitignoreContent), 0o600)
-
-	// Create README.md
-	readmeContent := fmt.Sprintf(`# %s
-
-A Grove ecosystem for managing related projects.
-
-## Getting Started
-
-Add projects to this directory and they will be automatically discovered by Grove tools.
-`, m.ecosystemName)
-	_ = m.service.WriteFile(filepath.Join(m.ecosystemPath, "README.md"), []byte(readmeContent), 0o600)
-
-	// Initialize git repository
-	_ = m.service.RunGitInit(m.ecosystemPath)
+	_ = m.service.ScaffoldEcosystem(m.ecosystemPath, m.ecosystemName, format)
 }
 
 func (m *setupModel) setupFirstProject() {

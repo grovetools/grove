@@ -165,14 +165,14 @@ func TestNotebookEssentials(t *testing.T) {
 }
 
 // TestNotebookPageOrderInFullPager: the full pager carries the Notebook tab
-// after Themes and before Data.
+// after Themes, then Ecosystem, then Data last.
 func TestNotebookPageOrderInFullPager(t *testing.T) {
 	m, _, _ := newCuratedTestModel(t)
 	var names []string
 	for _, p := range m.pager.Pages() {
 		names = append(names, p.Name())
 	}
-	want := []string{"Appearance", "Layout", "Keys", "Themes", "Notebook", "Data"}
+	want := []string{"Appearance", "Layout", "Keys", "Themes", "Notebook", "Ecosystem", "Data"}
 	if len(names) != len(want) {
 		t.Fatalf("pages = %v, want %v", names, want)
 	}
