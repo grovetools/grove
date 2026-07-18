@@ -18,6 +18,13 @@ func NewTOMLHandler(service *Service) *TOMLHandler {
 	return &TOMLHandler{service: service}
 }
 
+// Service returns the underlying setup service, for callers that hold only
+// the handler but need the service's file-scaffolding side (the config TUI's
+// ecosystem commit).
+func (h *TOMLHandler) Service() *Service {
+	return h.service
+}
+
 // SaveGlobalConfig saves a configuration map to the global grove configuration file.
 // Uses grove.toml format.
 func (h *TOMLHandler) SaveGlobalConfig(config map[string]interface{}) error {
