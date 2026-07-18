@@ -23,6 +23,14 @@ import (
 // stringified bool makes the strict decoder drop the entire file).
 func newCuratedTestModel(t *testing.T) (Model, string, string) {
 	t.Helper()
+	return newCuratedTestModelSeeded(t, "[tui]\ntheme = \"kanagawa-dark\"\n")
+}
+
+// newCuratedTestModelSeeded is newCuratedTestModel with a caller-provided
+// global grove.toml body (e.g. pre-set hide_splash_on_startup for the
+// inverted Layout row).
+func newCuratedTestModelSeeded(t *testing.T, seed string) (Model, string, string) {
+	t.Helper()
 
 	groveHome := t.TempDir()
 	t.Setenv("GROVE_HOME", groveHome)
@@ -33,7 +41,6 @@ func newCuratedTestModel(t *testing.T) (Model, string, string) {
 		t.Fatalf("mkdir global config dir: %v", err)
 	}
 	globalPath := filepath.Join(globalDir, "grove.toml")
-	seed := "[tui]\ntheme = \"kanagawa-dark\"\n"
 	if err := os.WriteFile(globalPath, []byte(seed), 0o600); err != nil {
 		t.Fatalf("seed global config: %v", err)
 	}

@@ -153,11 +153,11 @@ func New(
 
 	width, height := 80, 24 // Initial dummy size
 
-	// Curated pages: Appearance is real (Phase 3); Layout/Keys stay stubs
-	// until Phases 4–5; Themes is the existing gallery; Data is the raw
-	// per-layer tree collapsed into one tab with a layer cycler.
+	// Curated pages: Appearance (Phase 3) and Layout (Phase 4) are real;
+	// Keys stays a stub until Phase 5; Themes is the existing gallery; Data
+	// is the raw per-layer tree collapsed into one tab with a layer cycler.
 	appearancePage := NewCuratedPage("Appearance", AppearanceSettings(), layered, keys, width, height, CuratedOpts{})
-	layoutPage := newStubPage("Layout", "layout", "Layout settings coming soon", width, height)
+	layoutPage := NewCuratedPage("Layout", LayoutSettings(), layered, keys, width, height, CuratedOpts{})
 	keysPage := newStubPage("Keys", "keys", "Key settings coming soon", width, height)
 	themesPage := NewThemesPage(layered, keys, width, height)
 	dataPage := NewDataPage(layered, filters, keys, width, height)
@@ -195,7 +195,7 @@ func New(
 		pager:        pgr,
 		dataPage:     dataPage,
 		themesPage:   themesPage,
-		curatedPages: []*CuratedPage{appearancePage},
+		curatedPages: []*CuratedPage{appearancePage, layoutPage},
 		input:        ti,
 		layered:      layered,
 		yamlHandler:  yamlHandler,
@@ -291,6 +291,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if err != nil {
 			m.statusMsg = fmt.Sprintf("Error: %v", err)
 			return m, nil
+		}
+		// Inverted-presentation rows (e.g. Show Home on startup →
+		// hide_splash_on_startup) map the typed control value to the value
+		// the key actually stores.
+		if msg.setting.WriteTransform != nil {
+			typed = msg.setting.WriteTransform(typed)
 		}
 		if err := SaveGlobalSetting(m.tomlHandler, m.yamlHandler, m.layered, msg.setting.Path, typed); err != nil {
 			m.statusMsg = fmt.Sprintf("Error: %v", err)
