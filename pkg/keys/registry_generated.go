@@ -403,6 +403,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "ViewMemory", Keys: []string{"vm"}, Description: "memory search", Enabled: true, ConfigKey: "view_memory"},
 					{Name: "ViewNativeAgent", Keys: []string{"va"}, Description: "preview agent pane", Enabled: true, ConfigKey: "view_native_agent"},
 					{Name: "ViewSkillPane", Keys: []string{"vs"}, Description: "skills", Enabled: true, ConfigKey: "view_skill_pane"},
+					{Name: "ViewAccessedFiles", Keys: []string{"vy"}, Description: "accessed files", Enabled: true, ConfigKey: "view_accessed_files"},
 				},
 			},
 			{
