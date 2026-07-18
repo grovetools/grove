@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/workspace"
 
 	"github.com/grovetools/grove/pkg/discovery"
@@ -14,7 +13,9 @@ import (
 // DiscoverTargetProjects determines the appropriate scope of projects based on the current context.
 // If run from within an EcosystemWorktree, it returns only the constituents of that worktree.
 // If run from within an Ecosystem root, it returns only the direct sub-projects.
-// Otherwise, it returns all projects in the root ecosystem or standalone project group.
+// If run from within a sub-project or standalone project, it returns only that project.
+// When the current directory cannot be classified it fails closed with an error —
+// it never falls back to a machine-wide discovery.
 func DiscoverTargetProjects() ([]*workspace.WorkspaceNode, string, error) {
 	// Get current working directory
 	cwd, err := filepath.Abs(".")
@@ -25,26 +26,9 @@ func DiscoverTargetProjects() ([]*workspace.WorkspaceNode, string, error) {
 	// Use GetProjectByPath to perform a fast lookup and identify the current workspace node
 	currentNode, err := workspace.GetProjectByPath(cwd)
 	if err != nil {
-		// If we can't determine the current context, fall back to discovering all projects
-		logger := logging.NewLogger("discovery")
-		logger.WithField("error", err).Debug("Could not determine current workspace context, falling back to full discovery")
-
-		projects, err := discovery.DiscoverProjects()
-		if err != nil {
-			return nil, "", err
-		}
-
-		rootDir, _ := workspace.FindEcosystemRoot("")
-		if rootDir == "" {
-			rootDir = cwd
-		}
-		return projects, rootDir, nil
-	}
-
-	// Get all projects to filter from
-	allProjects, err := discovery.DiscoverAllProjects()
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to discover all projects: %w", err)
+		// Fail closed: without a classified context we must never fall back to
+		// a machine-wide discovery.
+		return nil, "", fmt.Errorf("cannot determine grove workspace context for %s: %w (run grove from inside an ecosystem or project)", cwd, err)
 	}
 
 	// Determine the scope for the command
@@ -56,6 +40,12 @@ func DiscoverTargetProjects() ([]*workspace.WorkspaceNode, string, error) {
 		// We're in an EcosystemWorktree, scope to its constituents
 		scopeRoot = currentNode.Path
 		scopeRootLower := strings.ToLower(scopeRoot)
+
+		// Get all projects to filter from
+		allProjects, err := discovery.DiscoverAllProjects()
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to discover projects in %s: %w", scopeRoot, err)
+		}
 
 		// Don't include the ecosystem worktree itself - it's a meta-project
 
@@ -80,6 +70,12 @@ func DiscoverTargetProjects() ([]*workspace.WorkspaceNode, string, error) {
 		// We're in an ecosystem root, only include its direct children (not the root itself)
 		scopeRoot = currentNode.Path
 		scopeRootLower := strings.ToLower(scopeRoot)
+
+		// Get all projects to filter from
+		allProjects, err := discovery.DiscoverAllProjects()
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to discover projects in %s: %w", scopeRoot, err)
+		}
 
 		// Don't include the ecosystem root itself - it's a meta-project
 
@@ -109,27 +105,24 @@ func DiscoverTargetProjects() ([]*workspace.WorkspaceNode, string, error) {
 		scopeRoot = currentNode.Path
 
 	default:
-		// For any other case, fall back to standard discovery
-		projects, err := discovery.DiscoverProjects()
+		// Unrecognized context (e.g. a non-grove repo). Scope to the enclosing
+		// ecosystem when there is one; otherwise fail closed — never fall back
+		// to a machine-wide discovery.
+		rootDir, rootErr := workspace.FindEcosystemRoot(cwd)
+		if rootErr != nil {
+			return nil, "", fmt.Errorf("cannot determine grove workspace context for %s (classified as %s): %v (run grove from inside an ecosystem or project)", cwd, currentNode.Kind, rootErr)
+		}
+
+		projects, err := discovery.DiscoverProjectsInEcosystem(rootDir, false)
 		if err != nil {
 			return nil, "", err
 		}
 
-		rootDir, _ := workspace.FindEcosystemRoot("")
-		if rootDir == "" {
-			rootDir = cwd
-		}
-
-		// Filter to only direct children of the current ecosystem if we're in one
+		// Only include direct ecosystem children (main repos, not worktrees)
 		rootDirLower := strings.ToLower(rootDir)
 		for _, p := range projects {
 			parentPathLower := strings.ToLower(p.ParentEcosystemPath)
-
-			// Only include direct ecosystem children (main repos, not worktrees)
 			if parentPathLower == rootDirLower && p.Kind == workspace.KindEcosystemSubProject {
-				filteredProjects = append(filteredProjects, p)
-			} else if p.ParentEcosystemPath == "" {
-				// Include standalone projects when not in an ecosystem
 				filteredProjects = append(filteredProjects, p)
 			}
 		}

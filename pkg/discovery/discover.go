@@ -1,12 +1,21 @@
 package discovery
 
 import (
+	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/sirupsen/logrus"
 )
+
+// ErrNoEcosystemScope indicates that no enclosing ecosystem root could be
+// resolved for the current directory. Callers that can meaningfully operate
+// without an ecosystem must opt in to machine-wide enumeration explicitly via
+// DiscoverAllProjectsGlobal instead of receiving the global project set
+// implicitly.
+var ErrNoEcosystemScope = errors.New("cannot determine ecosystem scope")
 
 // DiscoverProjects is a centralized helper that finds all main workspace projects
 // (excluding worktrees) within the current ecosystem using the discovery service from grove-core.
@@ -17,6 +26,17 @@ func DiscoverProjects() ([]*workspace.WorkspaceNode, error) {
 // DiscoverAllProjects discovers all projects including worktrees within the current ecosystem.
 func DiscoverAllProjects() ([]*workspace.WorkspaceNode, error) {
 	return DiscoverProjectsInEcosystem("", true)
+}
+
+// DiscoverAllProjectsGlobal enumerates every project registered on this
+// machine (all configured groves), including worktrees. The machine-wide
+// fan-out is intentional and opt-in: build-like verbs must never use this —
+// they go through the ecosystem-scoped discovery functions above.
+func DiscoverAllProjectsGlobal() ([]*workspace.WorkspaceNode, error) {
+	logger := logrus.New()
+	logger.SetLevel(logrus.WarnLevel) // Suppress noisy output
+
+	return workspace.GetProjects(logger)
 }
 
 // DiscoverProjectsInEcosystem discovers projects scoped to a specific ecosystem root.
@@ -38,8 +58,9 @@ func DiscoverProjectsInEcosystem(ecosystemRoot string, includeWorktrees bool) ([
 		// First, find what FindEcosystemRoot returns (might be a worktree)
 		currentRoot, err := workspace.FindEcosystemRoot("")
 		if err != nil {
-			// If we can't find an ecosystem root, just return all projects
-			return allProjects, nil
+			// Fail closed: without a resolvable ecosystem scope we must not
+			// hand back the unfiltered machine-wide project set.
+			return nil, fmt.Errorf("%w: %v", ErrNoEcosystemScope, err)
 		}
 
 		// Normalize path for comparison (lowercase for case-insensitive filesystems)

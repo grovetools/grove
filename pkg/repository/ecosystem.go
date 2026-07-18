@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -236,6 +237,11 @@ func deriveAliasFromRepoName(repoName string) string {
 func checkBinaryAliasConflict(alias string) error {
 	// Discover all workspaces
 	projects, err := discovery.DiscoverProjects()
+	if errors.Is(err, discovery.ErrNoEcosystemScope) {
+		// Best-effort check: outside a discoverable ecosystem there are no
+		// sibling workspaces to conflict with.
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("failed to discover workspaces: %w", err)
 	}

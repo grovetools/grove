@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -95,6 +96,11 @@ func runSchemaGenerate(cmd *cobra.Command, args []string) error {
 	// 3. Discover all projects and look for their schemas
 	// Use DiscoverAllProjects to include worktrees when developing in a worktree context
 	projects, err := discovery.DiscoverAllProjects()
+	if errors.Is(err, discovery.ErrNoEcosystemScope) {
+		// Outside any ecosystem, schema aggregation genuinely wants every
+		// registered project — opt in to machine-wide enumeration explicitly.
+		projects, err = discovery.DiscoverAllProjectsGlobal()
+	}
 	if err != nil {
 		return fmt.Errorf("failed to discover projects: %w", err)
 	}
