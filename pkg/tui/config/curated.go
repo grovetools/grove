@@ -35,13 +35,26 @@ const (
 	ControlColor
 	// ControlInt is numeric input. Writes a Go int.
 	ControlInt
-	// ControlKeyCapture captures the next keystroke as the value (Phase 5
-	// wires the capture mode; the kind exists now so descriptors are stable).
-	// Writes a string.
+	// ControlKeyCapture captures the next keystroke as the value: activating
+	// the row arms a capture (announced to the host via embed.KeyCaptureMsg
+	// so chord/global routing steps aside for one keystroke) and the next
+	// tea.KeyMsg.String() is staged as the candidate; enter commits it,
+	// esc cancels, backspace stages the row's default (Options[0]).
+	// Writes a string (the raw bubbletea key string, e.g. "ctrl+b" — the
+	// form tuimux compares against Config.LeaderKey each keypress).
 	ControlKeyCapture
 	// ControlLink is not a value at all: activating it switches the pager to
 	// the tab named by Options[0] (e.g. Appearance → Themes). Never written.
 	ControlLink
+	// ControlHostLink is a deep link into the HOST's panel space: activating
+	// it emits embed.NavigateMsg for the "panel" or "panel.tab" named by
+	// Options[0] (e.g. Keys → the treemux keymap debugger). Inert in the
+	// standalone CLI, where no host handles the message. Never written.
+	ControlHostLink
+	// ControlStatic is a read-only row: explanatory content rendered via
+	// Description/PreviewFn (e.g. the Keys page's two-chord explainer and
+	// effective-bindings summary). Activation is a no-op; never written.
+	ControlStatic
 )
 
 // Setting is one row of a curated config page: a described, typed handle on
@@ -63,8 +76,10 @@ type Setting struct {
 	Path []string
 	// Control selects the edit widget and the written Go type.
 	Control ControlKind
-	// Options are the allowed values for ControlSelect, or the target tab ID
-	// (Options[0]) for ControlLink.
+	// Options are the allowed values for ControlSelect; the target tab ID
+	// (Options[0]) for ControlLink; the host "panel" or "panel.tab" target
+	// (Options[0]) for ControlHostLink; and the reset-to-default value
+	// (Options[0], staged by backspace during capture) for ControlKeyCapture.
 	Options []string
 	// Read returns the setting's current display value from the layered
 	// config. nil renders as unset.
@@ -118,8 +133,8 @@ func (s Setting) TypedValue(raw string) (interface{}, error) {
 			return nil, fmt.Errorf("invalid integer %q for %s", raw, s.ID)
 		}
 		return n, nil
-	case ControlLink:
-		return nil, fmt.Errorf("link setting %s has no value", s.ID)
+	case ControlLink, ControlHostLink, ControlStatic:
+		return nil, fmt.Errorf("setting %s is not a value", s.ID)
 	default:
 		return raw, nil
 	}
@@ -133,10 +148,6 @@ type setSettingMsg struct {
 	setting Setting
 	value   string
 }
-
-// KeysSettings returns the Keys page's setting descriptors. Phase 5
-// populates it (leader/action capture, pane-nav choice).
-func KeysSettings() []Setting { return nil }
 
 // CuratedOpts configures a CuratedPage.
 type CuratedOpts struct {
@@ -161,6 +172,14 @@ type CuratedPage struct {
 	// steal keys for tab navigation.
 	editing bool
 	input   textinput.Model
+
+	// capturing is true while a ControlKeyCapture row waits for its next
+	// keystroke. The host's single-shot capture mode (armed via
+	// embed.KeyCaptureMsg when the row was activated) delivers exactly one
+	// raw key here, bypassing chord/global routing; IsTextEntryActive also
+	// reports it so neither the pager nor the outer Model's quit/help/filter
+	// matches steal the captured key.
+	capturing bool
 
 	// pendingIdx/pendingValue hold an uncommitted candidate value staged by
 	// h/l cycling on a select row (ThemesPage's preview-then-commit
@@ -254,10 +273,15 @@ func (p *CuratedPage) Focus() tea.Cmd {
 	return nil
 }
 
-// Blur implements pager.Page. Leaving the page cancels any open editor and
-// reverts any staged (previewed but uncommitted) candidate value.
+// Blur implements pager.Page. Leaving the page cancels any open editor,
+// reverts any staged (previewed but uncommitted) candidate value, and drops
+// an in-progress key capture. Blur cannot return a tea.Cmd, so no disarm
+// message reaches the host from here — the treemux host self-heals instead:
+// its capture mode is single-shot and only forwards while the arming panel
+// is still the focused input target (see TerminalModel's key-capture check).
 func (p *CuratedPage) Blur() {
 	p.active = false
+	p.capturing = false
 	p.clearPending(true)
 	p.stopEditing()
 }
@@ -274,8 +298,9 @@ func (p *CuratedPage) Refresh(layered *config.LayeredConfig) {
 	p.layered = layered
 }
 
-// IsTextEntryActive implements pager.PageWithTextInput.
-func (p *CuratedPage) IsTextEntryActive() bool { return p.editing }
+// IsTextEntryActive implements pager.PageWithTextInput. A key capture in
+// progress claims raw key input exactly like an open text editor does.
+func (p *CuratedPage) IsTextEntryActive() bool { return p.editing || p.capturing }
 
 // currentSetting returns the setting under the cursor, or nil.
 func (p *CuratedPage) currentSetting() *Setting {
@@ -367,6 +392,10 @@ func (p *CuratedPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 		return p, nil
 	}
 
+	if p.capturing {
+		return p.updateCapturing(keyMsg)
+	}
+
 	if p.editing {
 		return p.updateEditing(keyMsg)
 	}
@@ -407,8 +436,10 @@ func (p *CuratedPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 // activate performs the enter/space action for a setting, per control kind:
 // bools commit their toggled value immediately, selects commit the staged
 // (h/l-previewed) candidate if one exists or cycle to the next option and
-// commit, text-ish kinds open the inline editor, links switch the pager tab.
-// Key capture is inert until Phase 5 wires the capture mode.
+// commit, text-ish kinds open the inline editor, links switch the pager tab,
+// host links emit a deep-link into the host's panel space, and key-capture
+// rows either commit a staged captured chord or arm the capture (announcing
+// it to the host so its chord routing steps aside for one keystroke).
 func (p *CuratedPage) activate(s Setting) tea.Cmd {
 	switch s.Control {
 	case ControlBool:
@@ -438,14 +469,58 @@ func (p *CuratedPage) activate(s Setting) tea.Cmd {
 		p.input.SetValue(p.currentValue(s))
 		p.input.CursorEnd()
 		return p.input.Focus()
+	case ControlKeyCapture:
+		if staged := p.pendingFor(p.cursor); staged != "" {
+			return p.commitWithPreview(s, staged)
+		}
+		p.capturing = true
+		return func() tea.Msg { return embed.KeyCaptureMsg{Active: true} }
 	case ControlLink:
 		if len(s.Options) == 0 {
 			return nil
 		}
 		target := s.Options[0]
 		return func() tea.Msg { return embed.SwitchTabMsg{TabID: target} }
+	case ControlHostLink:
+		if len(s.Options) == 0 {
+			return nil
+		}
+		panelID, tabID := s.Options[0], ""
+		if dot := strings.IndexByte(panelID, '.'); dot >= 0 {
+			panelID, tabID = panelID[:dot], panelID[dot+1:]
+		}
+		return func() tea.Msg { return embed.NavigateMsg{PanelID: panelID, TabID: tabID} }
 	}
 	return nil
+}
+
+// updateCapturing handles the single keystroke a ControlKeyCapture row is
+// waiting for: esc cancels (and tells the host to disarm, in case its
+// single-shot mode did not deliver this esc itself), backspace stages the
+// row's default (Options[0] — the reset-to-default affordance; an explicit
+// value is always written, never a key deletion, because the treemux
+// leader/action apply handlers guard on empty strings), and any other key's
+// raw bubbletea string is staged as the candidate for enter-to-commit.
+func (p *CuratedPage) updateCapturing(keyMsg tea.KeyMsg) (pager.Page, tea.Cmd) {
+	p.capturing = false
+	keyStr := keyMsg.String()
+
+	if keyStr == "esc" {
+		return p, func() tea.Msg { return embed.KeyCaptureMsg{Active: false} }
+	}
+
+	s := p.currentSetting()
+	if s == nil {
+		return p, func() tea.Msg { return embed.KeyCaptureMsg{Active: false} }
+	}
+	if keyStr == "backspace" {
+		if def := firstOption(*s); def != "" {
+			p.stagePending(p.cursor, *s, def)
+		}
+		return p, nil
+	}
+	p.stagePending(p.cursor, *s, keyStr)
+	return p, nil
 }
 
 // commitWithPreview applies the setting's in-process preview effect for the
@@ -554,6 +629,12 @@ func (p *CuratedPage) renderRow(s Setting, labelWidth int, selected bool, pendin
 	switch {
 	case s.Control == ControlLink:
 		value = t.Path.Render("→ " + firstOption(s))
+	case s.Control == ControlHostLink:
+		value = t.Path.Render("→ " + firstOption(s))
+	case s.Control == ControlStatic:
+		value = ""
+	case selected && p.capturing:
+		value = t.Highlight.Render("press a key…")
 	case pending != "":
 		value = t.Highlight.Render(pending) + " " + t.Muted.Render("(preview)")
 	case value == "":
@@ -578,6 +659,8 @@ func (p *CuratedPage) renderCuratedFooter() string {
 	t := theme.DefaultTheme
 	hints := "enter: change • h/l: preview options • j/k: browse"
 	switch {
+	case p.capturing:
+		hints = "press the new key • backspace: default • esc: cancel"
 	case p.editing:
 		hints = "enter: save • esc: cancel"
 	case p.pendingIdx >= 0:
