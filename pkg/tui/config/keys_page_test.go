@@ -381,16 +381,17 @@ func TestKeysPaneNavTypedWrite(t *testing.T) {
 }
 
 // TestKeysSettingsEssentials: EssentialsOnly yields exactly the leader
-// capture and the pane-nav choice (the onboarding contract, spec 23).
+// capture, the pane-nav choice, and the two-chord explainer (the onboarding
+// contract, spec 23 round 3: the Keys step teaches leader vs action).
 func TestKeysSettingsEssentials(t *testing.T) {
 	p := NewCuratedPage("Keys", KeysSettings(), nil, grovekeymap.NewConfigKeyMap(nil), 80, 24, CuratedOpts{EssentialsOnly: true})
 	got := p.Settings()
-	if len(got) != 2 || got[0].ID != "leader" || got[1].ID != "pane_nav" {
+	if len(got) != 3 || got[0].ID != "leader" || got[1].ID != "pane_nav" || got[2].ID != "chords_help" {
 		ids := make([]string, 0, len(got))
 		for _, s := range got {
 			ids = append(ids, s.ID)
 		}
-		t.Fatalf("essentials = %v, want [leader pane_nav]", ids)
+		t.Fatalf("essentials = %v, want [leader pane_nav chords_help]", ids)
 	}
 }
 

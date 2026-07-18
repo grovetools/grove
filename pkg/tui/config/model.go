@@ -167,19 +167,7 @@ func New(
 
 	pages := []pager.Page{appearancePage, layoutPage, keysPage, themesPage, dataPage}
 
-	pagerKeys := pager.KeyMap{
-		Tab1:    keys.Base.Tab1,
-		Tab2:    keys.Base.Tab2,
-		Tab3:    keys.Base.Tab3,
-		Tab4:    keys.Base.Tab4,
-		Tab5:    keys.Base.Tab5,
-		Tab6:    keys.Base.Tab6,
-		Tab7:    keys.Base.Tab7,
-		Tab8:    keys.Base.Tab8,
-		Tab9:    keys.Base.Tab9,
-		NextTab: keys.NextPage,
-		PrevTab: keys.PrevPage,
-	}
+	pagerKeys := newPagerKeyMap(keys)
 
 	pagerCfg := pager.Config{
 		OuterPadding: [4]int{1, 2, 0, 2},

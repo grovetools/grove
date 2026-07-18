@@ -367,7 +367,12 @@ func KeysSettings() []Setting {
 			ID:          "chords_help",
 			Label:       "About the two chords",
 			Description: "Why treemux has both a leader and an action key",
-			Control:     ControlStatic,
+			// Essential: the onboarding Keys step must teach the leader vs
+			// action two-chord model explicitly (spec 23 round 3), with both
+			// CURRENT values live — this row already does exactly that for
+			// the full page, so the essentials density inherits it.
+			Essential: true,
+			Control:   ControlStatic,
 			PreviewFn: func(lc *config.LayeredConfig, width int) string {
 				t := theme.DefaultTheme
 				leader := effectiveChord(lc, func(tc *config.TUIConfig) string { return tc.LeaderKey }, defaultLeaderKey)
