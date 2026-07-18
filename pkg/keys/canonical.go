@@ -385,6 +385,12 @@ func NormalizeAction(name string) string {
 		"open":           "confirm",     // nav-*/hooks o/enter=open (primary row action)
 		"toggle expand":  "fold toggle", // cx-view enter/space=toggle_expand
 		"toggle exclude": "exclude",     // cx-view x=toggle_exclude (dedupes with exclude)
+		// nb-browser Phase 4: Copy migrated onto the vim yank chord `yy`. Its
+		// action "copy selected" suffix-strips to "copy", which sits on reserved
+		// `yy` (expects "yank"). Vim's yank IS copy, so this is a true alias, not a
+		// deviation — it keeps the `yy`=copy binding from minting a reserved
+		// violation. Safe: "copy path"/"copy chunk" don't strip to bare "copy".
+		"copy": "yank",
 	}
 	// Alias lookup on the FULL form first, so multi-word aliases win before
 	// suffix-stripping can mangle them (e.g. "select session" → "confirm").
