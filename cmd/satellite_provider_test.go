@@ -93,3 +93,48 @@ func TestSatelliteEndpointHost(t *testing.T) {
 		t.Error("malformed endpoint address not rejected")
 	}
 }
+
+// TestSatelliteProviderRefTarget pins the provider-identity extraction the
+// lifecycle guards key off: the ref's prefix, empty for a refless (gcp) entry,
+// and an unrecognized prefix returned as-is so callers refuse rather than
+// falling back to the gcp default.
+func TestSatelliteProviderRefTarget(t *testing.T) {
+	cases := map[string]string{
+		"tart:grove-sat-mysat":   "tart",
+		"docker:grove-sat-mysat": "docker",
+		"":                       "",
+		"vsphere:vm-7":           "vsphere",
+		"garbage":                "",
+	}
+	for ref, want := range cases {
+		if got := satelliteProviderRefTarget(ref); got != want {
+			t.Errorf("satelliteProviderRefTarget(%q) = %q, want %q", ref, got, want)
+		}
+	}
+}
+
+// TestSatelliteProviderRefMismatch pins the cross-check both `up` and `down`
+// refuse on. This is a safety guard, not a nicety: without it a `--target gcp`
+// typo against a local satellite drives terraform at real cloud billing, and a
+// `--target docker` typo re-provisions over — and orphans — a live tart VM.
+func TestSatelliteProviderRefMismatch(t *testing.T) {
+	cases := []struct {
+		name   string
+		entry  satelliteConfigEntry
+		target string
+		want   string
+	}{
+		{"tart entry, gcp requested", satelliteConfigEntry{ProviderRef: "tart:grove-sat-x"}, "gcp", "tart"},
+		{"tart entry, docker requested", satelliteConfigEntry{ProviderRef: "tart:grove-sat-x"}, "docker", "tart"},
+		{"tart entry, tart requested", satelliteConfigEntry{ProviderRef: "tart:grove-sat-x"}, "tart", ""},
+		{"docker entry, tart requested", satelliteConfigEntry{ProviderRef: "docker:grove-sat-x"}, "tart", "docker"},
+		{"tart entry, empty target defaults to gcp", satelliteConfigEntry{ProviderRef: "tart:grove-sat-x"}, "", "tart"},
+		{"refless entry never mismatches", satelliteConfigEntry{SSHAddr: "203.0.113.7:22"}, "tart", ""},
+		{"absent entry never mismatches", satelliteConfigEntry{}, "gcp", ""},
+	}
+	for _, tc := range cases {
+		if got := satelliteProviderRefMismatch(tc.entry, tc.target); got != tc.want {
+			t.Errorf("%s: satelliteProviderRefMismatch = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}

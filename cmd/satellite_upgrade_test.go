@@ -896,3 +896,50 @@ func TestPrebuiltInstallScriptExecution(t *testing.T) {
 		t.Errorf("stage dir not kept on failure: %v", statErr)
 	}
 }
+
+// TestSatelliteUpgradeRefusesExecKind pins R5's guard. `upgrade`'s restart
+// step runs `systemctl restart grove-syncd` + `--user restart groved` under
+// `set -euo pipefail` — services an exec-only satellite does not have — so
+// without this the verb mutates a tart/docker guest and only THEN hard-fails.
+// The refusal must land before any remote work, i.e. before the ssh transport
+// is built (asserted here by an empty PATH: reaching ssh/git would surface a
+// different error).
+func TestSatelliteUpgradeRefusesExecKind(t *testing.T) {
+	setupGroveHome(t)
+	writeSatelliteStateEntry(t, "tartdemo", satelliteConfigEntry{
+		SSHAddr:     "192.168.64.2:22",
+		User:        "admin",
+		HostKey:     "ssh-ed25519 AAAA",
+		Kind:        satelliteKindExec,
+		ProviderRef: "tart:grove-sat-tartdemo",
+	})
+	t.Setenv("PATH", t.TempDir())
+
+	err := runSatelliteCmd(t, newSatelliteUpgradeCmd(), "tartdemo", "--yes")
+	if err == nil {
+		t.Fatal("upgrade of an exec-only satellite was not refused")
+	}
+	for _, want := range []string{"exec-only satellite", "no groved or grove-syncd", "grove satellite up tartdemo"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("upgrade error %q missing %q", err, want)
+		}
+	}
+}
+
+// TestSatelliteUpgradeAllowsFullKind pins the other side of the guard: a
+// full-kind satellite still proceeds past it (and then fails on the missing
+// registry-adjacent work, not on the exec refusal).
+func TestSatelliteUpgradeAllowsFullKind(t *testing.T) {
+	setupGroveHome(t)
+	writeSatelliteStateEntry(t, "gcpsat", satelliteConfigEntry{
+		SSHAddr: "203.0.113.7:22",
+		User:    "grovedev",
+		HostKey: "ssh-ed25519 AAAA",
+	})
+	t.Setenv("PATH", t.TempDir())
+
+	err := runSatelliteCmd(t, newSatelliteUpgradeCmd(), "gcpsat", "--yes", "--dry-run")
+	if err != nil && strings.Contains(err.Error(), "exec-only satellite") {
+		t.Errorf("full-kind satellite must pass the exec guard: %v", err)
+	}
+}
