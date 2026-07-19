@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/models"
 	"github.com/pelletier/go-toml/v2"
+	"github.com/spf13/cobra"
 )
 
 // setupGroveHome points GROVE_HOME at a temp root and returns the config dir
@@ -337,5 +339,203 @@ func TestFormatReloadSummary(t *testing.T) {
 		if got := formatReloadSummary(&tc.in); got != tc.want {
 			t.Errorf("%s: formatReloadSummary = %q, want %q", tc.name, got, tc.want)
 		}
+	}
+}
+
+// writeSatelliteStateEntry seeds the CLI-owned state file under the temp
+// GROVE_HOME so the lifecycle guards see a provisioned satellite.
+func writeSatelliteStateEntry(t *testing.T, name string, entry satelliteConfigEntry) {
+	t.Helper()
+	if err := upsertSatelliteState(name, entry); err != nil {
+		t.Fatalf("upsertSatelliteState: %v", err)
+	}
+}
+
+// runSatelliteCmd executes one satellite subcommand with its output swallowed,
+// returning the error the verb produced.
+func runSatelliteCmd(t *testing.T, cmd *cobra.Command, args ...string) error {
+	t.Helper()
+	cmd.SetArgs(args)
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	return cmd.Execute()
+}
+
+// TestSatelliteUpRefusesCrossProviderReuse pins the single most important
+// lifecycle guard: `up <name> --target <other>` against a name an existing
+// provider already owns must REFUSE before anything is created. Without it the
+// verb stamps a new provider_ref over the old one and orphans the live
+// machine — and a `--target gcp` typo drives terraform at real billing.
+func TestSatelliteUpRefusesCrossProviderReuse(t *testing.T) {
+	setupGroveHome(t)
+	writeSatelliteStateEntry(t, "tartdemo", satelliteConfigEntry{
+		SSHAddr:     "192.168.64.2:22",
+		User:        "admin",
+		HostKey:     "ssh-ed25519 AAAA",
+		Kind:        satelliteKindExec,
+		ProviderRef: "tart:grove-sat-tartdemo",
+	})
+
+	for _, target := range []string{"gcp", "docker"} {
+		err := runSatelliteCmd(t, newSatelliteUpCmd(), "tartdemo", "--target", target, "--yes")
+		if err == nil {
+			t.Fatalf("up --target %s against a tart-owned name was not refused", target)
+		}
+		for _, want := range []string{`"tart"`, "refusing to re-provision", "grove satellite down tartdemo --target tart"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("up --target %s error %q missing %q", target, err, want)
+			}
+		}
+	}
+	// The matching-target (guard passes) case is covered by the unit test
+	// TestSatelliteProviderRefMismatch: exercising it through the verb would
+	// run the provider and create a real machine.
+}
+
+// TestSatelliteDownRefusesTargetMismatch pins the `down` half of the same
+// guard (R3): running the wrong provider's destroy and then unconditionally
+// deleting the state entry is how a VM gets orphaned with its record gone.
+func TestSatelliteDownRefusesTargetMismatch(t *testing.T) {
+	setupGroveHome(t)
+	writeSatelliteStateEntry(t, "tartdemo", satelliteConfigEntry{
+		SSHAddr:     "192.168.64.2:22",
+		HostKey:     "ssh-ed25519 AAAA",
+		ProviderRef: "tart:grove-sat-tartdemo",
+	})
+
+	err := runSatelliteCmd(t, newSatelliteDownCmd(), "tartdemo", "--target", "gcp", "--yes")
+	if err == nil {
+		t.Fatal("down --target gcp against a tart-owned satellite was not refused")
+	}
+	for _, want := range []string{`"tart"`, "refusing to run the wrong provider's destroy", "grove satellite down tartdemo --target tart"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("down error %q missing %q", err, want)
+		}
+	}
+
+	// The state entry must survive a refused down.
+	entries, err := loadSatelliteState()
+	if err != nil {
+		t.Fatalf("loadSatelliteState: %v", err)
+	}
+	if _, ok := entries["tartdemo"]; !ok {
+		t.Error("a refused `down` deleted the satellite state entry")
+	}
+}
+
+// TestSatelliteDownUsesProviderRefOverInfraTarget pins R1: with a stale (or
+// suppressed) infra target in config, `down` must still drive the provider
+// that actually created the machine. Proven by PATH-starving tart: reaching
+// its "not found" preflight means the tart provider — not gcp/terraform — was
+// selected.
+func TestSatelliteDownUsesProviderRefOverInfraTarget(t *testing.T) {
+	configDir := setupGroveHome(t)
+	if err := os.WriteFile(filepath.Join(configDir, "grove.toml"), []byte(`[satellites.tartdemo.infra]
+target = "gcp"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeSatelliteStateEntry(t, "tartdemo", satelliteConfigEntry{
+		SSHAddr:     "192.168.64.2:22",
+		HostKey:     "ssh-ed25519 AAAA",
+		ProviderRef: "tart:grove-sat-tartdemo",
+	})
+
+	t.Setenv("PATH", t.TempDir())
+	err := runSatelliteCmd(t, newSatelliteDownCmd(), "tartdemo", "--yes")
+	if err == nil || !strings.Contains(err.Error(), "tart not found on PATH") {
+		t.Fatalf("down resolved the provider from the infra target, not provider_ref: %v", err)
+	}
+}
+
+// TestRemoveManagedSatelliteInfraTOMLTable pins `down`'s residue cleanup: the
+// [satellites.<name>.infra] block `up` wrote itself (marker-tagged) goes,
+// while a hand-authored block, other satellites' blocks, and unrelated
+// subtables survive byte-for-byte.
+func TestRemoveManagedSatelliteInfraTOMLTable(t *testing.T) {
+	content := `# my grove config
+[satellites.mine.infra]
+target = "tart"
+
+[satellites.tartdemo.infra] ` + satelliteInfraManagedMarker + `
+target = "tart"
+tart_home = "/tank/tart"
+
+[satellites.tartdemo.sync]
+workspaces = ["cloud"]
+`
+	out, removed := removeManagedSatelliteInfraTOMLTable(content, "tartdemo")
+	if !removed {
+		t.Fatal("marker-tagged infra block was not removed")
+	}
+	if strings.Contains(out, "tart_home") {
+		t.Errorf("managed block survived:\n%s", out)
+	}
+	for _, want := range []string{"# my grove config", "[satellites.mine.infra]", "[satellites.tartdemo.sync]"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("cleanup clobbered %q:\n%s", want, out)
+		}
+	}
+
+	// A hand-authored block (no marker) is never touched.
+	if _, removed := removeManagedSatelliteInfraTOMLTable(content, "mine"); removed {
+		t.Error("a hand-authored [satellites.mine.infra] block was removed")
+	}
+}
+
+// TestRenderManagedSatelliteInfraTOML pins that the write-back carries the
+// marker `down` matches on while the drift print — which the user pastes into
+// their own config — does not.
+func TestRenderManagedSatelliteInfraTOML(t *testing.T) {
+	infra := satelliteInfraConfig{Target: "tart", TartHome: "/tank/tart"}
+	managed := renderManagedSatelliteInfraTOML("mysat", infra)
+	if !strings.Contains(managed, "[satellites.mysat.infra] "+satelliteInfraManagedMarker+"\n") {
+		t.Errorf("write-back block missing the marker:\n%s", managed)
+	}
+	if !strings.Contains(managed, `tart_home = "/tank/tart"`) {
+		t.Errorf("write-back block lost its body:\n%s", managed)
+	}
+	if strings.Contains(renderSatelliteInfraTOML("mysat", infra), satelliteInfraManagedMarker) {
+		t.Error("the pasteable drift block must not carry the marker")
+	}
+	// The marker rides a header comment, so the result still parses.
+	if err := toml.Unmarshal([]byte(managed), &map[string]interface{}{}); err != nil {
+		t.Errorf("marker-tagged block does not parse as TOML: %v", err)
+	}
+}
+
+// TestSatelliteTableRowsPartialUp pins R10: an entry whose provider_ref was
+// stamped before the rest of `up` failed renders as a partial provision with
+// the remediation, not as a healthy exec-only satellite.
+func TestSatelliteTableRowsPartialUp(t *testing.T) {
+	stateIdx, errIdx := -1, -1
+	for i, h := range satelliteTableHeaders {
+		switch h {
+		case "State":
+			stateIdx = i
+		case "Last Error":
+			errIdx = i
+		}
+	}
+	if stateIdx == -1 || errIdx == -1 {
+		t.Fatalf("missing State/Last Error columns in headers: %v", satelliteTableHeaders)
+	}
+
+	rows := satelliteTableRows(map[string]satelliteConfigEntry{
+		"partial":  {Kind: satelliteKindExec, ProviderRef: "tart:grove-sat-partial"},
+		"complete": {Kind: satelliteKindExec, SSHAddr: "192.168.64.2:22", HostKey: "ssh-ed25519 AAAA", ProviderRef: "tart:grove-sat-complete"},
+	}, nil)
+	byName := map[string][]string{}
+	for _, r := range rows {
+		byName[r[0]] = r
+	}
+	if got := byName["partial"][stateIdx]; got != satelliteStatePartialUp {
+		t.Errorf("partial-up State = %q, want %q", got, satelliteStatePartialUp)
+	}
+	if got := byName["partial"][errIdx]; !strings.Contains(got, "grove satellite down partial") {
+		t.Errorf("partial-up Last Error = %q, want the remediation", got)
+	}
+	if got := byName["complete"][stateIdx]; got != satelliteStateExecOnly {
+		t.Errorf("a complete exec satellite must stay %q, got %q", satelliteStateExecOnly, got)
 	}
 }

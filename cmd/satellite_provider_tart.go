@@ -107,6 +107,7 @@ func (p *tartSatelliteProvider) PrepareUp(opts *satelliteUpOptions) error {
 	if _, err := exec.LookPath("tart"); err != nil {
 		return fmt.Errorf("tart not found on PATH — install it with `brew install cirruslabs/cli/tart`: %w", err)
 	}
+	opts.Infra.TartHome = resolveTartHome(opts.Infra.TartHome)
 	p.image = opts.Infra.Image
 	if p.image == "" {
 		p.image = defaultTartImage
@@ -230,6 +231,7 @@ func (p *tartSatelliteProvider) Down(ctx context.Context, opts *satelliteDownOpt
 	if _, err := exec.LookPath("tart"); err != nil {
 		return fmt.Errorf("tart not found on PATH — install it with `brew install cirruslabs/cli/tart`: %w", err)
 	}
+	opts.Infra.TartHome = resolveTartHome(opts.Infra.TartHome)
 
 	// The registry entry (config ∪ state) supplies the pinned ssh transport
 	// for the graceful poweroff and the recorded VM name.
@@ -312,6 +314,30 @@ func stopTartVMGracefully(infra satelliteInfraConfig, entry satelliteConfigEntry
 }
 
 // --- tart CLI plumbing ---
+
+// tartHomeFlagHelp documents --tart-home, shared by up and down.
+const tartHomeFlagHelp = "Storage root for the tart VMs grove creates (the TART_HOME env var; tart target only). 'up' records the effective value in [satellites.<name>.infra] tart_home so 'down' drives the same store — default: that block, else the environment's TART_HOME, else " + defaultTartHomeDir
+
+// defaultTartHomeDir is tart's own default storage root. `up` records it
+// explicitly when neither the infra block nor the environment names one, so
+// every later tart invocation grove makes for the satellite targets the same
+// store — a `down` shell that exports a DIFFERENT TART_HOME would otherwise
+// find no VM, report "nothing to delete", and orphan it while `down` wipes the
+// state entry.
+const defaultTartHomeDir = "~/.tart"
+
+// resolveTartHome resolves the effective TART_HOME for a tart satellite:
+// --tart-home / the infra block, else the process environment, else tart's own
+// default. Never empty, so the resolved value is always persistable.
+func resolveTartHome(configured string) string {
+	if configured != "" {
+		return configured
+	}
+	if env := os.Getenv("TART_HOME"); env != "" {
+		return env
+	}
+	return defaultTartHomeDir
+}
 
 // tartCommand builds a tart invocation, relocating tart's storage via
 // TART_HOME when [satellites.<name>.infra] tart_home is set (otherwise the

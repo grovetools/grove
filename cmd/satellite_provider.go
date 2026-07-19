@@ -146,6 +146,37 @@ func satelliteProviderFor(target string) (satelliteProvider, error) {
 	return ctor(target), nil
 }
 
+// satelliteProviderRefTarget extracts the infra target from a state entry's
+// provider_ref ("tart:grove-sat-mysat" -> "tart"). Empty when no ref was
+// stamped (gcp, whose terraform state owns the mapping) — an unrecognized
+// prefix is returned as-is so callers refuse rather than silently falling back
+// to the gcp default.
+func satelliteProviderRefTarget(providerRef string) string {
+	target, _, ok := strings.Cut(providerRef, ":")
+	if !ok {
+		return ""
+	}
+	return target
+}
+
+// satelliteProviderRefMismatch cross-checks a requested infra target against
+// the provider recorded in an existing entry's provider_ref, returning the
+// RECORDED target when the two disagree (empty when they agree or nothing is
+// recorded). Each provider's "is this machine ours?" check only looks within
+// its own provider, so driving the wrong provider at an existing satellite
+// orphans the machine it already created — `up` and `down` both refuse on a
+// non-empty result.
+func satelliteProviderRefMismatch(entry satelliteConfigEntry, target string) string {
+	if target == "" {
+		target = defaultSatelliteTarget
+	}
+	ref := satelliteProviderRefTarget(entry.ProviderRef)
+	if ref == "" || ref == target {
+		return ""
+	}
+	return ref
+}
+
 // resolveSatelliteKind resolves the `up --kind` flag value: empty means the
 // provider's default (gcp: full); anything but full/exec is rejected.
 func resolveSatelliteKind(flagValue string, p satelliteProvider) (string, error) {

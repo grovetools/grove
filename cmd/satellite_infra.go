@@ -49,8 +49,10 @@ type satelliteInfraConfig struct {
 	// content-hash tag).
 	Image string `yaml:"image"`
 	// TartHome relocates tart's storage (the TART_HOME env var) for every
-	// tart command grove runs (tart target only; config-only — no flag).
-	// Empty inherits the process environment.
+	// tart command grove runs (tart target only). `up` resolves the EFFECTIVE
+	// value (--tart-home, else this block, else the process TART_HOME, else
+	// tart's own default) and persists it, so `down` drives the same store
+	// even from a shell whose environment differs.
 	TartHome string `yaml:"tart_home"`
 }
 
@@ -105,6 +107,8 @@ type infraFlagOverrides struct {
 	IdentitySet  bool
 	Image        string
 	ImageSet     bool
+	TartHome     string
+	TartHomeSet  bool
 }
 
 // mergeInfra resolves flag-over-config precedence for the infra inputs
@@ -132,6 +136,9 @@ func mergeInfra(cfg satelliteInfraConfig, f infraFlagOverrides) satelliteInfraCo
 	}
 	if f.ImageSet {
 		out.Image = f.Image
+	}
+	if f.TartHomeSet {
+		out.TartHome = f.TartHome
 	}
 	return out
 }

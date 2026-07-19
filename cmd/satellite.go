@@ -90,6 +90,17 @@ const (
 // live one whenever groved is running.
 const satelliteStateExecOnly = "exec-only"
 
+// satelliteStatePartialUp is the status/list state for an entry a provider
+// stamped a provider_ref into before the rest of `up` failed: the machine
+// exists (or may) but the satellite was never finished.
+const satelliteStatePartialUp = "partial up"
+
+// satelliteEntryIsPartial reports whether an entry is such a phantom — a
+// provider handle with no reachable, pinned endpoint to go with it.
+func satelliteEntryIsPartial(e satelliteConfigEntry) bool {
+	return e.ProviderRef != "" && (e.SSHAddr == "" || e.HostKey == "")
+}
+
 // effectiveKind normalizes Kind: empty means full (mirrors the daemon's
 // EffectiveKind).
 func (e satelliteConfigEntry) effectiveKind() string {
@@ -148,6 +159,7 @@ func newSatelliteUpCmd() *cobra.Command {
 		tfDir          string
 		identityFile   string
 		image          string
+		tartHome       string
 		assumeYes      bool
 		ghTokenCmd     string
 		claudeFlag     bool
@@ -177,8 +189,9 @@ Infra inputs (--project, --zone, --ssh-user, --cidr, --identity-file,
 --target) default from a [satellites.<name>.infra] block in the same grove
 config; explicit
 flags override it. A successful 'up' writes the resolved values back into the
-block — and 'down' leaves the block in place — so only the very first
-provision of a name needs the flags:
+block when the config carries none, so a re-provision of the same name needs
+no flags. A block grove wrote itself is removed again by 'down' (it is
+provisioning residue); one you authored is never edited or removed:
 
   [satellites.mysat.infra]
   project = "my-gcp-project"
@@ -225,6 +238,7 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 	cmd.Flags().StringVar(&tfDir, "tf-dir", "", tfDirFlagHelp)
 	cmd.Flags().StringVar(&identityFile, "identity-file", "", "SSH private key for the satellite (written to the registry as identity_file; default: [satellites.<name>.infra] identity_file, else agent-only auth)")
 	cmd.Flags().StringVar(&image, "image", "", "Guest image override: the OCI image the tart provider clones (default "+defaultTartImage+") or the docker image the docker provider runs instead of building the embedded one (default: [satellites.<name>.infra] image; tart/docker targets only)")
+	cmd.Flags().StringVar(&tartHome, "tart-home", "", tartHomeFlagHelp)
 	cmd.Flags().BoolVar(&assumeYes, "yes", false, "Skip the billable-resource confirmation prompt")
 	cmd.Flags().StringVar(&ghTokenCmd, "gh-token-cmd", "", "Local command whose stdout is the GitHub token piped to bootstrap (overrides provision config; empty disables)")
 	cmd.Flags().BoolVar(&claudeFlag, "claude", false, "Install Claude Code on the VM (overrides provision config)")
@@ -262,6 +276,7 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 			IdentityFile: identityFile, IdentitySet: cmd.Flags().Changed("identity-file"),
 			Target: target, TargetSet: cmd.Flags().Changed("target"),
 			Image: image, ImageSet: cmd.Flags().Changed("image"),
+			TartHome: tartHome, TartHomeSet: cmd.Flags().Changed("tart-home"),
 		})
 		// Infra target → provider: validity routes through the provider
 		// registry (an unknown name in config is a typo either way; empty
@@ -270,6 +285,17 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		provider, err := satelliteProviderFor(infra.Target)
 		if err != nil {
 			return err
+		}
+		// Provider identity is machine-derived: an existing entry's
+		// provider_ref names the provider that actually created the machine.
+		// Re-provisioning the same name under a different target would stamp a
+		// new provider_ref over it and orphan that machine (each provider's
+		// ours-check only looks within its own provider), so a mismatch is
+		// refused BEFORE anything is created — a --target typo must never
+		// reach terraform.
+		if recorded := satelliteProviderRefMismatch(loadMergedSatellites()[name], provider.Kind()); recorded != "" {
+			return fmt.Errorf("satellite %q was provisioned by the %q target — refusing to re-provision it as %q, which would orphan the existing machine: destroy it first with `grove satellite down %s --target %s`, or pick another satellite name",
+				name, recorded, provider.Kind(), name, recorded)
 		}
 		// Satellite kind: --kind over the provider default (gcp: full).
 		// Exec-kind provisions skip the groved socket probe and every piece
@@ -459,8 +485,10 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 			return err
 		}
 		// The provider may have resolved inputs while creating (gcp: an
-		// auto-detected CIDR) — adopt them for the infra write-back below.
+		// auto-detected CIDR; tart: the effective TART_HOME) — adopt them for
+		// the infra write-back below.
 		infra.CIDR = upOpts.Infra.CIDR
+		infra.TartHome = upOpts.Infra.TartHome
 		ip, err := satelliteEndpointHost(endpoint)
 		if err != nil {
 			return err
@@ -750,33 +778,54 @@ func newSatelliteDownCmd() *cobra.Command {
 	var (
 		target       string
 		tfDir        string
+		tartHome     string
 		assumeYes    bool
 		syncOriginID string
 	)
 	cmd := cli.NewStandardCommand("down <name>", "Destroy a satellite VM and remove its registry entry")
 	cmd.Args = cobra.ExactArgs(1)
 	cmd.SilenceUsage = true
-	cmd.Flags().StringVar(&target, "target", "", "Embedded infra target whose terraform module to extract for the destroy (default: [satellites.<name>.infra] target, else \"gcp\")")
+	cmd.Flags().StringVar(&target, "target", "", "Embedded infra target whose terraform module to extract for the destroy (default: the provider recorded in the satellite's provider_ref, else [satellites.<name>.infra] target, else \"gcp\")")
 	cmd.Flags().StringVar(&tfDir, "tf-dir", "", tfDirFlagHelp)
+	cmd.Flags().StringVar(&tartHome, "tart-home", "", tartHomeFlagHelp)
 	cmd.Flags().BoolVar(&assumeYes, "yes", false, "Skip the destroy confirmation prompt")
 	cmd.Flags().StringVar(&syncOriginID, "sync-origin-id", "", "Satellite sync origin_id to deregister precisely (best-effort; see C19/C20)")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
-		// Resolve the provider the same way `up` does: the target from the
-		// same [satellites.<name>.infra] block, --target winning. The
+		// Resolve the provider. The state entry's provider_ref is the truth —
+		// it names the provider that actually created the machine — and the
+		// infra block's target is only the fallback for entries carrying no
+		// ref (gcp). Reading the target alone destroys against the WRONG
+		// provider whenever `up` suppressed the write-back (a pre-existing
+		// config block only gets a drift message), and the state removal below
+		// then wipes the record of the still-running machine. The
 		// terraform-dir resolution (per-name state dir or --tf-dir as-is)
 		// happens inside the provider's Down.
 		infraCfg, _, err := loadSatelliteInfra(name)
 		if err != nil {
 			return err
 		}
+		entry := loadMergedSatellites()[name]
 		if cmd.Flags().Changed("target") {
+			if recorded := satelliteProviderRefMismatch(entry, target); recorded != "" {
+				return fmt.Errorf("satellite %q was provisioned by the %q target, not %q — refusing to run the wrong provider's destroy against it: re-run `grove satellite down %s --target %s`, or omit --target to use the recorded provider",
+					name, recorded, target, name, recorded)
+			}
 			infraCfg.Target = target
+		} else if recorded := satelliteProviderRefTarget(entry.ProviderRef); recorded != "" {
+			infraCfg.Target = recorded
 		}
 		provider, err := satelliteProviderFor(infraCfg.Target)
 		if err != nil {
 			return err
+		}
+		// The effective TART_HOME `up` recorded (the tart provider persists it
+		// into the infra block): without it a `down` shell whose TART_HOME
+		// differs finds no VM, reports "nothing to delete", and orphans the VM
+		// in the other store while the state entry is removed below.
+		if cmd.Flags().Changed("tart-home") {
+			infraCfg.TartHome = tartHome
 		}
 
 		// 1.+2. Provider Down: destroy confirm, then — via PostConfirm,
@@ -817,6 +866,20 @@ func newSatelliteDownCmd() *cobra.Command {
 		if !removedState && !legacyRemoved {
 			fmt.Printf("(no satellite state or registry entry for %q)\n", name)
 		}
+
+		// 3b. The rest of the residue `up` created: the
+		// [satellites.<name>.infra] write-back (marker-tagged, so a
+		// hand-authored block survives) and the now-empty per-satellite state
+		// dir. Both must go BEFORE the reload below: a surviving config
+		// subtable keeps the name in the daemon's config-half registry, which
+		// reports the destroyed satellite as "changed" rather than "removed"
+		// and leaves a permanent disconnected row behind.
+		if infraRemoved, infraErr := removeManagedSatelliteInfra(name); infraErr != nil {
+			fmt.Printf("warning: could not remove the [satellites.%s.infra] block from the grove config: %v\n", name, infraErr)
+		} else if infraRemoved {
+			fmt.Printf("(removed the [satellites.%s.infra] block `up` wrote)\n", name)
+		}
+		removeEmptySatelliteStateDir(name)
 
 		// 4. Registry hot-reload, the FINAL step: the daemon drops the dead
 		//    satellite's connection, sync port-forward, status entry, and
@@ -988,13 +1051,20 @@ func satelliteTableRows(configured map[string]satelliteConfigEntry, live map[str
 			}
 			lastErr = ls.lastError
 		} else if entry, ok := configured[name]; ok {
-			if entry.isExec() {
+			switch {
+			case satelliteEntryIsPartial(entry):
+				// A provider stamped provider_ref and `up` then failed: the
+				// machine may well exist while the satellite is unusable.
+				// Saying "exec-only" here would read as healthy.
+				state = satelliteStatePartialUp
+				lastErr = fmt.Sprintf("`up` did not finish — re-run `grove satellite up %s`, or `grove satellite down %s` to destroy the machine", name, name)
+			case entry.isExec():
 				// Exec satellites have no groved connection to report:
 				// derive the daemon's exec-only state from the merged
 				// registry so it shows even when groved isn't running (and
 				// agrees with the live status when it is).
 				state = satelliteStateExecOnly
-			} else {
+			default:
 				state = "not connected (restart groved?)"
 			}
 		}
@@ -1095,8 +1165,68 @@ func upsertSatelliteInfraTOMLTable(path, name string, infra satelliteInfraConfig
 	if content != "" && !strings.HasSuffix(content, "\n") {
 		content += "\n"
 	}
-	content += "\n" + renderSatelliteInfraTOML(name, infra)
+	content += "\n" + renderManagedSatelliteInfraTOML(name, infra)
 	return writeValidatedTOML(path, content)
+}
+
+// satelliteInfraManagedMarker tags the [satellites.<name>.infra] header `up`
+// writes ITSELF (the no-block-anywhere case), so `down` can remove exactly
+// that block and never a hand-authored one — grove's standing rule is that it
+// does not edit config blocks it did not write.
+const satelliteInfraManagedMarker = "# written by `grove satellite up`"
+
+// renderManagedSatelliteInfraTOML is renderSatelliteInfraTOML with the managed
+// marker spliced into the header line.
+func renderManagedSatelliteInfraTOML(name string, infra satelliteInfraConfig) string {
+	block := renderSatelliteInfraTOML(name, infra)
+	header, rest, _ := strings.Cut(block, "\n")
+	return header + " " + satelliteInfraManagedMarker + "\n" + rest
+}
+
+// removeManagedSatelliteInfra removes the [satellites.<name>.infra] block from
+// the global config when it carries the managed marker — the residue a
+// grove-written write-back leaves behind after `down`, which otherwise keeps
+// the name alive in the daemon's config-half registry as a phantom row. A
+// hand-authored block (no marker) and YAML configs (the write-back records no
+// marker there) are left untouched.
+func removeManagedSatelliteInfra(name string) (bool, error) {
+	path, isTOML, err := satelliteRegistryPath()
+	if err != nil {
+		return false, err
+	}
+	if !isTOML {
+		return false, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	content, removed := removeManagedSatelliteInfraTOMLTable(string(data), name)
+	if !removed {
+		return false, nil
+	}
+	return true, writeValidatedTOML(path, content)
+}
+
+// removeManagedSatelliteInfraTOMLTable is removeSatelliteTOMLSubtable for the
+// infra subtable, narrowed to headers carrying the managed marker.
+func removeManagedSatelliteInfraTOMLTable(content, name string) (string, bool) {
+	quoted := regexp.QuoteMeta(name)
+	header := regexp.MustCompile(`^\[\s*satellites\s*\.\s*(?:` + quoted + `|"` + quoted + `")\s*\.\s*infra\s*\]\s*` + regexp.QuoteMeta(satelliteInfraManagedMarker) + `\s*$`)
+	return removeTOMLBlock(content, header)
+}
+
+// removeEmptySatelliteStateDir removes <StateDir>/satellites/<name> once the
+// provider has cleaned its own subdir. os.Remove refuses a non-empty dir, so
+// surviving provider state (gcp's terraform dir) keeps it — only the empty
+// husk a local-provider `down` leaves is reaped.
+func removeEmptySatelliteStateDir(name string) {
+	if dir, err := satelliteStateDir(name); err == nil {
+		_ = os.Remove(dir)
+	}
 }
 
 // renderSatelliteInfraTOML renders the [satellites.<name>.infra] block —

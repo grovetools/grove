@@ -125,6 +125,14 @@ Notes:
 		if !ok {
 			return fmt.Errorf("satellite %q not found in the registry (config or state) — run `grove satellite up %s` first", name, name)
 		}
+		// Exec-kind satellites (tart, docker) run no groved and no
+		// grove-syncd, so the restart step below hard-fails under `set -euo
+		// pipefail` AFTER the guest has already been mutated. Refuse before
+		// touching it — re-running `up` reinstalls their prebuilt stack, which
+		// is the whole of an exec satellite.
+		if entry.isExec() {
+			return fmt.Errorf("satellite %q is an exec-only satellite (kind %q): it runs no groved or grove-syncd for `upgrade` to restart — reinstall its prebuilt stack with `grove satellite up %s` instead", name, satelliteKindExec, name)
+		}
 
 		// --prebuilt target (validated up front; --target is meaningless
 		// without --prebuilt).
