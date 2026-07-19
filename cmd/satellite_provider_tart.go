@@ -350,6 +350,17 @@ func tartCommand(infra satelliteInfraConfig, args ...string) *exec.Cmd {
 	return cmd
 }
 
+// tartCommandContext is tartCommand bound to ctx, so a read-only `tart list`
+// can be capped by a deadline (the status-time machine-state probe) without
+// touching the long-lived detached `tart run` path tartCommand also serves.
+func tartCommandContext(ctx context.Context, infra satelliteInfraConfig, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "tart", args...) //nolint:gosec // G204: internal/flag-derived args
+	if infra.TartHome != "" {
+		cmd.Env = append(os.Environ(), "TART_HOME="+expandUserPath(infra.TartHome))
+	}
+	return cmd
+}
+
 // tartVM is one `tart list --format json` row (fields we consume).
 type tartVM struct {
 	Name    string `json:"Name"`
@@ -360,7 +371,15 @@ type tartVM struct {
 
 // tartList lists VMs and cached images.
 func tartList(infra satelliteInfraConfig) ([]tartVM, error) {
-	out, err := tartCommand(infra, "list", "--format", "json").Output()
+	// context.Background() never cancels, and .Output() always Waits, so this
+	// keeps the pre-context behavior for the up/down callers exactly.
+	return tartListContext(context.Background(), infra)
+}
+
+// tartListContext is tartList bound to ctx: the status-time machine-state probe
+// caps it with a deadline so a slow `tart list` cannot stall status.
+func tartListContext(ctx context.Context, infra satelliteInfraConfig) ([]tartVM, error) {
+	out, err := tartCommandContext(ctx, infra, "list", "--format", "json").Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
 			return nil, fmt.Errorf("tart list: %w: %s", err, strings.TrimSpace(string(ee.Stderr)))

@@ -995,8 +995,12 @@ the daemon's sync forward, and the last error.
 per-satellite objects carry the machine fields the table has no room for —
 provider, provider_ref, user, identity_file, and a ready-to-run ssh_command —
 so nothing has to be scraped from the state file or reconstructed by
-convention. Every documented key is always present; unknown values are the
-zero value for their type.`
+convention. For local exec satellites (tart/docker) a cheap provider probe also
+fills machine_state ("running", "stopped", or "absent") — the actual machine
+liveness, distinct from live, so a powered-off satellite the daemon never dials
+is still visible; it is "" when the provider cannot say (a gcp/full satellite,
+or the probe timed out). Every documented key is always present; unknown values
+are the zero value for their type.`
 
 func newSatelliteStatusCmd() *cobra.Command {
 	cmd := cli.NewStandardCommand("status", "Show satellite connection health")
@@ -1047,15 +1051,22 @@ func renderSatellites(jsonOutput bool) error {
 		}
 	}
 
+	// Provider-level machine-state probe (F3): one cheap read-only subprocess
+	// per LOCAL provider that owns a satellite here, filling machine_state for
+	// the exec-kind satellites the ConnManager never dials. Zero subprocess
+	// calls when no tart/docker satellite is registered, and a probe
+	// error/timeout leaves the affected satellites at "" without failing status.
+	machineStates := probeSatelliteMachineStates(configured)
+
 	if jsonOutput {
 		return writeSatelliteJSON(os.Stdout, satelliteStatusJSON{
 			Schema:          satelliteStatusSchema,
 			DaemonReachable: daemonReachable,
-			Satellites:      satelliteStatusPayload(configured, live),
+			Satellites:      satelliteStatusPayload(configured, live, machineStates),
 		})
 	}
 
-	rows := satelliteTableRows(configured, live)
+	rows := satelliteTableRows(configured, live, machineStates)
 	if rows == nil {
 		fmt.Println("No satellites configured.")
 		return nil
@@ -1079,8 +1090,10 @@ func renderSatellites(jsonOutput bool) error {
 }
 
 // satelliteStatusPayload projects the merged registry + live health into the
-// --json satellite list, ordered like the table.
-func satelliteStatusPayload(configured map[string]satelliteConfigEntry, live map[string]satelliteLiveStatus) []satelliteJSON {
+// --json satellite list, ordered like the table. machineStates carries the
+// provider probe's result (name→machine_state); a name it does not cover keeps
+// the field at its "" zero value.
+func satelliteStatusPayload(configured map[string]satelliteConfigEntry, live map[string]satelliteLiveStatus, machineStates map[string]string) []satelliteJSON {
 	names := satelliteNamesOrdered(configured, live)
 	out := make([]satelliteJSON, 0, len(names))
 	for _, name := range names {
@@ -1088,7 +1101,9 @@ func satelliteStatusPayload(configured map[string]satelliteConfigEntry, live map
 		if l, ok := live[name]; ok {
 			ls = &l
 		}
-		out = append(out, satelliteEntryJSON(name, configured[name], ls))
+		s := satelliteEntryJSON(name, configured[name], ls)
+		s.MachineState = machineStates[name]
+		out = append(out, s)
 	}
 	return out
 }
@@ -1176,7 +1191,9 @@ var satelliteTableHeaders = []string{"Name", "Kind", "State", "Addr", "Forward",
 // satelliteTableRows builds the status/list table rows from the union of
 // configured + live names, so a just-added (not-yet-connected) satellite still
 // shows, and vice versa. Returns nil when there is nothing to show.
-func satelliteTableRows(configured map[string]satelliteConfigEntry, live map[string]satelliteLiveStatus) [][]string {
+// machineStates is the provider probe's result; a non-empty machine_state is
+// rendered as a suffix on the State cell (see below).
+func satelliteTableRows(configured map[string]satelliteConfigEntry, live map[string]satelliteLiveStatus, machineStates map[string]string) [][]string {
 	ordered := satelliteNamesOrdered(configured, live)
 	if len(ordered) == 0 {
 		return nil
@@ -1190,6 +1207,16 @@ func satelliteTableRows(configured map[string]satelliteConfigEntry, live map[str
 			ls = &l
 		}
 		state := satelliteEntryState(name, entry, ls)
+		// F3: the derived State cell says how a satellite is DOING (an exec
+		// satellite's healthy "exec-only", "partial up", ...) but nothing about
+		// whether its VM/container is actually powered on — the ConnManager
+		// never dials it. When the provider probe knows the machine liveness,
+		// suffix it so a powered-off box reads `exec-only (stopped)` rather than
+		// as healthy. Left untouched (no suffix) when the probe cannot say — the
+		// State column's own logic is deliberately unchanged.
+		if ms := machineStates[name]; ms != "" {
+			state += " (" + ms + ")"
+		}
 		addr := entry.SSHAddr
 		forward := "-"
 		since := "-"
