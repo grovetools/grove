@@ -158,7 +158,7 @@ func TestSatelliteEntryJSON(t *testing.T) {
 func TestSatelliteStatusJSONKeysAreAlwaysPresent(t *testing.T) {
 	payload := satelliteStatusJSON{
 		Schema:     satelliteStatusSchema,
-		Satellites: satelliteStatusPayload(map[string]satelliteConfigEntry{"bare": {}}, nil),
+		Satellites: satelliteStatusPayload(map[string]satelliteConfigEntry{"bare": {}}, nil, nil),
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -182,7 +182,7 @@ func TestSatelliteStatusJSONKeysAreAlwaysPresent(t *testing.T) {
 		t.Fatalf("satellites = %d, want 1", len(decoded.Satellites))
 	}
 	for _, key := range []string{
-		"name", "kind", "state", "partial_up", "live", "provider", "provider_ref",
+		"name", "kind", "state", "partial_up", "live", "machine_state", "provider", "provider_ref",
 		"ssh_addr", "ssh_host", "ssh_port", "user", "identity_file", "host_key_pinned",
 		"ssh_command", "grove_ssh_command", "socket_path", "sync_local_port",
 		"sync_remote_addr", "forward", "since", "last_error",
@@ -197,6 +197,7 @@ func TestSatelliteStatusPayloadOrdering(t *testing.T) {
 	got := satelliteStatusPayload(
 		map[string]satelliteConfigEntry{"zeta": {}, "alpha": {}},
 		map[string]satelliteLiveStatus{"mid": {state: "connected"}},
+		nil,
 	)
 	var names []string
 	for _, s := range got {

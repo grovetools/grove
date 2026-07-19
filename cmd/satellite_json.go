@@ -49,6 +49,17 @@ type satelliteJSON struct {
 	// Live reports whether the running daemon had a status for this name
 	// (false = the row is registry-derived only).
 	Live bool `json:"live"`
+	// MachineState is the provider-level machine liveness a status/list probe
+	// reads straight from the LOCAL provider (tart/docker), distinct from Live
+	// (which only says "the daemon had a status"): "running", "stopped", or
+	// "absent" (the provider answered and the machine is not in its inventory —
+	// deleted out of band), else "" when the provider cannot say (a gcp/full
+	// satellite, an up/down summary that runs no probe, or a probe that timed
+	// out or errored). It closes the powered-off-exec-satellite-looks-healthy
+	// gap (F3): an exec satellite whose State stays "exec-only" — it is never
+	// dialled by the ConnManager — now carries machine_state "stopped"/"absent"
+	// when its VM/container is down.
+	MachineState string `json:"machine_state"`
 	// Provider is the infra target that created the machine, derived from
 	// the provider_ref prefix (empty for entries carrying no ref, e.g. gcp).
 	Provider    string `json:"provider"`

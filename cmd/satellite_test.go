@@ -240,7 +240,7 @@ func TestSatelliteTableRowsForward(t *testing.T) {
 		"sat-none": {state: "connected", addr: "203.0.113.8:22"},
 	}
 
-	rows := satelliteTableRows(configured, live)
+	rows := satelliteTableRows(configured, live, nil)
 	if len(rows) != 2 {
 		t.Fatalf("expected 2 rows, got %d: %v", len(rows), rows)
 	}
@@ -260,7 +260,7 @@ func TestSatelliteTableRowsForward(t *testing.T) {
 	}
 
 	// A configured-only satellite (daemon not reporting it) also stays clean.
-	rows = satelliteTableRows(map[string]satelliteConfigEntry{"sat-cfg": {SSHAddr: "203.0.113.9:22"}}, nil)
+	rows = satelliteTableRows(map[string]satelliteConfigEntry{"sat-cfg": {SSHAddr: "203.0.113.9:22"}}, nil, nil)
 	if got := rows[0][forwardIdx]; got != "-" {
 		t.Fatalf("Forward cell for configured-only satellite = %q, want %q", got, "-")
 	}
@@ -291,7 +291,7 @@ func TestSatelliteTableRowsExecOnly(t *testing.T) {
 	}
 
 	// Daemon not running: no live statuses at all.
-	rows := satelliteTableRows(configured, nil)
+	rows := satelliteTableRows(configured, nil, nil)
 	byName := map[string][]string{}
 	for _, r := range rows {
 		byName[r[0]] = r
@@ -309,7 +309,7 @@ func TestSatelliteTableRowsExecOnly(t *testing.T) {
 	// Daemon running: the live exec-only status flows through unchanged.
 	rows = satelliteTableRows(configured, map[string]satelliteLiveStatus{
 		"exec-sat": {state: satelliteStateExecOnly, addr: "203.0.113.7:22"},
-	})
+	}, nil)
 	for _, r := range rows {
 		byName[r[0]] = r
 	}
@@ -579,7 +579,7 @@ func TestSatelliteTableRowsPartialUp(t *testing.T) {
 	rows := satelliteTableRows(map[string]satelliteConfigEntry{
 		"partial":  {Kind: satelliteKindExec, ProviderRef: "tart:grove-sat-partial"},
 		"complete": {Kind: satelliteKindExec, SSHAddr: "192.168.64.2:22", HostKey: "ssh-ed25519 AAAA", ProviderRef: "tart:grove-sat-complete"},
-	}, nil)
+	}, nil, nil)
 	byName := map[string][]string{}
 	for _, r := range rows {
 		byName[r[0]] = r
@@ -621,7 +621,7 @@ func TestSatelliteTableRowsKindColumn(t *testing.T) {
 	}
 	rows := satelliteTableRows(configured, map[string]satelliteLiveStatus{
 		"fullsat": {state: "connected"},
-	})
+	}, nil)
 	byName := map[string][]string{}
 	for _, r := range rows {
 		if len(r) != len(satelliteTableHeaders) {

@@ -376,6 +376,33 @@ func dockerContainerState(container string) (dockerContainerStatus, error) {
 	return dockerContainerStatus{exists: true, running: strings.TrimSpace(string(out)) == "true"}, nil
 }
 
+// dockerListContainerStates returns name→running for every container the
+// daemon knows about, in ONE `docker ps -a` — the status-time machine-state
+// probe's batch counterpart to dockerContainerState's single-container inspect.
+// ctx caps it so a hung daemon cannot stall status. Absent from the map = no
+// such container (the probe reports that satellite "absent").
+func dockerListContainerStates(ctx context.Context) (map[string]bool, error) {
+	out, err := exec.CommandContext(ctx, "docker", "ps", "-a", "--format", "{{.Names}}\t{{.State}}").Output()
+	if err != nil {
+		return nil, fmt.Errorf("docker ps -a: %w%s", err, dockerExitStderr(err))
+	}
+	states := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		// One container may map to multiple names (rare); the provider names
+		// are unique, so the first tab splits name from the .State token
+		// (running | exited | created | paused | ...).
+		name, state, ok := strings.Cut(line, "\t")
+		if !ok {
+			continue
+		}
+		states[name] = state == "running"
+	}
+	return states, nil
+}
+
 // ensureImage makes p.image available locally: a present image is reused; a
 // missing grove-owned image is built from the embedded context (streamed to
 // the caller's terminal); a missing BYO override is left to `docker create`,
