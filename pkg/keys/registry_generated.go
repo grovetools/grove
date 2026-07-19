@@ -441,8 +441,8 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "Actions",
 				Bindings: []BindingEntry{
 					{Name: "Run", Keys: []string{"r"}, Description: "run job", Enabled: true, ConfigKey: "run"},
-					{Name: "Edit", Keys: []string{"e"}, Description: "edit", Enabled: true, ConfigKey: "edit"},
-					{Name: "Confirm", Keys: []string{"enter", "y"}, Description: "confirm", Enabled: true, ConfigKey: "confirm"},
+					{Name: "Edit", Keys: []string{"e"}, Description: "quick edit in Editor pane", Enabled: true, ConfigKey: "edit"},
+					{Name: "Confirm", Keys: []string{"enter", "y"}, Description: "open in own pane / confirm", Enabled: true, ConfigKey: "confirm"},
 					{Name: "AddJob", Keys: []string{"A"}, Description: "add job", Enabled: true, ConfigKey: "add_job"},
 					{Name: "AddFromRecipe", Keys: []string{"P"}, Description: "add from recipe", Enabled: true, ConfigKey: "add_from_recipe"},
 					{Name: "AddXmlPlan", Keys: []string{"x"}, Description: "add XML plan job", Enabled: true, ConfigKey: "add_xml_plan"},
@@ -1492,10 +1492,10 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Actions",
 				Bindings: []BindingEntry{
-					{Name: "Confirm", Keys: []string{"enter"}, Description: "confirm", Enabled: true, ConfigKey: "confirm"},
+					{Name: "Confirm", Keys: []string{"enter"}, Description: "open in own pane / confirm", Enabled: true, ConfigKey: "confirm"},
 					{Name: "Cancel", Keys: []string{"ctrl+g"}, Description: "cancel", Enabled: true, ConfigKey: "cancel"},
 					{Name: "Back", Keys: []string{"esc"}, Description: "back", Enabled: true, ConfigKey: "back"},
-					{Name: "Edit", Keys: []string{"e"}, Description: "edit", Enabled: true, ConfigKey: "edit"},
+					{Name: "Edit", Keys: []string{"e"}, Description: "quick edit in Editor pane", Enabled: true, ConfigKey: "edit"},
 					{Name: "Delete", Keys: []string{"dd"}, Description: "delete", Enabled: true, ConfigKey: "delete"},
 					{Name: "Yank", Keys: []string{"yy"}, Description: "yank", Enabled: false, ConfigKey: "yank"},
 					{Name: "Rename", Keys: []string{"R"}, Description: "rename", Enabled: false, ConfigKey: "rename"},
