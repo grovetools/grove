@@ -267,6 +267,29 @@ func TestMergeSatelliteEntriesMatrix(t *testing.T) {
 	}
 }
 
+// TestSatelliteEntryKind separates the two questions effectiveKind cannot: an
+// entry that exists and names no kind IS full, but a lookup that missed
+// entirely has no kind to report, and rendering "full" for it invents a fact
+// about a satellite the registry has never seen.
+func TestSatelliteEntryKind(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		entry satelliteConfigEntry
+		want  string
+	}{
+		{"no entry", satelliteConfigEntry{}, ""},
+		{"entry with no kind is full", satelliteConfigEntry{SSHAddr: "203.0.113.7:22"}, satelliteKindFull},
+		{"explicit full", satelliteConfigEntry{SSHAddr: "203.0.113.7:22", Kind: satelliteKindFull}, satelliteKindFull},
+		{"exec", satelliteConfigEntry{ProviderRef: "tart:grove-x", Kind: satelliteKindExec}, satelliteKindExec},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := satelliteEntryKind(tc.entry); got != tc.want {
+				t.Fatalf("satelliteEntryKind = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestMergeSatelliteEntriesKind pins kind's merge rule — the user-authored
 // pattern (like user/identity_file, and the daemon's LoadRegistry): a
 // non-empty CONFIG value wins, the state snapshot only fills a config gap,

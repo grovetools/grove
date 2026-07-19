@@ -35,7 +35,8 @@ const (
 type satelliteJSON struct {
 	Name string `json:"name"`
 	// Kind is always normalized ("full" or "exec") — never the empty string
-	// the registry uses for the default.
+	// the registry uses for the default. It is empty only when there is no
+	// registry entry behind the row at all, per the zero-value contract.
 	Kind string `json:"kind"`
 	// State is the same string the State column renders, so the two views
 	// cannot disagree. Machine consumers should branch on the booleans below
@@ -90,7 +91,9 @@ type satelliteStatusJSON struct {
 
 // satelliteTimingsJSON carries wall-clock costs. Phases is an open map so a
 // verb can report new steps without a schema bump; TotalMS is always the whole
-// verb.
+// verb, INCLUDING the steps no phase names, so the phases are an attribution
+// of the total rather than a partition of it and a consumer must not expect
+// them to sum to it.
 type satelliteTimingsJSON struct {
 	TotalMS int64            `json:"total_ms"`
 	Phases  map[string]int64 `json:"phases"`
@@ -143,7 +146,7 @@ func (t *satelliteTimings) payload() satelliteTimingsJSON {
 func satelliteEntryJSON(name string, entry satelliteConfigEntry, live *satelliteLiveStatus) satelliteJSON {
 	out := satelliteJSON{
 		Name:            name,
-		Kind:            entry.effectiveKind(),
+		Kind:            satelliteEntryKind(entry),
 		State:           satelliteEntryState(name, entry, live),
 		PartialUp:       satelliteEntryIsPartial(entry),
 		Live:            live != nil,

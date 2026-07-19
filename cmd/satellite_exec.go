@@ -30,8 +30,10 @@ func newSatelliteExecCmd() *cobra.Command {
 	cmd.Long = `Run one command on a satellite and exit with the command's own exit status.
 
 Everything after '--' is the remote command; its words are quoted individually,
-so they reach the remote shell as written. stdin, stdout and stderr are the
-caller's, making this usable in a pipeline:
+so they reach the remote shell as written. It runs under the guest's LOGIN
+shell, so it sees the same PATH 'grove satellite ssh' does — including the
+grove stack's own bin directory, which only the login profile adds. stdin,
+stdout and stderr are the caller's, making this usable in a pipeline:
 
   grove satellite exec mysat -- grove version
   echo hi | grove satellite exec mysat -- cat
@@ -129,7 +131,25 @@ func buildSatelliteRemoteCommand(dir string, args []string) string {
 	if dir != "" {
 		command = remoteChdir(dir) + " && " + command
 	}
-	return command
+	return remoteLoginShell(command)
+}
+
+// remoteLoginShell wraps an already-quoted remote command so the guest runs it
+// under a LOGIN shell.
+//
+// `ssh host <command>` runs it under a non-login, non-interactive shell, whose
+// PATH is sshd's rather than the profile's — and the grove stack installs to
+// ~/.local/share/grove/bin, a directory only the login profile adds. So
+// `satellite exec <name> -- grove version` (the line `up` prints on success,
+// and this verb's first help example) died with 127 while the sibling `ssh`,
+// which gets a login shell, worked. The two verbs have to agree about the
+// guest environment; the login shell is the half that already works.
+//
+// The whole command becomes ONE quoted argument to `-lc`, so its own quoting
+// survives the extra layer untouched, and exec keeps the remote exit status
+// the caller branches on.
+func remoteLoginShell(command string) string {
+	return `exec ${SHELL:-/bin/sh} -lc ` + shellQuote(command)
 }
 
 // remoteChdir renders the cd that prefixes a remote command. The path is

@@ -106,6 +106,13 @@ func TestSatelliteEntryJSON(t *testing.T) {
 		}
 	})
 
+	t.Run("no entry at all leaves kind at the zero value", func(t *testing.T) {
+		got := satelliteEntryJSON("phantom", satelliteConfigEntry{}, &satelliteLiveStatus{state: "disconnected"})
+		if got.Kind != "" {
+			t.Fatalf("kind = %q for a row with no registry entry, want \"\" — a consumer cannot tell that from a genuinely full satellite", got.Kind)
+		}
+	})
+
 	t.Run("empty kind normalizes to full", func(t *testing.T) {
 		got := satelliteEntryJSON("sat", satelliteConfigEntry{SSHAddr: "203.0.113.7"}, nil)
 		if got.Kind != satelliteKindFull {
