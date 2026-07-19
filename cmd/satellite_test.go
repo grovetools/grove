@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -390,6 +391,60 @@ func TestSatelliteUpRefusesCrossProviderReuse(t *testing.T) {
 	// The matching-target (guard passes) case is covered by the unit test
 	// TestSatelliteProviderRefMismatch: exercising it through the verb would
 	// run the provider and create a real machine.
+}
+
+// TestSatelliteUpRefusalJSONDescribesTheRealSatellite pins the refusal's
+// machine payload. `up` refused before it had loaded the state entry, so the
+// document described an empty satellite — and `kind` alone did not stay empty
+// with it, since the registry's absent-means-full normalization turned the
+// zero entry into a confident "full" for what was on disk an exec satellite.
+// A consumer could neither trust the field nor tell it was unpopulated.
+func TestSatelliteUpRefusalJSONDescribesTheRealSatellite(t *testing.T) {
+	setupGroveHome(t)
+	writeSatelliteStateEntry(t, "tartdemo", satelliteConfigEntry{
+		SSHAddr:     "192.168.64.2:22",
+		User:        "admin",
+		HostKey:     "ssh-ed25519 AAAA",
+		Kind:        satelliteKindExec,
+		ProviderRef: "tart:grove-sat-tartdemo",
+	})
+
+	// The report swaps os.Stdout for the rest of the process by design (the
+	// verb owns it to exit), so the test holds the real handle and restores
+	// it.
+	orig := os.Stdout
+	t.Cleanup(func() { os.Stdout = orig })
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	runErr := runSatelliteCmd(t, newSatelliteUpCmd(), "tartdemo", "--target", "docker", "--yes", "--json")
+	_ = w.Close()
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runErr == nil {
+		t.Fatal("cross-provider up was not refused")
+	}
+
+	var doc satelliteVerbJSON
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("stdout is not one JSON document (%v): %s", err, out)
+	}
+	if doc.Ok || doc.Error == "" {
+		t.Errorf("ok=%v error=%q, want a reported failure", doc.Ok, doc.Error)
+	}
+	if doc.Satellite.Kind != satelliteKindExec {
+		t.Errorf("satellite.kind = %q, want %q — the ground truth in the state file", doc.Satellite.Kind, satelliteKindExec)
+	}
+	if doc.Satellite.ProviderRef != "tart:grove-sat-tartdemo" || doc.Satellite.Provider != "tart" {
+		t.Errorf("provider/provider_ref = %q/%q, want the recorded owner", doc.Satellite.Provider, doc.Satellite.ProviderRef)
+	}
+	if doc.Satellite.SSHAddr != "192.168.64.2:22" || !doc.Satellite.HostKeyPinned {
+		t.Errorf("ssh_addr=%q host_key_pinned=%v, want the recorded endpoint", doc.Satellite.SSHAddr, doc.Satellite.HostKeyPinned)
+	}
 }
 
 // TestSatelliteDownRefusesTargetMismatch pins the `down` half of the same

@@ -145,6 +145,18 @@ func (e satelliteConfigEntry) effectiveKind() string {
 	return e.Kind
 }
 
+// satelliteEntryKind is effectiveKind for a lookup that may have missed: the
+// zero entry is not a full satellite, it is NO satellite (a daemon-only
+// phantom row, or a verb that refused before a record existed), and answering
+// "full" for one states a fact about a machine the registry has never seen.
+// The rendered views want the zero value of the field there instead.
+func satelliteEntryKind(entry satelliteConfigEntry) string {
+	if (entry == satelliteConfigEntry{}) {
+		return ""
+	}
+	return entry.effectiveKind()
+}
+
 // isExec reports whether the entry is an exec-only (no groved) satellite.
 func (e satelliteConfigEntry) isExec() bool { return e.Kind == satelliteKindExec }
 
@@ -332,7 +344,13 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		// ours-check only looks within its own provider), so a mismatch is
 		// refused BEFORE anything is created — a --target typo must never
 		// reach terraform.
-		if recorded := satelliteProviderRefMismatch(loadMergedSatellites()[name], provider.Kind()); recorded != "" {
+		// The pre-existing entry (zero for a first `up`) is handed to the
+		// report up front so a refusal below describes the satellite that IS
+		// there rather than emitting an empty one — same stance as `down`,
+		// which loads it before its own wrong-target refusal.
+		existing := loadMergedSatellites()[name]
+		report.entry = existing
+		if recorded := satelliteProviderRefMismatch(existing, provider.Kind()); recorded != "" {
 			return fmt.Errorf("satellite %q was provisioned by the %q target — refusing to re-provision it as %q, which would orphan the existing machine: destroy it first with `grove satellite down %s --target %s`, or pick another satellite name",
 				name, recorded, provider.Kind(), name, recorded)
 		}
@@ -1193,7 +1211,11 @@ func satelliteTableRows(configured map[string]satelliteConfigEntry, live map[str
 		if addr == "" {
 			addr = "-"
 		}
-		rows = append(rows, []string{name, entry.effectiveKind(), state, addr, forward, since, lastErr})
+		kind := satelliteEntryKind(entry)
+		if kind == "" {
+			kind = "-"
+		}
+		rows = append(rows, []string{name, kind, state, addr, forward, since, lastErr})
 	}
 	return rows
 }
