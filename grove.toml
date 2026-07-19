@@ -26,6 +26,8 @@ scenarios = [
   "satellite-hostkey-pin",
   "satellite-upgrade-dry-run",
   "satellite-repos-flag-matrix",
+  "satellite-lifecycle-tart",
+  "satellite-lifecycle-docker",
 ]
 
 [[hooks.on_stop]]

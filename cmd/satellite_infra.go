@@ -42,6 +42,16 @@ type satelliteInfraConfig struct {
 	// IdentityFile is the SSH private key recorded in the registry entry
 	// (empty = agent-only auth).
 	IdentityFile string `yaml:"identity_file"`
+	// Image is the guest image override (tart/docker targets only): the OCI
+	// image the tart provider clones (empty resolves to defaultTartImage),
+	// or the docker image the docker provider runs as-is instead of building
+	// its embedded Dockerfile (empty resolves to the grove-owned
+	// content-hash tag).
+	Image string `yaml:"image"`
+	// TartHome relocates tart's storage (the TART_HOME env var) for every
+	// tart command grove runs (tart target only; config-only — no flag).
+	// Empty inherits the process environment.
+	TartHome string `yaml:"tart_home"`
 }
 
 // loadSatelliteInfra reads [satellites.<name>.infra] from the same layered
@@ -93,6 +103,8 @@ type infraFlagOverrides struct {
 	CIDRSet      bool
 	IdentityFile string
 	IdentitySet  bool
+	Image        string
+	ImageSet     bool
 }
 
 // mergeInfra resolves flag-over-config precedence for the infra inputs
@@ -117,6 +129,9 @@ func mergeInfra(cfg satelliteInfraConfig, f infraFlagOverrides) satelliteInfraCo
 	}
 	if f.IdentitySet {
 		out.IdentityFile = f.IdentityFile
+	}
+	if f.ImageSet {
+		out.Image = f.Image
 	}
 	return out
 }
@@ -159,6 +174,12 @@ func writeSatelliteInfra(name string, infra satelliteInfraConfig) error {
 	}
 	if infra.IdentityFile != "" {
 		values["identity_file"] = infra.IdentityFile
+	}
+	if infra.Image != "" {
+		values["image"] = infra.Image
+	}
+	if infra.TartHome != "" {
+		values["tart_home"] = infra.TartHome
 	}
 	if err := setup.SetValue(root, values, "satellites", name, "infra"); err != nil {
 		return err

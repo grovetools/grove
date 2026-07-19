@@ -149,8 +149,8 @@ func removeSatelliteState(name string) (bool, error) {
 //   - machine-derived fields (ssh_addr, host_key, socket_path,
 //     sync_remote_addr): a non-empty STATE value wins — they churn on every VM
 //     recreate and the CLI's provisioning snapshot is the truth.
-//   - user-authored fields (user, identity_file, sync_local_port): a non-empty
-//     CONFIG value wins over the state's resolved snapshot.
+//   - user-authored fields (user, identity_file, kind, sync_local_port): a
+//     non-empty CONFIG value wins over the state's resolved snapshot.
 //
 // A satellite present in only one source passes through complete. When config
 // still carries a flat ssh_addr/host_key that CONFLICTS with state (a legacy
@@ -195,11 +195,22 @@ func mergeSatelliteEntries(fromConfig, fromState map[string]satelliteConfigEntry
 		if st.SyncRemoteAddr != "" {
 			out.SyncRemoteAddr = st.SyncRemoteAddr
 		}
+		if st.ProviderRef != "" {
+			// Machine-derived like ssh_addr/host_key: the CLI's provisioning
+			// snapshot is the truth for which machine the provider created.
+			out.ProviderRef = st.ProviderRef
+		}
 		if out.User == "" {
 			out.User = st.User
 		}
 		if out.IdentityFile == "" {
 			out.IdentityFile = st.IdentityFile
+		}
+		if out.Kind == "" {
+			// Kind is user-authored first, but `up` also stamps it into the
+			// state snapshot — same fallback rule as user/identity_file
+			// (empty in both sources = full).
+			out.Kind = st.Kind
 		}
 		if out.SyncLocalPort == 0 {
 			out.SyncLocalPort = st.SyncLocalPort
