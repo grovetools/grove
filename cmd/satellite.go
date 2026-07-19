@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/tui/components/table"
+	"github.com/mattn/go-isatty"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 
@@ -101,6 +103,39 @@ func satelliteEntryIsPartial(e satelliteConfigEntry) bool {
 	return e.ProviderRef != "" && (e.SSHAddr == "" || e.HostKey == "")
 }
 
+// satellitePartialUpRemediation is the Last Error text (and the JSON
+// last_error) for a partial-up entry: both exits from the state are commands.
+func satellitePartialUpRemediation(name string) string {
+	return fmt.Sprintf("`up` did not finish — re-run `grove satellite up %s`, or `grove satellite down %s` to destroy the machine", name, name)
+}
+
+// satelliteEntryState derives the State cell for one satellite: the live
+// ConnManager state when the daemon reported one, else the registry-derived
+// state. Shared by the table and the --json view so the two cannot disagree.
+func satelliteEntryState(name string, entry satelliteConfigEntry, live *satelliteLiveStatus) string {
+	if live != nil {
+		if live.state != "" {
+			return live.state
+		}
+		return "not connected"
+	}
+	switch {
+	case satelliteEntryIsPartial(entry):
+		// A provider stamped provider_ref and `up` then failed: the machine
+		// may well exist while the satellite is unusable. Saying "exec-only"
+		// here would read as healthy.
+		return satelliteStatePartialUp
+	case entry.isExec():
+		// Exec satellites have no groved connection to report: derive the
+		// daemon's exec-only state from the merged registry so it shows even
+		// when groved isn't running (and agrees with the live status when it
+		// is).
+		return satelliteStateExecOnly
+	default:
+		return "not connected (restart groved?)"
+	}
+}
+
 // effectiveKind normalizes Kind: empty means full (mirrors the daemon's
 // EffectiveKind).
 func (e satelliteConfigEntry) effectiveKind() string {
@@ -134,6 +169,8 @@ from and dispatches to over SSH (M2). 'up' is billable — it creates cloud
 resources via terraform.`
 	cmd.AddCommand(newSatelliteUpCmd())
 	cmd.AddCommand(newSatelliteUpgradeCmd())
+	cmd.AddCommand(newSatelliteExecCmd())
+	cmd.AddCommand(newSatelliteSSHCmd())
 	cmd.AddCommand(newSatelliteReposCmd())
 	cmd.AddCommand(newSatelliteWorktreeCmd())
 	cmd.AddCommand(newSatelliteConfigCmd())
@@ -255,8 +292,10 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 	// infra --target, so there it is spelled --target.)
 	cmd.Flags().StringVar(&prebuiltTarget, "prebuilt-target", "linux/amd64", "Cross-compile target for --prebuilt as <goos>/<goarch> (the VM arch)")
 	cmd.Flags().StringVar(&sourceDir, "source-dir", "", "Local ecosystem worktree root the --prebuilt stack is cross-built from (default: the go.work root above cwd)")
-	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+	cmd.RunE = func(cmd *cobra.Command, args []string) (runErr error) {
 		name := args[0]
+		report := beginSatelliteVerbReport(cmd, "up", satelliteUpSchema, name)
+		defer func() { report.finish(runErr) }()
 
 		// Infra inputs: [satellites.<name>.infra] with flag overrides — the
 		// five infra flags' persistent config home (same flag>config stance
@@ -480,7 +519,9 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		// 1.+2. Provider Up: billable confirm, machine creation (gcp:
 		//    tfvars persist + terraform init/apply + external_ip output) →
 		//    the endpoint the shared steps below operate on.
+		providerStart := time.Now()
 		endpoint, err := provider.Up(cmd.Context(), upOpts)
+		report.phase("provider_up", providerStart)
 		if err != nil {
 			return err
 		}
@@ -512,6 +553,7 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		//     (unlike upgrade, where the old binaries keep running), so any
 		//     install failure aborts here rather than proceeding to bootstrap.
 		var syncdUnitRemotePath string
+		prebuiltStart := time.Now()
 		if prebuilt {
 			// Transport identity comes from the provider's endpoint (gcp:
 			// the infra ssh_user/identity_file it was handed; tart: the
@@ -575,6 +617,7 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 				return fmt.Errorf("prebuilt install failed on the fresh VM (nothing bootstrapped yet — fix and re-run `grove satellite up %s --prebuilt`, or `grove satellite down %s`): %w", name, name, deployErr)
 			}
 			fmt.Printf("Prebuilt grove stack installed on %q (%s).\n", name, strings.Join(shipped, ", "))
+			report.phase("prebuilt_install", prebuiltStart)
 		}
 
 		// 4. Bootstrap the VM (subprocess, inherited stdout/stderr). Provision
@@ -585,6 +628,7 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		//    (tart) skip this entirely: the prebuilt install above IS the
 		//    provisioning, and the provider did the minimal guest prep itself.
 		if usesBootstrap {
+			bootstrapStart := time.Now()
 			provArgs, secretStdin := buildBootstrapProvision(prov, ghToken, claudeToken)
 			// The resolved sync workspaces drive the VM's pull-enabled sync.toml
 			// (bootstrap step 5). Always passed — an explicitly empty flag value
@@ -605,6 +649,7 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 			if err := runInheritedWithStdin(endpoint.LocalRunDir, secretStdin, "bash", bootstrapArgs...); err != nil {
 				return fmt.Errorf("satellite bootstrap: %w", err)
 			}
+			report.phase("bootstrap", bootstrapStart)
 		}
 
 		// 5. Assemble the registry entry (yaml keys match P7's SatelliteConfig
@@ -747,7 +792,16 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		//    Soft-fail: with no daemon running or an old groved (404), the next
 		//    steps below fall back to the manual reload instruction.
 		fmt.Printf("\nSatellite %q provisioned at %s.\n", name, ip)
+		report.entry = entry
+		// P7: an exec satellite IS its sshd endpoint, so the way in belongs in
+		// the provision's own output — it used to have to be reassembled from
+		// the state file plus the provider's key-path convention.
+		if line := satelliteSSHCommand(entry); line != "" {
+			fmt.Printf("Reach it with: grove satellite ssh %s   (or: grove satellite exec %s -- grove version)\n", name, name)
+			fmt.Printf("  raw equivalent: %s\n", line)
+		}
 		summary, reloaded := reloadDaemonSatelliteRegistry()
+		report.reloaded = reloaded
 		if reloaded {
 			fmt.Printf("Daemon satellite registry hot-reloaded (%s).\n", formatReloadSummary(summary))
 		}
@@ -790,8 +844,10 @@ func newSatelliteDownCmd() *cobra.Command {
 	cmd.Flags().StringVar(&tartHome, "tart-home", "", tartHomeFlagHelp)
 	cmd.Flags().BoolVar(&assumeYes, "yes", false, "Skip the destroy confirmation prompt")
 	cmd.Flags().StringVar(&syncOriginID, "sync-origin-id", "", "Satellite sync origin_id to deregister precisely (best-effort; see C19/C20)")
-	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+	cmd.RunE = func(cmd *cobra.Command, args []string) (runErr error) {
 		name := args[0]
+		report := beginSatelliteVerbReport(cmd, "down", satelliteDownSchema, name)
+		defer func() { report.finish(runErr) }()
 
 		// Resolve the provider. The state entry's provider_ref is the truth —
 		// it names the provider that actually created the machine — and the
@@ -807,6 +863,7 @@ func newSatelliteDownCmd() *cobra.Command {
 			return err
 		}
 		entry := loadMergedSatellites()[name]
+		report.entry = entry
 		if cmd.Flags().Changed("target") {
 			if recorded := satelliteProviderRefMismatch(entry, target); recorded != "" {
 				return fmt.Errorf("satellite %q was provisioned by the %q target, not %q — refusing to run the wrong provider's destroy against it: re-run `grove satellite down %s --target %s`, or omit --target to use the recorded provider",
@@ -844,9 +901,11 @@ func newSatelliteDownCmd() *cobra.Command {
 				return nil
 			},
 		}
+		providerStart := time.Now()
 		if err := provider.Down(cmd.Context(), downOpts); err != nil {
 			return err
 		}
+		report.phase("provider_down", providerStart)
 
 		// 3. Remove the satellite's provisioning state entry, plus any LEGACY
 		// flat [satellites.<name>] entry an older `up` wrote into the global
@@ -863,6 +922,8 @@ func newSatelliteDownCmd() *cobra.Command {
 		if legacyRemoved {
 			fmt.Printf("(removed legacy [satellites.%s] entry from the grove config)\n", name)
 		}
+		report.removedState = removedState
+		report.removedLegacyEntry = legacyRemoved
 		if !removedState && !legacyRemoved {
 			fmt.Printf("(no satellite state or registry entry for %q)\n", name)
 		}
@@ -877,6 +938,7 @@ func newSatelliteDownCmd() *cobra.Command {
 		if infraRemoved, infraErr := removeManagedSatelliteInfra(name); infraErr != nil {
 			fmt.Printf("warning: could not remove the [satellites.%s.infra] block from the grove config: %v\n", name, infraErr)
 		} else if infraRemoved {
+			report.removedInfraBlock = infraRemoved
 			fmt.Printf("(removed the [satellites.%s.infra] block `up` wrote)\n", name)
 		}
 		removeEmptySatelliteStateDir(name)
@@ -886,7 +948,9 @@ func newSatelliteDownCmd() *cobra.Command {
 		//    federated rows immediately. Soft-fail to the manual instruction
 		//    when the daemon isn't running or predates the endpoint.
 		fmt.Printf("\nSatellite %q destroyed and deregistered.\n", name)
-		if summary, ok := reloadDaemonSatelliteRegistry(); ok {
+		summary, reloaded := reloadDaemonSatelliteRegistry()
+		report.reloaded = reloaded
+		if reloaded {
 			fmt.Printf("Daemon satellite registry hot-reloaded (%s); its connection and\n", formatReloadSummary(summary))
 			fmt.Println("sync port-forward are torn down.")
 		} else {
@@ -904,18 +968,40 @@ func newSatelliteDownCmd() *cobra.Command {
 	return cmd
 }
 
+// satelliteRenderLong documents the --json contract on both read verbs (they
+// render the same view; `list` is the registry-first name for it).
+const satelliteRenderLong = `Show every configured/provisioned satellite: kind, connection state, address,
+the daemon's sync forward, and the last error.
+
+--json emits the same view as a ` + satelliteStatusSchema + ` document, whose
+per-satellite objects carry the machine fields the table has no room for —
+provider, provider_ref, user, identity_file, and a ready-to-run ssh_command —
+so nothing has to be scraped from the state file or reconstructed by
+convention. Every documented key is always present; unknown values are the
+zero value for their type.`
+
 func newSatelliteStatusCmd() *cobra.Command {
 	cmd := cli.NewStandardCommand("status", "Show satellite connection health")
+	cmd.Long = satelliteRenderLong
 	cmd.SilenceUsage = true
-	cmd.RunE = func(cmd *cobra.Command, args []string) error { return renderSatellites() }
+	cmd.RunE = func(cmd *cobra.Command, args []string) error { return renderSatellites(satelliteJSONRequested(cmd)) }
 	return cmd
 }
 
 func newSatelliteListCmd() *cobra.Command {
 	cmd := cli.NewStandardCommand("list", "List configured satellites")
+	cmd.Long = satelliteRenderLong
 	cmd.SilenceUsage = true
-	cmd.RunE = func(cmd *cobra.Command, args []string) error { return renderSatellites() }
+	cmd.RunE = func(cmd *cobra.Command, args []string) error { return renderSatellites(satelliteJSONRequested(cmd)) }
 	return cmd
+}
+
+// satelliteJSONRequested reads the ecosystem-wide --json flag (registered as a
+// persistent flag by cli.NewStandardCommand, so it resolves whether it was
+// given on the verb or inherited).
+func satelliteJSONRequested(cmd *cobra.Command) bool {
+	v, _ := cmd.Flags().GetBool("json")
+	return v
 }
 
 // renderSatellites merges the registry entries (config ∪ state, the daemon's
@@ -923,12 +1009,13 @@ func newSatelliteListCmd() *cobra.Command {
 // (client.GetSatelliteStatuses, the Store surface P7 emits via the new GET
 // /api/satellites read endpoint). With the daemon unreachable the merged
 // registry view still renders every configured/provisioned satellite.
-func renderSatellites() error {
+func renderSatellites(jsonOutput bool) error {
 	configured := loadMergedSatellites()
 
 	live := map[string]satelliteLiveStatus{}
 	client := daemon.New()
-	if client.IsRunning() {
+	daemonReachable := client.IsRunning()
+	if daemonReachable {
 		ctx := context.Background()
 		if statuses, err := client.GetSatelliteStatuses(ctx); err == nil {
 			for name, st := range statuses {
@@ -937,7 +1024,17 @@ func renderSatellites() error {
 				}
 				live[name] = satelliteLiveStatus{state: st.State, addr: st.Addr, since: st.Since, lastError: st.LastError, forward: st.Forward}
 			}
+		} else {
+			daemonReachable = false
 		}
+	}
+
+	if jsonOutput {
+		return writeSatelliteJSON(os.Stdout, satelliteStatusJSON{
+			Schema:          satelliteStatusSchema,
+			DaemonReachable: daemonReachable,
+			Satellites:      satelliteStatusPayload(configured, live),
+		})
 	}
 
 	rows := satelliteTableRows(configured, live)
@@ -950,7 +1047,50 @@ func renderSatellites() error {
 		Headers(satelliteTableHeaders...).
 		Rows(rows...)
 	fmt.Println(tbl.Render())
+	// P7: the endpoint alone never told anyone how to reach the guest — the
+	// key path and login user had to be reconstructed from the state dir's
+	// layout. Print the verb that does it, and the raw invocation behind it.
+	for _, name := range satelliteNamesOrdered(configured, live) {
+		if entry, ok := configured[name]; ok {
+			if line := satelliteSSHCommand(entry); line != "" {
+				fmt.Printf("\n%s: grove satellite ssh %s\n  (%s)\n", name, name, line)
+			}
+		}
+	}
 	return nil
+}
+
+// satelliteStatusPayload projects the merged registry + live health into the
+// --json satellite list, ordered like the table.
+func satelliteStatusPayload(configured map[string]satelliteConfigEntry, live map[string]satelliteLiveStatus) []satelliteJSON {
+	names := satelliteNamesOrdered(configured, live)
+	out := make([]satelliteJSON, 0, len(names))
+	for _, name := range names {
+		var ls *satelliteLiveStatus
+		if l, ok := live[name]; ok {
+			ls = &l
+		}
+		out = append(out, satelliteEntryJSON(name, configured[name], ls))
+	}
+	return out
+}
+
+// satelliteNamesOrdered is the sorted union of configured and live names, so a
+// just-provisioned (not-yet-connected) satellite still appears, and vice versa.
+func satelliteNamesOrdered(configured map[string]satelliteConfigEntry, live map[string]satelliteLiveStatus) []string {
+	names := map[string]struct{}{}
+	for n := range configured {
+		names[n] = struct{}{}
+	}
+	for n := range live {
+		names[n] = struct{}{}
+	}
+	ordered := make([]string, 0, len(names))
+	for n := range names {
+		ordered = append(ordered, n)
+	}
+	sort.Strings(ordered)
+	return ordered
 }
 
 // reloadDaemonSatelliteRegistry POSTs the global daemon's satellite registry
@@ -1007,39 +1147,36 @@ func formatReloadSummary(s *models.SatelliteReloadSummary) string {
 }
 
 // satelliteTableHeaders is the column contract for satelliteTableRows.
-var satelliteTableHeaders = []string{"Name", "State", "Addr", "Forward", "Since", "Last Error"}
+//
+// Kind sits beside State because the two answer different questions and an
+// exec satellite's healthy State ("exec-only") otherwise had to carry both:
+// Kind is what the satellite IS (what `up` wired), State is how it is doing.
+// That keeps the third state, "partial up", legible — a partial-up exec entry
+// reads `exec | partial up` rather than collapsing into one ambiguous cell.
+var satelliteTableHeaders = []string{"Name", "Kind", "State", "Addr", "Forward", "Since", "Last Error"}
 
 // satelliteTableRows builds the status/list table rows from the union of
 // configured + live names, so a just-added (not-yet-connected) satellite still
 // shows, and vice versa. Returns nil when there is nothing to show.
 func satelliteTableRows(configured map[string]satelliteConfigEntry, live map[string]satelliteLiveStatus) [][]string {
-	names := map[string]struct{}{}
-	for n := range configured {
-		names[n] = struct{}{}
-	}
-	for n := range live {
-		names[n] = struct{}{}
-	}
-	if len(names) == 0 {
+	ordered := satelliteNamesOrdered(configured, live)
+	if len(ordered) == 0 {
 		return nil
 	}
-	ordered := make([]string, 0, len(names))
-	for n := range names {
-		ordered = append(ordered, n)
-	}
-	sort.Strings(ordered)
 
 	var rows [][]string
 	for _, name := range ordered {
-		state := "not connected"
-		addr := configured[name].SSHAddr
+		entry := configured[name]
+		var ls *satelliteLiveStatus
+		if l, ok := live[name]; ok {
+			ls = &l
+		}
+		state := satelliteEntryState(name, entry, ls)
+		addr := entry.SSHAddr
 		forward := "-"
 		since := "-"
 		lastErr := ""
-		if ls, ok := live[name]; ok {
-			if ls.state != "" {
-				state = ls.state
-			}
+		if ls != nil {
 			if ls.addr != "" {
 				addr = ls.addr
 			}
@@ -1050,28 +1187,13 @@ func satelliteTableRows(configured map[string]satelliteConfigEntry, live map[str
 				since = timeAgo(ls.since)
 			}
 			lastErr = ls.lastError
-		} else if entry, ok := configured[name]; ok {
-			switch {
-			case satelliteEntryIsPartial(entry):
-				// A provider stamped provider_ref and `up` then failed: the
-				// machine may well exist while the satellite is unusable.
-				// Saying "exec-only" here would read as healthy.
-				state = satelliteStatePartialUp
-				lastErr = fmt.Sprintf("`up` did not finish — re-run `grove satellite up %s`, or `grove satellite down %s` to destroy the machine", name, name)
-			case entry.isExec():
-				// Exec satellites have no groved connection to report:
-				// derive the daemon's exec-only state from the merged
-				// registry so it shows even when groved isn't running (and
-				// agrees with the live status when it is).
-				state = satelliteStateExecOnly
-			default:
-				state = "not connected (restart groved?)"
-			}
+		} else if satelliteEntryIsPartial(entry) {
+			lastErr = satellitePartialUpRemediation(name)
 		}
 		if addr == "" {
 			addr = "-"
 		}
-		rows = append(rows, []string{name, state, addr, forward, since, lastErr})
+		rows = append(rows, []string{name, entry.effectiveKind(), state, addr, forward, since, lastErr})
 	}
 	return rows
 }
@@ -1411,6 +1533,29 @@ func bestEffortDeregisterCursors(name, syncOriginID string) {
 
 // --- small subprocess / prompt helpers ---
 
+// confirmOrAbort asks prompt and turns anything but an explicit yes into the
+// verb's abort error.
+//
+// A [y/N] prompt cannot be answered when stdin is not a terminal, so a script
+// or an agent used to hit a bare `Error: aborted` with nothing to act on. That
+// case is now detected up front and named, along with the flag that makes the
+// verb non-interactive.
+func confirmOrAbort(prompt string) error {
+	if !satelliteStdinIsTTY() {
+		return fmt.Errorf("aborted: this step needs confirmation and stdin is not a terminal — re-run with --yes to confirm non-interactively (%s)", prompt)
+	}
+	if !confirmYesNo(prompt) {
+		return fmt.Errorf("aborted")
+	}
+	return nil
+}
+
+// satelliteStdinIsTTY reports whether a [y/N] prompt could be answered at all.
+func satelliteStdinIsTTY() bool {
+	fd := os.Stdin.Fd()
+	return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
+}
+
 func confirmYesNo(prompt string) bool {
 	fmt.Printf("%s [y/N]: ", prompt)
 	reader := bufio.NewReader(os.Stdin)
@@ -1420,6 +1565,45 @@ func confirmYesNo(prompt string) bool {
 	}
 	line = strings.TrimSpace(strings.ToLower(line))
 	return line == "y" || line == "yes"
+}
+
+// Partial-success contract for the push verbs.
+//
+// `repos push` and `worktree push` ship each repo independently, and hold the
+// ones whose VM side carries commits the laptop has never fetched. A held repo
+// is not a failure of the machinery — the VM is consistent and the message
+// names the exact remediation — but the push the caller asked for did NOT
+// fully happen, so reporting success would let a scripted loop proceed against
+// a stale guest. Partial success is therefore an ERROR, with its own exit
+// status so a caller can tell "some repos held, remediable" apart from
+// "the transport or the remote script broke", which exit 1 keeps meaning.
+//
+// 2 matches the only other differentiated exit status grove has
+// (envdrift.TerraformDriftExitCode, itself `terraform plan
+// -detailed-exitcode`'s "changes pending").
+const satellitePartialExitCode = 2
+
+// satellitePartialError marks that outcome. It is a plain error everywhere
+// except at the verb boundary, where exitOnSatellitePartial maps it to the
+// status above.
+type satellitePartialError struct{ msg string }
+
+func (e *satellitePartialError) Error() string { return e.msg }
+
+func satellitePartialf(format string, a ...any) error {
+	return &satellitePartialError{msg: fmt.Sprintf(format, a...)}
+}
+
+// exitOnSatellitePartial is the verb boundary: a partial result exits with
+// satellitePartialExitCode instead of the 1 Cobra gives every returned error
+// (same direct-exit idiom as `grove env drift`).
+func exitOnSatellitePartial(err error) error {
+	var partial *satellitePartialError
+	if errors.As(err, &partial) {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", partial.Error())
+		os.Exit(satellitePartialExitCode)
+	}
+	return err
 }
 
 // runInherited runs a command with the caller's stdio attached (so terraform /

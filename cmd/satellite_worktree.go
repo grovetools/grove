@@ -389,7 +389,7 @@ if [ -n "$FAILED_REPOS" ]; then
   exit 1
 fi
 rm -rf "$STAGE"
-echo "worktree push complete"
+echo "worktree push: remote steps complete for the shipped repos"
 `)
 	return b.String()
 }
@@ -541,8 +541,8 @@ func pushSatelliteWorktree(transport satelliteReposTransport, name, containerAbs
 		if forced := deltasWithStatus(deltas, deltaStatusForcedDiverged); len(forced) > 0 {
 			prompt = fmt.Sprintf("Push plan worktree %q onto %q — DISCARDING unfetched VM commits in %s?", worktreeName, name, strings.Join(deltaRepoNames(forced), ", "))
 		}
-		if !confirmYesNo(prompt) {
-			return fmt.Errorf("aborted")
+		if err := confirmOrAbort(prompt); err != nil {
+			return err
 		}
 	}
 
@@ -596,7 +596,7 @@ func pushSatelliteWorktree(transport satelliteReposTransport, name, containerAbs
 			len(nobase), strings.Join(deltaRepoNames(nobase), ", "), name))
 	}
 	if len(heldMsgs) > 0 {
-		return fmt.Errorf("%s", strings.Join(heldMsgs, "; "))
+		return satellitePartialf("PARTIAL: %d repo(s) pushed, %s", len(updates), strings.Join(heldMsgs, "; "))
 	}
 	return nil
 }
@@ -889,7 +889,14 @@ Notes:
   - COMMITTED state only: dirty laptop worktrees ship their HEAD, never
     uncommitted content (a loud warning tells you so).
   - idempotent and cheap to re-run: matching shas ship no bundles.
-  - --plan defaults to the enclosing worktree's plan when run from inside one.`
+  - --plan defaults to the enclosing worktree's plan when run from inside one.
+
+Exit status:
+  0  every requested repo was pushed.
+  2  PARTIAL — the shipped repos are live on the VM, but some were held; the
+     message names them and the command that unblocks each. The VM is
+     consistent; a scripted caller must not treat this as done.
+  1  the push failed (bad inputs, transport, or the remote script).`
 	cmd.Args = cobra.ExactArgs(1)
 	cmd.SilenceUsage = true
 	cmd.Flags().StringVar(&planFlag, "plan", "", "Plan whose worktree to push (default: the enclosing worktree's plan)")
@@ -908,7 +915,7 @@ Notes:
 		if err != nil {
 			return err
 		}
-		return pushSatelliteWorktreeOverSSH(name, entry, containerAbs, remoteCodeDir, worktreeName, planName, repos, dryRun, assumeYes, force)
+		return exitOnSatellitePartial(pushSatelliteWorktreeOverSSH(name, entry, containerAbs, remoteCodeDir, worktreeName, planName, repos, dryRun, assumeYes, force))
 	}
 	return cmd
 }

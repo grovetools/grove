@@ -90,8 +90,8 @@ func (p *gcpSatelliteProvider) Up(_ context.Context, opts *satelliteUpOptions) (
 	}
 
 	if !opts.AssumeYes {
-		if !confirmYesNo(fmt.Sprintf("Provision satellite %q — this creates BILLABLE GCP resources. Continue?", opts.Name)) {
-			return satelliteEndpoint{}, fmt.Errorf("aborted")
+		if err := confirmOrAbort(fmt.Sprintf("Provision satellite %q — this creates BILLABLE GCP resources. Continue?", opts.Name)); err != nil {
+			return satelliteEndpoint{}, err
 		}
 	}
 	// Shared fail-fast work that must run after the confirm but before any
@@ -180,8 +180,8 @@ func (p *gcpSatelliteProvider) Down(_ context.Context, opts *satelliteDownOption
 	}
 
 	if !opts.AssumeYes {
-		if !confirmYesNo(fmt.Sprintf("Destroy satellite %q and remove its registry entry?", opts.Name)) {
-			return fmt.Errorf("aborted")
+		if err := confirmOrAbort(fmt.Sprintf("Destroy satellite %q and remove its registry entry?", opts.Name)); err != nil {
+			return err
 		}
 	}
 	// Shared pre-destroy work (the verb's best-effort cursor deregister,
