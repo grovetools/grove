@@ -269,6 +269,27 @@ func newTaskOrchestrator(options orch.OrchestratorOptions, workspaces []string, 
 	}
 }
 
+// newLocalTaskOrchestrator is the daemon-optional sibling of
+// newTaskOrchestrator: the in-process local worker pool only —
+// LocalStateProvider, no daemon client, no build queue. Critically it never
+// calls daemon.NewGlobalClient (which auto-starts groved as a side effect);
+// satellite provisioning builds through this path, where spawning the global
+// daemon mid-provision is wrong (and recursive for local targets).
+func newLocalTaskOrchestrator(options orch.OrchestratorOptions, workspaces []string, taskJobs []orch.TaskJob, configMap map[string]*config.Config) *orch.Orchestrator {
+	var binDirs []string
+	for _, wsPath := range workspaces {
+		binDirs = append(binDirs, filepath.Join(wsPath, "bin"))
+	}
+
+	return &orch.Orchestrator{
+		Options:       options,
+		RunOpts:       &orch.RunOptions{ExtraPathDirs: binDirs},
+		StateProvider: &orch.LocalStateProvider{},
+		Configs:       configMap,
+		DepGraph:      orch.DeriveWorkspaceBuildAfter(taskJobs, configMap),
+	}
+}
+
 // BuildReposForTarget builds the named repos under sourceDir for target via
 // the standard orchestrator: wave-ordered, parallel, cached per
 // "build@<goos>_<goarch>". This is the local-build engine behind
@@ -276,6 +297,19 @@ func newTaskOrchestrator(options orch.OrchestratorOptions, workspaces []string, 
 // satellite upgrade use grove build" — now it does). Results come back
 // per-repo; a failed repo is one failed TaskResult, never an error.
 func BuildReposForTarget(ctx context.Context, sourceDir string, repos []string, target orch.Target, jobs int) ([]orch.TaskResult, error) {
+	return buildReposForTarget(ctx, sourceDir, repos, target, jobs, false)
+}
+
+// BuildReposForTargetLocal is the daemon-optional variant of
+// BuildReposForTarget: it builds on the in-process local worker pool and
+// never calls daemon.NewGlobalClient (which auto-starts groved). Satellite
+// provisioning uses this — auto-starting the global daemon mid-provision is
+// wrong, and recursive for local targets.
+func BuildReposForTargetLocal(ctx context.Context, sourceDir string, repos []string, target orch.Target, jobs int) ([]orch.TaskResult, error) {
+	return buildReposForTarget(ctx, sourceDir, repos, target, jobs, true)
+}
+
+func buildReposForTarget(ctx context.Context, sourceDir string, repos []string, target orch.Target, jobs int, localOnly bool) ([]orch.TaskResult, error) {
 	var workspaces []string
 	for _, r := range repos {
 		workspaces = append(workspaces, filepath.Join(sourceDir, r))
@@ -284,14 +318,20 @@ func BuildReposForTarget(ctx context.Context, sourceDir string, repos []string, 
 	if jobs <= 0 {
 		jobs = runtime.NumCPU()
 	}
-	o := newTaskOrchestrator(orch.OrchestratorOptions{
+	options := orch.OrchestratorOptions{
 		Verb:       "build",
 		Strategy:   orch.StrategyWaveSorted,
 		Jobs:       jobs,
 		FailFast:   false,
-		RemoteExec: true,
+		RemoteExec: !localOnly,
 		Target:     target,
-	}, workspaces, taskJobs, configMap)
+	}
+	var o *orch.Orchestrator
+	if localOnly {
+		o = newLocalTaskOrchestrator(options, workspaces, taskJobs, configMap)
+	} else {
+		o = newTaskOrchestrator(options, workspaces, taskJobs, configMap)
+	}
 	return o.RunWithResults(ctx, taskJobs)
 }
 

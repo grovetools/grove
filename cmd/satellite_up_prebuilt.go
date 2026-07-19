@@ -38,7 +38,7 @@ const satelliteSyncdUnitRel = "sync/systemd/grove-syncd.service"
 // `up --prebuilt` ships (the grove-syncd unit). Deliberately NOT the prebuilt
 // install stage dir (satelliteStageDir): the install script rm -rf's that on
 // success, and bootstrap's step 6 still needs the unit afterwards.
-const satelliteUpAssetsDir = "/tmp/grove-satellite-up"
+var satelliteUpAssetsDir = satelliteStageBase() + "/grove-satellite-up"
 
 // validateSatellitePrebuiltStack fails fast (before terraform) when the
 // ecosystem worktree can't supply what a prebuilt `up` needs: every stack repo

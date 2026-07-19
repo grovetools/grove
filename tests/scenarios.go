@@ -77,6 +77,14 @@ func AllScenarios() []*harness.Scenario {
 		SatelliteHostKeyPinScenario(),
 		SatelliteUpgradeScenario(),
 		SatelliteReposFlagMatrixScenario(),
+
+		// Satellite lifecycle acceptance scenarios: boot a REAL tart/docker
+		// machine with `up`, run the suite above against it in real mode,
+		// `down` it, and assert zero residue. Opt-in via
+		// TEND_SATELLITE_LIFECYCLE=1 (cheap pass-with-NOTICE otherwise) —
+		// see tests/scenarios_satellite_lifecycle.go.
+		SatelliteTartLifecycleScenario(),
+		SatelliteDockerLifecycleScenario(),
 	}
 }
 

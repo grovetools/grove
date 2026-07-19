@@ -267,6 +267,54 @@ func TestMergeSatelliteEntriesMatrix(t *testing.T) {
 	}
 }
 
+// TestMergeSatelliteEntriesKind pins kind's merge rule — the user-authored
+// pattern (like user/identity_file, and the daemon's LoadRegistry): a
+// non-empty CONFIG value wins, the state snapshot only fills a config gap,
+// and empty in both sources stays empty (= full via effectiveKind). No drift
+// warning is involved (only ssh_addr/host_key conflicts warn).
+func TestMergeSatelliteEntriesKind(t *testing.T) {
+	cases := []struct {
+		name      string
+		cfg, st   string // Kind values ("" = absent side handled below)
+		want      string
+		effective string
+	}{
+		{"config wins over state", satelliteKindFull, satelliteKindExec, satelliteKindFull, satelliteKindFull},
+		{"state fills empty config", "", satelliteKindExec, satelliteKindExec, satelliteKindExec},
+		{"empty both stays empty", "", "", "", satelliteKindFull},
+		{"exec config over empty state", satelliteKindExec, "", satelliteKindExec, satelliteKindExec},
+	}
+	for _, tc := range cases {
+		merged, warnings := mergeSatelliteEntries(
+			map[string]satelliteConfigEntry{"s": {SSHAddr: "203.0.113.7:22", Kind: tc.cfg}},
+			map[string]satelliteConfigEntry{"s": {SSHAddr: "203.0.113.7:22", Kind: tc.st}},
+		)
+		if got := merged["s"].Kind; got != tc.want {
+			t.Errorf("%s: merged Kind = %q, want %q", tc.name, got, tc.want)
+		}
+		if got := merged["s"].effectiveKind(); got != tc.effective {
+			t.Errorf("%s: effectiveKind = %q, want %q", tc.name, got, tc.effective)
+		}
+		if len(warnings) != 0 {
+			t.Errorf("%s: kind merge must not warn: %v", tc.name, warnings)
+		}
+	}
+
+	// One-sided entries pass through untouched (raw field NOT normalized in
+	// place: a state-only exec entry stays exec, a config-only empty stays
+	// empty).
+	merged, _ := mergeSatelliteEntries(nil,
+		map[string]satelliteConfigEntry{"cattle": {SSHAddr: "203.0.113.8:22", Kind: satelliteKindExec}})
+	if merged["cattle"].Kind != satelliteKindExec || !merged["cattle"].isExec() {
+		t.Errorf("state-only exec entry mangled: %+v", merged["cattle"])
+	}
+	merged, _ = mergeSatelliteEntries(
+		map[string]satelliteConfigEntry{"hand": {SSHAddr: "203.0.113.9:22"}}, nil)
+	if merged["hand"].Kind != "" || merged["hand"].isExec() {
+		t.Errorf("config-only entry grew a kind: %+v", merged["hand"])
+	}
+}
+
 // TestSatelliteInfraDriftMessage pins the write-back rescope's user-facing
 // half: identical resolved values → silence; drifted values → a message that
 // names the changed fields and includes the paste-ready up-to-date block.

@@ -529,14 +529,6 @@ func SatelliteUpgradeScenario() *harness.Scenario {
 				fmt.Println("NOTICE: source-mode deploy arm is sim-only — skipped under TEND_SATELLITE_REAL=1")
 				return nil
 			}
-			if writableTmpBase() != "/tmp" {
-				// upgrade's stage dir is the hardcoded /tmp/grove-satellite-upgrade
-				// (it does NOT honor GROVE_SATELLITE_STAGE_BASE — see the run
-				// report); in sandboxes without a writable /tmp the deploy
-				// cannot stage, so only the dry-run arms apply.
-				fmt.Println("NOTICE: /tmp not writable — upgrade stages at the hardcoded /tmp/grove-satellite-upgrade; deploy arm skipped")
-				return nil
-			}
 			// "y" confirms the deploy; "n" declines the systemd restart (no
 			// systemctl in the sim — restart stays uncoverable here).
 			result := groveSatelliteStdin(ctx, "y\nn\n", upgradeArgs(ctx)...)
@@ -569,18 +561,13 @@ func SatelliteUpgradeScenario() *harness.Scenario {
 			// Recipe-less fixture repos produce no linux/amd64 binaries, so the
 			// prebuilt deploy must drop everything and abort VM-untouched.
 			//
-			// PATH is restricted to the system dirs: the prebuilt local build
-			// path (BuildReposForTarget → daemon.NewGlobalClient) AUTO-STARTS
-			// groved when it can find one, and a groved started inside the
-			// sandbox reads the sandbox satellites.json and opens a persistent
-			// pinned SSH connection to the sim — which then never tears down
-			// (Close blocks on open sessions) and outlives the scenario. With
-			// no groved reachable the client degrades to the documented local
-			// pool; ssh/scp/git/make all live in the system dirs.
+			// The prebuilt local build path (BuildReposForTargetLocal) runs on
+			// the in-process local pool and never calls daemon.NewGlobalClient,
+			// so no groved can be auto-started inside the sandbox — no PATH
+			// restriction needed to keep one from finding the sim.
 			cmd := ctx.Bin(append([]string{"satellite"}, upgradeArgs(ctx, "--prebuilt", "--repos", "beta", "--yes")...)...)
 			cmd.Dir(ctx.GetString(satKeyCodeDir))
 			cmd.Env(ep.ExtraGroveEnv()...)
-			cmd.Env("PATH=/usr/bin:/bin:/usr/sbin:/sbin")
 			cmd.Timeout(3 * time.Minute)
 			result := cmd.Run()
 			ctx.ShowCommandOutput("grove satellite upgrade --prebuilt (nothing shippable)", result.Stdout, result.Stderr)

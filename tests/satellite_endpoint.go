@@ -121,7 +121,14 @@ func writableTmpBase() string {
 }
 
 func acquireSatelliteLock() (*os.File, error) {
-	f, err := os.OpenFile(satelliteScenarioLockPath(), os.O_CREATE|os.O_RDWR, 0o644)
+	return acquireFlock(satelliteScenarioLockPath())
+}
+
+// acquireFlock takes a blocking exclusive flock on path (creating it if
+// needed) — shared by the satellite scenario lock above and the lifecycle
+// scenarios' dedicated lock (scenarios_satellite_lifecycle.go).
+func acquireFlock(path string) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, err
 	}

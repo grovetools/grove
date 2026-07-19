@@ -263,6 +263,58 @@ func TestSatelliteTableRowsForward(t *testing.T) {
 	}
 }
 
+// TestSatelliteTableRowsExecOnly pins the status/list rendering of exec-kind
+// satellites: with no live daemon status the merged-registry kind alone
+// renders State "exec-only" (never the "restart groved?" hint), agreeing
+// with the daemon's own exec-only status when groved is running — while full
+// satellites keep their existing states.
+func TestSatelliteTableRowsExecOnly(t *testing.T) {
+	stateIdx, forwardIdx := -1, -1
+	for i, h := range satelliteTableHeaders {
+		switch h {
+		case "State":
+			stateIdx = i
+		case "Forward":
+			forwardIdx = i
+		}
+	}
+	if stateIdx == -1 || forwardIdx == -1 {
+		t.Fatalf("missing State/Forward columns in headers: %v", satelliteTableHeaders)
+	}
+
+	configured := map[string]satelliteConfigEntry{
+		"exec-sat": {SSHAddr: "203.0.113.7:22", Kind: satelliteKindExec},
+		"full-sat": {SSHAddr: "203.0.113.8:22"},
+	}
+
+	// Daemon not running: no live statuses at all.
+	rows := satelliteTableRows(configured, nil)
+	byName := map[string][]string{}
+	for _, r := range rows {
+		byName[r[0]] = r
+	}
+	if got := byName["exec-sat"][stateIdx]; got != satelliteStateExecOnly {
+		t.Errorf("exec-kind State without daemon = %q, want %q", got, satelliteStateExecOnly)
+	}
+	if got := byName["exec-sat"][forwardIdx]; got != "-" {
+		t.Errorf("exec-kind Forward = %q, want -", got)
+	}
+	if got := byName["full-sat"][stateIdx]; got != "not connected (restart groved?)" {
+		t.Errorf("full-kind State degraded: %q", got)
+	}
+
+	// Daemon running: the live exec-only status flows through unchanged.
+	rows = satelliteTableRows(configured, map[string]satelliteLiveStatus{
+		"exec-sat": {state: satelliteStateExecOnly, addr: "203.0.113.7:22"},
+	})
+	for _, r := range rows {
+		byName[r[0]] = r
+	}
+	if got := byName["exec-sat"][stateIdx]; got != satelliteStateExecOnly {
+		t.Errorf("exec-kind State with daemon = %q, want %q", got, satelliteStateExecOnly)
+	}
+}
+
 // TestFormatReloadSummary pins the one-liner `up`/`down` print after the
 // registry hot-reload POST: action groups only when non-empty, unchanged
 // elided, and an all-empty summary reading "no changes".

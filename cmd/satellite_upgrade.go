@@ -38,7 +38,7 @@ import (
 
 // satelliteStageDir is the remote staging dir bundles are scp'd into; the
 // deploy script removes it on success, so re-runs stay clean.
-const satelliteStageDir = "/tmp/grove-satellite-upgrade"
+var satelliteStageDir = satelliteStageBase() + "/grove-satellite-upgrade"
 
 // satelliteUserBinDir mirrors bootstrap step 4's BIN_DIR (as a remote shell
 // expression).
@@ -900,7 +900,7 @@ func tailLines(s string, n int) string {
 // failures; fatal aborts the upgrade.
 func deploySatellitePrebuilt(ssh *satelliteSSH, satName, sourceAbs string, target orch.Target, updates []repoDelta, dirty map[string]bool) (shipped []string, deployErr error, fatal error) {
 	fmt.Printf("\nCross-building %d repo(s) for %s (grove build --target %s, wave-ordered)...\n", len(updates), target, target)
-	results, err := BuildReposForTarget(context.Background(), sourceAbs, deltaRepoNames(updates), target, 0)
+	results, err := BuildReposForTargetLocal(context.Background(), sourceAbs, deltaRepoNames(updates), target, 0)
 	if err != nil {
 		return nil, nil, fmt.Errorf("local cross-build: %w", err)
 	}

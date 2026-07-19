@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -40,6 +41,15 @@ type satelliteConfigEntry struct {
 	// IdentityFile is the optional SSH private key `up --identity-file` was
 	// invoked with (empty = agent-only auth, matching SatelliteConfig).
 	IdentityFile string `yaml:"identity_file" json:"identity_file,omitempty"`
+	// Kind selects how much of the satellite stack `up` wires and the daemon
+	// engages: satelliteKindFull (or empty — the default) is the
+	// groved-dialing shape; satelliteKindExec is sshd + grove binaries only
+	// (no groved dial, no sync wiring; the daemon reports it as "exec-only").
+	// Tags match the daemon's SatelliteConfig.Kind contract. The raw field is
+	// deliberately never normalized in place — an empty config value must not
+	// override a state "exec" in the merge; use effectiveKind/isExec instead
+	// of comparing the raw field.
+	Kind string `yaml:"kind" json:"kind,omitempty"`
 	// SocketPath is the remote groved unix socket, probed post-bootstrap as
 	// /run/user/<uid>/grove/groved.sock. Written explicitly because the
 	// daemon's remoteSocketPath default guesses wrong on the real VM.
@@ -52,7 +62,45 @@ type satelliteConfigEntry struct {
 	// SyncRemoteAddr is the VM-side syncd address the forward dials.
 	// Optional; the daemon defaults it to 127.0.0.1:8788.
 	SyncRemoteAddr string `yaml:"sync_remote_addr" json:"sync_remote_addr,omitempty"`
+	// ProviderRef is the provider's machine handle for the satellite
+	// (tart: "tart:<vm-name>"; empty for gcp). Machine-derived provisioning
+	// state — state wins in the merge — letting a later `up`/`down`
+	// recognize the machine as grove-created (tart's restart-vs-collision
+	// check). The daemon ignores the key.
+	ProviderRef string `yaml:"provider_ref,omitempty" json:"provider_ref,omitempty"`
 }
+
+// Satellite kinds (the satelliteConfigEntry.Kind axis) — CLI-local mirror of
+// the daemon's satellite.KindFull/KindExec consts
+// (daemon/internal/daemon/satellite/registry.go), redeclared rather than
+// imported for the same reason as satelliteConfigEntry itself.
+const (
+	// satelliteKindFull is the default full-stack satellite: remote groved
+	// dialed by the ConnManager, sync forward wired. An empty Kind means
+	// satelliteKindFull.
+	satelliteKindFull = "full"
+	// satelliteKindExec is an sshd-plus-grove-binaries endpoint with no
+	// groved daemon: no socket probe, no sync wiring; the daemon reports it
+	// as satelliteStateExecOnly.
+	satelliteKindExec = "exec"
+)
+
+// satelliteStateExecOnly matches the daemon ConnManager's status State for
+// exec satellites, so the registry-derived status/list cell agrees with the
+// live one whenever groved is running.
+const satelliteStateExecOnly = "exec-only"
+
+// effectiveKind normalizes Kind: empty means full (mirrors the daemon's
+// EffectiveKind).
+func (e satelliteConfigEntry) effectiveKind() string {
+	if e.Kind == "" {
+		return satelliteKindFull
+	}
+	return e.Kind
+}
+
+// isExec reports whether the entry is an exec-only (no groved) satellite.
+func (e satelliteConfigEntry) isExec() bool { return e.Kind == satelliteKindExec }
 
 // newSatelliteCmd is the `grove satellite` noun. It wraps the embedded
 // terraform/bootstrap assets (grove/cmd/satelliteassets, formerly the
@@ -96,8 +144,10 @@ func newSatelliteUpCmd() *cobra.Command {
 		cidr           string
 		zone           string
 		target         string
+		kind           string
 		tfDir          string
 		identityFile   string
+		image          string
 		assumeYes      bool
 		ghTokenCmd     string
 		claudeFlag     bool
@@ -171,8 +221,10 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 	cmd.Flags().StringVar(&cidr, "cidr", "", "CIDR allowed to reach :22 (default: [satellites.<name>.infra] cidr, else your public IP /32 via ifconfig.me)")
 	cmd.Flags().StringVar(&zone, "zone", "", "GCP zone override (terraform var zone; default: [satellites.<name>.infra] zone)")
 	cmd.Flags().StringVar(&target, "target", "", "Embedded infra target whose terraform module provisions the VM (default: [satellites.<name>.infra] target, else \"gcp\")")
+	cmd.Flags().StringVar(&kind, "kind", "", "Satellite kind: \"full\" wires the whole stack (groved dial, socket probe, note sync); \"exec\" registers an sshd+binaries endpoint with no groved dial or sync wiring (default: the target's default — gcp: full)")
 	cmd.Flags().StringVar(&tfDir, "tf-dir", "", tfDirFlagHelp)
 	cmd.Flags().StringVar(&identityFile, "identity-file", "", "SSH private key for the satellite (written to the registry as identity_file; default: [satellites.<name>.infra] identity_file, else agent-only auth)")
+	cmd.Flags().StringVar(&image, "image", "", "Guest image override: the OCI image the tart provider clones (default "+defaultTartImage+") or the docker image the docker provider runs instead of building the embedded one (default: [satellites.<name>.infra] image; tart/docker targets only)")
 	cmd.Flags().BoolVar(&assumeYes, "yes", false, "Skip the billable-resource confirmation prompt")
 	cmd.Flags().StringVar(&ghTokenCmd, "gh-token-cmd", "", "Local command whose stdout is the GitHub token piped to bootstrap (overrides provision config; empty disables)")
 	cmd.Flags().BoolVar(&claudeFlag, "claude", false, "Install Claude Code on the VM (overrides provision config)")
@@ -209,17 +261,57 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 			CIDR: cidr, CIDRSet: cmd.Flags().Changed("cidr"),
 			IdentityFile: identityFile, IdentitySet: cmd.Flags().Changed("identity-file"),
 			Target: target, TargetSet: cmd.Flags().Changed("target"),
+			Image: image, ImageSet: cmd.Flags().Changed("image"),
 		})
-		project, sshUser, cidr, zone, identityFile = infra.Project, infra.SSHUser, infra.CIDR, infra.Zone, infra.IdentityFile
-		if project == "" || sshUser == "" {
-			return fmt.Errorf("--project and --ssh-user are required (or persist them in [satellites.%s.infra] — a successful `up` writes the block for you)", name)
-		}
-		// Infra target: validated against the embedded targets even when
-		// --tf-dir bypasses extraction (an unknown name in config is a typo
-		// either way). Empty resolves to the gcp default.
-		resolvedTarget, err := resolveSatelliteTarget(infra.Target)
+		// Infra target → provider: validity routes through the provider
+		// registry (an unknown name in config is a typo either way; empty
+		// resolves to the gcp default). Provider-required inputs (gcp:
+		// --project/--ssh-user) are validated by the provider's PrepareUp.
+		provider, err := satelliteProviderFor(infra.Target)
 		if err != nil {
 			return err
+		}
+		// Satellite kind: --kind over the provider default (gcp: full).
+		// Exec-kind provisions skip the groved socket probe and every piece
+		// of sync wiring below; the bootstrap script itself is unchanged for
+		// now (bootstrap layering is a later slice).
+		resolvedKind, err := resolveSatelliteKind(kind, provider)
+		if err != nil {
+			return err
+		}
+		execKind := resolvedKind == satelliteKindExec
+
+		// Providers without a bootstrap script (tart) are provisioned
+		// client-side: --prebuilt is implied (bare image + locally
+		// cross-built stack; spec decision), the default cross-build target
+		// is the tart linux guest's arch, and only exec kind is possible —
+		// the full stack (groved, syncd, systemd units) is bootstrap's job.
+		usesBootstrap := provider.UsesBootstrapScript()
+		if !usesBootstrap {
+			if cmd.Flags().Changed("prebuilt") && !prebuilt {
+				return fmt.Errorf("--prebuilt=false contradicts the %q target: it always provisions from a locally cross-built stack (--prebuilt is implied)", provider.Kind())
+			}
+			prebuilt = true
+			if !cmd.Flags().Changed("prebuilt-target") {
+				// The default cross-build target is the arch of the machine
+				// the provider creates (tart: the linux/arm64 guest; docker:
+				// the daemon's reported Os/Arch — a live query, so an
+				// unreachable daemon fails here with its remediation), not
+				// the flag's gcp-VM default.
+				dt, dtErr := provider.DefaultPrebuiltTarget()
+				if dtErr != nil {
+					return dtErr
+				}
+				prebuiltTarget = dt
+			}
+			if !execKind {
+				return fmt.Errorf("--kind %s is not supported by the %q target yet: no bootstrap script runs, so no groved/sync stack is provisioned — use --kind exec (the default)", resolvedKind, provider.Kind())
+			}
+			for _, f := range []string{"gh-token-cmd", "claude", "claude-token-cmd", "dotfiles-repo"} {
+				if cmd.Flags().Changed(f) {
+					return fmt.Errorf("--%s needs the bootstrap script, which the %q target does not run", f, provider.Kind())
+				}
+			}
 		}
 
 		// Provisioning options: [satellites.<name>.provision] with flag
@@ -321,92 +413,64 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 			}
 		}
 
-		// Terraform dir: the per-satellite state dir with the embedded
-		// target module extracted into it (module files overwritten every
-		// run, tfstate/tfvars/.terraform never touched; legacy worktree
-		// state migrated in first) — or, with --tf-dir, a BYO module dir
-		// used as-is.
-		tfAbs, err := resolveSatelliteTerraformDir(name, resolvedTarget, tfDir, os.Stdout)
-		if err != nil {
-			return err
+		// Provider preparation (gcp: terraform dir resolution + variables.tf
+		// sanity check) — validation only, still BEFORE the confirm prompt
+		// and machine creation, same fail-fast order as always.
+		upOpts := &satelliteUpOptions{
+			Name:                name,
+			Infra:               infra,
+			TFDir:               tfDir,
+			AssumeYes:           assumeYes,
+			ServiceAccountEmail: prov.ServiceAccountEmail,
 		}
-		if _, err := os.Stat(filepath.Join(tfAbs, "variables.tf")); err != nil {
-			return fmt.Errorf("terraform dir %q does not look like a grove-satellite module (no variables.tf; the contract is documented in grove/cmd/satelliteassets/CONTRACT.md): %w", tfAbs, err)
+		if err := provider.PrepareUp(upOpts); err != nil {
+			return err
 		}
 		// Bootstrap script: always the embedded copy (extracted next to the
 		// per-satellite terraform dir) so it can never skew from this CLI —
-		// even when --tf-dir brings a custom module.
-		bootstrapScript, err := extractSatelliteBootstrap(name)
-		if err != nil {
-			return fmt.Errorf("extract embedded bootstrap script: %w", err)
-		}
-
-		if !assumeYes {
-			if !confirmYesNo(fmt.Sprintf("Provision satellite %q — this creates BILLABLE GCP resources. Continue?", name)) {
-				return fmt.Errorf("aborted")
+		// even when --tf-dir brings a custom module. Non-bootstrap providers
+		// (tart) never run it — nothing to extract.
+		var bootstrapScript string
+		if usesBootstrap {
+			if bootstrapScript, err = extractSatelliteBootstrap(name); err != nil {
+				return fmt.Errorf("extract embedded bootstrap script: %w", err)
 			}
 		}
 
-		// Resolve tokens NOW — before terraform — so a broken token command
-		// aborts while the provision is still free (fail fast, no orphaned VM).
-		ghToken, claudeToken, err := resolveProvisionTokens(prov)
+		// Tokens resolve inside the provider's Up, between its confirm
+		// prompt and machine creation (the historical order) — a broken
+		// token command aborts while the provision is still free (fail
+		// fast, no orphaned VM). Tokens only feed the bootstrap script;
+		// non-bootstrap providers skip them.
+		var ghToken, claudeToken string
+		if usesBootstrap {
+			upOpts.PostConfirm = func() error {
+				var tokenErr error
+				ghToken, claudeToken, tokenErr = resolveProvisionTokens(prov)
+				return tokenErr
+			}
+		}
+
+		// 1.+2. Provider Up: billable confirm, machine creation (gcp:
+		//    tfvars persist + terraform init/apply + external_ip output) →
+		//    the endpoint the shared steps below operate on.
+		endpoint, err := provider.Up(cmd.Context(), upOpts)
+		if err != nil {
+			return err
+		}
+		// The provider may have resolved inputs while creating (gcp: an
+		// auto-detected CIDR) — adopt them for the infra write-back below.
+		infra.CIDR = upOpts.Infra.CIDR
+		ip, err := satelliteEndpointHost(endpoint)
 		if err != nil {
 			return err
 		}
 
-		if cidr == "" {
-			cidr = detectPublicCIDR()
-			if cidr == "" {
-				return fmt.Errorf("could not auto-detect your public IP; pass --cidr (e.g. 203.0.113.7/32)")
-			}
-			fmt.Printf("Using detected SSH CIDR: %s\n", cidr)
-		}
-
-		// Persist the required (default-less) terraform variables as
-		// terraform.tfvars in the tf dir BEFORE apply, so `grove satellite
-		// down` can run terraform destroy non-interactively — variables.tf
-		// deliberately has no defaults for project_id/ssh_user/
-		// allowed_ssh_cidr. terraform auto-loads the file from the -chdir
-		// dir, and the PoC's .gitignore already excludes *.tfvars.
-		if err := writeSatelliteTFVars(tfAbs, project, sshUser, cidr, name, zone, prov.ServiceAccountEmail); err != nil {
-			return fmt.Errorf("write %s: %w", satelliteTFVarsName, err)
-		}
-
-		// 1. terraform init + apply (subprocess, inherited stdio — terraform
-		//    runs its own confirmation).
-		if err := runInherited(tfAbs, "terraform", "-chdir="+tfAbs, "init", "-input=false"); err != nil {
-			return fmt.Errorf("terraform init: %w", err)
-		}
-		applyArgs := []string{
-			"-chdir=" + tfAbs, "apply",
-			"-var", "project_id=" + project,
-			"-var", "ssh_user=" + sshUser,
-			"-var", "allowed_ssh_cidr=" + cidr,
-			"-var", "vm_name=" + name,
-		}
-		if zone != "" {
-			applyArgs = append(applyArgs, "-var", "zone="+zone)
-		}
-		if prov.ServiceAccountEmail != "" {
-			applyArgs = append(applyArgs, "-var", "service_account_email="+prov.ServiceAccountEmail)
-		}
-		if err := runInherited(tfAbs, "terraform", applyArgs...); err != nil {
-			return fmt.Errorf("terraform apply: %w", err)
-		}
-
-		// 2. terraform output -raw external_ip → IP.
-		ip, err := terraformOutput(tfAbs, "external_ip")
-		if err != nil {
-			return fmt.Errorf("read terraform output external_ip: %w", err)
-		}
-		ip = strings.TrimSpace(ip)
-		if ip == "" {
-			return fmt.Errorf("terraform output external_ip was empty")
-		}
-
 		// 3. Host-key pin (C2): ssh-keyscan, seeded-not-TOFU. ConnManager
-		//    hard-fails on any later mismatch.
-		hostKey, err := sshKeyscanHostKey(ip)
+		//    hard-fails on any later mismatch. Scanned at the endpoint's real
+		//    port (docker publishes sshd on a loopback high port; gcp/tart
+		//    stay :22).
+		hostKey, err := sshKeyscanHostKey(endpoint.SSHAddr)
 		if err != nil {
 			return fmt.Errorf("ssh-keyscan host-key pin: %w", err)
 		}
@@ -421,9 +485,12 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		//     install failure aborts here rather than proceeding to bootstrap.
 		var syncdUnitRemotePath string
 		if prebuilt {
-			pinnedEntry := satelliteConfigEntry{SSHAddr: ip + ":22", User: sshUser, HostKey: hostKey}
-			if identityFile != "" {
-				pinnedEntry.IdentityFile = expandUserPath(identityFile)
+			// Transport identity comes from the provider's endpoint (gcp:
+			// the infra ssh_user/identity_file it was handed; tart: the
+			// admin user + the layer-0 generated key).
+			pinnedEntry := satelliteConfigEntry{SSHAddr: endpoint.SSHAddr, User: endpoint.User, HostKey: hostKey}
+			if endpoint.IdentityFile != "" {
+				pinnedEntry.IdentityFile = expandUserPath(endpoint.IdentityFile)
 			}
 			shipDir, mkErr := os.MkdirTemp("", "grove-satellite-up-prebuilt-")
 			if mkErr != nil {
@@ -441,9 +508,12 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 			}
 			// Ship the grove-syncd systemd unit sourced from the ecosystem
 			// worktree (no source tree on the VM to copy it from). Its remote
-			// path is handed to bootstrap via --syncd-unit.
-			if syncdUnitRemotePath, err = shipSatelliteSyncdUnit(ssh, sourceAbs); err != nil {
-				return fmt.Errorf("ship grove-syncd unit: %w", err)
+			// path is handed to bootstrap via --syncd-unit. Exec-kind
+			// satellites run no sync stack — nothing to ship.
+			if !execKind {
+				if syncdUnitRemotePath, err = shipSatelliteSyncdUnit(ssh, sourceAbs); err != nil {
+					return fmt.Errorf("ship grove-syncd unit: %w", err)
+				}
 			}
 			// compositor is a library (no binaries) but grove/flow/nb/treemux/
 			// tuimux link its per-target zig static libs; cross-build it FIRST
@@ -454,7 +524,7 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 			// a fresh `up --prebuilt` works where `upgrade --prebuilt` assumes
 			// the libs already exist and holds compositor.)
 			fmt.Printf("Cross-building compositor's %s zig libraries (linked by the grove stack)...\n", prebuiltXTarget)
-			compResults, cErr := BuildReposForTarget(context.Background(), sourceAbs, []string{"compositor"}, prebuiltXTarget, 0)
+			compResults, cErr := BuildReposForTargetLocal(context.Background(), sourceAbs, []string{"compositor"}, prebuiltXTarget, 0)
 			if cErr != nil {
 				return fmt.Errorf("cross-build compositor libs: %w", cErr)
 			}
@@ -483,37 +553,55 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		//    options become the script's flags; tokens ride stdin in its
 		//    documented framing (raw single token, or KEY=VALUE lines when both
 		//    are present) — never argv. The script already fetches the laptop
-		//    sync token to ~/.config/grove/sync.token.
-		provArgs, secretStdin := buildBootstrapProvision(prov, ghToken, claudeToken)
-		// The resolved sync workspaces drive the VM's pull-enabled sync.toml
-		// (bootstrap step 5). Always passed — an explicitly empty flag value
-		// means "no sync workspaces" on the VM too.
-		provArgs = append(provArgs, "--workspaces", strings.Join(resolvedSyncWorkspaces, ","))
-		// Prebuilt mode: tell bootstrap to SKIP the clone/build/source-unit-copy
-		// steps and install the CLI-shipped grove-syncd unit instead.
-		if prebuilt {
-			provArgs = append(provArgs, "--prebuilt", "--syncd-unit", syncdUnitRemotePath)
-		}
-		bootstrapArgs := append([]string{bootstrapScript, sshUser + "@" + ip}, provArgs...)
-		if err := runInheritedWithStdin(tfAbs, secretStdin, "bash", bootstrapArgs...); err != nil {
-			return fmt.Errorf("satellite bootstrap: %w", err)
+		//    sync token to ~/.config/grove/sync.token. Non-bootstrap providers
+		//    (tart) skip this entirely: the prebuilt install above IS the
+		//    provisioning, and the provider did the minimal guest prep itself.
+		if usesBootstrap {
+			provArgs, secretStdin := buildBootstrapProvision(prov, ghToken, claudeToken)
+			// The resolved sync workspaces drive the VM's pull-enabled sync.toml
+			// (bootstrap step 5). Always passed — an explicitly empty flag value
+			// means "no sync workspaces" on the VM too.
+			provArgs = append(provArgs, "--workspaces", strings.Join(resolvedSyncWorkspaces, ","))
+			// Prebuilt mode: tell bootstrap to SKIP the clone/build/source-unit-copy
+			// steps and install the CLI-shipped grove-syncd unit instead. Exec
+			// kind ships no unit, so --syncd-unit is omitted; the bootstrap
+			// script itself is deliberately unchanged in this slice (exec-aware
+			// bootstrap layering lands later).
+			if prebuilt {
+				provArgs = append(provArgs, "--prebuilt")
+				if syncdUnitRemotePath != "" {
+					provArgs = append(provArgs, "--syncd-unit", syncdUnitRemotePath)
+				}
+			}
+			bootstrapArgs := append([]string{bootstrapScript, endpoint.User + "@" + ip}, provArgs...)
+			if err := runInheritedWithStdin(endpoint.LocalRunDir, secretStdin, "bash", bootstrapArgs...); err != nil {
+				return fmt.Errorf("satellite bootstrap: %w", err)
+			}
 		}
 
 		// 5. Assemble the registry entry (yaml keys match P7's SatelliteConfig
 		//    tags — exactly what LoadRegistry reads).
 		entry := satelliteConfigEntry{
-			SSHAddr: ip + ":22",
-			User:    sshUser,
-			HostKey: hostKey,
+			SSHAddr:     endpoint.SSHAddr,
+			User:        endpoint.User,
+			HostKey:     hostKey,
+			ProviderRef: endpoint.ProviderRef,
 		}
-		if identityFile != "" {
-			entry.IdentityFile = expandUserPath(identityFile)
+		if endpoint.IdentityFile != "" {
+			entry.IdentityFile = expandUserPath(endpoint.IdentityFile)
+		}
+		// Kind: "full" is normalized to "" before writing (json omitempty
+		// keeps state files clean; empty means full everywhere), "exec" is
+		// written as-is.
+		if resolvedKind != satelliteKindFull {
+			entry.Kind = resolvedKind
 		}
 		// Sync forward fields (fixed M2 contract with the daemon side): the
 		// daemon binds 127.0.0.1:<sync_local_port> and forwards to the VM's
 		// syncd over the pinned SSH connection. 0 = forward off (fields
-		// omitted so the entry stays minimal).
-		if syncPort != 0 {
+		// omitted so the entry stays minimal). Exec satellites run no syncd —
+		// no forward to record.
+		if syncPort != 0 && !execKind {
 			entry.SyncLocalPort = syncPort
 			entry.SyncRemoteAddr = defaultSyncRemoteAddr
 		}
@@ -523,14 +611,17 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		//     the daemon's default socket-path convention guesses wrong on the
 		//     real VM; a probe failure degrades to the daemon default rather
 		//     than failing a successful provision. The probe pins the host key
-		//     just scanned — never TOFU (C2).
-		if socketPath, exists, probeErr := probeSatelliteSocketPath(entry); probeErr != nil {
-			fmt.Printf("(could not probe remote groved socket path, leaving socket_path unset: %v)\n", probeErr)
-		} else {
-			if !exists {
-				fmt.Printf("(remote socket %s not present yet — groved may still be starting; writing the path anyway)\n", socketPath)
+		//     just scanned — never TOFU (C2). Exec satellites run no groved —
+		//     no socket to probe.
+		if !execKind {
+			if socketPath, exists, probeErr := probeSatelliteSocketPath(entry); probeErr != nil {
+				fmt.Printf("(could not probe remote groved socket path, leaving socket_path unset: %v)\n", probeErr)
+			} else {
+				if !exists {
+					fmt.Printf("(remote socket %s not present yet — groved may still be starting; writing the path anyway)\n", socketPath)
+				}
+				entry.SocketPath = socketPath
 			}
-			entry.SocketPath = socketPath
 		}
 
 		// 5c. Upsert the satellite's entry in the CLI-owned provisioning
@@ -550,7 +641,6 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		// global config so the next 0→1 needs zero flags (`down` leaves the
 		// subtable in place). Non-fatal either way: the VM is provisioned and
 		// registered.
-		infra.CIDR = cidr // may have been auto-detected after the merge
 		if infraInConfig {
 			fmt.Print(satelliteInfraDriftMessage(name, infraCfg, infra))
 		} else if err := writeSatelliteInfra(name, infra); err != nil {
@@ -596,8 +686,9 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		// entry (5c) already carries the forward fields; the daemon owns the
 		// tunnel from its next boot. Errors here are real errors (with
 		// remediation in the message) — but the VM is provisioned and
-		// registered, so a re-run is cheap.
-		if syncPort != 0 {
+		// registered, so a re-run is cheap. Exec satellites have no sync
+		// half — skipped end-to-end.
+		if syncPort != 0 && !execKind {
 			laptopConfigDir := paths.ConfigDir()
 			if laptopConfigDir == "" {
 				return fmt.Errorf("could not resolve the laptop's grove config directory for sync setup")
@@ -632,7 +723,14 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		if reloaded {
 			fmt.Printf("Daemon satellite registry hot-reloaded (%s).\n", formatReloadSummary(summary))
 		}
-		printSatelliteNextSteps(true, reloaded, syncPort)
+		// Exec satellites have no sync half — next-steps must not mention
+		// the daemon's sync forward (syncPort still carries the flag default
+		// here even though every sync step above was skipped).
+		nextStepsSyncPort := syncPort
+		if execKind {
+			nextStepsSyncPort = 0
+		}
+		printSatelliteNextSteps(true, reloaded, nextStepsSyncPort)
 		fmt.Println()
 		fmt.Println("Note: the satellite's sync origin_id (C20) is minted per-install on the VM")
 		fmt.Println("and is disposable; the registry name above is the stable federation Origin (C6).")
@@ -665,11 +763,10 @@ func newSatelliteDownCmd() *cobra.Command {
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
-		// Resolve the terraform dir the same way `up` does: the per-name
-		// state dir (with legacy worktree tfstate migrated in and the
-		// embedded module re-extracted so destroy always has current .tf
-		// files), or --tf-dir as-is. The target comes from the same
-		// [satellites.<name>.infra] block, --target winning.
+		// Resolve the provider the same way `up` does: the target from the
+		// same [satellites.<name>.infra] block, --target winning. The
+		// terraform-dir resolution (per-name state dir or --tf-dir as-is)
+		// happens inside the provider's Down.
 		infraCfg, _, err := loadSatelliteInfra(name)
 		if err != nil {
 			return err
@@ -677,46 +774,29 @@ func newSatelliteDownCmd() *cobra.Command {
 		if cmd.Flags().Changed("target") {
 			infraCfg.Target = target
 		}
-		resolvedTarget, err := resolveSatelliteTarget(infraCfg.Target)
-		if err != nil {
-			return err
-		}
-		tfAbs, err := resolveSatelliteTerraformDir(name, resolvedTarget, tfDir, os.Stdout)
+		provider, err := satelliteProviderFor(infraCfg.Target)
 		if err != nil {
 			return err
 		}
 
-		if !assumeYes {
-			if !confirmYesNo(fmt.Sprintf("Destroy satellite %q and remove its registry entry?", name)) {
-				return fmt.Errorf("aborted")
-			}
+		// 1.+2. Provider Down: destroy confirm, then — via PostConfirm,
+		//    BEFORE destroy — the best-effort cursor-deregister (C19/C20) so
+		//    a durable hub isn't left pinning GC (in the PoC topology syncd
+		//    dies with the VM anyway; this matters for the hosted-hub
+		//    future), then the machine teardown (gcp: terraform init +
+		//    destroy against the persisted tfvars).
+		downOpts := &satelliteDownOptions{
+			Name:      name,
+			Infra:     infraCfg,
+			TFDir:     tfDir,
+			AssumeYes: assumeYes,
+			PostConfirm: func() error {
+				bestEffortDeregisterCursors(name, syncOriginID)
+				return nil
+			},
 		}
-
-		// 1. Best-effort cursor-deregister (C19/C20) BEFORE destroy, so a
-		//    durable hub isn't left pinning GC. In the PoC topology syncd dies
-		//    with the VM anyway; this matters for the hosted-hub future.
-		bestEffortDeregisterCursors(name, syncOriginID)
-
-		// 2. terraform destroy (subprocess, inherited stdio — terraform runs
-		//    its own confirmation). Destroy needs the same required vars as
-		//    apply (variables.tf has no defaults for project_id/ssh_user/
-		//    allowed_ssh_cidr); `up` persists them as terraform.tfvars, and
-		//    -input=false makes a missing variable a hard error instead of an
-		//    interactive prompt so scripted teardown fails fast.
-		tfvarsPath := filepath.Join(tfAbs, satelliteTFVarsName)
-		if _, err := os.Stat(tfvarsPath); err != nil {
-			return fmt.Errorf("%s not found — `grove satellite up` writes it and terraform destroy needs project_id/ssh_user/allowed_ssh_cidr (no defaults in variables.tf); recreate it or run terraform destroy manually with -var flags: %w", tfvarsPath, err)
-		}
-		// init first: the per-name state dir starts without .terraform/ (a
-		// legacy migration copies only tfstate+tfvars, and extraction ships
-		// only module files). Idempotent and near-free when already
-		// initialized.
-		if err := runInherited(tfAbs, "terraform", "-chdir="+tfAbs, "init", "-input=false"); err != nil {
-			return fmt.Errorf("terraform init: %w", err)
-		}
-		destroyArgs := []string{"-chdir=" + tfAbs, "destroy", "-input=false", "-var", "vm_name=" + name}
-		if err := runInherited(tfAbs, "terraform", destroyArgs...); err != nil {
-			return fmt.Errorf("terraform destroy: %w", err)
+		if err := provider.Down(cmd.Context(), downOpts); err != nil {
+			return err
 		}
 
 		// 3. Remove the satellite's provisioning state entry, plus any LEGACY
@@ -907,8 +987,16 @@ func satelliteTableRows(configured map[string]satelliteConfigEntry, live map[str
 				since = timeAgo(ls.since)
 			}
 			lastErr = ls.lastError
-		} else if _, ok := configured[name]; ok {
-			state = "not connected (restart groved?)"
+		} else if entry, ok := configured[name]; ok {
+			if entry.isExec() {
+				// Exec satellites have no groved connection to report:
+				// derive the daemon's exec-only state from the merged
+				// registry so it shows even when groved isn't running (and
+				// agrees with the live status when it is).
+				state = satelliteStateExecOnly
+			} else {
+				state = "not connected (restart groved?)"
+			}
 		}
 		if addr == "" {
 			addr = "-"
@@ -1037,6 +1125,12 @@ func renderSatelliteInfraTOML(name string, infra satelliteInfraConfig) string {
 	if infra.IdentityFile != "" {
 		fmt.Fprintf(&table, "identity_file = %q\n", infra.IdentityFile)
 	}
+	if infra.Image != "" {
+		fmt.Fprintf(&table, "image = %q\n", infra.Image)
+	}
+	if infra.TartHome != "" {
+		fmt.Fprintf(&table, "tart_home = %q\n", infra.TartHome)
+	}
 	return table.String()
 }
 
@@ -1060,6 +1154,8 @@ func satelliteInfraDriftMessage(name string, fromConfig, resolved satelliteInfra
 		{"ssh_user", fromConfig.SSHUser, resolved.SSHUser},
 		{"cidr", fromConfig.CIDR, resolved.CIDR},
 		{"identity_file", fromConfig.IdentityFile, resolved.IdentityFile},
+		{"image", fromConfig.Image, resolved.Image},
+		{"tart_home", fromConfig.TartHome, resolved.TartHome},
 	} {
 		if f.cfg != f.res {
 			fmt.Fprintf(&b, "  %s: %q -> %q\n", f.key, f.cfg, f.res)
@@ -1183,32 +1279,6 @@ func bestEffortDeregisterCursors(name, syncOriginID string) {
 	}
 }
 
-// satelliteTFVarsName is the variables file `up` persists into the terraform
-// dir (auto-loaded by terraform) so `down` can destroy non-interactively.
-const satelliteTFVarsName = "terraform.tfvars"
-
-// writeSatelliteTFVars persists the terraform variables that have no defaults
-// in variables.tf (plus vm_name/zone/service_account_email) so a later
-// terraform destroy resolves them without prompting — and, for the service
-// account, so destroy plans the same instance shape apply created. Values are
-// %q-quoted, which is valid HCL string syntax for these flag-derived inputs.
-func writeSatelliteTFVars(tfDir, project, sshUser, cidr, vmName, zone, serviceAccountEmail string) error {
-	var b strings.Builder
-	b.WriteString("# Generated by `grove satellite up`. `grove satellite down` relies on this\n")
-	b.WriteString("# file so terraform destroy runs without prompting for variables.\n")
-	fmt.Fprintf(&b, "project_id       = %q\n", project)
-	fmt.Fprintf(&b, "ssh_user         = %q\n", sshUser)
-	fmt.Fprintf(&b, "allowed_ssh_cidr = %q\n", cidr)
-	fmt.Fprintf(&b, "vm_name          = %q\n", vmName)
-	if zone != "" {
-		fmt.Fprintf(&b, "zone             = %q\n", zone)
-	}
-	if serviceAccountEmail != "" {
-		fmt.Fprintf(&b, "service_account_email = %q\n", serviceAccountEmail)
-	}
-	return os.WriteFile(filepath.Join(tfDir, satelliteTFVarsName), []byte(b.String()), 0o600)
-}
-
 // --- small subprocess / prompt helpers ---
 
 func confirmYesNo(prompt string) bool {
@@ -1245,21 +1315,23 @@ func runInheritedWithStdin(dir, stdin, name string, args ...string) error {
 	return cmd.Run()
 }
 
-func terraformOutput(tfDir, name string) (string, error) {
-	cmd := exec.Command("terraform", "-chdir="+tfDir, "output", "-raw", name) //nolint:gosec // G204: internal args
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
-}
-
 // sshKeyscanHostKey retries ssh-keyscan until sshd is up, returning the ed25519
-// host public key line body (the value pinned into the registry, C2).
-func sshKeyscanHostKey(ip string) (string, error) {
+// host public key line body (the value pinned into the registry, C2). addr is
+// a bare host (the historical form — scanned on :22) or host:port; a non-22
+// port (docker's loopback-published sshd) rides `ssh-keyscan -p`.
+func sshKeyscanHostKey(addr string) (string, error) {
+	host, port := addr, ""
+	if h, p, err := net.SplitHostPort(addr); err == nil {
+		host, port = h, p
+	}
+	scanArgs := []string{"-t", "ed25519"}
+	if port != "" && port != "22" {
+		scanArgs = append(scanArgs, "-p", port)
+	}
+	scanArgs = append(scanArgs, host)
 	var lastErr error
 	for attempt := 0; attempt < 30; attempt++ {
-		cmd := exec.Command("ssh-keyscan", "-t", "ed25519", ip) //nolint:gosec // G204: ip from terraform output
+		cmd := exec.Command("ssh-keyscan", scanArgs...) //nolint:gosec // G204: provider endpoint address
 		out, err := cmd.Output()
 		if err == nil {
 			if key := parseHostKey(string(out)); key != "" {
@@ -1289,22 +1361,4 @@ func parseHostKey(scan string) string {
 		}
 	}
 	return ""
-}
-
-// detectPublicCIDR resolves the laptop's public IP as a /32 via ifconfig.me
-// (matches the PoC README guidance).
-func detectPublicCIDR() string {
-	client := &http.Client{Timeout: 8 * time.Second}
-	resp, err := client.Get("https://ifconfig.me/ip")
-	if err != nil {
-		return ""
-	}
-	defer func() { _ = resp.Body.Close() }()
-	buf := make([]byte, 64)
-	n, _ := resp.Body.Read(buf)
-	ip := strings.TrimSpace(string(buf[:n]))
-	if ip == "" {
-		return ""
-	}
-	return ip + "/32"
 }

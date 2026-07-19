@@ -1,6 +1,7 @@
 // Package satelliteassets embeds the infrastructure assets `grove satellite`
 // ships inside the grove binary: per-target terraform modules
-// (targets/<target>/terraform), the target-agnostic bootstrap script
+// (targets/<target>/terraform), the docker satellite image build context
+// (targets/docker), the target-agnostic bootstrap script
 // (bootstrap/satellite-bootstrap.sh), and reference templates (templates/).
 //
 // Embedding decouples satellites from the intentionally-unpublished cloud
@@ -47,9 +48,13 @@ func BootstrapScript() ([]byte, error) {
 	return data, nil
 }
 
-// Targets enumerates the embedded infra targets (the direct children of the
-// targets/ tree), sorted. Today that is just "gcp"; future aws/azure/local
-// modules land as sibling directories.
+// Targets enumerates the embedded TERRAFORM infra targets — the children of
+// the targets/ tree that carry a terraform/ module — sorted. Today that is
+// just "gcp"; future aws/azure modules land as sibling directories. Other
+// provider assets also live under targets/ (targets/docker is the docker
+// image build context) but are deliberately excluded: this listing backs
+// terraform-target validation (resolveSatelliteTarget) and TerraformFS,
+// while non-terraform targets resolve through the provider registry instead.
 func Targets() []string {
 	entries, err := assets.ReadDir("targets")
 	if err != nil {
@@ -57,12 +62,48 @@ func Targets() []string {
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
-		if e.IsDir() {
-			names = append(names, e.Name())
+		if !e.IsDir() {
+			continue
 		}
+		if _, err := fs.Stat(assets, "targets/"+e.Name()+"/terraform"); err != nil {
+			continue
+		}
+		names = append(names, e.Name())
 	}
 	sort.Strings(names)
 	return names
+}
+
+// dockerContextDir is the embedded docker satellite image build context
+// (Dockerfile + entrypoint.sh) the docker provider builds its image from.
+const dockerContextDir = "targets/docker"
+
+// DockerBuildContext returns the embedded docker image build-context files
+// keyed by base name (Dockerfile, entrypoint.sh). The docker provider writes
+// them into a temp dir for `docker build` and derives the image tag from
+// their content hash, so an asset change rebuilds the image naturally.
+func DockerBuildContext() (map[string][]byte, error) {
+	entries, err := assets.ReadDir(dockerContextDir)
+	if err != nil {
+		// Unreachable in a correctly built binary — the files are embedded at
+		// compile time — but surfaced rather than panicked for safety.
+		return nil, fmt.Errorf("embedded docker build context missing (%s): %w", dockerContextDir, err)
+	}
+	files := make(map[string][]byte, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		data, err := assets.ReadFile(dockerContextDir + "/" + e.Name())
+		if err != nil {
+			return nil, err
+		}
+		files[e.Name()] = data
+	}
+	if _, ok := files["Dockerfile"]; !ok {
+		return nil, fmt.Errorf("embedded docker build context has no Dockerfile (%s)", dockerContextDir)
+	}
+	return files, nil
 }
 
 // HasTarget reports whether an embedded target of that name exists.
