@@ -539,3 +539,59 @@ func TestSatelliteTableRowsPartialUp(t *testing.T) {
 		t.Errorf("a complete exec satellite must stay %q, got %q", satelliteStateExecOnly, got)
 	}
 }
+
+// TestSatelliteTableRowsKindColumn pins R8/P7's column and how it composes
+// with the three State values: Kind says what the satellite IS, State how it
+// is doing, so a partial-up exec entry reports BOTH rather than collapsing
+// into one cell.
+func TestSatelliteTableRowsKindColumn(t *testing.T) {
+	kindIdx, stateIdx := -1, -1
+	for i, h := range satelliteTableHeaders {
+		switch h {
+		case "Kind":
+			kindIdx = i
+		case "State":
+			stateIdx = i
+		}
+	}
+	if kindIdx == -1 || stateIdx == -1 {
+		t.Fatalf("missing Kind/State columns in headers: %v", satelliteTableHeaders)
+	}
+
+	configured := map[string]satelliteConfigEntry{
+		"execsat":    {Kind: satelliteKindExec, SSHAddr: "192.168.64.2:22", HostKey: "ssh-ed25519 AAAA", ProviderRef: "tart:grove-execsat"},
+		"execpart":   {Kind: satelliteKindExec, ProviderRef: "tart:grove-execpart"},
+		"fullsat":    {SSHAddr: "203.0.113.7:22", HostKey: "ssh-ed25519 AAAA"},
+		"fullexplic": {Kind: satelliteKindFull, SSHAddr: "203.0.113.8:22", HostKey: "ssh-ed25519 AAAA"},
+	}
+	rows := satelliteTableRows(configured, map[string]satelliteLiveStatus{
+		"fullsat": {state: "connected"},
+	})
+	byName := map[string][]string{}
+	for _, r := range rows {
+		if len(r) != len(satelliteTableHeaders) {
+			t.Fatalf("row width %d != header width %d: %v", len(r), len(satelliteTableHeaders), r)
+		}
+		byName[r[0]] = r
+	}
+
+	for _, tc := range []struct{ name, kind, state string }{
+		{"execsat", satelliteKindExec, satelliteStateExecOnly},
+		{"execpart", satelliteKindExec, satelliteStatePartialUp},
+		{"fullsat", satelliteKindFull, "connected"},
+		// An absent Kind is the registry's "full" default and must render as
+		// such, never as an empty cell.
+		{"fullexplic", satelliteKindFull, "not connected (restart groved?)"},
+	} {
+		row := byName[tc.name]
+		if row == nil {
+			t.Fatalf("no row for %q", tc.name)
+		}
+		if row[kindIdx] != tc.kind {
+			t.Errorf("%s Kind = %q, want %q", tc.name, row[kindIdx], tc.kind)
+		}
+		if row[stateIdx] != tc.state {
+			t.Errorf("%s State = %q, want %q", tc.name, row[stateIdx], tc.state)
+		}
+	}
+}

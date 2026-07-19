@@ -267,8 +267,8 @@ Notes:
 					prompt = fmt.Sprintf("Cross-build for %s and install %d prebuilt repo(s) on %q — INCLUDING DIRTY TREES (%s)?", target, len(updates), name, strings.Join(dirtyShipped, ", "))
 				}
 			}
-			if !confirmYesNo(prompt) {
-				return fmt.Errorf("aborted")
+			if err := confirmOrAbort(prompt); err != nil {
+				return err
 			}
 		}
 
@@ -331,6 +331,9 @@ Notes:
 		if !assumeYes {
 			if !confirmYesNo(fmt.Sprintf("Restart grove-syncd and groved on %q now?", name)) {
 				fmt.Println("\nBinaries are installed but services still run the old ones. Restart manually with:")
+				if !satelliteStdinIsTTY() {
+					fmt.Println("  (or re-run with --yes — the prompt cannot be answered with stdin off a terminal)")
+				}
 				fmt.Printf("  ssh %s 'sudo systemctl restart grove-syncd'\n", ssh.dest())
 				fmt.Printf("  ssh %s 'XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user restart groved'\n", ssh.dest())
 				if deployErr != nil {
@@ -1119,6 +1122,27 @@ func (s *satelliteSSH) outputCommand(command, stdin string) (string, error) {
 		return "", err
 	}
 	return string(out), nil
+}
+
+// execCommand runs a remote command (empty = an interactive login shell) with
+// the CALLER's stdio attached, so the guest's output streams live and stdin can
+// be piped in. tty requests a remote pty (-tt, forced because our own stdin may
+// not be one). The returned *exec.ExitError carries the remote command's exit
+// status, which ssh mirrors.
+func (s *satelliteSSH) execCommand(command string, tty bool) error {
+	args := s.baseOptions()
+	if tty {
+		args = append(args, "-tt")
+	}
+	args = append(args, "-p", s.port, s.dest())
+	if command != "" {
+		args = append(args, command)
+	}
+	cmd := exec.Command("ssh", args...) //nolint:gosec // G204: registry/flag-derived
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 // runCommand runs a single remote command, capturing output into the error.

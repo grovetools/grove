@@ -251,7 +251,11 @@ func TestBuildSatelliteWorktreePushScript(t *testing.T) {
 		"=== worktree push summary ===",
 		"exit 1",
 		`rm -rf "$STAGE"`,
-		"worktree push complete",
+		// The remote script speaks only for the repos it was handed; the
+		// laptop side owns the verb's overall verdict (repos held on the
+		// laptop never reach this script, so "complete" here must not be
+		// read as "the push completed").
+		"worktree push: remote steps complete for the shipped repos",
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("worktree push script missing %q:\n%s", want, script)

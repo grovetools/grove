@@ -268,8 +268,8 @@ func (p *dockerSatelliteProvider) Down(_ context.Context, opts *satelliteDownOpt
 	}
 
 	if !opts.AssumeYes {
-		if !confirmYesNo(fmt.Sprintf("Remove docker container %q and remove satellite %q's registry entry?", container, opts.Name)) {
-			return fmt.Errorf("aborted")
+		if err := confirmOrAbort(fmt.Sprintf("Remove docker container %q and remove satellite %q's registry entry?", container, opts.Name)); err != nil {
+			return err
 		}
 	}
 	if opts.PostConfirm != nil {

@@ -242,8 +242,8 @@ func (p *tartSatelliteProvider) Down(ctx context.Context, opts *satelliteDownOpt
 	}
 
 	if !opts.AssumeYes {
-		if !confirmYesNo(fmt.Sprintf("Delete local tart VM %q and remove satellite %q's registry entry?", vmName, opts.Name)) {
-			return fmt.Errorf("aborted")
+		if err := confirmOrAbort(fmt.Sprintf("Delete local tart VM %q and remove satellite %q's registry entry?", vmName, opts.Name)); err != nil {
+			return err
 		}
 	}
 	if opts.PostConfirm != nil {

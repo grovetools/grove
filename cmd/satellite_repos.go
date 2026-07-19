@@ -487,8 +487,8 @@ func pushSatelliteRepos(ssh *satelliteSSH, name, sourceAbs, remoteCodeDir string
 		if forced := deltasWithStatus(deltas, deltaStatusForcedDiverged); len(forced) > 0 {
 			prompt = fmt.Sprintf("Mirror %d repo(s) onto %q — DISCARDING unfetched VM commits in %s?", len(updates), name, strings.Join(deltaRepoNames(forced), ", "))
 		}
-		if !confirmYesNo(prompt) {
-			return fmt.Errorf("aborted")
+		if err := confirmOrAbort(prompt); err != nil {
+			return err
 		}
 	}
 
@@ -528,7 +528,7 @@ func pushSatelliteRepos(ssh *satelliteSSH, name, sourceAbs, remoteCodeDir string
 	// Held repos are per-repo isolated (everything else shipped above), but
 	// the run as a whole did NOT converge — exit nonzero so callers notice.
 	if held := deltasWithStatus(deltas, deltaStatusHeldUnfetched); len(held) > 0 {
-		return fmt.Errorf("%d repo(s) held (unfetched VM commits): %s — run `grove satellite repos pull %s` first, or push with --force", len(held), strings.Join(deltaRepoNames(held), ", "), name)
+		return satellitePartialf("PARTIAL: %d repo(s) held (unfetched VM commits): %s — run `grove satellite repos pull %s` first, or push with --force", len(held), strings.Join(deltaRepoNames(held), ", "), name)
 	}
 	return nil
 }
@@ -578,7 +578,14 @@ Notes:
   - a VM head that merely diverged from the local tip but is already present
     locally (i.e. previously pulled) is force-checked-out to the laptop tip —
     nothing is lost; the commits stay reachable via refs/satellite/<name>/….
-  - idempotent and cheap to re-run: matching shas ship no bundles.`
+  - idempotent and cheap to re-run: matching shas ship no bundles.
+
+Exit status:
+  0  every requested repo was mirrored.
+  2  PARTIAL — the shipped repos are live on the VM, but some were held; the
+     message names them and the command that unblocks each. The VM is
+     consistent; a scripted caller must not treat this as done.
+  1  the mirror failed (bad inputs, transport, or the remote script).`
 	cmd.Args = cobra.ExactArgs(1)
 	cmd.SilenceUsage = true
 	cmd.Flags().StringVar(&reposFlag, "repos", "", "Comma-separated repos to mirror (overrides [satellites.<name>.repos]/.sync workspaces)")
@@ -623,7 +630,7 @@ Notes:
 
 		// An explicit --repos list is strict (unknown names are errors, like
 		// upgrade's --repos); config-derived sets skip non-repos with a notice.
-		return pushSatelliteReposOverSSH(name, entry, sourceAbs, remoteCodeDir, repos, flagSet, dryRun, assumeYes, force)
+		return exitOnSatellitePartial(pushSatelliteReposOverSSH(name, entry, sourceAbs, remoteCodeDir, repos, flagSet, dryRun, assumeYes, force))
 	}
 	return cmd
 }
