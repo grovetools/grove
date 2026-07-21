@@ -446,9 +446,11 @@ func TestCuratedPageControls(t *testing.T) {
 // here we pin that a nil layered still targets the canonical global path.
 func TestSaveGlobalSettingNilLayered(t *testing.T) {
 	// Redirect the canonical global path via HOME so the fallback write
-	// lands in a temp dir (setup.GlobalTOMLConfigPath uses the home dir).
+	// lands in a temp dir. Clear higher-precedence portable/XDG roots.
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("GROVE_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
 
 	svc := setup.NewService(false)
 	th := setup.NewTOMLHandler(svc)
