@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -119,18 +120,9 @@ func DeleteTOMLValue(data map[string]interface{}, path ...string) bool {
 
 // GlobalTOMLConfigPath returns the path to the global grove TOML configuration file.
 func GlobalTOMLConfigPath() string {
-	configDir := configDir()
+	configDir := paths.ConfigDir()
 	if configDir == "" {
 		return ""
 	}
 	return filepath.Join(configDir, "grove.toml")
-}
-
-// configDir returns the grove config directory path
-func configDir() string {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(homeDir, ".config", "grove")
 }
