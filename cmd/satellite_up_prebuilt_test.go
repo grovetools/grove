@@ -38,10 +38,10 @@ func gitInitStackRepo(t *testing.T, dir string) string {
 
 // TestSatellitePrebuiltStackReposCoverRequiredBinaries pins the fixed ship set:
 // it must map to every binary the source bootstrap guarantees (grove, groved,
-// flow, nb, treemux, tuimux from step 4; grove-syncd from step 6) — groved via
-// the daemon repo, grove-syncd via the sync repo.
+// flow, nb, treemux, tuimux from step 4; grove-syncd from step 6) plus the
+// explicit grove-agent product runtime. groved comes from daemon, syncd from sync.
 func TestSatellitePrebuiltStackReposCoverRequiredBinaries(t *testing.T) {
-	for _, want := range []string{"grove", "daemon", "flow", "nb", "treemux", "tuimux", "sync"} {
+	for _, want := range []string{"grove", "daemon", "flow", "nb", "treemux", "tuimux", "sync", "agent"} {
 		if !containsString(satellitePrebuiltStackRepos, want) {
 			t.Errorf("satellitePrebuiltStackRepos missing %q (required for the grove stack)", want)
 		}
