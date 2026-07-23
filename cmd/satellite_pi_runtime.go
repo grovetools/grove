@@ -240,7 +240,7 @@ cat > "$runtime/grove-policy.json.staged" <<'JSON'
 JSON
 chmod 600 "$runtime/grove-policy.json.staged"; mv "$runtime/grove-policy.json.staged" "$runtime/grove-policy.json"
 cat > "$runtime/metadata.json.staged" <<JSON
-{"schema_version":1,"binary":"$(command -v pi)","version":"%s","global_config_dir":"$config","project_config_dir":".pi","session_dir":"$config/sessions","trust_path":"$config/trust.json","auth_path":"$config/auth.json","package":"%s","package_version":"%s","package_sha256":"$manifest_hash","package_path":"$store/package","auth_helper":"$store/bin/pi-codex-auth.mjs","support_exclusions":["$config/auth.json","$config/auth.json.lock"],"isolation_boundary":"tart-vm"}
+{"schema_version":1,"binary":"$(command -v pi)","version":"%s","global_config_dir":"$config","project_config_dir":".pi","session_dir":"flow-owned:.artifacts/<job-id>/sessions","artifact_fetch":{"supported":true,"max_files":128,"max_bytes":33554432},"trust_path":"$config/trust.json","auth_path":"$config/auth.json","package":"%s","package_version":"%s","package_sha256":"$manifest_hash","package_path":"$store/package","auth_helper":"$store/bin/pi-codex-auth.mjs","support_exclusions":["$config/auth.json","$config/auth.json.lock"],"isolation_boundary":"tart-vm"}
 JSON
 chmod 600 "$runtime/metadata.json.staged"; mv "$runtime/metadata.json.staged" "$runtime/metadata.json"
 health="$runtime/extensions-loaded.json"; rm -f "$health"
