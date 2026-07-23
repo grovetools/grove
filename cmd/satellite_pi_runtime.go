@@ -230,7 +230,7 @@ let v={}; if(fs.existsSync(settings)){ try{v=JSON.parse(fs.readFileSync(settings
 const packages=Array.isArray(v.packages)?v.packages:[];
 v.packages=[...packages.filter(x=>{const s=typeof x==='string'?x:x?.source; return !(typeof s==='string' && s.includes('/.local/share/grove/pi-packages/sha256/'));}),pkg];
 const staged=settings+'.staged-'+process.pid; fs.writeFileSync(staged,JSON.stringify(v,null,2)+'\n',{mode:0o600});
-if(fs.existsSync(settings)) fs.copyFileSync(settings,settings+'.previous'); fs.chmodSync(settings+'.previous',0o600);
+if(fs.existsSync(settings)){ fs.copyFileSync(settings,settings+'.previous'); fs.chmodSync(settings+'.previous',0o600); }
 fs.renameSync(staged,settings); fs.chmodSync(settings,0o600);
 NODE
 activated=true
