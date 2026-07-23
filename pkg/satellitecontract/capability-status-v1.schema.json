@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://grove.dev/schemas/full-tart-capability-status-v1.json",
+  "title": "Full Tart satellite capability status v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "runtime", "auth", "policy", "record_return", "artifact_fetch"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "platform", "package_version", "package_sha256"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "platform": { "type": "string", "minLength": 1 },
+        "package_version": { "type": "string" },
+        "package_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["present"],
+      "properties": {
+        "present": { "type": "boolean" },
+        "type": { "enum": ["oauth", "api_key"] },
+        "usable": { "type": "boolean" }
+      },
+      "allOf": [
+        { "if": { "properties": { "present": { "const": false } } }, "then": { "not": { "anyOf": [{ "required": ["type"] }, { "required": ["usable"] }] } } },
+        { "if": { "properties": { "present": { "const": true } } }, "then": { "required": ["type"] } }
+      ]
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trust", "policy", "guard", "isolation_boundary"],
+      "properties": {
+        "trust": { "$ref": "#/$defs/health" },
+        "policy": { "$ref": "#/$defs/health" },
+        "guard": { "$ref": "#/$defs/health" },
+        "isolation_boundary": { "const": "tart-vm" }
+      }
+    },
+    "record_return": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generation", "cleanliness"],
+      "properties": {
+        "generation": { "type": "string", "minLength": 1 },
+        "cleanliness": { "enum": ["clean", "dirty", "unknown"] },
+        "escrow_operation_id": { "type": "string", "minLength": 1 },
+        "escrow_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "escrow_verified": { "type": "boolean" }
+      },
+      "dependentRequired": {
+        "escrow_operation_id": ["escrow_sha256"],
+        "escrow_sha256": ["escrow_operation_id"],
+        "escrow_verified": ["escrow_operation_id", "escrow_sha256"]
+      }
+    },
+    "artifact_fetch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["supported"],
+      "properties": {
+        "supported": { "type": "boolean" },
+        "max_files": { "type": "integer", "minimum": 1 },
+        "max_bytes": { "type": "integer", "minimum": 1 }
+      },
+      "allOf": [
+        { "if": { "properties": { "supported": { "const": true } } }, "then": { "required": ["max_files", "max_bytes"] } },
+        { "if": { "properties": { "supported": { "const": false } } }, "then": { "not": { "anyOf": [{ "required": ["max_files"] }, { "required": ["max_bytes"] }] } } }
+      ]
+    }
+  },
+  "$defs": {
+    "health": { "enum": ["ready", "degraded", "unavailable", "unknown"] }
+  }
+}
