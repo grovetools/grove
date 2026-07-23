@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -59,6 +60,9 @@ type satelliteSyncOptions struct {
 	// become the VM sync.toml's pull-enabled entries (bootstrap --workspaces)
 	// AND the laptop sync.toml's push-only entries.
 	Workspaces []string `yaml:"workspaces"`
+	// AllWorkspaces is an explicit complete-replica opt-in. It is never
+	// inferred from an absent allowlist.
+	AllWorkspaces bool `yaml:"all_workspaces"`
 }
 
 // loadSatelliteSyncOptions reads [satellites.<name>.sync] from the layered
@@ -97,6 +101,42 @@ func resolveSatelliteSyncWorkspaces(cfg satelliteSyncOptions, flagValue string, 
 		return append([]string(nil), cfg.Workspaces...)
 	}
 	return append([]string(nil), defaultSatelliteSyncWorkspaces...)
+}
+
+// resolveAllNotebookWorkspaces enumerates the configured notebook workspace
+// directories. Only the explicit --all-workspaces/config opt-in calls this;
+// an absent allowlist never silently expands to the laptop's whole notebook.
+func resolveAllNotebookWorkspaces(cfg *config.Config) ([]string, error) {
+	if cfg == nil || cfg.Notebooks == nil || len(cfg.Notebooks.Definitions) == 0 {
+		return nil, fmt.Errorf("no notebook definitions are configured")
+	}
+	seen := map[string]bool{}
+	for _, nb := range cfg.Notebooks.Definitions {
+		if nb == nil || nb.RootDir == "" {
+			continue
+		}
+		entries, err := os.ReadDir(filepath.Join(expandUserPath(nb.RootDir), "workspaces"))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				seen[entry.Name()] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	if len(out) == 0 {
+		return nil, fmt.Errorf("--all-workspaces found no configured notebook workspaces")
+	}
+	return out, nil
 }
 
 // splitWorkspacesFlag splits a comma-separated workspace flag, dropping empty
@@ -145,6 +185,29 @@ func renderLaptopSyncWorkspaces(entries []laptopSyncWorkspace) (string, error) {
 		fmt.Fprintf(&b, "\n[[workspaces]]\nname = %q\n", e.Name)
 	}
 	return b.String(), nil
+}
+
+// validateManagedLaptopPushOnly is the pre-clone half of the pull refusal.
+// setupLaptopSyncConfig repeats the same check at write time for TOCTOU safety.
+func validateManagedLaptopPushOnly(configDir string) error {
+	path := filepath.Join(configDir, syncConfigFileName)
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	cfg, err := parseLaptopSyncContent(path, string(data))
+	if err != nil {
+		return err
+	}
+	for _, ws := range cfg.Workspaces {
+		if ws.Pull {
+			return fmt.Errorf("refusing managed satellite setup: existing workspace %q in %s has pull = true; remove/segregate that pull profile before provisioning", ws.Name, path)
+		}
+	}
+	return nil
 }
 
 // setupLaptopSyncConfig is `up`'s laptop-side sync finishing step: verify the
@@ -290,12 +353,12 @@ func mergeLaptopSyncConfig(path string, port int, workspaces []string, out io.Wr
 
 	warnSyncServerMismatch(out, path, existing.Server, port)
 
-	// Existing pull entries are the user's own: preserved untouched (this
-	// writer never edits existing entries) but loudly flagged — the laptop
-	// config is supposed to be push-only.
+	// Managed full-satellite setup refuses an already pulling laptop. Merely
+	// preserving it would let guest writes bypass incoming review and escrow.
+	// A user may operate pull separately, but not through this managed profile.
 	for _, ws := range existing.Workspaces {
 		if ws.Pull {
-			fmt.Fprintf(out, "warning: existing workspace %q in %s has pull = true — the laptop sync config should be PUSH-ONLY; entry left untouched, consider removing the pull key.\n", ws.Name, path)
+			return fmt.Errorf("refusing managed satellite setup: existing workspace %q in %s has pull = true; remove/segregate that pull profile before provisioning a push-only laptop", ws.Name, path)
 		}
 	}
 

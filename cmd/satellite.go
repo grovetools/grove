@@ -26,6 +26,7 @@ import (
 	"github.com/spf13/cobra"
 
 	orch "github.com/grovetools/grove/pkg/orchestrator"
+	"github.com/grovetools/grove/pkg/satellitecontract"
 	"github.com/grovetools/grove/pkg/setup"
 )
 
@@ -73,6 +74,10 @@ type satelliteConfigEntry struct {
 	// ProviderTartHome is partial-up recovery state, persisted atomically with
 	// provider_ref as soon as a Tart VM exists. It is not daemon configuration.
 	ProviderTartHome string `yaml:"-" json:"provider_tart_home,omitempty"`
+	// RecordWorkspaces persists the exact selected replica for destructive
+	// return checks, including flag-only selections that are absent from config.
+	RecordWorkspaces    string `yaml:"-" json:"record_workspaces,omitempty"`
+	RecordAllWorkspaces bool   `yaml:"-" json:"record_all_workspaces,omitempty"`
 }
 
 // Satellite kinds (the satelliteConfigEntry.Kind axis) — CLI-local mirror of
@@ -220,6 +225,7 @@ func newSatelliteUpCmd() *cobra.Command {
 		serviceAccount string
 		syncPort       int
 		syncWorkspaces string
+		allWorkspaces  bool
 		reloadDaemon   bool
 		prebuilt       bool
 		prebuiltTarget string
@@ -298,7 +304,8 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 	cmd.Flags().StringVar(&dotfilesRepo, "dotfiles-repo", "", "Dotfiles repo cloned + installed on the VM, best-effort (overrides provision config; empty disables)")
 	cmd.Flags().StringVar(&serviceAccount, "service-account", "", "Service account email attached to the VM (terraform var service_account_email; overrides provision config; empty disables)")
 	cmd.Flags().IntVar(&syncPort, "sync-port", defaultSyncLocalPort, "Laptop-local port the daemon binds and forwards to the VM's syncd (registry sync_local_port; 0 disables the sync forward and laptop sync setup)")
-	cmd.Flags().StringVar(&syncWorkspaces, "sync-workspaces", "", "Comma-separated workspaces to sync with the VM (overrides [satellites.<name>.sync] workspaces; default "+strings.Join(defaultSatelliteSyncWorkspaces, ",")+")")
+	cmd.Flags().StringVar(&syncWorkspaces, "sync-workspaces", "", "Comma-separated workspace allowlist to sync with the VM (required for full Tart unless --all-workspaces is set)")
+	cmd.Flags().BoolVar(&allWorkspaces, "all-workspaces", false, "Explicitly replicate every configured notebook workspace (the only complete-replica mode; mutually exclusive with --sync-workspaces)")
 	cmd.Flags().BoolVar(&reloadDaemon, "reload-daemon", false, "Run 'groved upgrade --global' at the end (a FULL daemon restart). Rarely needed now: the registry hot-reloads via the daemon API automatically; this remains for picking up a rebuilt groved binary or boot-only config (e.g. sync transport) in the same breath")
 	cmd.Flags().BoolVar(&prebuilt, "prebuilt", false, "Provision from locally cross-compiled binaries instead of a VM-side git clone + source build: the grove stack (grove, groved, flow, nb, treemux, tuimux, grove-syncd) is built on the laptop, shipped over the pinned SSH connection, and installed before bootstrap")
 	// NOTE: the cross-compile target is --prebuilt-target, NOT --target:
@@ -434,7 +441,32 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		if err != nil {
 			return err
 		}
+		if allWorkspaces && cmd.Flags().Changed("sync-workspaces") {
+			return fmt.Errorf("--all-workspaces and --sync-workspaces are mutually exclusive")
+		}
+		if syncOpts.AllWorkspaces && (len(syncOpts.Workspaces) > 0 || cmd.Flags().Changed("sync-workspaces")) {
+			return fmt.Errorf("[satellites.%s.sync] all_workspaces conflicts with a workspace allowlist", name)
+		}
+		explicitWorkspaceSelection := cmd.Flags().Changed("sync-workspaces") || len(syncOpts.Workspaces) > 0 || allWorkspaces || syncOpts.AllWorkspaces
 		resolvedSyncWorkspaces := resolveSatelliteSyncWorkspaces(syncOpts, syncWorkspaces, cmd.Flags().Changed("sync-workspaces"))
+		if allWorkspaces || syncOpts.AllWorkspaces {
+			fullCfg, loadErr := config.LoadDefault()
+			if loadErr != nil {
+				return loadErr
+			}
+			resolvedSyncWorkspaces, err = resolveAllNotebookWorkspaces(fullCfg)
+			if err != nil {
+				return err
+			}
+		}
+		if provider.Kind() == tartSatelliteTarget && !execKind {
+			if !explicitWorkspaceSelection || len(resolvedSyncWorkspaces) == 0 {
+				return fmt.Errorf("full Tart requires an explicit non-empty [satellites.%s.sync] workspaces allowlist, --sync-workspaces, or the separate --all-workspaces opt-in", name)
+			}
+			if err := validateManagedLaptopPushOnly(paths.ConfigDir()); err != nil {
+				return err
+			}
+		}
 
 		// Repo-mirror inputs ([satellites.<name>.repos], falling back to the
 		// sync workspaces): loaded NOW — before terraform — so a malformed
@@ -713,6 +745,10 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		}
 		if provider.Kind() == tartSatelliteTarget {
 			entry.ProviderTartHome = upOpts.Infra.TartHome
+			if !execKind {
+				entry.RecordWorkspaces = strings.Join(resolvedSyncWorkspaces, ",")
+				entry.RecordAllWorkspaces = allWorkspaces || syncOpts.AllWorkspaces
+			}
 		}
 		if endpoint.IdentityFile != "" {
 			entry.IdentityFile = expandUserPath(endpoint.IdentityFile)
@@ -892,11 +928,12 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 
 func newSatelliteDownCmd() *cobra.Command {
 	var (
-		target       string
-		tfDir        string
-		tartHome     string
-		assumeYes    bool
-		syncOriginID string
+		target                    string
+		tfDir                     string
+		tartHome                  string
+		assumeYes                 bool
+		syncOriginID              string
+		forceDiscardRecordChanges bool
 	)
 	cmd := cli.NewStandardCommand("down <name>", "Destroy a satellite VM and remove its registry entry")
 	cmd.Args = cobra.ExactArgs(1)
@@ -906,6 +943,7 @@ func newSatelliteDownCmd() *cobra.Command {
 	cmd.Flags().StringVar(&tartHome, "tart-home", "", tartHomeFlagHelp)
 	cmd.Flags().BoolVar(&assumeYes, "yes", false, "Skip the destroy confirmation prompt")
 	cmd.Flags().StringVar(&syncOriginID, "sync-origin-id", "", "Satellite sync origin_id to deregister precisely (best-effort; see C19/C20)")
+	cmd.Flags().BoolVar(&forceDiscardRecordChanges, "force-discard-record-changes", false, "Explicitly discard unreturned notebook changes for this satellite (audited; unknown/disconnected/generation races still refuse)")
 	cmd.RunE = func(cmd *cobra.Command, args []string) (runErr error) {
 		name := args[0]
 		report := beginSatelliteVerbReport(cmd, "down", satelliteDownSchema, name)
@@ -950,6 +988,51 @@ func newSatelliteDownCmd() *cobra.Command {
 			infraCfg.TartHome = tartHome
 		}
 
+		// Full Tart is destructive record storage: establish laptop+guest
+		// maintenance before even asking the provider to confirm deletion. The
+		// final check is run inside PostConfirm immediately before delete.
+		var finalRecordCheck func() error
+		var leaveRecordMaintenance func()
+		if provider.Kind() == tartSatelliteTarget && !entry.isExec() {
+			syncOpts, syncErr := loadSatelliteSyncOptions(name)
+			if syncErr != nil {
+				return syncErr
+			}
+			workspaces := splitWorkspacesFlag(entry.RecordWorkspaces)
+			if len(workspaces) == 0 {
+				workspaces = append(workspaces, syncOpts.Workspaces...)
+			}
+			if len(workspaces) == 0 && (entry.RecordAllWorkspaces || syncOpts.AllWorkspaces) {
+				fullCfg, loadErr := config.LoadDefault()
+				if loadErr != nil {
+					return loadErr
+				}
+				workspaces, syncErr = resolveAllNotebookWorkspaces(fullCfg)
+				if syncErr != nil {
+					return syncErr
+				}
+			}
+			tmpDir, mkErr := os.MkdirTemp("", "grove-record-return-")
+			if mkErr != nil {
+				return mkErr
+			}
+			defer os.RemoveAll(tmpDir)
+			ssh, sshErr := newSatelliteSSH(entry, tmpDir)
+			if sshErr != nil {
+				return sshErr
+			}
+			tr := &satelliteRecordTransport{ssh: ssh}
+			finalRecordCheck, leaveRecordMaintenance, err = prepareRecordSafeDown(cmd.Context(), tr, name, workspaces, forceDiscardRecordChanges)
+			if err != nil {
+				return err
+			}
+			defer leaveRecordMaintenance()
+			if forceDiscardRecordChanges {
+				fmt.Fprintln(cmd.ErrOrStderr(), satellitecontract.DestructiveOverrideWarning)
+				fmt.Fprintf(cmd.ErrOrStderr(), "AUDIT: %s\n", satellitecontract.DestructiveOverrideConfirmation(name))
+			}
+		}
+
 		// 1.+2. Provider Down: destroy confirm, then — via PostConfirm,
 		//    BEFORE destroy — the best-effort cursor-deregister (C19/C20) so
 		//    a durable hub isn't left pinning GC (in the PoC topology syncd
@@ -962,6 +1045,11 @@ func newSatelliteDownCmd() *cobra.Command {
 			TFDir:     tfDir,
 			AssumeYes: assumeYes,
 			PostConfirm: func() error {
+				if finalRecordCheck != nil {
+					if err := finalRecordCheck(); err != nil {
+						return fmt.Errorf("final destructive record-return check refused deletion: %w", err)
+					}
+				}
 				bestEffortDeregisterCursors(name, syncOriginID)
 				return nil
 			},
