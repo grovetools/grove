@@ -67,6 +67,13 @@ const tartVMNamePrefix = "grove-sat-"
 // tartVMName is the local tart VM name for a satellite.
 func tartVMName(satName string) string { return tartVMNamePrefix + satName }
 
+// isGroveManagedTartVMImage identifies local Grove satellite VMs. Grove cannot
+// police direct tart or host-backup operations, but it must never itself clone
+// a potentially hydrated/authenticated guest as a new full satellite.
+func isGroveManagedTartVMImage(image string) bool {
+	return strings.HasPrefix(filepath.Clean(image), tartVMNamePrefix)
+}
+
 // tartProviderRef is the provider_ref state value marking a VM as
 // grove-created for a given satellite ("tart:<vm-name>").
 func tartProviderRef(vmName string) string { return tartSatelliteTarget + ":" + vmName }
@@ -135,6 +142,9 @@ func (p *tartSatelliteProvider) PrepareUp(opts *satelliteUpOptions) error {
 	p.image = opts.Infra.Image
 	if p.image == "" {
 		p.image = defaultTartImage
+	}
+	if opts.SatelliteKind == satelliteKindFull && isGroveManagedTartVMImage(p.image) {
+		return fmt.Errorf("full Tart image %q names a Grove-managed satellite VM; authenticated or hydrated guests must never be clone sources — use a credential-free base image", p.image)
 	}
 	// Best-effort pull-size warning: an uncached image means a multi-GB OCI
 	// pull on the first `up` (the ubuntu image is ~3.0GB compressed).

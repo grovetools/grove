@@ -12,6 +12,19 @@ import (
 
 // TestTartVMNaming pins the local VM naming and provider_ref scheme the
 // restart-vs-collision check depends on.
+func TestTartManagedGuestCannotBeFullCloneSource(t *testing.T) {
+	for _, image := range []string{"grove-sat-authenticated", "grove-sat-hydrated"} {
+		if !isGroveManagedTartVMImage(image) {
+			t.Errorf("managed image %q was not recognized", image)
+		}
+	}
+	for _, image := range []string{defaultTartImage, "ghcr.io/example/credential-free:latest", "not-grove-sat-x"} {
+		if isGroveManagedTartVMImage(image) {
+			t.Errorf("credential-free image %q was rejected", image)
+		}
+	}
+}
+
 func TestTartVMNaming(t *testing.T) {
 	if got := tartVMName("mysat"); got != "grove-sat-mysat" {
 		t.Errorf("tartVMName = %q, want grove-sat-mysat", got)
@@ -231,6 +244,15 @@ func TestTartFullHostPreflightFailsBeforeClone(t *testing.T) {
 	}
 	if opts.Infra.TartVolumeIdentity != "volume-uuid" {
 		t.Fatalf("discovered identity was not pinned: %q", opts.Infra.TartVolumeIdentity)
+	}
+
+	p = &tartSatelliteProvider{target: tartSatelliteTarget}
+	opts = &satelliteUpOptions{
+		Name: "x", SatelliteKind: satelliteKindFull, CapacityPlan: budget,
+		Infra: satelliteInfraConfig{TartHome: satellitecontract.ExpectedTartHome, Image: "grove-sat-authenticated"},
+	}
+	if err := p.PrepareUp(opts); err == nil || !strings.Contains(err.Error(), "must never be clone sources") {
+		t.Fatalf("managed authenticated clone source was not refused: %v", err)
 	}
 }
 
