@@ -194,6 +194,7 @@ resources via terraform.`
 	cmd.AddCommand(newSatelliteReposCmd())
 	cmd.AddCommand(newSatelliteWorktreeCmd())
 	cmd.AddCommand(newSatelliteConfigCmd())
+	cmd.AddCommand(newSatelliteAuthCmd())
 	cmd.AddCommand(newSatelliteDownCmd())
 	cmd.AddCommand(newSatelliteStatusCmd())
 	cmd.AddCommand(newSatelliteListCmd())
@@ -733,6 +734,23 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 				return fmt.Errorf("satellite bootstrap: %w", err)
 			}
 			report.phase("bootstrap", bootstrapStart)
+		}
+
+		// 4b. Full-node Pi runtime. The pinned runtime and content-addressed
+		// Grove package are installed only after bootstrap health, and before
+		// any worktree can be created/trusted or provider-pi job dispatched.
+		// Exec satellites deliberately remain a bare command endpoint.
+		if provider.Kind() == tartSatelliteTarget && !execKind && prebuilt {
+			piRuntimeStart := time.Now()
+			if bootstrapSSH == nil {
+				return fmt.Errorf("Pi runtime provisioning requires the pinned SSH transport")
+			}
+			packageHash, piErr := provisionSatellitePiRuntime(bootstrapSSH, sourceAbs, filepath.Dir(bootstrapSSH.knownHosts))
+			if piErr != nil {
+				return piErr
+			}
+			fmt.Printf("Pinned stock Pi %s and Grove package sha256:%s installed.\n", stockPiVersion, packageHash)
+			report.phase("pi_runtime", piRuntimeStart)
 		}
 
 		// 5. Assemble the registry entry (yaml keys match P7's SatelliteConfig
