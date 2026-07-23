@@ -240,7 +240,7 @@ cat > "$runtime/grove-policy.json.staged" <<'JSON'
 JSON
 chmod 600 "$runtime/grove-policy.json.staged"; mv "$runtime/grove-policy.json.staged" "$runtime/grove-policy.json"
 cat > "$runtime/metadata.json.staged" <<JSON
-{"schema_version":1,"binary":"$(command -v pi)","version":"%s","global_config_dir":"$config","project_config_dir":".pi","session_dir":"flow-owned:.artifacts/<job-id>/sessions","artifact_fetch":{"supported":true,"max_files":128,"max_bytes":33554432},"trust_path":"$config/trust.json","auth_path":"$config/auth.json","package":"%s","package_version":"%s","package_sha256":"$manifest_hash","package_path":"$store/package","auth_helper":"$store/bin/pi-codex-auth.mjs","support_exclusions":["$config/auth.json","$config/auth.json.lock"],"authenticated_snapshot_policy":"prohibited; credential-free base images only","snapshot_enforcement":"grove-managed clone sources only; direct Tart and host backups are administrator-controlled","isolation_boundary":"tart-vm"}
+{"schema_version":1,"binary":"$(command -v pi)","version":"%s","global_config_dir":"$config","project_config_dir":".pi","session_dir":"flow-owned:.artifacts/<job-id>/sessions","artifact_fetch":{"supported":true,"max_files":128,"max_bytes":33554432},"trust_path":"$config/trust.json","auth_path":"$config/auth.json","package":"%s","package_version":"%s","package_sha256":"$manifest_hash","package_path":"$store/package","auth_helper":"$store/bin/pi-codex-auth.mjs","auth_runtime_module":"$(npm root --global)/%s/dist/index.js","support_exclusions":["$config/auth.json","$config/auth.json.lock"],"authenticated_snapshot_policy":"prohibited; credential-free base images only","snapshot_enforcement":"grove-managed clone sources only; direct Tart and host backups are administrator-controlled","isolation_boundary":"tart-vm"}
 JSON
 chmod 600 "$runtime/metadata.json.staged"; mv "$runtime/metadata.json.staged" "$runtime/metadata.json"
 health="$runtime/extensions-loaded.json"; rm -f "$health"
@@ -255,5 +255,5 @@ NODE
 [ "$(stat -c '%%a' "$runtime/grove-policy.json")" = 600 ]
 activated=false
 echo "pi-runtime-ready $manifest_hash"
-`, shellQuote(remoteArchive), shellQuote(bundle.ArchiveHash), shellQuote(bundle.ManifestHash), grovePiPackage, grovePiVersion, stockPiPackage, stockPiVersion, stockPiIntegrity, stockPiVersion, stockPiVersion, grovePiPackage, grovePiVersion, string(expectedExtensions))
+`, shellQuote(remoteArchive), shellQuote(bundle.ArchiveHash), shellQuote(bundle.ManifestHash), grovePiPackage, grovePiVersion, stockPiPackage, stockPiVersion, stockPiIntegrity, stockPiVersion, stockPiVersion, grovePiPackage, grovePiVersion, stockPiPackage, string(expectedExtensions))
 }

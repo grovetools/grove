@@ -165,8 +165,11 @@ umask 077
 runtime="$HOME/.config/grove/pi-runtime/metadata.json"
 [ -f "$runtime" ] && [ ! -L "$runtime" ] || { echo 'managed Pi runtime is missing' >&2; exit 1; }
 helper=$(node -e 'const m=require(process.argv[1]); if(m.version!=="0.80.10" || typeof m.auth_helper!=="string") process.exit(2); process.stdout.write(m.auth_helper)' "$runtime")
+auth_runtime=$(node -e 'const m=require(process.argv[1]); if(typeof m.auth_runtime_module!=="string") process.exit(2); process.stdout.write(m.auth_runtime_module)' "$runtime")
 case "$helper" in "$HOME/.local/share/grove/pi-packages/sha256/"*/bin/pi-codex-auth.mjs) ;; *) echo 'managed Pi auth helper path is invalid' >&2; exit 1;; esac
+case "$auth_runtime" in /*/node_modules/@earendil-works/pi-coding-agent/dist/index.js) ;; *) echo 'managed Pi auth runtime path is invalid' >&2; exit 1;; esac
 [ -f "$helper" ] && [ ! -L "$helper" ] || { echo 'managed Pi auth helper is missing' >&2; exit 1; }
+[ -f "$auth_runtime" ] && [ ! -L "$auth_runtime" ] || { echo 'managed Pi auth runtime is missing' >&2; exit 1; }
 authdir="$HOME/.pi/agent"; auth="$authdir/auth.json"
 [ ! -L "$HOME/.pi" ] && [ ! -L "$authdir" ] || { echo 'Pi auth parent is a symlink' >&2; exit 1; }
 mkdir -p "$authdir"; chmod 700 "$HOME/.pi" "$authdir"
@@ -174,7 +177,7 @@ if [ -e "$auth" ] || [ -L "$auth" ]; then
   [ -f "$auth" ] && [ ! -L "$auth" ] || { echo 'Pi auth destination is not a regular file' >&2; exit 1; }
   [ "$(stat -c '%%u' "$auth")" = "$(id -u)" ] && [ "$(stat -c '%%a' "$auth")" = 600 ] || { echo 'Pi auth file owner/mode is unsafe' >&2; exit 1; }
 fi
-node "$helper" %s --auth-path "$auth"%s
+GROVE_PI_RUNTIME_MODULE="$auth_runtime" node "$helper" %s --auth-path "$auth"%s
 %s
 if [ -e "$auth" ]; then
   [ -f "$auth" ] && [ ! -L "$auth" ] && [ "$(stat -c '%%u' "$auth")" = "$(id -u)" ] && [ "$(stat -c '%%a' "$auth")" = 600 ] || { echo 'Pi auth file failed post-operation safety checks' >&2; exit 1; }
@@ -206,7 +209,7 @@ func sanitizeRemoteAuthError(err error) error {
 	// ssh may include remote stderr. Keep only known operational guidance;
 	// provider/HTTP bodies and accidental credential values never cross here.
 	text := err.Error()
-	for _, allowed := range []string{"managed Pi runtime is missing", "managed Pi auth helper path is invalid", "managed Pi auth helper is missing", "Pi auth parent is a symlink", "Pi auth destination is not a regular file", "Pi auth file owner/mode is unsafe", "Pi auth file failed post-operation safety checks"} {
+	for _, allowed := range []string{"managed Pi runtime is missing", "managed Pi auth helper path is invalid", "managed Pi auth helper is missing", "managed Pi auth runtime path is invalid", "managed Pi auth runtime is missing", "Pi auth parent is a symlink", "Pi auth destination is not a regular file", "Pi auth file owner/mode is unsafe", "Pi auth file failed post-operation safety checks"} {
 		if strings.Contains(text, allowed) {
 			return fmt.Errorf("%s", allowed)
 		}
