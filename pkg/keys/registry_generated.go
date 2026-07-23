@@ -339,6 +339,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "End", Keys: []string{"end", "G"}, Description: "last plan", Enabled: true, ConfigKey: "end"},
 					{Name: "ViewPlan", Keys: []string{"enter"}, Description: "view plan details", Enabled: true, ConfigKey: "view_plan"},
 					{Name: "OpenPlan", Keys: []string{"o"}, Description: "open plan workspace", Enabled: true, ConfigKey: "open_plan"},
+					{Name: "ViewGit", Keys: []string{"V"}, Description: "inspect in Git Viewer", Enabled: true, ConfigKey: "view_git"},
 				},
 			},
 			{
@@ -350,8 +351,8 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "ReviewPlan", Keys: []string{"r"}, Description: "review changes", Enabled: true, ConfigKey: "review_plan"},
 					{Name: "FinishPlan", Keys: []string{"ctrl+x"}, Description: "finish plan", Enabled: true, ConfigKey: "finish_plan"},
 					{Name: "SetHoldStatus", Keys: []string{"h"}, Description: "hold/unhold plan", Enabled: true, ConfigKey: "set_hold_status"},
-					{Name: "FastForwardUpdate", Keys: []string{"U"}, Description: "update from main", Enabled: true, ConfigKey: "fast_forward_update"},
-					{Name: "FastForwardMain", Keys: []string{"M"}, Description: "merge to main", Enabled: true, ConfigKey: "fast_forward_main"},
+					{Name: "FastForwardUpdate", Keys: []string{"U"}, Description: "update from main", Enabled: false, ConfigKey: "fast_forward_update"},
+					{Name: "FastForwardMain", Keys: []string{"M"}, Description: "merge to main", Enabled: false, ConfigKey: "fast_forward_main"},
 				},
 			},
 			{
