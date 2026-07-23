@@ -1402,7 +1402,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "ToggleBranch", Keys: []string{"tb"}, Description: "toggle branch names", Enabled: true, ConfigKey: "toggle_branch"},
 					{Name: "ToggleNoteCounts", Keys: []string{"tn"}, Description: "toggle note counts", Enabled: true, ConfigKey: "toggle_note_counts"},
 					{Name: "TogglePlanStats", Keys: []string{"tf"}, Description: "toggle flow plans", Enabled: true, ConfigKey: "toggle_plan_stats"},
-					{Name: "ToggleHold", Keys: []string{"th"}, Description: "toggle on-hold", Enabled: true, ConfigKey: "toggle_hold"},
+					{Name: "ToggleHold", Keys: []string{"th", "H"}, Description: "toggle on-hold", Enabled: true, ConfigKey: "toggle_hold"},
 					{Name: "TogglePaths", Keys: []string{"tp"}, Description: "toggle full paths", Enabled: true, ConfigKey: "toggle_paths"},
 					{Name: "ToggleRelease", Keys: []string{"tr"}, Description: "toggle release", Enabled: true, ConfigKey: "toggle_release"},
 					{Name: "ToggleBinary", Keys: []string{"ty"}, Description: "toggle tool/version", Enabled: true, ConfigKey: "toggle_binary"},
