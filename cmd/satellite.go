@@ -195,6 +195,7 @@ resources via terraform.`
 	cmd.AddCommand(newSatelliteWorktreeCmd())
 	cmd.AddCommand(newSatelliteConfigCmd())
 	cmd.AddCommand(newSatelliteAuthCmd())
+	cmd.AddCommand(newSatelliteArtifactsCmd())
 	cmd.AddCommand(newSatelliteDownCmd())
 	cmd.AddCommand(newSatelliteStatusCmd())
 	cmd.AddCommand(newSatelliteListCmd())
