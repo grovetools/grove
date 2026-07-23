@@ -26,7 +26,7 @@ import (
 // shipped; its zig static libs are consumed at cross-build time by the repos
 // that link it (grove/flow/nb/treemux/tuimux), which `grove build --target`
 // builds in an earlier wave.
-var satellitePrebuiltStackRepos = []string{"grove", "daemon", "flow", "nb", "treemux", "tuimux", "sync"}
+var satellitePrebuiltStackRepos = []string{"grove", "daemon", "flow", "nb", "treemux", "tuimux", "sync", "agent"}
 
 // satelliteSyncdUnitRel is the grove-syncd systemd unit's path relative to the
 // ecosystem worktree root. `up --prebuilt` ships THIS real file to the VM
