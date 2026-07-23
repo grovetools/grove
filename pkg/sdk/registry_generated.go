@@ -10,6 +10,7 @@ var toolRegistry = map[string]ToolInfo{
 	"daemon":           {Alias: "groved", Description: "Grove ecosystem background daemon"},
 	"docgen":           {Alias: "docgen", Description: "LLM-powered, workspace-aware documentation generator."},
 	"flow":             {Alias: "flow", Description: "Job orchestration and workflows"},
+	"git-viewer":       {Alias: "git-viewer", Description: "Interactive git changes viewer TUI"},
 	"grove":            {Alias: "grove", Description: "Grove package manager and command delegator"},
 	"grove-anthropic":  {Alias: "grove-anthropic", Description: "Tools for using Anthropic/Claude API plaform"},
 	"grove-gemini":     {Alias: "grove-gemini", Description: "Tools for Google's Gemini API"},

@@ -275,7 +275,15 @@ func delegateToTool(toolName string, args []string) error {
 
 		// Check if the tool exists
 		if _, err := os.Stat(toolPath); os.IsNotExist(err) {
-			return fmt.Errorf("unknown tool: %s. Run 'grove install %s' or check spelling.", toolName, toolName)
+			// PRIORITY 4: a registered ecosystem tool with no managed install
+			// may still be provided directly on PATH (dev sandboxes, handoffs
+			// like flow routing `grove git-viewer` through the delegator).
+			if fallback := pathFallbackForRegisteredTool(toolName); fallback != "" {
+				toolPath = fallback
+				logger.WithField("path", toolPath).Debug("Using PATH fallback for registered tool")
+			} else {
+				return fmt.Errorf("unknown tool: %s. Run 'grove install %s' or check spelling.", toolName, toolName)
+			}
 		}
 	}
 
@@ -298,4 +306,21 @@ func delegateToTool(toolName string, args []string) error {
 		return err
 	}
 	return nil
+}
+
+// pathFallbackForRegisteredTool resolves a registered ecosystem tool that has
+// no globally managed binary to a same-named binary on PATH. This keeps
+// delegated handoffs (e.g. flow routing `grove git-viewer view` through the
+// delegator) working in layouts where the tool binaries are provided directly
+// on PATH rather than grove-installed. Unregistered names return "" so
+// delegation never becomes a passthrough to arbitrary PATH commands.
+func pathFallbackForRegisteredTool(toolName string) string {
+	if _, _, _, found := sdk.FindTool(toolName); !found {
+		return ""
+	}
+	binary, err := exec.LookPath(toolName)
+	if err != nil {
+		return ""
+	}
+	return binary
 }
