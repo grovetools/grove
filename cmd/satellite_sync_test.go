@@ -215,10 +215,9 @@ name = "cloud"
 	}
 }
 
-// TestLaptopSyncConfigMergePreservesUserPullEntry: an existing (user-authored)
-// pull entry is warned about but never edited — the merge path must not touch
-// existing entries even when they violate the push-only convention.
-func TestLaptopSyncConfigMergePreservesUserPullEntry(t *testing.T) {
+// TestLaptopSyncConfigMergeRefusesUserPullEntry: managed full-satellite setup
+// must not coexist with a laptop pull profile that bypasses incoming review.
+func TestLaptopSyncConfigMergeRefusesUserPullEntry(t *testing.T) {
 	dir := syncTestDir(t)
 	syncPath := filepath.Join(dir, syncConfigFileName)
 	original := `server = "http://127.0.0.1:8788"
@@ -232,20 +231,13 @@ pull = true
 	}
 
 	var out strings.Builder
-	if err := setupLaptopSyncConfig(dir, 8788, []string{"cloud", "grovetools"}, &out); err != nil {
-		t.Fatalf("setupLaptopSyncConfig: %v", err)
-	}
-	if !strings.Contains(out.String(), "PUSH-ONLY") {
-		t.Fatalf("expected a push-only warning about the existing pull entry, got: %s", out.String())
+	err := setupLaptopSyncConfig(dir, 8788, []string{"cloud", "grovetools"}, &out)
+	if err == nil || !strings.Contains(err.Error(), "pull = true") || !strings.Contains(err.Error(), "refusing managed satellite setup") {
+		t.Fatalf("expected fail-closed pull refusal, got: %v", err)
 	}
 	data, _ := os.ReadFile(syncPath)
-	if !strings.HasPrefix(string(data), original) {
-		t.Fatalf("merge edited the user's pull entry:\n%s", data)
-	}
-	// The appended entry itself must be push-only.
-	appended := strings.TrimPrefix(string(data), original)
-	if strings.Contains(appended, "pull") {
-		t.Fatalf("appended region contains a pull key:\n%s", appended)
+	if string(data) != original {
+		t.Fatalf("refusal edited the user's config:\n%s", data)
 	}
 }
 
@@ -346,6 +338,23 @@ workspaces = ["cloud", "grovetools", "extra"]
 
 // TestResolveSatelliteSyncWorkspacesPrecedence pins flag > config > default,
 // including the set-to-empty disable.
+func TestResolveAllNotebookWorkspacesRequiresExplicitEnumeration(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"zeta", "alpha"} {
+		if err := os.MkdirAll(filepath.Join(root, "workspaces", name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := &config.Config{Notebooks: &config.NotebooksConfig{Definitions: map[string]*config.Notebook{"main": {RootDir: root}}}}
+	got, err := resolveAllNotebookWorkspaces(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "alpha,zeta" {
+		t.Fatalf("got %v", got)
+	}
+}
+
 func TestResolveSatelliteSyncWorkspacesPrecedence(t *testing.T) {
 	cfg := satelliteSyncOptions{Workspaces: []string{"alpha", "beta"}}
 

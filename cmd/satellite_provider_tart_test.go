@@ -186,7 +186,6 @@ func TestTartFullHostPreflightFailsBeforeClone(t *testing.T) {
 		t.Skipf("tart preflight requires darwin/arm64 (this is %s/%s)", runtime.GOOS, runtime.GOARCH)
 	}
 	stubTartOnPath(t)
-	t.Setenv(fullTartExperimentalEnv, "1")
 	oldInspect := inspectTartHostVolume
 	t.Cleanup(func() { inspectTartHostVolume = oldInspect })
 	budget := satelliteCapacityPlan{
@@ -235,23 +234,14 @@ func TestTartFullHostPreflightFailsBeforeClone(t *testing.T) {
 	}
 }
 
-func TestTartFullExperimentalGateAndNoHomeFallback(t *testing.T) {
+func TestTartFullExposedButStillHasNoHomeFallback(t *testing.T) {
 	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
 		t.Skipf("tart preflight requires darwin/arm64 (this is %s/%s)", runtime.GOOS, runtime.GOARCH)
 	}
 	stubTartOnPath(t)
 	budget := satelliteCapacityPlan{Host: satellitecontract.CapacityBudget{PayloadBytes: 1}}
-	t.Setenv(fullTartExperimentalEnv, "")
-	err := (&tartSatelliteProvider{target: tartSatelliteTarget}).PrepareUp(&satelliteUpOptions{
-		Name: "x", SatelliteKind: satelliteKindFull, CapacityPlan: budget,
-		Infra: satelliteInfraConfig{TartHome: satellitecontract.ExpectedTartHome},
-	})
-	if err == nil || !strings.Contains(err.Error(), "experimental") {
-		t.Fatalf("missing experimental gate error: %v", err)
-	}
-	t.Setenv(fullTartExperimentalEnv, "1")
 	t.Setenv("TART_HOME", satellitecontract.ExpectedTartHome)
-	err = (&tartSatelliteProvider{target: tartSatelliteTarget}).PrepareUp(&satelliteUpOptions{
+	err := (&tartSatelliteProvider{target: tartSatelliteTarget}).PrepareUp(&satelliteUpOptions{
 		Name: "x", SatelliteKind: satelliteKindFull, CapacityPlan: budget,
 	})
 	if err == nil || !strings.Contains(err.Error(), "requires --tart-home") {

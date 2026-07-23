@@ -494,6 +494,7 @@ target = "gcp"
 		SSHAddr:     "192.168.64.2:22",
 		HostKey:     "ssh-ed25519 AAAA",
 		ProviderRef: "tart:grove-sat-tartdemo",
+		Kind:        satelliteKindExec, // provider-selection test, not full-record teardown
 	})
 
 	t.Setenv("PATH", t.TempDir())

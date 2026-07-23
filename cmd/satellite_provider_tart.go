@@ -45,10 +45,8 @@ import (
 // tartSatelliteTarget is the infra target name the provider registers under.
 const tartSatelliteTarget = "tart"
 
-// Full Tart deliberately has no advertised flag. Phase 1 is exercised only
-// when this explicit test/operator gate is present; Phase 2 removes the gate.
-const fullTartExperimentalEnv = "GROVE_EXPERIMENTAL_FULL_TART"
-
+// Full Tart is selectable through --kind full now that destructive record
+// return is generation-bound and fail-closed; exec remains the target default.
 // defaultTartImage is the guest image cloned when neither --image nor
 // [satellites.<name>.infra] image is set: Ubuntu 24.04 arm64, boots to sshd
 // in ~15s with default creds admin/admin, passwordless sudo, git
@@ -115,9 +113,6 @@ func (p *tartSatelliteProvider) PrepareUp(opts *satelliteUpOptions) error {
 		return fmt.Errorf("tart not found on PATH — install it with `brew install cirruslabs/cli/tart`: %w", err)
 	}
 	if opts.SatelliteKind == satelliteKindFull {
-		if os.Getenv(fullTartExperimentalEnv) != "1" {
-			return fmt.Errorf("full Tart satellites are experimental and cannot be exposed until record-return safety lands; set %s=1 only for controlled Phase-1 testing", fullTartExperimentalEnv)
-		}
 		if filepath.Clean(expandUserPath(opts.Infra.TartHome)) != satellitecontract.ExpectedTartHome {
 			return fmt.Errorf("full Tart requires --tart-home %s (no environment/default fallback)", satellitecontract.ExpectedTartHome)
 		}
