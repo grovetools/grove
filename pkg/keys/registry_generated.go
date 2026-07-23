@@ -333,6 +333,10 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "Up", Keys: []string{"k", "up"}, Description: "move up", Enabled: true, ConfigKey: "up"},
 					{Name: "Down", Keys: []string{"j", "down"}, Description: "move down", Enabled: true, ConfigKey: "down"},
+					{Name: "PageUp", Keys: []string{"pgup", "ctrl+u"}, Description: "page up", Enabled: true, ConfigKey: "page_up"},
+					{Name: "PageDown", Keys: []string{"pgdown", "ctrl+d"}, Description: "page down", Enabled: true, ConfigKey: "page_down"},
+					{Name: "Home", Keys: []string{"home"}, Description: "first plan", Enabled: true, ConfigKey: "home"},
+					{Name: "End", Keys: []string{"end", "G"}, Description: "last plan", Enabled: true, ConfigKey: "end"},
 					{Name: "ViewPlan", Keys: []string{"enter"}, Description: "view plan details", Enabled: true, ConfigKey: "view_plan"},
 					{Name: "OpenPlan", Keys: []string{"o"}, Description: "open plan workspace", Enabled: true, ConfigKey: "open_plan"},
 				},
