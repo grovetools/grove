@@ -10,6 +10,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const authenticatedGuestSnapshotPolicy = "Authenticated guest policy: never create an image, snapshot, or clone from this VM. Grove cannot enforce direct Tart or host-backup operations; use only credential-free base images."
+
+const upstreamRevocationGuidance = "Local deletion, VM deletion, and secure erasure do not revoke upstream OAuth authority. Grove has no supported Pi provider revoke callback; revoke separately through the upstream account when required."
+
 type piCodexStatus struct {
 	Provider        string `json:"provider"`
 	Present         bool   `json:"present"`
@@ -47,10 +51,12 @@ func newSatellitePiCodexLoginCmd() *cobra.Command {
 		}
 		defer cleanup()
 		fmt.Fprintln(cmd.OutOrStdout(), "Starting guest-local Pi openai-codex device authorization. OAuth values will not be displayed.")
+		fmt.Fprintln(cmd.OutOrStdout(), authenticatedGuestSnapshotPolicy)
 		if err := ssh.execCommand(piCodexRemoteCommand("login", false), false); err != nil {
 			return fmt.Errorf("Pi Codex login failed; no partial credential is retained: %w", sanitizeRemoteAuthError(err))
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), "Login complete. The credential survives stop/start and reboot; down/reset/reclone removes it and requires a new login.")
+		fmt.Fprintln(cmd.OutOrStdout(), "Login complete. The credential survives stop/start and reboot; down/reset/reclone removes the local copy and requires a new login.")
+		fmt.Fprintln(cmd.OutOrStdout(), upstreamRevocationGuidance)
 		return nil
 	}
 	return cmd
@@ -89,6 +95,8 @@ func newSatellitePiCodexStatusCmd() *cobra.Command {
 		}
 		if !status.Present {
 			fmt.Fprintf(cmd.OutOrStdout(), "login: grove satellite auth pi-codex login %s\n", args[0])
+		} else {
+			fmt.Fprintln(cmd.OutOrStdout(), authenticatedGuestSnapshotPolicy)
 		}
 		return nil
 	}
@@ -112,7 +120,9 @@ func newSatellitePiCodexLogoutCmd() *cobra.Command {
 		if _, err := parsePiCodexStatus(out); err != nil {
 			return err
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), "Guest-local Pi credential deleted. This does not revoke upstream OAuth authority or guarantee secure erasure.")
+		fmt.Fprintln(cmd.OutOrStdout(), "Guest-local Pi credential deleted.")
+		fmt.Fprintln(cmd.OutOrStdout(), upstreamRevocationGuidance)
+		fmt.Fprintln(cmd.OutOrStdout(), "Any pre-existing image, snapshot, clone, or backup may still contain the credential and must not be used as a base image.")
 		return nil
 	}
 	return cmd

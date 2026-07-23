@@ -51,6 +51,14 @@ func TestPiCodexRemoteCommandEnforcesGuestLocalSafety(t *testing.T) {
 	}
 }
 
+func TestPiCodexAuthMessagingSeparatesSnapshotAndRevocationPolicy(t *testing.T) {
+	for _, want := range []string{"never create an image, snapshot, or clone", "cannot enforce direct Tart", "no supported Pi provider revoke callback", "revoke separately"} {
+		if !strings.Contains(authenticatedGuestSnapshotPolicy+"\n"+upstreamRevocationGuidance, want) {
+			t.Errorf("auth hardening guidance missing %q", want)
+		}
+	}
+}
+
 func TestSatelliteAuthCommandShape(t *testing.T) {
 	root := newSatelliteAuthCmd()
 	if root.Use != "auth" {
