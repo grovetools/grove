@@ -91,6 +91,7 @@ func TestPiRuntimeInstallScriptPinsAndActivatesSafely(t *testing.T) {
 		"sha256/$manifest_hash",
 		"settings+'.staged-'",
 		"settings+'.previous'",
+		"if(fs.existsSync(settings)){ fs.copyFileSync(settings,settings+'.previous'); fs.chmodSync(settings+'.previous',0o600); }",
 		"trap cleanup_runtime_install EXIT",
 		"cp \"$settings.previous\" \"$settings\"",
 		"GROVE_PI_HEALTH_FILE",
