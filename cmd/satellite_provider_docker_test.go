@@ -40,7 +40,7 @@ func TestDockerProviderRegistration(t *testing.T) {
 	if p.DefaultSatelliteKind() != satelliteKindExec {
 		t.Errorf("docker DefaultSatelliteKind() = %q, want %q", p.DefaultSatelliteKind(), satelliteKindExec)
 	}
-	if p.UsesBootstrapScript() {
+	if p.UsesBootstrapScript(satelliteKindExec) {
 		t.Error("docker UsesBootstrapScript() = true, want false")
 	}
 

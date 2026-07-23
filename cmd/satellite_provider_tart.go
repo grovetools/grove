@@ -2,8 +2,8 @@ package cmd
 
 // The tart satellite provider — local Apple-Silicon VMs via the tart CLI
 // (github.com/cirruslabs/tart), linux guests only in this slice. Unlike gcp
-// there is no terraform and no bootstrap script: the provider clones a cached
-// OCI image, runs the VM detached, and performs a layer-0 auth bootstrap
+// there is no terraform: the provider clones a cached OCI image, runs the VM
+// detached, and performs a layer-0 auth bootstrap
 // (dedicated ed25519 key installed over the image's default password auth,
 // which is then disabled), after which the shared `up` verb provisions the
 // exec-kind satellite client-side from a locally cross-built stack
@@ -38,10 +38,16 @@ import (
 	"time"
 
 	gossh "golang.org/x/crypto/ssh"
+
+	"github.com/grovetools/grove/pkg/satellitecontract"
 )
 
 // tartSatelliteTarget is the infra target name the provider registers under.
 const tartSatelliteTarget = "tart"
+
+// Full Tart deliberately has no advertised flag. Phase 1 is exercised only
+// when this explicit test/operator gate is present; Phase 2 removes the gate.
+const fullTartExperimentalEnv = "GROVE_EXPERIMENTAL_FULL_TART"
 
 // defaultTartImage is the guest image cloned when neither --image nor
 // [satellites.<name>.infra] image is set: Ubuntu 24.04 arm64, boots to sshd
@@ -86,10 +92,11 @@ func (p *tartSatelliteProvider) Kind() string { return p.target }
 // bootstrap script, which this provider does not run (a later slice).
 func (p *tartSatelliteProvider) DefaultSatelliteKind() string { return satelliteKindExec }
 
-// UsesBootstrapScript: no — tart satellites are provisioned client-side (the
-// shared verb's prebuilt path), and the provider's layer-0 bootstrap does the
-// minimal guest prep itself.
-func (p *tartSatelliteProvider) UsesBootstrapScript() bool { return false }
+// UsesBootstrapScript is kind-aware: exec remains client-side/prebuilt only;
+// experimental full runs the shared full-node bootstrap after Tart guest prep.
+func (p *tartSatelliteProvider) UsesBootstrapScript(kind string) bool {
+	return kind == satelliteKindFull
+}
 
 // DefaultPrebuiltTarget: the tart linux guest's arch — Apple Silicon hosts
 // run arm64 guests (the value the shared verb hardcoded before the hook).
@@ -107,7 +114,29 @@ func (p *tartSatelliteProvider) PrepareUp(opts *satelliteUpOptions) error {
 	if _, err := exec.LookPath("tart"); err != nil {
 		return fmt.Errorf("tart not found on PATH — install it with `brew install cirruslabs/cli/tart`: %w", err)
 	}
-	opts.Infra.TartHome = resolveTartHome(opts.Infra.TartHome)
+	if opts.SatelliteKind == satelliteKindFull {
+		if os.Getenv(fullTartExperimentalEnv) != "1" {
+			return fmt.Errorf("full Tart satellites are experimental and cannot be exposed until record-return safety lands; set %s=1 only for controlled Phase-1 testing", fullTartExperimentalEnv)
+		}
+		if filepath.Clean(expandUserPath(opts.Infra.TartHome)) != satellitecontract.ExpectedTartHome {
+			return fmt.Errorf("full Tart requires --tart-home %s (no environment/default fallback)", satellitecontract.ExpectedTartHome)
+		}
+		opts.Infra.TartHome = satellitecontract.ExpectedTartHome
+		facts, err := inspectTartHostVolume()
+		if err != nil {
+			return fmt.Errorf("full Tart host preflight: %w", err)
+		}
+		expectedIdentity := opts.Infra.TartVolumeIdentity
+		if expectedIdentity == "" {
+			expectedIdentity = facts.MountIdentity
+		}
+		if err := satellitecontract.ValidateTartVolume(facts, expectedIdentity, opts.CapacityPlan.Host); err != nil {
+			return fmt.Errorf("full Tart host preflight (before clone): %w", err)
+		}
+		opts.Infra.TartVolumeIdentity = expectedIdentity
+	} else {
+		opts.Infra.TartHome = resolveTartHome(opts.Infra.TartHome)
+	}
 	p.image = opts.Infra.Image
 	if p.image == "" {
 		p.image = defaultTartImage
@@ -138,6 +167,7 @@ func (p *tartSatelliteProvider) Up(ctx context.Context, opts *satelliteUpOptions
 	if p.image == "" {
 		return satelliteEndpoint{}, fmt.Errorf("tart satellite provider: Up called without PrepareUp")
 	}
+	full := opts.SatelliteKind == satelliteKindFull
 	// Shared fail-fast work (the verb resolves nothing here for tart today,
 	// but honor the contract).
 	if opts.PostConfirm != nil {
@@ -162,6 +192,9 @@ func (p *tartSatelliteProvider) Up(ctx context.Context, opts *satelliteUpOptions
 				"tart VM %q already exists but is not recorded as satellite %q's VM in the grove state file — refusing to adopt it (delete it with `tart delete %s` or pick another satellite name)",
 				vmName, opts.Name, vmName)
 		}
+		if entries[opts.Name].effectiveKind() != opts.SatelliteKind {
+			return satelliteEndpoint{}, fmt.Errorf("tart VM %q is recorded as kind %q, not requested kind %q — refusing an in-place kind conversion; destroy and recreate it", vmName, entries[opts.Name].effectiveKind(), opts.SatelliteKind)
+		}
 		if existing.Running {
 			fmt.Printf("Local tart VM %q is already running — reusing it.\n", vmName)
 		} else {
@@ -180,13 +213,18 @@ func (p *tartSatelliteProvider) Up(ctx context.Context, opts *satelliteUpOptions
 		// ours-check above must still recognize the VM, and `down` must be
 		// able to find it. The shared verb overwrites this partial entry
 		// with the full one on success and removes it on `down`.
-		if entries, serr := loadSatelliteState(); serr == nil {
-			stamp := entries[opts.Name]
-			stamp.ProviderRef = tartProviderRef(vmName)
-			stamp.Kind = satelliteKindExec
-			if err := upsertSatelliteState(opts.Name, stamp); err != nil {
-				fmt.Printf("warning: could not stamp the satellite state entry (a failed `up` re-run will not recognize the VM as grove-created): %v\n", err)
-			}
+		entries, serr := loadSatelliteState()
+		if serr != nil {
+			_ = tartCommand(opts.Infra, "delete", vmName).Run()
+			return satelliteEndpoint{}, fmt.Errorf("load partial-up state after clone (VM deleted): %w", serr)
+		}
+		stamp := entries[opts.Name]
+		stamp.ProviderRef = tartProviderRef(vmName)
+		stamp.ProviderTartHome = opts.Infra.TartHome
+		stamp.Kind = opts.SatelliteKind
+		if err := upsertSatelliteState(opts.Name, stamp); err != nil {
+			_ = tartCommand(opts.Infra, "delete", vmName).Run()
+			return satelliteEndpoint{}, fmt.Errorf("persist provider_ref and TART_HOME immediately after clone (VM deleted): %w", err)
 		}
 		if err := p.startVM(opts, vmName); err != nil {
 			return satelliteEndpoint{}, err
@@ -210,7 +248,10 @@ func (p *tartSatelliteProvider) Up(ctx context.Context, opts *satelliteUpOptions
 	if err != nil {
 		return satelliteEndpoint{}, fmt.Errorf("ssh-keyscan host-key pin: %w", err)
 	}
-	if err := tartLayer0Bootstrap(ip, hostKey, keyPath, opts.Name); err != nil {
+	if full {
+		fmt.Println("warning: this Tart image carries clone-shared SSH host keys; Grove pins the key, but clone identity is not yet unique")
+	}
+	if err := tartLayer0Bootstrap(ip, hostKey, keyPath, opts.Name, full); err != nil {
 		return satelliteEndpoint{}, fmt.Errorf("layer-0 ssh bootstrap of %s: %w", vmName, err)
 	}
 
@@ -230,6 +271,11 @@ func (p *tartSatelliteProvider) Up(ctx context.Context, opts *satelliteUpOptions
 func (p *tartSatelliteProvider) Down(ctx context.Context, opts *satelliteDownOptions) error {
 	if _, err := exec.LookPath("tart"); err != nil {
 		return fmt.Errorf("tart not found on PATH — install it with `brew install cirruslabs/cli/tart`: %w", err)
+	}
+	if opts.Infra.TartHome == "" {
+		if entry := loadMergedSatellites()[opts.Name]; entry.ProviderTartHome != "" {
+			opts.Infra.TartHome = entry.ProviderTartHome
+		}
 	}
 	opts.Infra.TartHome = resolveTartHome(opts.Infra.TartHome)
 
@@ -519,7 +565,7 @@ func ensureTartSatelliteKey(satName string) (string, error) {
 // with the image's default password AND the keyscanned host key pinned (never
 // TOFU, C2). Idempotent: when the dedicated key already authenticates and the
 // grove sshd drop-in is in place (a restarted VM), it does nothing.
-func tartLayer0Bootstrap(ip, hostKey, keyPath, satName string) error {
+func tartLayer0Bootstrap(ip, hostKey, keyPath, satName string, full bool) error {
 	pub, err := os.ReadFile(keyPath + ".pub")
 	if err != nil {
 		return err
@@ -547,15 +593,18 @@ func tartLayer0Bootstrap(ip, hostKey, keyPath, satName string) error {
 		}
 	}
 
-	// Idempotency probe: key auth working + drop-in present = bootstrapped.
+	// Idempotency probe: full prep is complete only when its startup sentinel
+	// exists; an exec-prepared clone must not satisfy a later full request.
 	if client, err := gossh.Dial("tcp", ip+":22", baseConfig(gossh.PublicKeys(signer))); err == nil {
 		defer func() { _ = client.Close() }()
-		if _, err := tartSSHOutput(client, "test -f /etc/ssh/sshd_config.d/00-grove.conf"); err == nil {
-			return nil // restart of an existing VM — nothing to redo
+		probe := "test -f /etc/ssh/sshd_config.d/00-grove.conf"
+		if full {
+			probe += " && test -f /var/lib/grove-satellite/startup-done"
 		}
-		// Key auth works but the drop-in is missing (interrupted bootstrap):
-		// finish the guest config over the key-authed connection.
-		return tartConfigureGuest(client, pubLine)
+		if _, err := tartSSHOutput(client, probe); err == nil {
+			return nil
+		}
+		return tartConfigureGuest(client, pubLine, full)
 	}
 
 	// Fresh VM: the image's default password is the only way in.
@@ -565,14 +614,28 @@ func tartLayer0Bootstrap(ip, hostKey, keyPath, satName string) error {
 	}
 	defer func() { _ = client.Close() }()
 	fmt.Printf("Installing the satellite ssh key and disabling password auth on the guest...\n")
-	return tartConfigureGuest(client, pubLine)
+	return tartConfigureGuest(client, pubLine, full)
 }
 
 // tartConfigureGuest applies the layer-0 guest state: authorized_keys entry,
 // the FIRST-sorting sshd drop-in disabling password auth, the minimal exec
 // guest prep the gcp bootstrap normally provides (grove bin dir + login-shell
 // PATH), and a final `sync` so a subsequent stop cannot lose the changes.
-func tartConfigureGuest(client *gossh.Client, pubLine string) error {
+func tartConfigureGuest(client *gossh.Client, pubLine string, full bool) error {
+	fullPrep := ""
+	if full {
+		fullPrep = `
+# Full-node prerequisites. Keep this idempotent and write startup-done LAST:
+# the shared bootstrap treats that sentinel as proof all prep completed.
+sudo mkdir -p /var/lib/grove-satellite
+sudo rm -f /var/lib/grove-satellite/startup-done
+sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq
+sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl jq git ca-certificates
+sudo loginctl enable-linger "$(id -un)"
+sudo install -d -m 0755 /var/lib/grove-satellite
+printf 'full-tart-v1\n' | sudo tee /var/lib/grove-satellite/startup-done >/dev/null
+`
+	}
 	script := fmt.Sprintf(`set -eu
 umask 077
 mkdir -p "$HOME/.ssh"
@@ -587,9 +650,10 @@ sudo systemctl reload ssh
 # dir the prebuilt install targets, and a login-shell PATH that includes it.
 mkdir -p "$HOME/.local/share/grove/bin"
 printf 'export PATH="$HOME/.local/share/grove/bin:$PATH"\n' | sudo tee /etc/profile.d/grove-satellite.sh >/dev/null
+%[2]s
 # tart stop is effectively a hard poweroff; sync so none of the above is lost.
 sync
-`, pubLine)
+`, pubLine, fullPrep)
 	if out, err := tartSSHOutput(client, script); err != nil {
 		return fmt.Errorf("guest configuration script: %w: %s", err, strings.TrimSpace(out))
 	}

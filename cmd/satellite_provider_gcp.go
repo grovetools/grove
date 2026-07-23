@@ -42,7 +42,7 @@ func (p *gcpSatelliteProvider) DefaultSatelliteKind() string { return satelliteK
 
 // UsesBootstrapScript: yes — the shared verb runs the embedded bootstrap
 // script against the fresh VM, exactly the pre-seam behavior.
-func (p *gcpSatelliteProvider) UsesBootstrapScript() bool { return true }
+func (p *gcpSatelliteProvider) UsesBootstrapScript(_ string) bool { return true }
 
 // DefaultPrebuiltTarget mirrors the `up --prebuilt-target` flag default (the
 // gcp VMs are amd64). Not consulted today — the shared verb only asks

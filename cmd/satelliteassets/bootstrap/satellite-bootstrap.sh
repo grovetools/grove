@@ -59,7 +59,7 @@ set -euo pipefail
 CLAUDE_INSTALL_URL="https://claude.ai/install.sh"
 
 usage() {
-  echo "usage: $0 <ssh-destination> [--gh-token-stdin] [--claude] [--claude-token-stdin] [--dotfiles-repo <url>] [--workspaces <a,b>] [--prebuilt --syncd-unit <path>]" >&2
+  echo "usage: $0 <ssh-destination> [--gh-token-stdin] [--claude] [--claude-token-stdin] [--dotfiles-repo <url>] [--workspaces <a,b>] [--prebuilt --syncd-unit <path>] [--ssh-identity <path> --ssh-known-hosts <path> --ssh-host-key-algorithm <name> --ssh-port <port>]" >&2
   exit 2
 }
 
@@ -73,6 +73,10 @@ DOTFILES_REPO=""
 WORKSPACES="cloud,grovetools"
 PREBUILT=false
 SYNCD_UNIT=""
+SSH_IDENTITY=""
+SSH_KNOWN_HOSTS=""
+SSH_HOST_KEY_ALGORITHM=""
+SSH_PORT="22"
 while [ $# -gt 0 ]; do
   case "$1" in
     --gh-token-stdin) GH_TOKEN_STDIN=true ;;
@@ -95,6 +99,16 @@ while [ $# -gt 0 ]; do
     --syncd-unit)
       [ $# -ge 2 ] || usage
       SYNCD_UNIT="$2"
+      shift
+      ;;
+    --ssh-identity | --ssh-known-hosts | --ssh-host-key-algorithm | --ssh-port)
+      [ $# -ge 2 ] || usage
+      case "$1" in
+        --ssh-identity) SSH_IDENTITY="$2" ;;
+        --ssh-known-hosts) SSH_KNOWN_HOSTS="$2" ;;
+        --ssh-host-key-algorithm) SSH_HOST_KEY_ALGORITHM="$2" ;;
+        --ssh-port) SSH_PORT="$2" ;;
+      esac
       shift
       ;;
     *) usage ;;
@@ -151,7 +165,17 @@ elif $CLAUDE_TOKEN_STDIN; then
   [ -n "$SECRET_CLAUDE_TOKEN" ] || { echo "--claude-token-stdin: no token on stdin" >&2; exit 2; }
 fi
 
-SSH=(ssh -o StrictHostKeyChecking=accept-new "$DEST")
+SSH=(ssh -p "$SSH_PORT")
+if [ -n "$SSH_KNOWN_HOSTS" ]; then
+  [ -n "$SSH_HOST_KEY_ALGORITHM" ] || { echo "--ssh-known-hosts requires --ssh-host-key-algorithm" >&2; exit 2; }
+  SSH+=( -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS" -o GlobalKnownHostsFile=/dev/null -o "HostKeyAlgorithms=$SSH_HOST_KEY_ALGORITHM" )
+else
+  SSH+=( -o StrictHostKeyChecking=accept-new )
+fi
+if [ -n "$SSH_IDENTITY" ]; then
+  SSH+=( -o IdentitiesOnly=yes -i "$SSH_IDENTITY" )
+fi
+SSH+=( "$DEST" )
 # Remote steps run as login shells so /etc/profile.d/grove-satellite.sh
 # (go, zig, grove bin dirs) is on PATH.
 rsh() { "${SSH[@]}" 'bash -l -s'; }
@@ -176,11 +200,12 @@ log "[2/8] GitHub auth on the VM"
 if $GH_TOKEN_STDIN; then
   # the token travels on gh's stdin on the VM — never in argv
   printf '%s\n' "$SECRET_GH_TOKEN" | "${SSH[@]}" 'gh auth login --hostname github.com --with-token'
+  "${SSH[@]}" 'gh auth status --hostname github.com && gh auth setup-git --hostname github.com'
+else
+  echo "no GitHub token requested — continuing without guest GitHub credentials" >&2
 fi
 rsh <<'REMOTE'
 set -euo pipefail
-gh auth status --hostname github.com
-gh auth setup-git --hostname github.com
 # .gitmodules mixes scp-style (git@github.com:) and ssh:// URLs; rewrite
 # both to https so the gh credential helper covers submodule clones too.
 # add-if-missing keeps this idempotent (plain set errors on multi-values).

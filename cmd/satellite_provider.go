@@ -6,7 +6,7 @@ package cmd
 // option loading/validation, bootstrap, host-key pin, registry/state writes,
 // config push, repo mirror, sync finishing, daemon reload. Infra targets
 // resolve through the provider registry below; gcp (terraform, full-stack
-// default), tart (local Apple-Silicon VMs, exec-only, no bootstrap script),
+// default), tart (local Apple-Silicon VMs, exec by default with gated full),
 // and docker (local containers, exec-only, no bootstrap script) are the
 // providers today. The gcp embedded-terraform target resolution is a
 // gcp-private detail behind the seam.
@@ -47,6 +47,12 @@ type satelliteEndpoint struct {
 type satelliteUpOptions struct {
 	// Name is the satellite name (gcp: terraform var vm_name).
 	Name string
+	// SatelliteKind is the already-resolved full/exec kind. Providers use it
+	// for kind-specific preparation without changing their default kind.
+	SatelliteKind string
+	// CapacityPlan is calculated by the shared verb before provider creation.
+	// Full Tart consumes both observations; other targets intentionally ignore it.
+	CapacityPlan satelliteCapacityPlan
 	// Infra is the merged [satellites.<name>.infra] block, flags already
 	// applied.
 	Infra satelliteInfraConfig
@@ -89,11 +95,9 @@ type satelliteProvider interface {
 	// resolves to (gcp: satelliteKindFull; tart: satelliteKindExec).
 	DefaultSatelliteKind() string
 	// UsesBootstrapScript reports whether the shared `up` verb runs the
-	// embedded bootstrap script against the machine (gcp: true). Providers
-	// without it (tart: false) are provisioned client-side instead: the verb
-	// implies --prebuilt, restricts the satellite to exec kind, and the
-	// provider itself performs the minimal guest prep over ssh.
-	UsesBootstrapScript() bool
+	// embedded bootstrap for the resolved kind. GCP keeps its historical true
+	// behavior; Tart is false for exec and true for experimental full.
+	UsesBootstrapScript(kind string) bool
 	// DefaultPrebuiltTarget is the <goos>/<goarch> cross-compile target the
 	// shared verb builds the implied-prebuilt stack for when
 	// --prebuilt-target is not given: the arch of the machine the provider

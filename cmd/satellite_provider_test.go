@@ -22,7 +22,7 @@ func TestSatelliteProviderFor(t *testing.T) {
 		if p.DefaultSatelliteKind() != satelliteKindFull {
 			t.Errorf("gcp DefaultSatelliteKind() = %q, want %q", p.DefaultSatelliteKind(), satelliteKindFull)
 		}
-		if !p.UsesBootstrapScript() {
+		if !p.UsesBootstrapScript(satelliteKindFull) {
 			t.Error("gcp UsesBootstrapScript() = false, want true")
 		}
 	}
@@ -37,8 +37,11 @@ func TestSatelliteProviderFor(t *testing.T) {
 	if tp.DefaultSatelliteKind() != satelliteKindExec {
 		t.Errorf("tart DefaultSatelliteKind() = %q, want %q", tp.DefaultSatelliteKind(), satelliteKindExec)
 	}
-	if tp.UsesBootstrapScript() {
-		t.Error("tart UsesBootstrapScript() = true, want false")
+	if tp.UsesBootstrapScript(satelliteKindExec) {
+		t.Error("tart UsesBootstrapScript(exec) = true, want false")
+	}
+	if !tp.UsesBootstrapScript(satelliteKindFull) {
+		t.Error("tart UsesBootstrapScript(full) = false, want true")
 	}
 
 	_, err = satelliteProviderFor("vsphere")

@@ -84,6 +84,7 @@ func AllScenarios() []*harness.Scenario {
 		// TEND_SATELLITE_LIFECYCLE=1 (cheap pass-with-NOTICE otherwise) —
 		// see tests/scenarios_satellite_lifecycle.go.
 		SatelliteTartLifecycleScenario(),
+		SatelliteTartFullLifecycleScenario(),
 		SatelliteDockerLifecycleScenario(),
 	}
 }
