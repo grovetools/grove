@@ -54,6 +54,10 @@ type satelliteInfraConfig struct {
 	// tart's own default) and persists it, so `down` drives the same store
 	// even from a shell whose environment differs.
 	TartHome string `yaml:"tart_home"`
+	// TartVolumeIdentity pins the external volume observed by the first full
+	// Tart preflight (Volume UUID, with device identifier as a fallback).
+	// Later ups refuse a different volume mounted at the same path.
+	TartVolumeIdentity string `yaml:"tart_volume_identity"`
 }
 
 // loadSatelliteInfra reads [satellites.<name>.infra] from the same layered
@@ -187,6 +191,9 @@ func writeSatelliteInfra(name string, infra satelliteInfraConfig) error {
 	}
 	if infra.TartHome != "" {
 		values["tart_home"] = infra.TartHome
+	}
+	if infra.TartVolumeIdentity != "" {
+		values["tart_volume_identity"] = infra.TartVolumeIdentity
 	}
 	if err := setup.SetValue(root, values, "satellites", name, "infra"); err != nil {
 		return err

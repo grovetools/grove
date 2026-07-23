@@ -200,6 +200,9 @@ func mergeSatelliteEntries(fromConfig, fromState map[string]satelliteConfigEntry
 			// snapshot is the truth for which machine the provider created.
 			out.ProviderRef = st.ProviderRef
 		}
+		if st.ProviderTartHome != "" {
+			out.ProviderTartHome = st.ProviderTartHome
+		}
 		if out.User == "" {
 			out.User = st.User
 		}

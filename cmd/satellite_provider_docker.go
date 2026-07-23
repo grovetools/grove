@@ -92,7 +92,7 @@ func (p *dockerSatelliteProvider) DefaultSatelliteKind() string { return satelli
 // UsesBootstrapScript: no — docker satellites are provisioned client-side
 // (the shared verb's prebuilt path); the embedded image already contains the
 // minimal guest prep the tart layer-0 bootstrap performs over ssh.
-func (p *dockerSatelliteProvider) UsesBootstrapScript() bool { return false }
+func (p *dockerSatelliteProvider) UsesBootstrapScript(_ string) bool { return false }
 
 // DefaultPrebuiltTarget asks the docker daemon for its platform: containers
 // run on the daemon's kernel/arch (Docker Desktop on Apple Silicon:

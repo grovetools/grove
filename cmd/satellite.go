@@ -70,6 +70,9 @@ type satelliteConfigEntry struct {
 	// recognize the machine as grove-created (tart's restart-vs-collision
 	// check). The daemon ignores the key.
 	ProviderRef string `yaml:"provider_ref,omitempty" json:"provider_ref,omitempty"`
+	// ProviderTartHome is partial-up recovery state, persisted atomically with
+	// provider_ref as soon as a Tart VM exists. It is not daemon configuration.
+	ProviderTartHome string `yaml:"-" json:"provider_tart_home,omitempty"`
 }
 
 // Satellite kinds (the satelliteConfigEntry.Kind axis) — CLI-local mirror of
@@ -367,10 +370,11 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		// Providers without a bootstrap script (tart) are provisioned
 		// client-side: --prebuilt is implied (bare image + locally
 		// cross-built stack; spec decision), the default cross-build target
-		// is the tart linux guest's arch, and only exec kind is possible —
-		// the full stack (groved, syncd, systemd units) is bootstrap's job.
-		usesBootstrap := provider.UsesBootstrapScript()
-		if !usesBootstrap {
+		// is the guest's arch. Tart full also uses this path, then runs the
+		// shared bootstrap; exec Tart and Docker still skip that bootstrap.
+		usesBootstrap := provider.UsesBootstrapScript(resolvedKind)
+		impliesPrebuilt := !usesBootstrap || provider.Kind() == tartSatelliteTarget
+		if impliesPrebuilt {
 			if cmd.Flags().Changed("prebuilt") && !prebuilt {
 				return fmt.Errorf("--prebuilt=false contradicts the %q target: it always provisions from a locally cross-built stack (--prebuilt is implied)", provider.Kind())
 			}
@@ -387,12 +391,14 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 				}
 				prebuiltTarget = dt
 			}
-			if !execKind {
-				return fmt.Errorf("--kind %s is not supported by the %q target yet: no bootstrap script runs, so no groved/sync stack is provisioned — use --kind exec (the default)", resolvedKind, provider.Kind())
-			}
-			for _, f := range []string{"gh-token-cmd", "claude", "claude-token-cmd", "dotfiles-repo"} {
-				if cmd.Flags().Changed(f) {
-					return fmt.Errorf("--%s needs the bootstrap script, which the %q target does not run", f, provider.Kind())
+			if !usesBootstrap {
+				if !execKind {
+					return fmt.Errorf("--kind %s is not supported by the %q target: no bootstrap script runs", resolvedKind, provider.Kind())
+				}
+				for _, f := range []string{"gh-token-cmd", "claude", "claude-token-cmd", "dotfiles-repo"} {
+					if cmd.Flags().Changed(f) {
+						return fmt.Errorf("--%s needs the bootstrap script, which the %q target does not run", f, provider.Kind())
+					}
 				}
 			}
 		}
@@ -499,8 +505,17 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		// Provider preparation (gcp: terraform dir resolution + variables.tf
 		// sanity check) — validation only, still BEFORE the confirm prompt
 		// and machine creation, same fail-fast order as always.
+		var capacityPlan satelliteCapacityPlan
+		if provider.Kind() == tartSatelliteTarget && !execKind {
+			capacityPlan, err = calculateFullTartCapacityPlan(sourceAbs)
+			if err != nil {
+				return err
+			}
+		}
 		upOpts := &satelliteUpOptions{
 			Name:                name,
+			SatelliteKind:       resolvedKind,
+			CapacityPlan:        capacityPlan,
 			Infra:               infra,
 			TFDir:               tfDir,
 			AssumeYes:           assumeYes,
@@ -548,6 +563,7 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		// the infra write-back below.
 		infra.CIDR = upOpts.Infra.CIDR
 		infra.TartHome = upOpts.Infra.TartHome
+		infra.TartVolumeIdentity = upOpts.Infra.TartVolumeIdentity
 		ip, err := satelliteEndpointHost(endpoint)
 		if err != nil {
 			return err
@@ -571,6 +587,7 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		//     (unlike upgrade, where the old binaries keep running), so any
 		//     install failure aborts here rather than proceeding to bootstrap.
 		var syncdUnitRemotePath string
+		var bootstrapSSH *satelliteSSH
 		prebuiltStart := time.Now()
 		if prebuilt {
 			// Transport identity comes from the provider's endpoint (gcp:
@@ -591,8 +608,14 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 			}
 			// sshd answering keyscan ≠ auth ready: on a fresh VM the guest
 			// agent writes authorized_keys from metadata seconds after boot.
+			bootstrapSSH = ssh
 			if err := waitForSatelliteSSHAuth(ssh, 3*time.Minute); err != nil {
 				return err
+			}
+			if provider.Kind() == tartSatelliteTarget && !execKind {
+				if err := validateFullTartGuestCapacity(ssh, capacityPlan.Guest); err != nil {
+					return err
+				}
 			}
 			// Ship the grove-syncd systemd unit sourced from the ecosystem
 			// worktree (no source tree on the VM to copy it from). Its remote
@@ -663,7 +686,17 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 					provArgs = append(provArgs, "--syncd-unit", syncdUnitRemotePath)
 				}
 			}
-			bootstrapArgs := append([]string{bootstrapScript, endpoint.User + "@" + ip}, provArgs...)
+			bootstrapArgs := []string{bootstrapScript, endpoint.User + "@" + ip}
+			if bootstrapSSH != nil {
+				bootstrapArgs = append(bootstrapArgs,
+					"--ssh-known-hosts", bootstrapSSH.knownHosts,
+					"--ssh-host-key-algorithm", bootstrapSSH.hostKeyAlgo,
+					"--ssh-port", bootstrapSSH.port)
+				if bootstrapSSH.identityFile != "" {
+					bootstrapArgs = append(bootstrapArgs, "--ssh-identity", bootstrapSSH.identityFile)
+				}
+			}
+			bootstrapArgs = append(bootstrapArgs, provArgs...)
 			if err := runInheritedWithStdin(endpoint.LocalRunDir, secretStdin, "bash", bootstrapArgs...); err != nil {
 				return fmt.Errorf("satellite bootstrap: %w", err)
 			}
@@ -677,6 +710,9 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 			User:        endpoint.User,
 			HostKey:     hostKey,
 			ProviderRef: endpoint.ProviderRef,
+		}
+		if provider.Kind() == tartSatelliteTarget {
+			entry.ProviderTartHome = upOpts.Infra.TartHome
 		}
 		if endpoint.IdentityFile != "" {
 			entry.IdentityFile = expandUserPath(endpoint.IdentityFile)
@@ -705,10 +741,18 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		//     just scanned — never TOFU (C2). Exec satellites run no groved —
 		//     no socket to probe.
 		if !execKind {
-			if socketPath, exists, probeErr := probeSatelliteSocketPath(entry); probeErr != nil {
+			socketPath, exists, probeErr := probeSatelliteSocketPath(entry)
+			strictFullTart := provider.Kind() == tartSatelliteTarget
+			if probeErr != nil {
+				if strictFullTart {
+					return fmt.Errorf("full Tart groved socket health check failed (VM remains recorded as a partial up): %w", probeErr)
+				}
 				fmt.Printf("(could not probe remote groved socket path, leaving socket_path unset: %v)\n", probeErr)
 			} else {
 				if !exists {
+					if strictFullTart {
+						return fmt.Errorf("full Tart groved socket %s is absent after bootstrap (VM remains recorded as a partial up)", socketPath)
+					}
 					fmt.Printf("(remote socket %s not present yet — groved may still be starting; writing the path anyway)\n", socketPath)
 				}
 				entry.SocketPath = socketPath
@@ -899,6 +943,9 @@ func newSatelliteDownCmd() *cobra.Command {
 		// into the infra block): without it a `down` shell whose TART_HOME
 		// differs finds no VM, reports "nothing to delete", and orphans the VM
 		// in the other store while the state entry is removed below.
+		if entry.ProviderTartHome != "" {
+			infraCfg.TartHome = entry.ProviderTartHome
+		}
 		if cmd.Flags().Changed("tart-home") {
 			infraCfg.TartHome = tartHome
 		}
@@ -1432,6 +1479,9 @@ func renderSatelliteInfraTOML(name string, infra satelliteInfraConfig) string {
 	if infra.TartHome != "" {
 		fmt.Fprintf(&table, "tart_home = %q\n", infra.TartHome)
 	}
+	if infra.TartVolumeIdentity != "" {
+		fmt.Fprintf(&table, "tart_volume_identity = %q\n", infra.TartVolumeIdentity)
+	}
 	return table.String()
 }
 
@@ -1457,6 +1507,7 @@ func satelliteInfraDriftMessage(name string, fromConfig, resolved satelliteInfra
 		{"identity_file", fromConfig.IdentityFile, resolved.IdentityFile},
 		{"image", fromConfig.Image, resolved.Image},
 		{"tart_home", fromConfig.TartHome, resolved.TartHome},
+		{"tart_volume_identity", fromConfig.TartVolumeIdentity, resolved.TartVolumeIdentity},
 	} {
 		if f.cfg != f.res {
 			fmt.Fprintf(&b, "  %s: %q -> %q\n", f.key, f.cfg, f.res)

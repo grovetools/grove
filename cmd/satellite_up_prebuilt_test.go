@@ -181,6 +181,9 @@ func TestBootstrapScriptEmbedsPrebuiltBranches(t *testing.T) {
 	assertBashParses(t, script)
 	for _, marker := range []string{
 		"--prebuilt)",
+		"--ssh-known-hosts |",
+		"StrictHostKeyChecking=yes",
+		"no GitHub token requested — continuing without guest GitHub credentials",
 		"--syncd-unit)",
 		"requires --syncd-unit",
 		"preparing empty ecosystem root (repos arrive via 'grove satellite repos push')",

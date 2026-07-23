@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/grovetools/tend/pkg/command"
 	"github.com/grovetools/tend/pkg/harness"
 	"github.com/grovetools/tend/pkg/verify"
 )
@@ -53,7 +54,8 @@ import (
 const (
 	// satLifecycleEnv is the opt-in gate: unset/anything-but-1 means the
 	// lifecycle scenarios pass-with-NOTICE without touching any provider.
-	satLifecycleEnv = "TEND_SATELLITE_LIFECYCLE"
+	satLifecycleEnv     = "TEND_SATELLITE_LIFECYCLE"
+	satFullLifecycleEnv = "TEND_FULL_TART_LIFECYCLE"
 	// satelliteLifecycleTag marks the lifecycle scenarios so the inner-run
 	// selection (satellite tag minus this tag) can never recurse.
 	satelliteLifecycleTag = "satellite-lifecycle"
@@ -69,20 +71,30 @@ const (
 // SatelliteTartLifecycleScenario: full up → real-mode suite → down cycle
 // against a local tart VM (Apple Silicon hosts).
 func SatelliteTartLifecycleScenario() *harness.Scenario {
-	return satelliteLifecycleScenario("tart")
+	return satelliteLifecycleScenario("tart", false)
+}
+
+// SatelliteTartFullLifecycleScenario is a separately gated Phase-1 run using
+// the fixed external Tart store and the unadvertised experiment gate.
+func SatelliteTartFullLifecycleScenario() *harness.Scenario {
+	return satelliteLifecycleScenario("tart", true)
 }
 
 // SatelliteDockerLifecycleScenario: the same cycle against a local docker
 // container (any host with a reachable docker daemon).
 func SatelliteDockerLifecycleScenario() *harness.Scenario {
-	return satelliteLifecycleScenario("docker")
+	return satelliteLifecycleScenario("docker", false)
 }
 
-func satelliteLifecycleScenario(target string) *harness.Scenario {
+func satelliteLifecycleScenario(target string, full bool) *harness.Scenario {
 	steps := []harness.Step{
 		harness.NewStep("Gate: lifecycle opt-in + provider availability", func(ctx *harness.Context) error {
-			if os.Getenv(satLifecycleEnv) != "1" {
-				reason := fmt.Sprintf("lifecycle scenarios boot real %s machines — set %s=1 to opt in", target, satLifecycleEnv)
+			gate := satLifecycleEnv
+			if full {
+				gate = satFullLifecycleEnv
+			}
+			if os.Getenv(gate) != "1" {
+				reason := fmt.Sprintf("lifecycle scenario boots a real %s machine — set %s=1 to opt in", target, gate)
 				ctx.Set(satKeySkip, reason)
 				fmt.Printf("NOTICE: satellite lifecycle scenario skipped — %s\n", reason)
 				return nil
@@ -105,8 +117,14 @@ func satelliteLifecycleScenario(target string) *harness.Scenario {
 			// A distinct name keeps the lifecycle machines (and their state
 			// entries, were the sandbox ever misconfigured) clearly apart
 			// from any real satellite the user runs.
-			ctx.Set(satKeyLcName, "sat-e2e-"+target)
-			ctx.Set(satKeyLcEnv, satelliteLifecycleUpEnv(target))
+			name := "sat-e2e-" + target
+			env := satelliteLifecycleUpEnv(target)
+			if full {
+				name += "-full"
+				env = append(env, "GROVE_EXPERIMENTAL_FULL_TART=1", "TART_HOME=/Volumes/solot7/tart")
+			}
+			ctx.Set(satKeyLcName, name)
+			ctx.Set(satKeyLcEnv, env)
 			return nil
 		}),
 		satStep("Provision the satellite (grove satellite up)", func(ctx *harness.Context) error {
@@ -115,7 +133,11 @@ func satelliteLifecycleScenario(target string) *harness.Scenario {
 			// --sync-workspaces "" empties the exec-kind mirror set: the
 			// inner suite ships its own fixture repos, so mirroring the real
 			// ecosystem would only add minutes of bundle traffic.
-			cmd := ctx.Bin("satellite", "up", name, "--target", target, "--yes", "--sync-workspaces", "")
+			upArgs := []string{"satellite", "up", name, "--target", target, "--yes", "--sync-workspaces", ""}
+			if full {
+				upArgs = append(upArgs, "--kind", "full", "--tart-home", "/Volumes/solot7/tart")
+			}
+			cmd := ctx.Bin(upArgs...)
 			cmd.Dir(ctx.GetString(satKeyLcRoot))
 			cmd.Env(ctx.GetStringSlice(satKeyLcEnv)...)
 			cmd.Timeout(30 * time.Minute)
@@ -141,13 +163,54 @@ func satelliteLifecycleScenario(target string) *harness.Scenario {
 			keyPath := filepath.Join(ctx.StateDir(), "grove", "satellites", name, target, "id_ed25519")
 			_, keyErr := os.Stat(keyPath)
 			return ctx.Verify(func(v *verify.Collector) {
-				v.Equal("state entry kind is exec", "exec", entry.Kind)
+				wantKind := "exec"
+				if full {
+					wantKind = "" // full is normalized to omitted/default
+				}
+				v.Equal("state entry has resolved kind", wantKind, entry.Kind)
 				v.Equal("provider_ref marks the machine grove-created", target+":grove-sat-"+name, entry.ProviderRef)
 				v.True("ssh_addr recorded", entry.SSHAddr != "")
 				v.True("host_key pinned", entry.HostKey != "")
 				v.Equal("identity_file is the provider-dir key", keyPath, entry.IdentityFile)
 				v.True("provider identity key exists on disk", keyErr == nil)
 			})
+		}),
+		satStep("Full Tart services survive a guest reboot", func(ctx *harness.Context) error {
+			if !full {
+				return nil
+			}
+			name := ctx.GetString(satKeyLcName)
+			root := ctx.GetString(satKeyLcRoot)
+			env := ctx.GetStringSlice(satKeyLcEnv)
+			check := func() *command.Result {
+				cmd := ctx.Bin("satellite", "exec", name, "--", "bash", "-lc", "sudo systemctl is-active grove-syncd && systemctl --user is-active groved && test -S /run/user/$(id -u)/grove/groved.sock")
+				cmd.Dir(root)
+				cmd.Env(env...)
+				cmd.Timeout(30 * time.Second)
+				return cmd.Run()
+			}
+			before := check()
+			if err := ctx.Check("both full services are active before reboot", before.AssertSuccess()); err != nil {
+				return err
+			}
+			reboot := ctx.Bin("satellite", "exec", name, "--", "sudo", "reboot")
+			reboot.Dir(root)
+			reboot.Env(env...)
+			reboot.Timeout(30 * time.Second)
+			_ = reboot.Run() // ssh normally exits nonzero while the guest drops
+			deadline := time.Now().Add(3 * time.Minute)
+			var after *command.Result
+			for time.Now().Before(deadline) {
+				time.Sleep(5 * time.Second)
+				after = check()
+				if after.Error == nil && after.ExitCode == 0 {
+					return nil
+				}
+			}
+			if after == nil {
+				return fmt.Errorf("no post-reboot service probe ran")
+			}
+			return fmt.Errorf("full Tart services did not recover after reboot: exit %d: %s", after.ExitCode, strings.TrimSpace(after.Stdout+after.Stderr))
 		}),
 		satStep("Real-mode satellite suite passes against the live machine", func(ctx *harness.Context) error {
 			name := ctx.GetString(satKeyLcName)
@@ -226,9 +289,14 @@ func satelliteLifecycleScenario(target string) *harness.Scenario {
 			})
 		}),
 	}
+	scenarioName, gate := "satellite-lifecycle-"+target, satLifecycleEnv
+	if full {
+		scenarioName += "-full"
+		gate = satFullLifecycleEnv
+	}
 	return harness.NewScenario(
-		"satellite-lifecycle-"+target,
-		fmt.Sprintf("Boots a real %s satellite (`up --target %s`), passes the real-mode satellite suite against it, and `down`s it to zero residue (opt-in via %s=1)", target, target, satLifecycleEnv),
+		scenarioName,
+		fmt.Sprintf("Boots a real %s satellite, passes the real-mode satellite suite against it, and downs it to zero residue (opt-in via %s=1)", target, gate),
 		[]string{"satellite", satelliteLifecycleTag, "slow"},
 		steps,
 	).WithTeardown(

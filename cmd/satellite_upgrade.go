@@ -134,6 +134,20 @@ Notes:
 			return fmt.Errorf("satellite %q is an exec-only satellite (kind %q): it runs no groved or grove-syncd for `upgrade` to restart — reinstall its prebuilt stack with `grove satellite up %s` instead", name, satelliteKindExec, name)
 		}
 
+		// Full Tart is prebuilt-only and always linux/arm64. Do not let the
+		// upgrade verb's historical GCP linux/amd64 default silently ship an
+		// incompatible binary set; GCP behavior remains unchanged.
+		fullTart := satelliteProviderRefTarget(entry.ProviderRef) == tartSatelliteTarget
+		if fullTart {
+			if !prebuilt {
+				return fmt.Errorf("full Tart satellite %q requires --prebuilt upgrades (linux/arm64); source upgrades are not supported for this target", name)
+			}
+			if cmd.Flags().Changed("target") && targetFlag != "linux/arm64" {
+				return fmt.Errorf("full Tart satellite %q requires --target linux/arm64, got %q", name, targetFlag)
+			}
+			targetFlag = "linux/arm64"
+		}
+
 		// --prebuilt target (validated up front; --target is meaningless
 		// without --prebuilt).
 		var target orch.Target

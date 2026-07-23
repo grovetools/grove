@@ -929,6 +929,24 @@ func TestSatelliteUpgradeRefusesExecKind(t *testing.T) {
 // TestSatelliteUpgradeAllowsFullKind pins the other side of the guard: a
 // full-kind satellite still proceeds past it (and then fails on the missing
 // registry-adjacent work, not on the exec refusal).
+func TestSatelliteUpgradeFullTartRequiresArm64Prebuilt(t *testing.T) {
+	setupGroveHome(t)
+	writeSatelliteStateEntry(t, "tartfull", satelliteConfigEntry{
+		SSHAddr: "192.168.64.2:22", User: "admin", HostKey: "ssh-ed25519 AAAA",
+		ProviderRef: "tart:grove-sat-tartfull",
+	})
+	t.Setenv("PATH", t.TempDir())
+
+	err := runSatelliteCmd(t, newSatelliteUpgradeCmd(), "tartfull", "--yes")
+	if err == nil || !strings.Contains(err.Error(), "requires --prebuilt upgrades (linux/arm64)") {
+		t.Fatalf("source upgrade was not refused: %v", err)
+	}
+	err = runSatelliteCmd(t, newSatelliteUpgradeCmd(), "tartfull", "--yes", "--prebuilt", "--target", "linux/amd64")
+	if err == nil || !strings.Contains(err.Error(), "requires --target linux/arm64") {
+		t.Fatalf("mismatched prebuilt target was not refused: %v", err)
+	}
+}
+
 func TestSatelliteUpgradeAllowsFullKind(t *testing.T) {
 	setupGroveHome(t)
 	writeSatelliteStateEntry(t, "gcpsat", satelliteConfigEntry{

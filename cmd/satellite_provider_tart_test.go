@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"os"
+
+	"github.com/grovetools/grove/pkg/satellitecontract"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -102,7 +104,7 @@ func TestMergeSatelliteEntriesProviderRef(t *testing.T) {
 		"sat": {User: "admin", ProviderRef: "tart:stale-vm"},
 	}
 	fromState := map[string]satelliteConfigEntry{
-		"sat":       {SSHAddr: "192.168.64.2:22", ProviderRef: "tart:grove-sat-sat"},
+		"sat":       {SSHAddr: "192.168.64.2:22", ProviderRef: "tart:grove-sat-sat", ProviderTartHome: "/Volumes/solot7/tart"},
 		"stateonly": {SSHAddr: "192.168.64.3:22", ProviderRef: "tart:grove-sat-stateonly"},
 	}
 	merged, _ := mergeSatelliteEntries(fromConfig, fromState)
@@ -111,6 +113,9 @@ func TestMergeSatelliteEntriesProviderRef(t *testing.T) {
 	}
 	if got := merged["stateonly"].ProviderRef; got != "tart:grove-sat-stateonly" {
 		t.Errorf("state-only provider_ref must pass through: %q", got)
+	}
+	if got := merged["sat"].ProviderTartHome; got != "/Volumes/solot7/tart" {
+		t.Errorf("partial-up TART_HOME must pass through with provider_ref: %q", got)
 	}
 
 	// Empty state ref leaves a config-authored one alone.
@@ -123,14 +128,14 @@ func TestMergeSatelliteEntriesProviderRef(t *testing.T) {
 // TestRenderSatelliteInfraTOMLTartFields pins the write-back/drift rendering
 // of the tart-only infra fields (omitted when empty, quoted when set).
 func TestRenderSatelliteInfraTOMLTartFields(t *testing.T) {
-	got := renderSatelliteInfraTOML("mysat", satelliteInfraConfig{Target: "tart", Image: "img:latest", TartHome: "/tank/tart"})
-	for _, want := range []string{"[satellites.mysat.infra]", `target = "tart"`, `image = "img:latest"`, `tart_home = "/tank/tart"`} {
+	got := renderSatelliteInfraTOML("mysat", satelliteInfraConfig{Target: "tart", Image: "img:latest", TartHome: "/tank/tart", TartVolumeIdentity: "volume-uuid"})
+	for _, want := range []string{"[satellites.mysat.infra]", `target = "tart"`, `image = "img:latest"`, `tart_home = "/tank/tart"`, `tart_volume_identity = "volume-uuid"`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("rendered block missing %q:\n%s", want, got)
 		}
 	}
 	got = renderSatelliteInfraTOML("mysat", satelliteInfraConfig{Target: "gcp", Project: "p", SSHUser: "u"})
-	if strings.Contains(got, "image") || strings.Contains(got, "tart_home") {
+	if strings.Contains(got, "image") || strings.Contains(got, "tart_home") || strings.Contains(got, "tart_volume_identity") {
 		t.Errorf("empty tart fields must be omitted:\n%s", got)
 	}
 }
@@ -176,6 +181,84 @@ func TestTartPrepareUpRecordsEffectiveHome(t *testing.T) {
 // TestMergeInfraTartHome pins --tart-home's flag-over-config precedence (R7:
 // the field used to be config-only, which is what made the orphaned-VM
 // mismatch unreachable by flag).
+func TestTartFullHostPreflightFailsBeforeClone(t *testing.T) {
+	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
+		t.Skipf("tart preflight requires darwin/arm64 (this is %s/%s)", runtime.GOOS, runtime.GOARCH)
+	}
+	stubTartOnPath(t)
+	t.Setenv(fullTartExperimentalEnv, "1")
+	oldInspect := inspectTartHostVolume
+	t.Cleanup(func() { inspectTartHostVolume = oldInspect })
+	budget := satelliteCapacityPlan{
+		Host:  satellitecontract.CapacityBudget{PayloadBytes: 10, GrowthBytes: 10, ReserveBytes: 10},
+		Guest: satellitecontract.CapacityBudget{PayloadBytes: 1},
+	}
+	valid := satellitecontract.VolumeFacts{
+		Mounted: true, MountPoint: satellitecontract.ExpectedTartMount,
+		MountIdentity: "volume-uuid", TartHome: satellitecontract.ExpectedTartHome,
+		Writable: true, AvailableBytes: 100,
+	}
+	cases := map[string]satellitecontract.VolumeFacts{
+		"absent":    {TartHome: satellitecontract.ExpectedTartHome},
+		"wrong":     func() satellitecontract.VolumeFacts { f := valid; f.MountIdentity = "other"; return f }(),
+		"read-only": func() satellitecontract.VolumeFacts { f := valid; f.Writable = false; return f }(),
+		"low-space": func() satellitecontract.VolumeFacts { f := valid; f.AvailableBytes = 29; return f }(),
+	}
+	for name, facts := range cases {
+		t.Run(name, func(t *testing.T) {
+			inspectTartHostVolume = func() (satellitecontract.VolumeFacts, error) { return facts, nil }
+			p := &tartSatelliteProvider{target: tartSatelliteTarget}
+			err := p.PrepareUp(&satelliteUpOptions{
+				Name: "x", SatelliteKind: satelliteKindFull, CapacityPlan: budget,
+				Infra: satelliteInfraConfig{TartHome: satellitecontract.ExpectedTartHome, TartVolumeIdentity: "volume-uuid"},
+			})
+			if err == nil || !strings.Contains(err.Error(), "before clone") {
+				t.Fatalf("PrepareUp(%s) = %v, want pre-clone refusal", name, err)
+			}
+			if p.image != "" {
+				t.Fatalf("PrepareUp reached image resolution after failed host preflight")
+			}
+		})
+	}
+
+	inspectTartHostVolume = func() (satellitecontract.VolumeFacts, error) { return valid, nil }
+	p := &tartSatelliteProvider{target: tartSatelliteTarget}
+	opts := &satelliteUpOptions{
+		Name: "x", SatelliteKind: satelliteKindFull, CapacityPlan: budget,
+		Infra: satelliteInfraConfig{TartHome: satellitecontract.ExpectedTartHome},
+	}
+	if err := p.PrepareUp(opts); err != nil {
+		t.Fatalf("valid full preflight: %v", err)
+	}
+	if opts.Infra.TartVolumeIdentity != "volume-uuid" {
+		t.Fatalf("discovered identity was not pinned: %q", opts.Infra.TartVolumeIdentity)
+	}
+}
+
+func TestTartFullExperimentalGateAndNoHomeFallback(t *testing.T) {
+	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
+		t.Skipf("tart preflight requires darwin/arm64 (this is %s/%s)", runtime.GOOS, runtime.GOARCH)
+	}
+	stubTartOnPath(t)
+	budget := satelliteCapacityPlan{Host: satellitecontract.CapacityBudget{PayloadBytes: 1}}
+	t.Setenv(fullTartExperimentalEnv, "")
+	err := (&tartSatelliteProvider{target: tartSatelliteTarget}).PrepareUp(&satelliteUpOptions{
+		Name: "x", SatelliteKind: satelliteKindFull, CapacityPlan: budget,
+		Infra: satelliteInfraConfig{TartHome: satellitecontract.ExpectedTartHome},
+	})
+	if err == nil || !strings.Contains(err.Error(), "experimental") {
+		t.Fatalf("missing experimental gate error: %v", err)
+	}
+	t.Setenv(fullTartExperimentalEnv, "1")
+	t.Setenv("TART_HOME", satellitecontract.ExpectedTartHome)
+	err = (&tartSatelliteProvider{target: tartSatelliteTarget}).PrepareUp(&satelliteUpOptions{
+		Name: "x", SatelliteKind: satelliteKindFull, CapacityPlan: budget,
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires --tart-home") {
+		t.Fatalf("environment fallback was not refused: %v", err)
+	}
+}
+
 func TestMergeInfraTartHome(t *testing.T) {
 	cfg := satelliteInfraConfig{TartHome: "/tank/tart"}
 	if out := mergeInfra(cfg, infraFlagOverrides{}); out.TartHome != "/tank/tart" {
