@@ -351,8 +351,8 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "ReviewPlan", Keys: []string{"r"}, Description: "review changes", Enabled: true, ConfigKey: "review_plan"},
 					{Name: "FinishPlan", Keys: []string{"ctrl+x"}, Description: "finish plan", Enabled: true, ConfigKey: "finish_plan"},
 					{Name: "SetHoldStatus", Keys: []string{"h"}, Description: "hold/unhold plan", Enabled: true, ConfigKey: "set_hold_status"},
-					{Name: "FastForwardUpdate", Keys: []string{"U"}, Description: "update from main", Enabled: false, ConfigKey: "fast_forward_update"},
-					{Name: "FastForwardMain", Keys: []string{"M"}, Description: "merge to main", Enabled: false, ConfigKey: "fast_forward_main"},
+					{Name: "FastForwardUpdate", Keys: []string{"U"}, Description: "update from main", Enabled: true, ConfigKey: "fast_forward_update"},
+					{Name: "FastForwardMain", Keys: []string{"M"}, Description: "merge to main", Enabled: true, ConfigKey: "fast_forward_main"},
 				},
 			},
 			{
