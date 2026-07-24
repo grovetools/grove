@@ -60,7 +60,7 @@ Supported model families: claude-*, gemini-*, openrouter/* (run 'flow models' fo
 	}
 
 	// Superset of flags from grove-anthropic and grove-gemini
-	cmd.Flags().StringP("model", "m", "", "LLM model to use (e.g., claude-opus-4-8, gemini-2.5-pro, openrouter/openai/gpt-5.2)")
+	cmd.Flags().StringP("model", "m", "", "LLM model to use (e.g., claude-opus-5, gemini-2.5-pro, openrouter/openai/gpt-5.2)")
 	cmd.Flags().StringP("prompt", "p", "", "Prompt text")
 	cmd.Flags().StringP("file", "f", "", "Read prompt from file")
 	cmd.Flags().StringP("workdir", "w", "", "Working directory (defaults to current)")
