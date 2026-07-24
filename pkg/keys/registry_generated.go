@@ -361,6 +361,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "ToggleGitLog", Keys: []string{"g"}, Description: "toggle git log", Enabled: true, ConfigKey: "toggle_git_log"},
 					{Name: "ToggleHold", Keys: []string{"H"}, Description: "toggle on-hold", Enabled: true, ConfigKey: "toggle_hold"},
 					{Name: "ToggleArchived", Keys: []string{"A"}, Description: "toggle archived", Enabled: true, ConfigKey: "toggle_archived"},
+					{Name: "ToggleColumns", Keys: []string{"T"}, Description: "toggle columns", Enabled: true, ConfigKey: "toggle_columns"},
 				},
 			},
 			{
