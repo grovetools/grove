@@ -1744,7 +1744,6 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "PanelNav", Keys: []string{"<action> f"}, Description: "jump to Nav panel", Enabled: true, ConfigKey: "panel_nav"},
 					{Name: "PanelGit", Keys: []string{"<action> c"}, Description: "jump to Git panel", Enabled: true, ConfigKey: "panel_git"},
-					{Name: "PanelGitworktree", Keys: []string{"<action> C"}, Description: "jump to Changes panel", Enabled: true, ConfigKey: "panel_gitworktree"},
 					{Name: "PanelShell", Keys: []string{"<action> o"}, Description: "jump to Shell panel", Enabled: true, ConfigKey: "panel_shell"},
 					{Name: "PanelPlan", Keys: []string{"<action> p"}, Description: "jump to Plan panel", Enabled: true, ConfigKey: "panel_plan"},
 					{Name: "PanelNotebook", Keys: []string{"<action> n"}, Description: "jump to Notebook panel", Enabled: true, ConfigKey: "panel_notebook"},
