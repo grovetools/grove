@@ -65,6 +65,7 @@ func localRecordRequest(ctx context.Context, method, path string, body []byte) (
 	}
 	return b, nil
 }
+
 func (t *satelliteRecordTransport) Maintenance(ctx context.Context, target, action string) (recordMaintenanceStatus, error) {
 	body, _ := json.Marshal(map[string]string{"target": target, "action": action})
 	var b []byte
@@ -87,6 +88,7 @@ func (t *satelliteRecordTransport) Maintenance(ctx context.Context, target, acti
 	}
 	return st, nil
 }
+
 func (t *satelliteRecordTransport) Incoming(ctx context.Context, satellite string, workspaces []string) (recordIncomingStatus, error) {
 	q := url.Values{}
 	q.Set("satellite", satellite)

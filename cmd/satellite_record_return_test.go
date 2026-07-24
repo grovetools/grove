@@ -27,6 +27,7 @@ func (f *fakeRecordTransport) Maintenance(_ context.Context, _, _ string) (recor
 	}
 	return f.maintenance[i], nil
 }
+
 func (f *fakeRecordTransport) Incoming(_ context.Context, _ string, _ []string) (recordIncomingStatus, error) {
 	i := f.ic
 	f.ic++
@@ -35,6 +36,7 @@ func (f *fakeRecordTransport) Incoming(_ context.Context, _ string, _ []string) 
 	}
 	return f.incoming[i], nil
 }
+
 func incoming(g string, clean, escrow bool) recordIncomingStatus {
 	var s recordIncomingStatus
 	s.Manifest.Generation = g
@@ -57,6 +59,7 @@ func TestRecordSafeDownCleanAndGenerationBound(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
 func TestRecordSafeDownRefusesGuestOnlyNoteWithoutEscrow(t *testing.T) {
 	f := &fakeRecordTransport{maintenance: []recordMaintenanceStatus{{Draining: true}, {Draining: true}}, maintenanceErr: map[int]error{}, incoming: []recordIncomingStatus{incoming(strings.Repeat("b", 64), false, false)}, incomingErr: map[int]error{}}
 	_, _, err := prepareRecordSafeDown(context.Background(), f, "sat", []string{"ws"}, false)
@@ -64,6 +67,7 @@ func TestRecordSafeDownRefusesGuestOnlyNoteWithoutEscrow(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
 func TestRecordSafeDownAllowsVerifiedEscrow(t *testing.T) {
 	g := strings.Repeat("c", 64)
 	f := &fakeRecordTransport{maintenance: []recordMaintenanceStatus{{Draining: true}, {Draining: true}, {Draining: true}}, maintenanceErr: map[int]error{}, incoming: []recordIncomingStatus{incoming(g, false, true), incoming(g, false, true)}, incomingErr: map[int]error{}}
@@ -76,6 +80,7 @@ func TestRecordSafeDownAllowsVerifiedEscrow(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
 func TestRecordSafeDownTOCTOUGenerationChangeRefuses(t *testing.T) {
 	f := &fakeRecordTransport{maintenance: []recordMaintenanceStatus{{Draining: true}, {Draining: true}, {Draining: true}}, maintenanceErr: map[int]error{}, incoming: []recordIncomingStatus{incoming(strings.Repeat("d", 64), true, false), incoming(strings.Repeat("e", 64), true, false)}, incomingErr: map[int]error{}}
 	check, cleanup, err := prepareRecordSafeDown(context.Background(), f, "sat", []string{"ws"}, false)
@@ -87,6 +92,7 @@ func TestRecordSafeDownTOCTOUGenerationChangeRefuses(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
 func TestRecordSafeDownDisconnectFailsClosed(t *testing.T) {
 	f := &fakeRecordTransport{maintenanceErr: map[int]error{1: errors.New("ssh disconnected")}, incomingErr: map[int]error{}}
 	_, _, err := prepareRecordSafeDown(context.Background(), f, "sat", []string{"ws"}, false)
@@ -94,6 +100,7 @@ func TestRecordSafeDownDisconnectFailsClosed(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
 func TestRecordSafeDownActiveJobRefuses(t *testing.T) {
 	f := &fakeRecordTransport{maintenanceErr: map[int]error{1: errors.New("1 managed job is still active")}, incomingErr: map[int]error{}}
 	_, _, err := prepareRecordSafeDown(context.Background(), f, "sat", []string{"ws"}, false)
@@ -111,6 +118,7 @@ func TestRecordSafeDownPendingParkedDivergedRefuse(t *testing.T) {
 		}
 	}
 }
+
 func TestRecordSafeDownForceStillRefusesUnknownFinal(t *testing.T) {
 	g := strings.Repeat("f", 64)
 	f := &fakeRecordTransport{maintenance: []recordMaintenanceStatus{{Draining: true}, {Draining: true}, {Draining: true}}, maintenanceErr: map[int]error{}, incoming: []recordIncomingStatus{incoming(g, false, false)}, incomingErr: map[int]error{1: errors.New("server gone")}}

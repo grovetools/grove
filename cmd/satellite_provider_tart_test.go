@@ -2,12 +2,12 @@ package cmd
 
 import (
 	"os"
-
-	"github.com/grovetools/grove/pkg/satellitecontract"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/grovetools/grove/pkg/satellitecontract"
 )
 
 // TestTartVMNaming pins the local VM naming and provider_ref scheme the
