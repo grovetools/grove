@@ -1127,7 +1127,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "ToggleView", Keys: []string{"t"}, Description: "toggle view", Enabled: true, ConfigKey: "toggle_view"},
 					{Name: "ToggleFilter", Keys: []string{"f"}, Description: "toggle filter view", Enabled: true, ConfigKey: "toggle_filter"},
-					{Name: "ScopeToggle", Keys: []string{"alt+s"}, Description: "local/global scope", Enabled: true, ConfigKey: "scope_toggle"},
+					{Name: "ScopeToggle", Keys: []string{"alt+s", "0", "w"}, Description: "local/global scope", Enabled: true, ConfigKey: "scope_toggle"},
 				},
 			},
 			{
