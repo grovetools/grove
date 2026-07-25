@@ -237,7 +237,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "Toggle", Keys: []string{" "}, Description: "toggle", Enabled: true, ConfigKey: "toggle"},
 					{Name: "Submit", Keys: []string{"ctrl+s"}, Description: "submit", Enabled: true, ConfigKey: "submit"},
-					{Name: "ToggleClaw", Keys: []string{"ctrl+g"}, Description: "toggle claw", Enabled: true, ConfigKey: "toggle_claw"},
+					{Name: "ToggleClaw", Keys: []string{"ctrl+t"}, Description: "toggle claw", Enabled: true, ConfigKey: "toggle_claw"},
 				},
 			},
 			{
@@ -278,6 +278,12 @@ var TUIRegistry = []TUIRegistryEntry{
 				},
 			},
 			{
+				Name: "Danger",
+				Bindings: []BindingEntry{
+					{Name: "ToggleForce", Keys: []string{"f"}, Description: "toggle FORCE (discards uncommitted work)", Enabled: true, ConfigKey: "toggle_force"},
+				},
+			},
+			{
 				Name: "Actions",
 				Bindings: []BindingEntry{
 					{Name: "Confirm", Keys: []string{"enter"}, Description: "confirm and proceed", Enabled: true, ConfigKey: "confirm"},
@@ -287,7 +293,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "System",
 				Bindings: []BindingEntry{
 					{Name: "Help", Keys: []string{"?"}, Description: "help", Enabled: true, ConfigKey: "help"},
-					{Name: "Quit", Keys: []string{"q", "ctrl+c"}, Description: "quit", Enabled: true, ConfigKey: "quit"},
+					{Name: "Quit", Keys: []string{"q", "esc", "ctrl+c"}, Description: "quit", Enabled: true, ConfigKey: "quit"},
 				},
 			},
 		},
