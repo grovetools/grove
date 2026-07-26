@@ -380,6 +380,36 @@ var SchemaFields = []FieldMeta{
 				Priority:    62,
 			},
 			{
+				Path:        []string{"tui", "drawer"},
+				Type:        FieldObject,
+				Description: "Named global drawer pages and their layouts",
+				Layer:       config.SourceGlobal,
+				Priority:    63,
+				RefType:     "DrawerViewsConfig",
+				Children: []FieldMeta{
+					{
+						Path:        []string{"tui", "drawer", "cycle_key"},
+						Type:        FieldString,
+						Description: "Action sub-key used to cycle drawer pages; none disables it",
+					},
+					{
+						Path:        []string{"tui", "drawer", "default_page"},
+						Type:        FieldString,
+						Description: "Drawer page selected at startup",
+					},
+					{
+						Path:        []string{"tui", "drawer", "page_order"},
+						Type:        FieldArray,
+						Description: "Ordered drawer page names",
+					},
+					{
+						Path:        []string{"tui", "drawer", "pages"},
+						Type:        FieldMap,
+						Description: "Named drawer page definitions",
+					},
+				},
+			},
+			{
 				Path:        []string{"tui", "drawer_expanded"},
 				Type:        FieldBool,
 				Description: "Start active sessions drawer expanded",
