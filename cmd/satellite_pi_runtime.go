@@ -21,7 +21,7 @@ const (
 	grovePiVersion   = "0.1.0"
 )
 
-var requiredGrovePiExtensions = []string{"branding", "guard", "health", "knowledge", "lifecycle", "metrics"}
+var requiredGrovePiExtensions = []string{"branding", "guard", "health", "knowledge", "lifecycle", "metrics", "terminal-anchors"}
 
 type piRuntimeManifestEntry struct {
 	Path   string `json:"path"`
