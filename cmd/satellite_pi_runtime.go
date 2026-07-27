@@ -21,7 +21,11 @@ const (
 	grovePiVersion   = "0.1.0"
 )
 
-var requiredGrovePiExtensions = []string{"branding", "guard", "health", "knowledge", "lifecycle", "metrics", "terminal-anchors"}
+// Every extension in grove-pi's manifest, sorted: health.ts sorts the marker
+// set, and the provisioning probe compares it byte-for-byte. Any extension that
+// starts or stops calling markExtensionLoaded must be reflected here or
+// satellite provisioning fails with exit 6.
+var requiredGrovePiExtensions = []string{"branding", "flow-pipeline", "guard", "health", "knowledge", "lifecycle", "metrics", "oracle", "subjobs", "terminal-anchors"}
 
 type piRuntimeManifestEntry struct {
 	Path   string `json:"path"`
