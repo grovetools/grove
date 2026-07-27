@@ -460,7 +460,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "AddXmlPlan", Keys: []string{"x"}, Description: "add XML plan job", Enabled: true, ConfigKey: "add_xml_plan"},
 					{Name: "Implement", Keys: []string{"n"}, Description: "new implementation", Enabled: true, ConfigKey: "implement"},
 					{Name: "AgentFromChat", Keys: []string{"I"}, Description: "agent from chat", Enabled: true, ConfigKey: "agent_from_chat"},
-					{Name: "Resume", Keys: []string{"ctrl+e"}, Description: "resume job", Enabled: true, ConfigKey: "resume"},
+					{Name: "Resume", Keys: []string{"U"}, Description: "resume job", Enabled: true, ConfigKey: "resume"},
 					{Name: "DemoteToNote", Keys: []string{"D"}, Description: "demote to note", Enabled: true, ConfigKey: "demote_to_note"},
 					{Name: "Archive", Keys: []string{"X"}, Description: "archive selected", Enabled: true, ConfigKey: "archive"},
 					{Name: "SendInput", Keys: []string{"i"}, Description: "input to agent", Enabled: true, ConfigKey: "send_input"},
