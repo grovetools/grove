@@ -359,6 +359,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "SetHoldStatus", Keys: []string{"h"}, Description: "hold/unhold plan", Enabled: true, ConfigKey: "set_hold_status"},
 					{Name: "FastForwardUpdate", Keys: []string{"U"}, Description: "update from main", Enabled: true, ConfigKey: "fast_forward_update"},
 					{Name: "FastForwardMain", Keys: []string{"M"}, Description: "merge to main", Enabled: true, ConfigKey: "fast_forward_main"},
+					{Name: "FastForwardAll", Keys: []string{"F"}, Description: "update all conflict-free plans from main", Enabled: true, ConfigKey: "fast_forward_all"},
 				},
 			},
 			{
