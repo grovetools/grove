@@ -1782,6 +1782,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "ToggleSplitOrientation", Keys: []string{"<action> |", "<leader> |"}, Description: "toggle split orientation", Enabled: true, ConfigKey: "toggle_split_orientation"},
 					{Name: "DrawerPageSessions", Keys: []string{"<action> S"}, Description: "drawer: sessions page", Enabled: true, ConfigKey: "drawer_page_sessions"},
 					{Name: "DrawerPageToc", Keys: []string{"<action> T"}, Description: "drawer: toc page", Enabled: true, ConfigKey: "drawer_page_toc"},
+					{Name: "DrawerPageGit", Keys: []string{"<action> G"}, Description: "drawer: git page", Enabled: true, ConfigKey: "drawer_page_git"},
 				},
 			},
 			{
