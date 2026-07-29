@@ -356,10 +356,24 @@ func printConsent(req *plugin.ConsentRequest, out io.Writer) {
 		fmt.Fprintln(out, "  The panel declares:")
 		if f.Protocol != "" {
 			fmt.Fprintf(out, "      protocol  %s — it gets a control socket: focus, workspace scope,\n", f.Protocol)
-			fmt.Fprintln(out, "                          theme, deep links into other panels, key claims")
+			fmt.Fprintln(out, "                          theme, icon set, pane size, its settings, deep links")
+			fmt.Fprintln(out, "                          into other panels, and key claims")
 		}
 		for _, k := range f.Keys {
 			fmt.Fprintf(out, "      key       %s (while it holds focus, if the host allows it)\n", k)
+		}
+	}
+
+	// Settings get their own block rather than a line in the one above,
+	// because they are the only thing on this screen the user is expected to
+	// go on to EDIT. grove never runs them — the host forwards the table and
+	// never interprets it — but they decide what the panel does on first run,
+	// so approving without reading them is approving a behavior sight unseen.
+	if len(f.Settings) > 0 {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "  Its settings start out as (yours to change afterwards, in the file below):")
+		for _, s := range f.Settings {
+			fmt.Fprintf(out, "      %s\n", s)
 		}
 	}
 

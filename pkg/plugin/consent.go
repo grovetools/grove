@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -48,7 +49,22 @@ type ConsentFacts struct {
 
 	Protocol string   `json:"protocol,omitempty"`
 	Icon     string   `json:"icon,omitempty"`
+	Label    string   `json:"label,omitempty"`
 	Keys     []string `json:"keys,omitempty"`
+	// Settings is the manifest's default settings table, flattened to sorted
+	// "dotted.key = value" lines.
+	//
+	// Flattened rather than carried as a map because everything in ConsentFacts
+	// is compared and digested as text: a map's iteration order would make the
+	// digest unstable, and Diff would have nothing to show a user but "the
+	// settings changed". A line per leaf means an update diff names the setting
+	// that moved and both of its values.
+	//
+	// It is here despite grove never executing any of it. A panel's defaults
+	// decide what it does on first run, an update that changes one changes the
+	// behavior the user approved, and the manifest digest already re-opens the
+	// prompt for it — showing the values is what makes that prompt answerable.
+	Settings []string `json:"settings,omitempty"`
 }
 
 // NewConsentFacts assembles the consent screen's content from a validated
@@ -72,7 +88,48 @@ func NewConsentFacts(m *Manifest, src ResolvedSource, manifestBytes []byte, runB
 		Env:            append([]string(nil), m.Panel.Env...),
 		Protocol:       m.Panel.Protocol,
 		Icon:           m.Panel.Icon,
+		Label:          m.Panel.Label,
 		Keys:           keys,
+		Settings:       FlattenSettings(m.Panel.Settings),
+	}
+}
+
+// FlattenSettings renders a settings table as sorted "dotted.key = value"
+// lines. Sorted so the result is stable across runs — the approval digest is
+// computed over it, and a map's iteration order would make an unchanged
+// manifest hash differently every time.
+//
+// Exported because the fragment writer and the consent screen must agree on
+// what a setting is called; a user reading "timer.work_minutes = 25" at the
+// prompt should find the same path in the file grove writes.
+func FlattenSettings(settings map[string]any) []string {
+	var out []string
+	flattenSettingsInto(&out, "", settings)
+	sort.Strings(out)
+	return out
+}
+
+func flattenSettingsInto(out *[]string, prefix string, v any) {
+	switch v := v.(type) {
+	case map[string]any:
+		for name, value := range v {
+			key := name
+			if prefix != "" {
+				key = prefix + "." + name
+			}
+			flattenSettingsInto(out, key, value)
+		}
+	case []any:
+		// Arrays render whole rather than one line per element: an ordered
+		// list is one decision, and splitting it would let a reordering read
+		// as several unrelated changes in an update diff.
+		parts := make([]string, 0, len(v))
+		for _, e := range v {
+			parts = append(parts, fmt.Sprintf("%v", e))
+		}
+		*out = append(*out, fmt.Sprintf("%s = [%s]", prefix, strings.Join(parts, ", ")))
+	default:
+		*out = append(*out, fmt.Sprintf("%s = %v", prefix, v))
 	}
 }
 
@@ -89,6 +146,8 @@ func (f ConsentFacts) Digest() string {
 		"env=" + strings.Join(f.Env, "\x1f"),
 		"protocol=" + f.Protocol,
 		"keys=" + strings.Join(f.Keys, "\x1f"),
+		"label=" + f.Label,
+		"settings=" + strings.Join(f.Settings, "\x1f"),
 	}
 	return exectrust.Digest(parts)
 }
@@ -118,6 +177,10 @@ func Diff(old, next ConsentFacts) []FactChange {
 	add("env", strings.Join(old.Env, " "), strings.Join(next.Env, " "))
 	add("protocol", old.Protocol, next.Protocol)
 	add("keys", strings.Join(old.Keys, ", "), strings.Join(next.Keys, ", "))
+	add("label", old.Label, next.Label)
+	// One line per changed setting rather than one "settings" row: an update
+	// that retunes a default should say which one and from what.
+	out = append(out, diffLines("settings", old.Settings, next.Settings)...)
 	// The icon is cosmetic, but the manifest digest covers it, so a changed
 	// icon alone re-opens the prompt. Showing it keeps the screen from saying
 	// "nothing you approved has changed" while asking about something.
@@ -182,4 +245,45 @@ func shortCommit(c string) string {
 		return c[:12]
 	}
 	return c
+}
+
+// diffLines reports per-line changes between two flattened key = value lists,
+// keyed by the part before the first "=" so a changed VALUE reads as a change
+// rather than as one removal plus one addition.
+func diffLines(field string, old, next []string) []FactChange {
+	index := func(lines []string) map[string]string {
+		m := make(map[string]string, len(lines))
+		for _, l := range lines {
+			key, value, found := strings.Cut(l, " = ")
+			if !found {
+				key = l
+			}
+			m[key] = value
+		}
+		return m
+	}
+	oldByKey, nextByKey := index(old), index(next)
+
+	keys := make([]string, 0, len(oldByKey)+len(nextByKey))
+	seen := make(map[string]bool, len(keys))
+	for _, m := range []map[string]string{oldByKey, nextByKey} {
+		for k := range m {
+			if !seen[k] {
+				seen[k] = true
+				keys = append(keys, k)
+			}
+		}
+	}
+	sort.Strings(keys)
+
+	var out []FactChange
+	for _, k := range keys {
+		before, hadBefore := oldByKey[k]
+		after, hasAfter := nextByKey[k]
+		if hadBefore && hasAfter && before == after {
+			continue
+		}
+		out = append(out, FactChange{Field: field + "." + k, Old: before, New: after})
+	}
+	return out
 }

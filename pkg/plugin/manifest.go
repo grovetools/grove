@@ -56,12 +56,17 @@ const ProtocolEmbedV1 = "embed/v1"
 //	binary  = "bin/grove-panel-hello"
 //
 //	[panel]
+//	label            = "Break timer"
 //	icon             = ""
 //	protocol         = "embed/v1"
 //	protocol_timeout = "2s"
 //	args             = []
 //	env              = []
 //	restart          = true
+//
+//	[panel.settings]
+//	work_minutes  = 25
+//	break_minutes = 5
 //
 //	[[panel.keys]]
 //	key         = "ctrl+f"
@@ -93,6 +98,10 @@ type Build struct {
 
 // Panel is what the installer turns into a [tui.plugins.<name>] fragment.
 type Panel struct {
+	// Label is the human-readable name the rail shows. Empty falls back to
+	// plugin.name, which is constrained to a bare key and is often not what
+	// the author would choose to display.
+	Label           string   `toml:"label"`
 	Icon            string   `toml:"icon"`
 	Protocol        string   `toml:"protocol"`
 	ProtocolTimeout string   `toml:"protocol_timeout"`
@@ -100,6 +109,20 @@ type Panel struct {
 	Env             []string `toml:"env"`
 	Restart         bool     `toml:"restart"`
 	Keys            []Key    `toml:"keys"`
+	// Settings are the panel's DEFAULT settings: the free-form table the host
+	// delivers to it over the control plane, seeded from the manifest so a
+	// freshly installed panel works before the user has configured anything.
+	//
+	// The user's own [tui.plugins.<name>.settings] is the same key in a config
+	// layer they own, and later layers replace earlier ones wholesale, so
+	// editing the fragment is how a user overrides these.
+	//
+	// They are shown on the consent screen and bound into the approval digest
+	// like everything else in the manifest — not because grove will run them
+	// (it will not: the host forwards this table and never interprets it) but
+	// because a value the user has approved is one they should have read. An
+	// update that changes a default re-opens the prompt with a diff.
+	Settings map[string]any `toml:"settings"`
 }
 
 // Key is a host hotkey the panel intends to claim over the control plane. It
@@ -223,6 +246,12 @@ func (m *Manifest) Validate() error {
 	if err := printable("panel.icon", m.Panel.Icon); err != nil {
 		return err
 	}
+	if err := printable("panel.label", m.Panel.Label); err != nil {
+		return err
+	}
+	if err := validateSettings("panel.settings", m.Panel.Settings); err != nil {
+		return err
+	}
 	for i, k := range m.Panel.Keys {
 		if strings.TrimSpace(k.Key) == "" {
 			return fmt.Errorf("panel.keys[%d].key is required", i)
@@ -269,6 +298,52 @@ func validateRelPath(key, p string) error {
 		return fmt.Errorf("%s %q must stay inside the plugin repo", key, p)
 	}
 	return printable(key, p)
+}
+
+// validateSettings walks a free-form settings table and rejects anything that
+// could not be shown honestly on the consent screen.
+//
+// grove deliberately does not constrain the SHAPE — it cannot know what a
+// third-party panel's options mean, and a schema that guessed would reject
+// valid ones. What it does constrain is renderability: every key and every
+// string value ends up printed on a screen the user's approval depends on, and
+// a value carrying an escape sequence could redraw that screen to say something
+// other than what will be installed. Tables and arrays are walked so nesting
+// cannot smuggle one past.
+//
+// The depth bound is not about attack surface; it is about the consent screen
+// staying legible. A manifest that needs more than a few levels of nesting to
+// express its defaults has outgrown what a user can meaningfully approve.
+func validateSettings(key string, settings map[string]any) error {
+	return validateSettingsAt(key, settings, 0)
+}
+
+const maxSettingsDepth = 8
+
+func validateSettingsAt(key string, v any, depth int) error {
+	if depth > maxSettingsDepth {
+		return fmt.Errorf("%s nests more than %d levels deep", key, maxSettingsDepth)
+	}
+	switch v := v.(type) {
+	case map[string]any:
+		for name, value := range v {
+			if err := printable(key+" key "+name, name); err != nil {
+				return err
+			}
+			if err := validateSettingsAt(key+"."+name, value, depth+1); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for i, value := range v {
+			if err := validateSettingsAt(fmt.Sprintf("%s[%d]", key, i), value, depth+1); err != nil {
+				return err
+			}
+		}
+	case string:
+		return printable(key, v)
+	}
+	return nil
 }
 
 // printable rejects control characters. Everything here is rendered into a
