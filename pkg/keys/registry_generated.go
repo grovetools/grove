@@ -417,6 +417,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "ViewNativeAgent", Keys: []string{"va"}, Description: "preview agent pane", Enabled: true, ConfigKey: "view_native_agent"},
 					{Name: "ViewSkillPane", Keys: []string{"vs"}, Description: "skills", Enabled: true, ConfigKey: "view_skill_pane"},
 					{Name: "ViewAccessedFiles", Keys: []string{"vy"}, Description: "accessed files", Enabled: true, ConfigKey: "view_accessed_files"},
+					{Name: "ViewArtifacts", Keys: []string{"vj"}, Description: "job artifacts", Enabled: true, ConfigKey: "view_artifacts"},
 				},
 			},
 			{
@@ -1580,7 +1581,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "Toggle (t…)",
 				Bindings: []BindingEntry{
 					{Name: "ToggleArchives", Keys: []string{"ta"}, Description: "toggle archives", Enabled: true, ConfigKey: "toggle_archives"},
-					{Name: "ToggleArtifacts", Keys: []string{"tb"}, Description: "toggle artifacts", Enabled: true, ConfigKey: "toggle_artifacts"},
+					{Name: "ToggleArtifacts", Keys: []string{"tj"}, Description: "toggle job artifacts", Enabled: true, ConfigKey: "toggle_artifacts"},
 					{Name: "ToggleGlobal", Keys: []string{"tg"}, Description: "toggle global", Enabled: true, ConfigKey: "toggle_global"},
 					{Name: "ToggleHold", Keys: []string{"th"}, Description: "toggle on-hold", Enabled: true, ConfigKey: "toggle_hold"},
 					{Name: "ToggleColumns", Keys: []string{"tc"}, Description: "toggle columns", Enabled: true, ConfigKey: "toggle_columns"},
