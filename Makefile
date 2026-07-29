@@ -33,7 +33,7 @@ ifneq ($(strip $(GROVE_TARGET_GOOS)),)
 GO_CROSS_ENV = GOOS=$(GROVE_TARGET_GOOS) GOARCH=$(GROVE_TARGET_GOARCH) CGO_ENABLED=0
 endif
 
-.PHONY: all build test clean fmt fmt-check vet lint run check dev build-all schema registry config-schema keys-registry keys-registry-check keys-audit help
+.PHONY: all build test clean fmt fmt-check vet lint run check dev build-all schema registry config-schema keys-registry keys-registry-check keys-audit apidiff help
 
 all: build
 
@@ -61,6 +61,13 @@ keys-registry-check: keys-registry
 # Structural + semantic gate over the generated registry (see cmd/keys_audit.go).
 keys-audit:
 	@go run . keys audit
+
+# Diff the exported API of the ecosystem's contract packages against each
+# module's last tag (docs/10-api-stability.md). Deliberately NOT part of
+# `check`: it reports pre-1.0 drift that is allowed, but must be changelogged.
+# ARGS limits it to specific modules, e.g. `make apidiff ARGS=core`.
+apidiff:
+	@bash scripts/apidiff.sh $(ARGS)
 
 build: registry schema config-schema keys-registry
 	@mkdir -p $(BIN_DIR)
@@ -168,5 +175,6 @@ help:
 	@echo "  make build-all     - Build for multiple platforms"
 	@echo "  make config-schema - Generate config UI schema from JSON schemas"
 	@echo "  make keys-registry - Generate TUI keybindings registry"
+	@echo "  make apidiff       - Diff contract-package APIs against the last tag"
 	@echo "  make test-e2e ARGS=...- Run E2E test runner binary"
 	@echo "  make test-e2e ARGS=...- Run E2E tests (e.g., ARGS=\"run -i add-repo-dry-run\")"
