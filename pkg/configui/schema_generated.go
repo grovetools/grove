@@ -903,6 +903,24 @@ var SchemaFields = []FieldMeta{
 		},
 	},
 	{
+		Path:        []string{"security"},
+		Type:        FieldObject,
+		Description: "Security policy (exec-bearing config trust gate)",
+		Layer:       config.SourceGlobal,
+		Priority:    95,
+		RefType:     "SecurityConfig",
+		Children: []FieldMeta{
+			{
+				Path:        []string{"security", "exec_trust"},
+				Type:        FieldSelect,
+				Description: "Exec-provenance gate policy for config from untrusted (repo-controlled) layers",
+				Options:     []string{"default", "strict", "warn", "off"},
+				Layer:       config.SourceGlobal,
+				Priority:    95,
+			},
+		},
+	},
+	{
 		Path:        []string{"version"},
 		Type:        FieldString,
 		Description: "Configuration version (e.g. 1.0)",
@@ -1126,6 +1144,13 @@ var SchemaFields = []FieldMeta{
 		Namespace:   "gemini",
 	},
 	{
+		Path:        []string{"agent_target"},
+		Type:        FieldString,
+		Description: "Agent launch target: auto/native/tmux",
+		Priority:    1000,
+		Namespace:   "flow",
+	},
+	{
 		Path:             []string{"search_paths"},
 		Type:             FieldMap,
 		Description:      "DEPRECATED: Use groves instead",
@@ -1136,13 +1161,6 @@ var SchemaFields = []FieldMeta{
 		StatusSince:      "v0.5.0",
 		StatusTarget:     "v1.0.0",
 		StatusReplacedBy: "groves",
-	},
-	{
-		Path:        []string{"agent_target"},
-		Type:        FieldString,
-		Description: "Agent launch target: auto/native/tmux",
-		Priority:    1000,
-		Namespace:   "flow",
 	},
 }
 
@@ -1182,11 +1200,12 @@ var FieldsByPath = map[string]*FieldMeta{
 	"flow.recipes":                     &SchemaFields[31],
 	"logging.log_startup":              &SchemaFields[32],
 	"onboarding":                       &SchemaFields[33],
-	"version":                          &SchemaFields[34],
-	"claude":                           &SchemaFields[35],
-	"gemini.api_key":                   &SchemaFields[36],
-	"search_paths":                     &SchemaFields[37],
+	"security":                         &SchemaFields[34],
+	"version":                          &SchemaFields[35],
+	"claude":                           &SchemaFields[36],
+	"gemini.api_key":                   &SchemaFields[37],
 	"flow.agent_target":                &SchemaFields[38],
+	"search_paths":                     &SchemaFields[39],
 }
 
 // ImportantFields contains only fields marked as important/key configuration options.
@@ -1197,6 +1216,6 @@ var ImportantFields = []*FieldMeta{
 	&SchemaFields[15],
 	&SchemaFields[16],
 	&SchemaFields[21],
-	&SchemaFields[35],
 	&SchemaFields[36],
+	&SchemaFields[37],
 }

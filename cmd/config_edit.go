@@ -45,6 +45,7 @@ instead of opening the TUI (no terminal required).`
 	// Subcommands. The parent's RunE still handles the bare `grove config`
 	// invocation (cobra falls back to it when no subcommand matches).
 	cmd.AddCommand(newConfigAuditCmd())
+	cmd.AddCommand(newConfigTrustCmd())
 
 	return cmd
 }
@@ -62,6 +63,11 @@ func runConfigEdit(cmd *cobra.Command, args []string) error {
 	if jsonOutput, _ := cmd.Flags().GetBool("json"); jsonOutput {
 		return printConfigJSON(layered)
 	}
+
+	// The exec-provenance gate is silent in the merged view by design (the
+	// withheld values simply are not there). Say so before handing over to
+	// the TUI, or the config would look like it is missing keys.
+	warnUntrustedExecConfig(layered)
 
 	// Initialize Setup Service and handlers
 	svc := setup.NewService(false) // Not dry-run
@@ -97,6 +103,14 @@ func printConfigJSON(layered *config.LayeredConfig) error {
 	var asMap map[string]interface{}
 	if err := yaml.Unmarshal(yamlData, &asMap); err != nil {
 		return fmt.Errorf("failed to convert configuration: %w", err)
+	}
+
+	// The exec-provenance gate removes values before the merge, so the JSON
+	// above cannot show what is missing. Attach the report under a reserved
+	// key (Config has no "_exec_gate" field) so scripted consumers can see
+	// that the merged view is incomplete and why.
+	if final.ExecGate != nil {
+		asMap["_exec_gate"] = final.ExecGate
 	}
 
 	jsonData, err := json.MarshalIndent(asMap, "", "  ")

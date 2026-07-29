@@ -40,7 +40,14 @@ With --json, the findings array is printed to stdout.`,
 func runConfigAudit(cmd *cobra.Command, args []string) error {
 	cwd, _ := os.Getwd()
 
-	findings, err := config.Audit(cwd)
+	// Audit via LoadLayered rather than config.Audit so the exec-gate report
+	// is available: the audit classifies keys that ARE set, and a key the
+	// gate withheld is one the merged config no longer has.
+	layered, err := config.LoadLayered(cwd)
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+	findings, err := config.AuditLayered(layered)
 	if err != nil {
 		return fmt.Errorf("failed to audit configuration: %w", err)
 	}
@@ -49,6 +56,7 @@ func runConfigAudit(cmd *cobra.Command, args []string) error {
 		return printAuditJSON(findings)
 	}
 	printAuditTable(findings)
+	warnUntrustedExecConfig(layered)
 	return nil
 }
 
