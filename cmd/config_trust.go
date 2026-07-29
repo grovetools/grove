@@ -88,7 +88,7 @@ func runConfigTrust(cmd *cobra.Command, args []string) error {
 	case jsonOutput:
 		return printJSON(report)
 	default:
-		printExecGateReport(report)
+		printExecGateReport(report, true)
 		return nil
 	}
 }
@@ -119,6 +119,15 @@ func runConfigTrustList(jsonOutput bool) error {
 // applyConfigTrust records the current digest for every file in scope that is
 // not already trusted at it.
 func applyConfigTrust(report *config.ExecGateReport, jsonOutput bool) error {
+	// Print what is being trusted before recording it. `grove config trust`
+	// and `grove config trust --yes` are two separate loads: without this,
+	// anything that edited the config between the review and the approval
+	// (a `git pull`, a running agent, a sync) would get trusted unseen.
+	if !jsonOutput {
+		printExecGateReport(report, false)
+		fmt.Println()
+	}
+
 	store := exectrust.Load()
 	now := time.Now()
 	var changed []string
@@ -182,7 +191,7 @@ func revokeConfigTrust(report *config.ExecGateReport, jsonOutput bool) error {
 // printExecGateReport renders the report diff-style: every command the config
 // would run, grouped by the file that declares it, marked with whether it is
 // currently withheld.
-func printExecGateReport(report *config.ExecGateReport) {
+func printExecGateReport(report *config.ExecGateReport, showCallToAction bool) {
 	byFile := map[string][]config.ExecFinding{}
 	for _, f := range report.Findings {
 		byFile[f.File] = append(byFile[f.File], f)
@@ -219,7 +228,7 @@ func printExecGateReport(report *config.ExecGateReport) {
 
 	fmt.Println()
 	fmt.Printf("%d value(s) ignored, %d honored.\n", ignored, honored)
-	if ignored > 0 {
+	if ignored > 0 && showCallToAction {
 		fmt.Println()
 		fmt.Println("Read the commands above before allowing them — they run on your machine")
 		fmt.Println("with your privileges. To allow them:")
