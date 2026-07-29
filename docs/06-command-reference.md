@@ -150,6 +150,41 @@ grove alias set grove-context ctx
 grove alias unset grove-context
 ```
 
+---
+
+### grove plugin
+
+**Synopsis**: Install treemux sidecar panels from a git repository.
+
+**Syntax**: `grove plugin <install|list|update|remove>`
+
+**Description**:
+Installs a treemux panel from a repository shipping a `grove-plugin.toml`: it clones at the requested ref, resolves it to an exact commit, shows what the manifest declares and asks for approval, builds, installs the binary into `~/.local/share/grove/bin`, and writes the `~/.config/grove/plugins/<name>.toml` fragment so the rail item appears on treemux's next config reload. Installs pin a commit and never float; `update` is the only thing that moves a pin, and it re-asks with a diff. The approval is recorded in the same trust store `grove config trust` uses.
+
+Full design, including the manifest schema and what is deferred to v2: [`09-plugins.md`](09-plugins.md).
+
+**Subcommands**:
+-   `install <source>[@ref]`: Install a panel. The source is `host/owner/repo`, a git URL, or a local repository path. `--ref` overrides the ref; `--yes` approves non-interactively; `--force` reinstalls a pin already installed.
+-   `list`: Show every installed panel, its pin, and whether it is still intact.
+-   `update [name...]`: Re-resolve the recorded ref and move the pin. `--ref` moves one panel to a different ref.
+-   `remove <name>`: Uninstall a panel and withdraw its approval. `--keep-source` leaves the checkout.
+
+**Examples**:
+```bash
+# Install a panel, pinned to a tag
+grove plugin install github.com/user/grove-panel-foo@v1.2.0
+
+# See what is installed and whether it is intact
+grove plugin list
+
+# Move one panel's pin to a new release
+grove plugin update foo --ref v1.3.0
+
+# Uninstall it
+grove plugin remove foo
+```
+**Related Commands**: `grove config trust`
+
 ## Version Management
 
 Commands for managing different installed versions of tools.

@@ -47,6 +47,7 @@ func init() {
 	rootCmd.AddCommand(newFmtCmd())
 	rootCmd.AddCommand(newKeysCmd())
 	rootCmd.AddCommand(newLintCmd())
+	rootCmd.AddCommand(newPluginCmd())
 	rootCmd.AddCommand(newRecordCmd())
 	rootCmd.AddCommand(newSatelliteCmd())
 	rootCmd.AddCommand(newSchemaCmd())
