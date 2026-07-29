@@ -23,14 +23,21 @@ func newConfigTrustCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "trust",
 		Short: "Review and trust a workspace's exec-bearing config",
-		Long: `Show every shell command a workspace's config layers would run, and
-decide whether to allow them.
+		Long: `Show every shell command a workspace's config layers would run — and every
+setting that would hand an agent the capability to run one — and decide whether
+to allow them.
 
 Grove's config cascade merges grove.toml files that come out of cloned
-repositories. Keys like [[hooks.on_stop]], [tui.plugins], [tui.panels.bindings]
-and [[daemon.hooks.on_skill_sync]] carry commands grove executes on its own —
-when a session stops, when the TUI boots, on a keypress — so grove withholds
-them until you have read them.
+repositories. Keys like [[hooks.on_stop]], [tui.plugins], [tui.panels.bindings],
+[commands] and [[daemon.hooks.on_skill_sync]] carry commands grove executes on
+its own — when a session stops, when the TUI boots, on a keypress, when a verb
+fans out across every workspace — so grove withholds them until you have read
+them.
+
+[claude] is withheld the same way. It is not a command, but grove propagates it
+into the worktree's .claude/settings.local.json — permission rules, the sandbox
+boundary, auto-approval, folder trust — so a repo that sets it chooses what the
+next agent session in that worktree is allowed to do.
 
 Bare 'grove config trust' is report-only. --yes records the decision, keyed to
 a digest of exactly the commands shown: if the repo later edits or adds one,
@@ -230,8 +237,9 @@ func printExecGateReport(report *config.ExecGateReport, showCallToAction bool) {
 	fmt.Printf("%d value(s) ignored, %d honored.\n", ignored, honored)
 	if ignored > 0 && showCallToAction {
 		fmt.Println()
-		fmt.Println("Read the commands above before allowing them — they run on your machine")
-		fmt.Println("with your privileges. To allow them:")
+		fmt.Println("Read the values above before allowing them — the commands run on your")
+		fmt.Println("machine with your privileges, and the capability entries decide what an")
+		fmt.Println("agent session in this workspace may do. To allow them:")
 		fmt.Println()
 		fmt.Println("    grove config trust --yes")
 	}
@@ -250,8 +258,8 @@ func warnUntrustedExecConfig(layered *config.LayeredConfig) {
 		return
 	}
 	fmt.Fprintf(os.Stderr,
-		"⚠ %d exec-bearing config value(s) are being ignored because their workspace is not trusted.\n"+
-			"  Review them with `grove config trust`.\n\n",
+		"⚠ %d exec-bearing or capability-granting config value(s) are being ignored because\n"+
+			"  their workspace is not trusted. Review them with `grove config trust`.\n\n",
 		len(report.Quarantined()))
 }
 
