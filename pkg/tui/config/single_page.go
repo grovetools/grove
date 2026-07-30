@@ -7,6 +7,7 @@ import (
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/components/pager"
+	corekeymap "github.com/grovetools/core/tui/keymap"
 
 	grovekeymap "github.com/grovetools/grove/pkg/keymap"
 	"github.com/grovetools/grove/pkg/setup"
@@ -33,11 +34,19 @@ func NewSinglePage(pageID string, layered *config.LayeredConfig, yamlHandler *se
 	width, height := 80, 24 // initial dummy size, replaced by WindowSizeMsg
 	curatedOpts := CuratedOpts{EssentialsOnly: opts.EssentialsOnly}
 
+	// The which-key show-delay comes from the merged config; a nil layered
+	// config falls back to the default delay.
+	var coreCfg *config.Config
+	if layered != nil {
+		coreCfg = layered.Final
+	}
+
 	m := Model{
 		layered:     layered,
 		yamlHandler: yamlHandler,
 		tomlHandler: tomlHandler,
 		keys:        keys,
+		whichKey:    corekeymap.NewWhichKeyHost(coreCfg, keys.Namespaces()...),
 		help:        help.NewBuilder().WithKeys(keys).WithTitle("Configuration Editor").Build(),
 		state:       viewList,
 		// The single-page Model hosts no LayerPage, but the shared filter

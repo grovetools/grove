@@ -10,9 +10,8 @@ import (
 // EnvKeyMap defines key bindings for the `grove env tui` dashboard.
 //
 // The env TUI is a single-screen live grid: it refreshes, opens the browser
-// dashboard, and quits. It reuses Base.Refresh (with an "r" alias),
-// Base.Back (esc), Base.Quit and Base.Help; the only genuinely new binding is
-// OpenDashboard.
+// dashboard, and quits. It reuses Base.Refresh, Base.Back (esc), Base.Quit and
+// Base.Help; the only genuinely new binding is OpenDashboard.
 type EnvKeyMap struct {
 	keymap.Base
 	OpenDashboard key.Binding // "d" — open the browser dashboard
@@ -29,11 +28,15 @@ func NewEnvKeyMap(cfg *config.Config) EnvKeyMap {
 	}
 
 	// Disable the whole Base vocabulary, then re-enable only what the env TUI
-	// handles: refresh (ctrl+r, plus an "r" alias), esc-as-Back, quit, help.
+	// handles: refresh (ctrl+r), esc-as-Back, quit, help.
+	//
+	// The flat "r" alias is dropped (canon 60 §5.5 + E4): ctrl+r is the
+	// canonical refresh StandardAction, and flat `r` is reserved fleet-wide for
+	// the run/review primary-verb family.
 	disableAllBase(&km.Base)
 	km.Refresh = key.NewBinding(
-		key.WithKeys("ctrl+r", "r"),
-		key.WithHelp("ctrl+r/r", "refresh"),
+		key.WithKeys("ctrl+r"),
+		key.WithHelp("ctrl+r", "refresh"),
 	)
 	enableBindings(&km.Quit, &km.Help, &km.Back)
 

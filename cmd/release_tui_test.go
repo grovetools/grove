@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	corekeymap "github.com/grovetools/core/tui/keymap"
 
 	"github.com/grovetools/grove/pkg/release"
 )
@@ -22,8 +23,12 @@ func newTestReleaseModel(t *testing.T, repo *release.RepoReleasePlan) releaseTui
 		ReleaseLevels: [][]string{{"foo"}},
 	}
 	return releaseTuiModel{
-		plan:          plan,
-		keys:          releaseKeys,
+		plan: plan,
+		keys: releaseKeys,
+		// Mirror initialReleaseModel: the chord seam at the top of Update's
+		// tea.KeyMsg case needs a live host (a zero-value one has a nil
+		// SequenceState).
+		whichKey:      corekeymap.NewWhichKeyHost(releaseCfg, releaseKeys.Namespaces()...),
 		currentView:   viewTable,
 		repoNames:     []string{"foo"},
 		selectedIndex: 0,
@@ -228,11 +233,14 @@ func TestViewDocsKeyEntersFromTable(t *testing.T) {
 	}
 	m := newTestReleaseModel(t, repo)
 
-	next, _ := m.Update(keyMsg('V'))
+	// ViewDocs is the `vs` chord now: `v` arms the View namespace, `s`
+	// completes it.
+	next, _ := m.Update(keyMsg('v'))
+	next, _ = next.(releaseTuiModel).Update(keyMsg('s'))
 	nm := next.(releaseTuiModel)
 
 	if nm.currentView != viewDocs {
-		t.Fatalf("expected viewDocs after 'V', got %q", nm.currentView)
+		t.Fatalf("expected viewDocs after 'vs', got %q", nm.currentView)
 	}
 	if nm.docsRepo != "foo" {
 		t.Fatalf("expected docsRepo=foo, got %q", nm.docsRepo)

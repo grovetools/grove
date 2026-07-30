@@ -164,10 +164,10 @@ func approvalBlocker(repo *release.RepoReleasePlan) string {
 		if repo.GenAttempts > 1 {
 			msg = fmt.Sprintf("docs/changelog generation failed after %d attempts", repo.GenAttempts)
 		}
-		return msg + " — " + firstLine(repo.GenError) + " (regenerate with 'G'/'g')"
+		return msg + " — " + firstLine(repo.GenError) + " (regenerate with 'cd'/'cg')"
 	}
 	if strings.TrimSpace(repo.ChangelogGenError) != "" {
-		return "changelog generation failed — " + firstLine(repo.ChangelogGenError) + " (regenerate with 'g')"
+		return "changelog generation failed — " + firstLine(repo.ChangelogGenError) + " (regenerate with 'cg')"
 	}
 	return ""
 }
@@ -311,7 +311,7 @@ func (m releaseTuiModel) viewDocs() string {
 	var b strings.Builder
 	if len(m.docsSections) == 0 {
 		b.WriteString(theme.DefaultTheme.Muted.Render(
-			"No docs sections found. Run 'grove release gen' (or press 'G') to generate docs for this repo.\n"))
+			"No docs sections found. Run 'grove release gen' (or press 'cd') to generate docs for this repo.\n"))
 	} else {
 		for i, s := range m.docsSections {
 			cursor := "  "
@@ -353,7 +353,7 @@ func (m releaseTuiModel) viewDocs() string {
 	}
 
 	help := theme.DefaultTheme.Muted.Render(
-		"↑/↓: section • G: regen section • D: diff vs notebook • esc: back • q: quit")
+		"↑/↓: section • cd: regen section • vd: diff vs notebook • esc: back • q: quit")
 
 	return fmt.Sprintf("%s\n\n%s\n%s", header, b.String(), help)
 }

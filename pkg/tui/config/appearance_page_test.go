@@ -322,8 +322,9 @@ func TestIconsPreviewLifecycle(t *testing.T) {
 		t.Fatalf("cursor not on icons row: %+v", p.currentSetting())
 	}
 
-	// l cycles nerd → ascii as a staged preview: applied live, not committed.
-	_, cmd := p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	// right cycles nerd → ascii as a staged preview: applied live, not committed.
+	// (The `l` alias was dropped from Expand/Collapse — canon 60 §4.4.)
+	_, cmd := p.Update(tea.KeyMsg{Type: tea.KeyRight})
 	if cmd != nil {
 		t.Error("preview cycle: expected no command (nothing committed)")
 	}
@@ -343,8 +344,8 @@ func TestIconsPreviewLifecycle(t *testing.T) {
 		t.Error("esc: staged candidate not cleared")
 	}
 
-	// l then enter commits the staged candidate.
-	_, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	// right then enter commits the staged candidate.
+	_, _ = p.Update(tea.KeyMsg{Type: tea.KeyRight})
 	_, cmd = p.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("commit: expected a command")
@@ -381,7 +382,7 @@ func TestBlurRevertsStagedPreview(t *testing.T) {
 	p := NewCuratedPage("Appearance", AppearanceSettings(), nil, keys, 80, 24, CuratedOpts{})
 	p.Focus()
 	_, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
-	_, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	_, _ = p.Update(tea.KeyMsg{Type: tea.KeyRight})
 	if !theme.ASCIIIcons {
 		t.Fatal("preview not applied")
 	}
@@ -588,7 +589,7 @@ func TestFocusColorUnknownValueSurfaced(t *testing.T) {
 		t.Fatalf("cursor not on focus_active_color: %+v", p.currentSetting())
 	}
 	// Cycling from an unknown value stages the first enum option.
-	_, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	_, _ = p.Update(tea.KeyMsg{Type: tea.KeyRight})
 	if got := p.pendingFor(p.cursor); got != focusColorOptions[0] {
 		t.Errorf("cycle from unknown staged %q, want %q", got, focusColorOptions[0])
 	}

@@ -16,6 +16,8 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "Up", Keys: []string{"k", "up"}, Description: "up", Enabled: true, ConfigKey: "up"},
 					{Name: "Down", Keys: []string{"j", "down"}, Description: "down", Enabled: true, ConfigKey: "down"},
+					{Name: "Left", Keys: []string{"h", "left"}, Description: "left", Enabled: true, ConfigKey: "left"},
+					{Name: "Right", Keys: []string{"l", "right"}, Description: "right", Enabled: true, ConfigKey: "right"},
 					{Name: "PageUp", Keys: []string{"pgup"}, Description: "page up", Enabled: true, ConfigKey: "page_up"},
 					{Name: "PageDown", Keys: []string{"pgdown"}, Description: "page down", Enabled: true, ConfigKey: "page_down"},
 					{Name: "HalfUp", Keys: []string{"ctrl+u"}, Description: "half page up", Enabled: true, ConfigKey: "half_up"},
@@ -25,29 +27,35 @@ var TUIRegistry = []TUIRegistryEntry{
 				},
 			},
 			{
-				Name: "Filters & View",
+				Name: "Toggle (t…)",
 				Bindings: []BindingEntry{
-					{Name: "ToggleScope", Keys: []string{"s"}, Description: "cycle scope", Enabled: true, ConfigKey: "toggle_scope"},
-					{Name: "ToggleSystem", Keys: []string{"S"}, Description: "toggle system logs", Enabled: true, ConfigKey: "toggle_system"},
-					{Name: "CycleLevel", Keys: []string{"v"}, Description: "cycle log level", Enabled: true, ConfigKey: "cycle_level"},
-					{Name: "ComponentSummary", Keys: []string{"C"}, Description: "component filter", Enabled: true, ConfigKey: "component_summary"},
-					{Name: "ToggleFilters", Keys: []string{"f"}, Description: "toggle filters", Enabled: true, ConfigKey: "toggle_filters"},
-					{Name: "ToggleEvents", Keys: []string{"E"}, Description: "toggle events only", Enabled: true, ConfigKey: "toggle_events"},
-					{Name: "ToggleFollow", Keys: []string{"F"}, Description: "toggle follow", Enabled: true, ConfigKey: "toggle_follow"},
-					{Name: "Search", Keys: []string{"/"}, Description: "search", Enabled: true, ConfigKey: "search"},
+					{Name: "CycleLevel", Keys: []string{"tl"}, Description: "cycle log level", Enabled: true, ConfigKey: "cycle_level"},
+					{Name: "ToggleScope", Keys: []string{"ts"}, Description: "cycle scope", Enabled: true, ConfigKey: "toggle_scope"},
+					{Name: "ToggleSystem", Keys: []string{"tS"}, Description: "toggle system logs", Enabled: true, ConfigKey: "toggle_system"},
+					{Name: "ToggleFilters", Keys: []string{"tf"}, Description: "toggle filters", Enabled: true, ConfigKey: "toggle_filters"},
+					{Name: "ToggleEvents", Keys: []string{"te"}, Description: "toggle events only", Enabled: true, ConfigKey: "toggle_events"},
+					{Name: "ToggleFollow", Keys: []string{"tt"}, Description: "toggle follow (tail)", Enabled: true, ConfigKey: "toggle_follow"},
+					{Name: "ComponentSummary", Keys: []string{"tc"}, Description: "component filter", Enabled: true, ConfigKey: "component_summary"},
+				},
+			},
+			{
+				Name: "View (v…)",
+				Bindings: []BindingEntry{
+					{Name: "ViewJSON", Keys: []string{"vj"}, Description: "view json", Enabled: true, ConfigKey: "view_json"},
 				},
 			},
 			{
 				Name: "Actions",
 				Bindings: []BindingEntry{
 					{Name: "Expand", Keys: []string{" ", "enter"}, Description: "expand/collapse", Enabled: true, ConfigKey: "expand"},
-					{Name: "ViewJSON", Keys: []string{"J"}, Description: "view json", Enabled: true, ConfigKey: "view_json"},
 					{Name: "VisualModeStart", Keys: []string{"V"}, Description: "visual line mode", Enabled: true, ConfigKey: "visual_mode_start"},
-					{Name: "Yank", Keys: []string{"y"}, Description: "yank json", Enabled: true, ConfigKey: "yank"},
-					{Name: "CopyRawText", Keys: []string{"c"}, Description: "copy raw text", Enabled: true, ConfigKey: "copy_raw_text"},
+					{Name: "Yank", Keys: []string{"yy"}, Description: "yank json", Enabled: true, ConfigKey: "yank"},
+					{Name: "CopyRawText", Keys: []string{"Y"}, Description: "copy raw text", Enabled: true, ConfigKey: "copy_raw_text"},
 					{Name: "ClearBuffer", Keys: []string{"ctrl+l"}, Description: "clear buffer", Enabled: true, ConfigKey: "clear_buffer"},
 					{Name: "OpenEditor", Keys: []string{"e"}, Description: "open in editor", Enabled: true, ConfigKey: "open_editor"},
 					{Name: "SwitchFocus", Keys: []string{"tab"}, Description: "switch focus", Enabled: true, ConfigKey: "switch_focus"},
+					{Name: "Search", Keys: []string{"/"}, Description: "search", Enabled: true, ConfigKey: "search"},
+					{Name: "Clear", Keys: []string{"esc"}, Description: "clear/back", Enabled: true, ConfigKey: "clear"},
 				},
 			},
 			{
@@ -132,20 +140,20 @@ var TUIRegistry = []TUIRegistryEntry{
 				},
 			},
 			{
-				Name: "List",
+				Name: "Toggle (t…)",
 				Bindings: []BindingEntry{
-					{Name: "ToggleSort", Keys: []string{"t"}, Description: "toggle sort", Enabled: true, ConfigKey: "toggle_sort"},
+					{Name: "ToggleSort", Keys: []string{"ts"}, Description: "toggle sort", Enabled: true, ConfigKey: "toggle_sort"},
+					{Name: "ToggleHot", Keys: []string{"th"}, Description: "toggle hot", Enabled: true, ConfigKey: "toggle_hot"},
+					{Name: "ToggleCold", Keys: []string{"tc"}, Description: "toggle cold", Enabled: true, ConfigKey: "toggle_cold"},
+					{Name: "ToggleIgnored", Keys: []string{"ti"}, Description: "toggle gitignored", Enabled: true, ConfigKey: "toggle_ignored"},
 				},
 			},
 			{
 				Name: "Tree",
 				Bindings: []BindingEntry{
 					{Name: "ToggleExpand", Keys: []string{"enter", " "}, Description: "toggle expand", Enabled: true, ConfigKey: "toggle_expand"},
-					{Name: "ToggleHot", Keys: []string{"h"}, Description: "toggle hot", Enabled: true, ConfigKey: "toggle_hot"},
-					{Name: "ToggleCold", Keys: []string{"c"}, Description: "toggle cold", Enabled: true, ConfigKey: "toggle_cold"},
 					{Name: "ToggleExclude", Keys: []string{"x"}, Description: "toggle exclude", Enabled: true, ConfigKey: "toggle_exclude"},
-					{Name: "ToggleIgnored", Keys: []string{"H", "."}, Description: "toggle gitignored", Enabled: true, ConfigKey: "toggle_ignored"},
-					{Name: "Refresh", Keys: []string{"r", "ctrl+r"}, Description: "refresh", Enabled: true, ConfigKey: "refresh"},
+					{Name: "Refresh", Keys: []string{"ctrl+r"}, Description: "refresh", Enabled: true, ConfigKey: "refresh"},
 					{Name: "Search", Keys: []string{"/"}, Description: "search", Enabled: true, ConfigKey: "search"},
 					{Name: "SearchNext", Keys: []string{"n"}, Description: "next match", Enabled: true, ConfigKey: "search_next"},
 					{Name: "SearchPrev", Keys: []string{"N"}, Description: "prev match", Enabled: true, ConfigKey: "search_prev"},
@@ -154,7 +162,7 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Stats",
 				Bindings: []BindingEntry{
-					{Name: "SwitchFocus", Keys: []string{"s", "left", "right"}, Description: "switch list", Enabled: true, ConfigKey: "switch_focus"},
+					{Name: "SwitchFocus", Keys: []string{"tab", "left", "right"}, Description: "switch list", Enabled: true, ConfigKey: "switch_focus"},
 				},
 			},
 			{
@@ -199,14 +207,24 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "Toggle", Keys: []string{" "}, Description: "toggle", Enabled: true, ConfigKey: "toggle"},
 					{Name: "Submit", Keys: []string{"ctrl+s"}, Description: "submit", Enabled: true, ConfigKey: "submit"},
-					{Name: "ToggleClaw", Keys: []string{"ctrl+t"}, Description: "toggle claw", Enabled: true, ConfigKey: "toggle_claw"},
+				},
+			},
+			{
+				Name: "Change (c…)",
+				Bindings: []BindingEntry{
+					{Name: "QuickChat", Keys: []string{"cc"}, Description: "quick chat setup", Enabled: true, ConfigKey: "quick_chat"},
+					{Name: "QuickAgent", Keys: []string{"ca"}, Description: "quick agent setup", Enabled: true, ConfigKey: "quick_agent"},
+				},
+			},
+			{
+				Name: "Toggle (t…)",
+				Bindings: []BindingEntry{
+					{Name: "ToggleClaw", Keys: []string{"ta"}, Description: "toggle claw", Enabled: true, ConfigKey: "toggle_claw"},
 				},
 			},
 			{
 				Name: "Navigation Mode",
 				Bindings: []BindingEntry{
-					{Name: "QuickChat", Keys: []string{"c"}, Description: "quick chat setup", Enabled: true, ConfigKey: "quick_chat"},
-					{Name: "QuickAgent", Keys: []string{"a"}, Description: "quick agent setup", Enabled: true, ConfigKey: "quick_agent"},
 					{Name: "Confirm", Keys: []string{"enter"}, Description: "confirm & next", Enabled: true, ConfigKey: "confirm"},
 				},
 			},
@@ -303,11 +321,10 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "Down", Keys: []string{"j", "down"}, Description: "move down", Enabled: true, ConfigKey: "down"},
 					{Name: "PageUp", Keys: []string{"pgup", "ctrl+u"}, Description: "page up", Enabled: true, ConfigKey: "page_up"},
 					{Name: "PageDown", Keys: []string{"pgdown", "ctrl+d"}, Description: "page down", Enabled: true, ConfigKey: "page_down"},
-					{Name: "Home", Keys: []string{"home"}, Description: "first plan", Enabled: true, ConfigKey: "home"},
-					{Name: "End", Keys: []string{"end", "G"}, Description: "last plan", Enabled: true, ConfigKey: "end"},
+					{Name: "Top", Keys: []string{"gg", "home"}, Description: "first plan", Enabled: true, ConfigKey: "top"},
+					{Name: "Bottom", Keys: []string{"end", "G"}, Description: "last plan", Enabled: true, ConfigKey: "bottom"},
 					{Name: "ViewPlan", Keys: []string{"enter"}, Description: "view plan details", Enabled: true, ConfigKey: "view_plan"},
 					{Name: "OpenPlan", Keys: []string{"o"}, Description: "open plan workspace", Enabled: true, ConfigKey: "open_plan"},
-					{Name: "ViewGit", Keys: []string{"V"}, Description: "inspect in Git Viewer", Enabled: true, ConfigKey: "view_git"},
 				},
 			},
 			{
@@ -318,19 +335,30 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "EditNotes", Keys: []string{"e"}, Description: "edit notes", Enabled: true, ConfigKey: "edit_notes"},
 					{Name: "ReviewPlan", Keys: []string{"r"}, Description: "review changes", Enabled: true, ConfigKey: "review_plan"},
 					{Name: "FinishPlan", Keys: []string{"ctrl+x"}, Description: "finish plan", Enabled: true, ConfigKey: "finish_plan"},
-					{Name: "SetHoldStatus", Keys: []string{"h"}, Description: "hold/unhold plan", Enabled: true, ConfigKey: "set_hold_status"},
 					{Name: "FastForwardUpdate", Keys: []string{"U"}, Description: "update from main", Enabled: true, ConfigKey: "fast_forward_update"},
 					{Name: "FastForwardMain", Keys: []string{"M"}, Description: "merge to main", Enabled: true, ConfigKey: "fast_forward_main"},
 					{Name: "FastForwardAll", Keys: []string{"F"}, Description: "update all conflict-free plans from main", Enabled: true, ConfigKey: "fast_forward_all"},
 				},
 			},
 			{
-				Name: "View",
+				Name: "Toggle (t…)",
 				Bindings: []BindingEntry{
-					{Name: "ToggleGitLog", Keys: []string{"g"}, Description: "toggle git log", Enabled: true, ConfigKey: "toggle_git_log"},
-					{Name: "ToggleHold", Keys: []string{"H"}, Description: "toggle on-hold", Enabled: true, ConfigKey: "toggle_hold"},
-					{Name: "ToggleArchived", Keys: []string{"A"}, Description: "toggle archived", Enabled: true, ConfigKey: "toggle_archived"},
-					{Name: "ToggleColumns", Keys: []string{"T"}, Description: "toggle columns", Enabled: true, ConfigKey: "toggle_columns"},
+					{Name: "ToggleGitLog", Keys: []string{"tg"}, Description: "toggle git log", Enabled: true, ConfigKey: "toggle_git_log"},
+					{Name: "ToggleHold", Keys: []string{"th"}, Description: "toggle on-hold", Enabled: true, ConfigKey: "toggle_hold"},
+					{Name: "ToggleArchived", Keys: []string{"ta"}, Description: "toggle archived", Enabled: true, ConfigKey: "toggle_archived"},
+					{Name: "ToggleColumns", Keys: []string{"tc"}, Description: "toggle columns", Enabled: true, ConfigKey: "toggle_columns"},
+				},
+			},
+			{
+				Name: "View (v…)",
+				Bindings: []BindingEntry{
+					{Name: "ViewGit", Keys: []string{"vg"}, Description: "inspect in Git Viewer", Enabled: true, ConfigKey: "view_git"},
+				},
+			},
+			{
+				Name: "Change (c…)",
+				Bindings: []BindingEntry{
+					{Name: "SetHoldStatus", Keys: []string{"ch"}, Description: "hold/unhold plan", Enabled: true, ConfigKey: "set_hold_status"},
 				},
 			},
 			{
@@ -356,13 +384,6 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "Bottom", Keys: []string{"G"}, Description: "bottom", Enabled: true, ConfigKey: "bottom"},
 					{Name: "PageUp", Keys: []string{"ctrl+u", "pgup"}, Description: "page up", Enabled: true, ConfigKey: "page_up"},
 					{Name: "PageDown", Keys: []string{"ctrl+d", "pgdown"}, Description: "page down", Enabled: true, ConfigKey: "page_down"},
-				},
-			},
-			{
-				Name: "Search",
-				Bindings: []BindingEntry{
-					{Name: "Search", Keys: []string{"/"}, Description: "search", Enabled: true, ConfigKey: "search"},
-					{Name: "ReEnterSearch", Keys: []string{"i"}, Description: "re-enter search (vim insert)", Enabled: true, ConfigKey: "re_enter_search"},
 				},
 			},
 			{
@@ -406,16 +427,6 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "ToggleAutoComplete", Keys: []string{"cA"}, Description: "toggle auto-complete", Enabled: true, ConfigKey: "toggle_auto_complete"},
 					{Name: "Rename", Keys: []string{"cn"}, Description: "rename job", Enabled: true, ConfigKey: "rename"},
 					{Name: "EditDeps", Keys: []string{"cd"}, Description: "edit dependencies", Enabled: true, ConfigKey: "edit_deps"},
-				},
-			},
-			{
-				Name: "Fold",
-				Bindings: []BindingEntry{
-					{Name: "FoldOpen", Keys: []string{"zo", "l"}, Description: "open fold", Enabled: true, ConfigKey: "fold_open"},
-					{Name: "FoldClose", Keys: []string{"zc", "h"}, Description: "close fold", Enabled: true, ConfigKey: "fold_close"},
-					{Name: "FoldToggle", Keys: []string{"za"}, Description: "toggle fold", Enabled: true, ConfigKey: "fold_toggle"},
-					{Name: "FoldOpenAll", Keys: []string{"zR"}, Description: "open all", Enabled: true, ConfigKey: "fold_open_all"},
-					{Name: "FoldCloseAll", Keys: []string{"zM"}, Description: "close all", Enabled: true, ConfigKey: "fold_close_all"},
 				},
 			},
 			{
@@ -482,16 +493,21 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "Cache Actions",
 				Bindings: []BindingEntry{
 					{Name: "Inspect", Keys: []string{"i", "enter"}, Description: "inspect", Enabled: true, ConfigKey: "inspect"},
-					{Name: "Analytics", Keys: []string{"a"}, Description: "analytics", Enabled: true, ConfigKey: "analytics"},
 					{Name: "Delete", Keys: []string{"d"}, Description: "delete from API", Enabled: true, ConfigKey: "delete"},
 					{Name: "Wipe", Keys: []string{"w"}, Description: "wipe local", Enabled: true, ConfigKey: "wipe"},
 					{Name: "Refresh", Keys: []string{"ctrl+r"}, Description: "refresh", Enabled: true, ConfigKey: "refresh"},
 				},
 			},
 			{
+				Name: "View (v…)",
+				Bindings: []BindingEntry{
+					{Name: "Analytics", Keys: []string{"va"}, Description: "analytics", Enabled: true, ConfigKey: "analytics"},
+				},
+			},
+			{
 				Name: "Actions",
 				Bindings: []BindingEntry{
-					{Name: "Confirm", Keys: []string{"enter", "y"}, Description: "confirm", Enabled: true, ConfigKey: "confirm"},
+					{Name: "Confirm", Keys: []string{"enter"}, Description: "confirm", Enabled: true, ConfigKey: "confirm"},
 					{Name: "Cancel", Keys: []string{"ctrl+g"}, Description: "cancel", Enabled: true, ConfigKey: "cancel"},
 					{Name: "Back", Keys: []string{"esc"}, Description: "back", Enabled: true, ConfigKey: "back"},
 				},
@@ -579,9 +595,9 @@ var TUIRegistry = []TUIRegistryEntry{
 				},
 			},
 			{
-				Name: "Display",
+				Name: "Toggle (t…)",
 				Bindings: []BindingEntry{
-					{Name: "ToggleMetric", Keys: []string{"t"}, Description: "toggle metric", Enabled: true, ConfigKey: "toggle_metric"},
+					{Name: "ToggleMetric", Keys: []string{"tm"}, Description: "toggle metric", Enabled: true, ConfigKey: "toggle_metric"},
 				},
 			},
 			{
@@ -605,26 +621,24 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "Down", Keys: []string{"j", "down"}, Description: "down", Enabled: true, ConfigKey: "down"},
 					{Name: "PageUp", Keys: []string{"ctrl+u", "pgup"}, Description: "page up", Enabled: true, ConfigKey: "page_up"},
 					{Name: "PageDown", Keys: []string{"ctrl+d", "pgdown"}, Description: "page down", Enabled: true, ConfigKey: "page_down"},
-					{Name: "Top", Keys: []string{"gg"}, Description: "top", Enabled: true, ConfigKey: "top"},
-					{Name: "Bottom", Keys: []string{"G"}, Description: "bottom", Enabled: true, ConfigKey: "bottom"},
-					{Name: "Home", Keys: []string{"home"}, Description: "start", Enabled: true, ConfigKey: "home"},
-					{Name: "End", Keys: []string{"end"}, Description: "end", Enabled: true, ConfigKey: "end"},
+					{Name: "Top", Keys: []string{"gg", "home"}, Description: "top", Enabled: true, ConfigKey: "top"},
+					{Name: "Bottom", Keys: []string{"G", "end"}, Description: "bottom", Enabled: true, ConfigKey: "bottom"},
 				},
 			},
 			{
 				Name: "Diff",
 				Bindings: []BindingEntry{
-					{Name: "Diff", Keys: []string{"v", "enter"}, Description: "diff", Enabled: true, ConfigKey: "diff"},
-					{Name: "DiffFull", Keys: []string{"o"}, Description: "diff fullscreen", Enabled: true, ConfigKey: "diff_full"},
-					{Name: "ReviewDiff", Keys: []string{"O"}, Description: "review diff", Enabled: true, ConfigKey: "review_diff"},
+					{Name: "Diff", Keys: []string{"vd", "enter"}, Description: "diff", Enabled: true, ConfigKey: "diff"},
+					{Name: "DiffFull", Keys: []string{"vf"}, Description: "diff fullscreen", Enabled: true, ConfigKey: "diff_full"},
+					{Name: "ReviewDiff", Keys: []string{"vr"}, Description: "review diff", Enabled: true, ConfigKey: "review_diff"},
 				},
 			},
 			{
 				Name: "Diff Base",
 				Bindings: []BindingEntry{
-					{Name: "BaseWorking", Keys: []string{"S"}, Description: "working", Enabled: true, ConfigKey: "base_working"},
-					{Name: "BaseMain", Keys: []string{"m"}, Description: "since main", Enabled: true, ConfigKey: "base_main"},
-					{Name: "BaseReview", Keys: []string{"R"}, Description: "since review", Enabled: true, ConfigKey: "base_review"},
+					{Name: "BaseWorking", Keys: []string{"cw"}, Description: "working", Enabled: true, ConfigKey: "base_working"},
+					{Name: "BaseMain", Keys: []string{"cm"}, Description: "since main", Enabled: true, ConfigKey: "base_main"},
+					{Name: "BaseReview", Keys: []string{"cR"}, Description: "since review", Enabled: true, ConfigKey: "base_review"},
 				},
 			},
 			{
@@ -634,7 +648,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "Stage", Keys: []string{"s"}, Description: "stage", Enabled: true, ConfigKey: "stage"},
 					{Name: "Unstage", Keys: []string{"u"}, Description: "unstage", Enabled: true, ConfigKey: "unstage"},
 					{Name: "Discard", Keys: []string{"x"}, Description: "discard", Enabled: true, ConfigKey: "discard"},
-					{Name: "Commit", Keys: []string{"c"}, Description: "commit", Enabled: true, ConfigKey: "commit"},
+					{Name: "Commit", Keys: []string{"C"}, Description: "commit", Enabled: true, ConfigKey: "commit"},
 				},
 			},
 			{
@@ -646,8 +660,8 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Fold",
 				Bindings: []BindingEntry{
-					{Name: "FoldOpen", Keys: []string{"zo", ">"}, Description: "unfold", Enabled: true, ConfigKey: "fold_open"},
-					{Name: "FoldClose", Keys: []string{"zc", "<"}, Description: "fold", Enabled: true, ConfigKey: "fold_close"},
+					{Name: "FoldOpen", Keys: []string{"zo"}, Description: "open fold", Enabled: true, ConfigKey: "fold_open"},
+					{Name: "FoldClose", Keys: []string{"zc"}, Description: "close fold", Enabled: true, ConfigKey: "fold_close"},
 					{Name: "FoldToggle", Keys: []string{"za"}, Description: "toggle fold", Enabled: true, ConfigKey: "fold_toggle"},
 					{Name: "FoldOpenAll", Keys: []string{"zR"}, Description: "open all", Enabled: true, ConfigKey: "fold_open_all"},
 					{Name: "FoldCloseAll", Keys: []string{"zM"}, Description: "close all", Enabled: true, ConfigKey: "fold_close_all"},
@@ -658,7 +672,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "Edit", Keys: []string{"e"}, Description: "edit", Enabled: true, ConfigKey: "edit"},
 					{Name: "Refresh", Keys: []string{"ctrl+r"}, Description: "refresh", Enabled: true, ConfigKey: "refresh"},
-					{Name: "AllFiles", Keys: []string{"a"}, Description: "all files", Enabled: true, ConfigKey: "all_files"},
+					{Name: "AllFiles", Keys: []string{"ta"}, Description: "all files", Enabled: true, ConfigKey: "all_files"},
 				},
 			},
 			{
@@ -694,10 +708,8 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "Down", Keys: []string{"j", "down"}, Description: "down", Enabled: true, ConfigKey: "down"},
 					{Name: "PageUp", Keys: []string{"ctrl+u", "pgup"}, Description: "page up", Enabled: true, ConfigKey: "page_up"},
 					{Name: "PageDown", Keys: []string{"ctrl+d", "pgdown"}, Description: "page down", Enabled: true, ConfigKey: "page_down"},
-					{Name: "Top", Keys: []string{"gg"}, Description: "top", Enabled: true, ConfigKey: "top"},
-					{Name: "Bottom", Keys: []string{"G"}, Description: "bottom", Enabled: true, ConfigKey: "bottom"},
-					{Name: "Home", Keys: []string{"home"}, Description: "start", Enabled: true, ConfigKey: "home"},
-					{Name: "End", Keys: []string{"end"}, Description: "end", Enabled: true, ConfigKey: "end"},
+					{Name: "Top", Keys: []string{"gg", "home"}, Description: "top", Enabled: true, ConfigKey: "top"},
+					{Name: "Bottom", Keys: []string{"G", "end"}, Description: "bottom", Enabled: true, ConfigKey: "bottom"},
 					{Name: "Left", Keys: []string{"h", "left"}, Description: "prev repo", Enabled: true, ConfigKey: "left"},
 					{Name: "Right", Keys: []string{"l", "right"}, Description: "next repo", Enabled: true, ConfigKey: "right"},
 				},
@@ -705,10 +717,10 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Actions",
 				Bindings: []BindingEntry{
-					{Name: "Compare", Keys: []string{"enter", "c"}, Description: "diff since commit", Enabled: true, ConfigKey: "compare"},
+					{Name: "Compare", Keys: []string{"enter"}, Description: "diff since commit", Enabled: true, ConfigKey: "compare"},
 					{Name: "Rebase", Keys: []string{"R"}, Description: "rebase onto commit", Enabled: true, ConfigKey: "rebase"},
 					{Name: "Worktrees", Keys: []string{"w"}, Description: "worktrees", Enabled: true, ConfigKey: "worktrees"},
-					{Name: "Refresh", Keys: []string{"r", "ctrl+r"}, Description: "refresh", Enabled: true, ConfigKey: "refresh"},
+					{Name: "Refresh", Keys: []string{"ctrl+r"}, Description: "refresh", Enabled: true, ConfigKey: "refresh"},
 				},
 			},
 			{
@@ -750,7 +762,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "RebaseCurrent", Keys: []string{"u"}, Description: "rebase current", Enabled: true, ConfigKey: "rebase_current"},
 					{Name: "RebaseAll", Keys: []string{"U"}, Description: "rebase all", Enabled: true, ConfigKey: "rebase_all"},
 					{Name: "Land", Keys: []string{"L"}, Description: "land", Enabled: true, ConfigKey: "land"},
-					{Name: "ChangeRef", Keys: []string{"c"}, Description: "change ref", Enabled: true, ConfigKey: "change_ref"},
+					{Name: "ChangeRef", Keys: []string{"cr"}, Description: "change ref", Enabled: true, ConfigKey: "change_ref"},
 				},
 			},
 			{
@@ -758,7 +770,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "DeleteRemote", Keys: []string{"D"}, Description: "delete remote", Enabled: true, ConfigKey: "delete_remote"},
 					{Name: "Worktrees", Keys: []string{"w"}, Description: "worktrees", Enabled: true, ConfigKey: "worktrees"},
-					{Name: "Refresh", Keys: []string{"r", "ctrl+r"}, Description: "refresh", Enabled: true, ConfigKey: "refresh"},
+					{Name: "Refresh", Keys: []string{"ctrl+r"}, Description: "refresh", Enabled: true, ConfigKey: "refresh"},
 				},
 			},
 			{
@@ -818,7 +830,6 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "Bottom", Keys: []string{"G"}, Description: "bottom", Enabled: true, ConfigKey: "bottom"},
 					{Name: "NextPage", Keys: []string{"tab"}, Description: "next page", Enabled: true, ConfigKey: "next_page"},
 					{Name: "PrevPage", Keys: []string{"shift+tab"}, Description: "prev page", Enabled: true, ConfigKey: "prev_page"},
-					{Name: "CycleLayer", Keys: []string{"L"}, Description: "cycle layer", Enabled: true, ConfigKey: "cycle_layer"},
 					{Name: "Tab1", Keys: []string{"1"}, Description: "tab 1", Enabled: true, ConfigKey: "tab1"},
 					{Name: "Tab2", Keys: []string{"2"}, Description: "tab 2", Enabled: true, ConfigKey: "tab2"},
 					{Name: "Tab3", Keys: []string{"3"}, Description: "tab 3", Enabled: true, ConfigKey: "tab3"},
@@ -831,11 +842,9 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "Edit", Keys: []string{"enter"}, Description: "edit value", Enabled: true, ConfigKey: "edit"},
 					{Name: "Delete", Keys: []string{"dd"}, Description: "delete from layer", Enabled: true, ConfigKey: "delete"},
-					{Name: "Info", Keys: []string{"i"}, Description: "field info", Enabled: true, ConfigKey: "info"},
-					{Name: "Sources", Keys: []string{"c"}, Description: "config sources", Enabled: true, ConfigKey: "sources"},
 					{Name: "Toggle", Keys: []string{" "}, Description: "expand/collapse", Enabled: true, ConfigKey: "toggle"},
-					{Name: "Expand", Keys: []string{"right", "l"}, Description: "expand", Enabled: true, ConfigKey: "expand"},
-					{Name: "Collapse", Keys: []string{"left", "h"}, Description: "collapse/parent", Enabled: true, ConfigKey: "collapse"},
+					{Name: "Expand", Keys: []string{"right"}, Description: "expand", Enabled: true, ConfigKey: "expand"},
+					{Name: "Collapse", Keys: []string{"left"}, Description: "collapse/parent", Enabled: true, ConfigKey: "collapse"},
 				},
 			},
 			{
@@ -849,14 +858,22 @@ var TUIRegistry = []TUIRegistryEntry{
 				},
 			},
 			{
-				Name: "Filter",
+				Name: "View (v…)",
 				Bindings: []BindingEntry{
-					{Name: "Preview", Keys: []string{"p"}, Description: "toggle preview", Enabled: true, ConfigKey: "preview"},
-					{Name: "ViewMode", Keys: []string{"v"}, Description: "toggle view", Enabled: true, ConfigKey: "view_mode"},
-					{Name: "MaturityFilter", Keys: []string{"m"}, Description: "cycle maturity", Enabled: true, ConfigKey: "maturity_filter"},
-					{Name: "MaturityFilterBack", Keys: []string{"M"}, Description: "cycle maturity back", Enabled: true, ConfigKey: "maturity_filter_back"},
-					{Name: "SortMode", Keys: []string{"s"}, Description: "cycle sort", Enabled: true, ConfigKey: "sort_mode"},
-					{Name: "SortModeBack", Keys: []string{"S"}, Description: "cycle sort back", Enabled: true, ConfigKey: "sort_mode_back"},
+					{Name: "ViewMode", Keys: []string{"vm"}, Description: "toggle view", Enabled: true, ConfigKey: "view_mode"},
+					{Name: "Preview", Keys: []string{"vp"}, Description: "toggle preview", Enabled: true, ConfigKey: "preview"},
+					{Name: "Sources", Keys: []string{"vs"}, Description: "config sources", Enabled: true, ConfigKey: "sources"},
+					{Name: "Info", Keys: []string{"vi"}, Description: "field info", Enabled: true, ConfigKey: "info"},
+				},
+			},
+			{
+				Name: "Toggle (t…)",
+				Bindings: []BindingEntry{
+					{Name: "SortMode", Keys: []string{"ts"}, Description: "cycle sort", Enabled: true, ConfigKey: "sort_mode"},
+					{Name: "SortModeBack", Keys: []string{"tS"}, Description: "cycle sort back", Enabled: true, ConfigKey: "sort_mode_back"},
+					{Name: "MaturityFilter", Keys: []string{"tm"}, Description: "cycle maturity", Enabled: true, ConfigKey: "maturity_filter"},
+					{Name: "MaturityFilterBack", Keys: []string{"tM"}, Description: "cycle maturity back", Enabled: true, ConfigKey: "maturity_filter_back"},
+					{Name: "CycleLayer", Keys: []string{"tl"}, Description: "cycle layer", Enabled: true, ConfigKey: "cycle_layer"},
 				},
 			},
 			{
@@ -884,7 +901,7 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Actions",
 				Bindings: []BindingEntry{
-					{Name: "Refresh", Keys: []string{"ctrl+r", "r"}, Description: "refresh", Enabled: true, ConfigKey: "refresh"},
+					{Name: "Refresh", Keys: []string{"ctrl+r"}, Description: "refresh", Enabled: true, ConfigKey: "refresh"},
 					{Name: "OpenDashboard", Keys: []string{"d"}, Description: "open browser dashboard", Enabled: true, ConfigKey: "open_dashboard"},
 				},
 			},
@@ -982,7 +999,7 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Selection",
 				Bindings: []BindingEntry{
-					{Name: "Toggle", Keys: []string{" ", "x"}, Description: "toggle selection", Enabled: true, ConfigKey: "toggle"},
+					{Name: "Toggle", Keys: []string{" "}, Description: "toggle selection", Enabled: true, ConfigKey: "toggle"},
 					{Name: "SelectAll", Keys: []string{"ctrl+a"}, Description: "select all", Enabled: true, ConfigKey: "select_all"},
 					{Name: "SelectNone", Keys: []string{"-"}, Description: "deselect all", Enabled: true, ConfigKey: "select_none"},
 				},
@@ -999,20 +1016,25 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Changelog",
 				Bindings: []BindingEntry{
-					{Name: "ViewChangelog", Keys: []string{"v"}, Description: "view changelog", Enabled: true, ConfigKey: "view_changelog"},
 					{Name: "EditChangelog", Keys: []string{"e"}, Description: "edit staged changelog", Enabled: true, ConfigKey: "edit_changelog"},
-					{Name: "EditRepoChangelog", Keys: []string{"E"}, Description: "edit repo CHANGELOG.md", Enabled: true, ConfigKey: "edit_repo_changelog"},
-					{Name: "GenerateChangelog", Keys: []string{"g"}, Description: "generate changelog (LLM)", Enabled: true, ConfigKey: "generate_changelog"},
-					{Name: "GenerateAll", Keys: []string{"L"}, Description: "generate all changelogs", Enabled: true, ConfigKey: "generate_all"},
-					{Name: "WriteChangelog", Keys: []string{"w"}, Description: "write changelog to repo", Enabled: true, ConfigKey: "write_changelog"},
 				},
 			},
 			{
-				Name: "Docs",
+				Name: "View (v…)",
 				Bindings: []BindingEntry{
-					{Name: "ViewDocs", Keys: []string{"V"}, Description: "view docs sections", Enabled: true, ConfigKey: "view_docs"},
-					{Name: "DiffDocs", Keys: []string{"D"}, Description: "docs diff (notebook vs repo)", Enabled: true, ConfigKey: "diff_docs"},
-					{Name: "RegenDocs", Keys: []string{"G"}, Description: "regenerate docs section", Enabled: true, ConfigKey: "regen_docs"},
+					{Name: "ViewChangelog", Keys: []string{"vc"}, Description: "view changelog", Enabled: true, ConfigKey: "view_changelog"},
+					{Name: "ViewDocs", Keys: []string{"vs"}, Description: "view docs sections", Enabled: true, ConfigKey: "view_docs"},
+					{Name: "DiffDocs", Keys: []string{"vd"}, Description: "docs diff (notebook vs repo)", Enabled: true, ConfigKey: "diff_docs"},
+				},
+			},
+			{
+				Name: "Change (c…)",
+				Bindings: []BindingEntry{
+					{Name: "GenerateChangelog", Keys: []string{"cg"}, Description: "generate changelog (LLM)", Enabled: true, ConfigKey: "generate_changelog"},
+					{Name: "GenerateAll", Keys: []string{"cG"}, Description: "generate all changelogs", Enabled: true, ConfigKey: "generate_all"},
+					{Name: "WriteChangelog", Keys: []string{"cw"}, Description: "write changelog to repo", Enabled: true, ConfigKey: "write_changelog"},
+					{Name: "EditRepoChangelog", Keys: []string{"ce"}, Description: "edit repo CHANGELOG.md", Enabled: true, ConfigKey: "edit_repo_changelog"},
+					{Name: "RegenDocs", Keys: []string{"cd"}, Description: "regenerate docs section", Enabled: true, ConfigKey: "regen_docs"},
 				},
 			},
 			{
@@ -1023,11 +1045,11 @@ var TUIRegistry = []TUIRegistryEntry{
 				},
 			},
 			{
-				Name: "Settings",
+				Name: "Toggle (t…)",
 				Bindings: []BindingEntry{
-					{Name: "ToggleDryRun", Keys: []string{"d"}, Description: "toggle dry-run mode", Enabled: true, ConfigKey: "toggle_dry_run"},
-					{Name: "TogglePush", Keys: []string{"P"}, Description: "toggle push to remote", Enabled: true, ConfigKey: "toggle_push"},
-					{Name: "ToggleSyncDeps", Keys: []string{"S"}, Description: "toggle sync dependencies", Enabled: true, ConfigKey: "toggle_sync_deps"},
+					{Name: "ToggleDryRun", Keys: []string{"td"}, Description: "toggle dry-run mode", Enabled: true, ConfigKey: "toggle_dry_run"},
+					{Name: "TogglePush", Keys: []string{"tp"}, Description: "toggle push to remote", Enabled: true, ConfigKey: "toggle_push"},
+					{Name: "ToggleSyncDeps", Keys: []string{"ts"}, Description: "toggle sync dependencies", Enabled: true, ConfigKey: "toggle_sync_deps"},
 				},
 			},
 			{
@@ -1110,17 +1132,9 @@ var TUIRegistry = []TUIRegistryEntry{
 				},
 			},
 			{
-				Name: "View",
-				Bindings: []BindingEntry{
-					{Name: "ToggleView", Keys: []string{"t"}, Description: "toggle view", Enabled: true, ConfigKey: "toggle_view"},
-					{Name: "ToggleFilter", Keys: []string{"f"}, Description: "toggle filter view", Enabled: true, ConfigKey: "toggle_filter"},
-					{Name: "ScopeToggle", Keys: []string{"alt+s", "0", "w"}, Description: "local/global scope", Enabled: true, ConfigKey: "scope_toggle"},
-				},
-			},
-			{
 				Name: "Actions",
 				Bindings: []BindingEntry{
-					{Name: "Confirm", Keys: []string{"enter", "y"}, Description: "confirm", Enabled: true, ConfigKey: "confirm"},
+					{Name: "Confirm", Keys: []string{"enter"}, Description: "confirm", Enabled: true, ConfigKey: "confirm"},
 					{Name: "Back", Keys: []string{"esc"}, Description: "back", Enabled: true, ConfigKey: "back"},
 					{Name: "Edit", Keys: []string{"e"}, Description: "edit", Enabled: true, ConfigKey: "edit"},
 					{Name: "Open", Keys: []string{"o"}, Description: "open agent session", Enabled: true, ConfigKey: "open"},
@@ -1130,14 +1144,23 @@ var TUIRegistry = []TUIRegistryEntry{
 				},
 			},
 			{
+				Name: "Toggle (t…)",
+				Bindings: []BindingEntry{
+					{Name: "ToggleView", Keys: []string{"tv"}, Description: "toggle view", Enabled: true, ConfigKey: "toggle_view"},
+					{Name: "ToggleFilter", Keys: []string{"tf"}, Description: "toggle filter view", Enabled: true, ConfigKey: "toggle_filter"},
+					{Name: "ScopeToggle", Keys: []string{"ts"}, Description: "local/global scope", Enabled: true, ConfigKey: "scope_toggle"},
+				},
+			},
+			{
+				Name: "Change (c…)",
+				Bindings: []BindingEntry{
+					{Name: "MarkComplete", Keys: []string{"cc"}, Description: "mark complete", Enabled: true, ConfigKey: "mark_complete"},
+				},
+			},
+			{
 				Name: "Session",
 				Bindings: []BindingEntry{
-					{Name: "MarkComplete", Keys: []string{"c"}, Description: "mark complete", Enabled: true, ConfigKey: "mark_complete"},
-					{Name: "Kill", Keys: []string{"ctrl+k"}, Description: "cleanup session (alias for x)", Enabled: true, ConfigKey: "kill"},
-					{Name: "Inspect", Keys: []string{"i"}, Description: "inspect session health", Enabled: true, ConfigKey: "inspect"},
-					{Name: "Cleanup", Keys: []string{"x"}, Description: "cleanup session", Enabled: true, ConfigKey: "cleanup"},
-					{Name: "CleanupStale", Keys: []string{"X"}, Description: "cleanup all stale", Enabled: true, ConfigKey: "cleanup_stale"},
-					{Name: "ExpandRuns", Keys: []string{"r"}, Description: "expand/collapse retries", Enabled: true, ConfigKey: "expand_runs"},
+					{Name: "Kill", Keys: []string{"ctrl+k"}, Description: "kill session", Enabled: true, ConfigKey: "kill"},
 				},
 			},
 			{
@@ -1172,12 +1195,22 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "ResultUp", Keys: []string{"k", "up", "ctrl+p"}, Description: "prev result", Enabled: true, ConfigKey: "result_up"},
 					{Name: "ResultDown", Keys: []string{"j", "down", "ctrl+n"}, Description: "next result", Enabled: true, ConfigKey: "result_down"},
 					{Name: "OpenResult", Keys: []string{"enter"}, Description: "open in editor", Enabled: true, ConfigKey: "open_result"},
-					{Name: "CopyResultPath", Keys: []string{"y"}, Description: "copy path", Enabled: true, ConfigKey: "copy_result_path"},
+					{Name: "CopyPath", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true, ConfigKey: "copy_path"},
 					{Name: "CopyChunk", Keys: []string{"Y"}, Description: "copy chunk", Enabled: true, ConfigKey: "copy_chunk"},
-					{Name: "CycleMode", Keys: []string{"m"}, Description: "cycle mode (hybrid/fts/vector)", Enabled: true, ConfigKey: "cycle_mode"},
-					{Name: "CycleScope", Keys: []string{"s"}, Description: "local/global scope", Enabled: true, ConfigKey: "cycle_scope"},
-					{Name: "CycleDocType", Keys: []string{"t"}, Description: "cycle type filter", Enabled: true, ConfigKey: "cycle_doc_type"},
-					{Name: "AppendContext", Keys: []string{"a"}, Description: "add to context", Enabled: true, ConfigKey: "append_context"},
+				},
+			},
+			{
+				Name: "Toggle (t…)",
+				Bindings: []BindingEntry{
+					{Name: "CycleDocType", Keys: []string{"td"}, Description: "cycle type filter", Enabled: true, ConfigKey: "cycle_doc_type"},
+					{Name: "CycleScope", Keys: []string{"ts"}, Description: "local/global scope", Enabled: true, ConfigKey: "cycle_scope"},
+					{Name: "CycleMode", Keys: []string{"tm"}, Description: "cycle mode (hybrid/fts/vector)", Enabled: true, ConfigKey: "cycle_mode"},
+				},
+			},
+			{
+				Name: "Change (c…)",
+				Bindings: []BindingEntry{
+					{Name: "AppendContext", Keys: []string{"ca"}, Description: "add to context", Enabled: true, ConfigKey: "append_context"},
 				},
 			},
 			{

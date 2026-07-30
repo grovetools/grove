@@ -46,7 +46,13 @@ func (m Model) renderListView() string {
 	footerParts = append(footerParts, m.help.View())
 	m.pager.SetFooter(strings.Join(footerParts, "\n"))
 
-	return m.pager.View()
+	frame := m.pager.View()
+	// Composite the bottom-anchored which-key popup onto the final frame while
+	// a v…/t… prefix is armed (past the show-delay). Returns frame unchanged
+	// otherwise; the delayed keymap.WhichKeyShowMsg tick forces the re-render
+	// that reveals it. m.height is passed as the vertical budget so a popup
+	// taller than the pager's own content is not truncated.
+	return m.whichKey.RenderOverlayAvail(frame, lipgloss.Width(frame), m.height, *theme.DefaultTheme)
 }
 
 func (m Model) renderEditView() string {

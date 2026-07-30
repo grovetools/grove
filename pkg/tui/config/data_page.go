@@ -93,10 +93,11 @@ func (dp *DataPage) Init() tea.Cmd { return nil }
 // page's returned Page is discarded and dp is always returned.
 func (dp *DataPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok && dp.inner.active {
-		// Cycle key advances the layer — unless a z-fold chord is
-		// pending, in which case the key belongs to the chord and must
-		// reach the inner page.
-		if key.Matches(keyMsg, dp.keys.CycleLayer) && !dp.inner.IsZChordPending() {
+		// Cycle key advances the layer. The old z-chord guard went away with
+		// the flat `L`: CycleLayer is now the `tl` chord, resolved by the
+		// which-key host before the pager ever sees the keystrokes, so it can
+		// no longer shadow a pending z-fold.
+		if key.Matches(keyMsg, dp.keys.CycleLayer) {
 			dp.cycleLayer()
 			return dp, nil
 		}

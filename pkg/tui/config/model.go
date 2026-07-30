@@ -15,6 +15,7 @@ import (
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/components/pager"
 	"github.com/grovetools/core/tui/embed"
+	corekeymap "github.com/grovetools/core/tui/keymap"
 
 	"github.com/grovetools/grove/pkg/configui"
 	grovekeymap "github.com/grovetools/grove/pkg/keymap"
@@ -130,9 +131,14 @@ type Model struct {
 
 	statusMsg string
 	keys      grovekeymap.ConfigKeyMap
-	help      help.Model
-	width     int
-	height    int
+	// whichKey is the shared chord/which-key mixin: it arms the v… and t…
+	// namespaces declared by ConfigKeyMap.Namespaces() and renders the
+	// bottom-anchored popup. Its *SequenceState is a pointer, so the arm-state
+	// survives this model's value semantics.
+	whichKey corekeymap.WhichKeyHost
+	help     help.Model
+	width    int
+	height   int
 
 	// workspacePath is the host's active workspace (set via
 	// embed.SetWorkspaceMsg). Used as the LoadLayered root for
@@ -188,6 +194,13 @@ func New(
 	ti.CharLimit = 200
 	ti.Width = 50
 
+	// The which-key show-delay comes from the merged config; a nil layered
+	// config (bare test models) falls back to the default delay.
+	var coreCfg *config.Config
+	if layered != nil {
+		coreCfg = layered.Final
+	}
+
 	m := Model{
 		pager:         pgr,
 		dataPage:      dataPage,
@@ -201,6 +214,7 @@ func New(
 		tomlHandler:   tomlHandler,
 		filters:       filters,
 		keys:          keys,
+		whichKey:      corekeymap.NewWhichKeyHost(coreCfg, keys.Namespaces()...),
 		help:          help.NewBuilder().WithKeys(keys).WithTitle("Configuration Editor").Build(),
 		state:         viewList,
 	}
@@ -390,6 +404,38 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	// Chord seam via the reusable which-key host. This is the TUI's top level:
+	// the overlay states (edit/info/sources/confirm-delete), the help overlay
+	// and the page-owned text-entry guard all return before reaching here, so
+	// the namespaces arm top-level-only for free (E3).
+	//
+	// No `extra` bindings: the config TUI's flat chords (gg, dd, z*) are driven
+	// by LayerPage's own timers in pages.go, not by this sequence engine, and
+	// none of g/d/z is a v… or t… prefix, so they fall straight through.
+	res, matched, chordCmd := m.whichKey.ProcessChord(msg)
+	switch res {
+	case corekeymap.ChordPending:
+		// A namespace prefix is armed; the returned tick reveals the popup once
+		// the show-delay elapses.
+		return m, chordCmd
+	case corekeymap.ChordConsumed:
+		// esc dismissed the popup, or a stray key closed an armed menu — swallow
+		// it so "t" then "q" does not quit the editor.
+		return m, nil
+	case corekeymap.ChordMatched:
+		// Re-synthesize the completed chord so the key.Matches dispatch below
+		// resolves it (chord-only bindings make Keys()[0] the chord itself).
+		// Skip when msg ALREADY matches the binding: a binding that keeps a flat
+		// key alongside its chord (a user override, or a folded pair like
+		// Top=["gg","home"]) would otherwise have the flat press rewritten into
+		// the chord and lose the shortcut.
+		if len(matched.Keys()) > 0 && !key.Matches(msg, matched) {
+			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(matched.Keys()[0])}
+		}
+	case corekeymap.ChordNone:
+		// Not a chord — fall through to the flat dispatch + pager delegation.
+	}
+
 	// Quit -> emit CloseRequestMsg instead of tea.Quit. When embedded the
 	// host process keeps running, so drop any live theme preview first.
 	if key.Matches(msg, m.keys.Base.Quit) {
@@ -406,6 +452,11 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Filter/sort/preview toggles only apply to LayerPages. On other pages
 	// (e.g. Themes) let the keys fall through to the page itself.
+	//
+	// These are all v…/t… chords now, so the z-fold guards these branches used
+	// to carry are gone: the which-key host resolves the whole chord before the
+	// page's hand-rolled z timer can see any of its keys, and no flat c/M/S/L
+	// remains to shadow zc/zM/zS.
 	onLayerPage := m.activeLayerPage() != nil
 	if onLayerPage {
 		// Toggle preview mode
@@ -440,40 +491,26 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Show config sources - but don't intercept if z-chord is pending
+		// Show config sources (vs)
 		if key.Matches(msg, m.keys.Sources) {
-			activePage := m.activeLayerPage()
-			if activePage == nil || !activePage.IsZChordPending() {
-				m.state = viewSources
-				return m, nil
-			}
-			// Let it fall through to pager delegation
+			m.state = viewSources
+			return m, nil
 		}
 
-		// Shift+M: cycle maturity filter backward — but don't intercept when a
-		// z-chord is pending, so "zM" (collapse-all) reaches the page instead
-		// of being shadowed by maturity-backward.
+		// Cycle maturity filter backward (tM)
 		if key.Matches(msg, m.keys.MaturityFilterBack) {
-			activePage := m.activeLayerPage()
-			if activePage == nil || !activePage.IsZChordPending() {
-				m.filters.MaturityFilter = configui.CycleMaturityFilterReverse(m.filters.MaturityFilter)
-				m.saveUIState()
-				m.refreshAllPages()
-				return m, nil
-			}
-			// z-chord pending: fall through to the pager so the page sees "M".
+			m.filters.MaturityFilter = configui.CycleMaturityFilterReverse(m.filters.MaturityFilter)
+			m.saveUIState()
+			m.refreshAllPages()
+			return m, nil
 		}
 
-		// Shift+S: cycle sort mode backward — same z-chord guard as above.
+		// Cycle sort mode backward (tS)
 		if key.Matches(msg, m.keys.SortModeBack) {
-			activePage := m.activeLayerPage()
-			if activePage == nil || !activePage.IsZChordPending() {
-				m.filters.SortMode = configui.CycleSortModeReverse(m.filters.SortMode)
-				m.saveUIState()
-				m.refreshAllPages()
-				return m, nil
-			}
-			// z-chord pending: fall through to the pager so the page sees "S".
+			m.filters.SortMode = configui.CycleSortModeReverse(m.filters.SortMode)
+			m.saveUIState()
+			m.refreshAllPages()
+			return m, nil
 		}
 	}
 

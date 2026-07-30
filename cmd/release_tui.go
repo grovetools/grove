@@ -18,6 +18,7 @@ import (
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/tui/components/help"
 	tablecomponent "github.com/grovetools/core/tui/components/table"
+	corekeymap "github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
 	grovecontext "github.com/grovetools/cx/pkg/context"
 	"github.com/spf13/cobra"
@@ -32,11 +33,13 @@ type releaseKeyMap = grovekeymap.ReleaseKeyMap
 // TUI logger for debugging
 var tuiLog = logging.NewUnifiedLogger("grove-meta.release-tui")
 
+// releaseCfg is the config backing both the release keymap and the which-key
+// host's popup show-delay. Package-level var init is dependency-ordered, so
+// releaseKeys below sees the loaded value.
+var releaseCfg, _ = config.LoadDefault()
+
 // releaseKeys is the singleton instance of the release TUI keymap.
-var releaseKeys = func() grovekeymap.ReleaseKeyMap {
-	cfg, _ := config.LoadDefault()
-	return grovekeymap.NewReleaseKeyMap(cfg)
-}()
+var releaseKeys = grovekeymap.NewReleaseKeyMap(releaseCfg)
 
 // TUI views
 const (
@@ -49,8 +52,13 @@ const (
 
 // releaseTuiModel represents the TUI state
 type releaseTuiModel struct {
-	plan          *release.ReleasePlan
-	keys          releaseKeyMap
+	plan *release.ReleasePlan
+	keys releaseKeyMap
+	// whichKey is the shared chord/which-key mixin: it arms the v…/t…/c…
+	// namespaces declared by ReleaseKeyMap.Namespaces() and renders the
+	// bottom-anchored popup. Its *SequenceState is a pointer, so the arm-state
+	// survives this model's value semantics.
+	whichKey      corekeymap.WhichKeyHost
 	currentView   string
 	selectedIndex int
 	repoNames     []string // Ordered list of repo names for consistent navigation
@@ -135,6 +143,7 @@ func initialReleaseModel(plan *release.ReleasePlan) releaseTuiModel {
 	return releaseTuiModel{
 		plan:        plan,
 		keys:        releaseKeys,
+		whichKey:    corekeymap.NewWhichKeyHost(releaseCfg, releaseKeys.Namespaces()...),
 		currentView: viewTable,
 		repoNames:   repoNames,
 		viewport:    viewport.New(80, 20),
@@ -166,6 +175,38 @@ func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, vpCmd
 
 	case tea.KeyMsg:
+		// Chord seam via the reusable which-key host, ahead of the per-view
+		// dispatch. The help overlay is the one modal that owns every key, so
+		// its guard runs BEFORE the seam and the namespaces cannot arm behind
+		// it (E3). The five views share one arm-state deliberately: vd/cd are
+		// handled in both the table and the docs panel, and td/tp/ts in the
+		// settings view, so the chords must resolve identically everywhere.
+		if !m.help.ShowAll {
+			res, matched, chordCmd := m.whichKey.ProcessChord(msg)
+			switch res {
+			case corekeymap.ChordPending:
+				// A prefix is armed; the tick reveals the popup after the delay.
+				return m, chordCmd
+			case corekeymap.ChordConsumed:
+				// esc dismissed the popup, or a stray key closed an armed menu —
+				// swallow it so "c" then "q" does not quit the release manager.
+				return m, nil
+			case corekeymap.ChordMatched:
+				// Re-synthesize the completed chord so the key.Matches dispatch
+				// in the per-view handlers resolves it (chord-only bindings make
+				// Keys()[0] the chord itself). Skip when msg ALREADY matches the
+				// binding: a binding that keeps a flat key alongside its chord (a
+				// user override, or a folded pair like Top=["gg","home"]) would
+				// otherwise have the flat press rewritten into the chord and lose
+				// the shortcut.
+				if len(matched.Keys()) > 0 && !key.Matches(msg, matched) {
+					msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(matched.Keys()[0])}
+				}
+			case corekeymap.ChordNone:
+				// Not a chord — fall through to the normal per-view dispatch.
+			}
+		}
+
 		switch m.currentView {
 		case viewTable:
 			return m.updateTable(msg)
@@ -470,7 +511,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						return clearProgressMsg{}
 					})
 				} else {
-					m.genProgress = fmt.Sprintf("%s No suggestion available. Generate changelog first with 'g'", theme.IconWarning)
+					m.genProgress = fmt.Sprintf("%s No suggestion available. Generate changelog first with 'cg'", theme.IconWarning)
 					return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 						return clearProgressMsg{}
 					})
@@ -496,7 +537,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					if _, err := os.Stat(changelogPath); err == nil {
 						return m, editFileCmd(changelogPath, repoPath)
 					} else {
-						m.genProgress = fmt.Sprintf("%s No changelog found. Generate one first with 'g'", theme.IconWarning)
+						m.genProgress = fmt.Sprintf("%s No changelog found. Generate one first with 'cg'", theme.IconWarning)
 						return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 							return clearProgressMsg{}
 						})
@@ -546,7 +587,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 							m.viewport.SetContent(string(content))
 						}
 					} else {
-						m.viewport.SetContent("No changelog generated yet. Press 'g' in the main view to generate.")
+						m.viewport.SetContent("No changelog generated yet. Press 'cg' in the main view to generate.")
 					}
 				}
 			}
@@ -652,7 +693,7 @@ func (m releaseTuiModel) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						return clearProgressMsg{}
 					})
 				} else {
-					m.genProgress = fmt.Sprintf("%s No changelog generated yet. Press 'g' to generate first.", theme.IconWarning)
+					m.genProgress = fmt.Sprintf("%s No changelog generated yet. Press 'cg' to generate first.", theme.IconWarning)
 					return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 						return clearProgressMsg{}
 					})
@@ -973,18 +1014,26 @@ func (m releaseTuiModel) View() string {
 		return m.help.View()
 	}
 
+	var frame string
 	switch m.currentView {
 	case viewChangelog:
-		return m.viewChangelog()
+		frame = m.viewChangelog()
 	case viewSettings:
-		return m.viewSettings()
+		frame = m.viewSettings()
 	case viewDocs:
-		return m.viewDocs()
+		frame = m.viewDocs()
 	case viewDiff:
-		return m.viewDiff()
+		frame = m.viewDiff()
 	default:
-		return m.viewTable()
+		frame = m.viewTable()
 	}
+
+	// Composite the bottom-anchored which-key popup onto the final frame while
+	// a v…/t…/c… prefix is armed (past the show-delay). Returns frame unchanged
+	// otherwise; the delayed keymap.WhichKeyShowMsg tick forces the re-render
+	// that reveals it. m.height is the vertical budget, so a popup taller than
+	// a short frame (the docs/diff panels) is not truncated.
+	return m.whichKey.RenderOverlayAvail(frame, lipgloss.Width(frame), m.height, *theme.DefaultTheme)
 }
 
 func (m releaseTuiModel) viewTable() string {

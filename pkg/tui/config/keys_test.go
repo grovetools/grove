@@ -17,6 +17,19 @@ func runeKey(r rune) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
 }
 
+// pressChord types a which-key chord one rune at a time (e.g. "tl" = cycle
+// layer, "vs" = config sources), returning the Model after the last keystroke.
+// The intermediate presses arm the namespace and return a popup tick, which
+// tests do not need.
+func pressChord(t *testing.T, m Model, chord string) Model {
+	t.Helper()
+	for _, r := range chord {
+		updated, _ := m.Update(runeKey(r))
+		m = updated.(Model)
+	}
+	return m
+}
+
 // newConfigModel builds a config Model with the given keymap over a temp
 // project layer, with the Data tab active on its Global layer (the
 // schema-driven tree the layer-page key tests exercise).

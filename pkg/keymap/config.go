@@ -45,13 +45,18 @@ func NewConfigKeyMap(cfg *config.Config) ConfigKeyMap {
 			key.WithKeys("dd"),
 			key.WithHelp("dd", "delete from layer"),
 		),
+		// View (v…) namespace member. Chord-only (E4): the flat `i` is released
+		// back to the Ring-1 `insert` vocabulary (canon 60 §4.1/§5.1).
 		Info: key.NewBinding(
-			key.WithKeys("i"),
-			key.WithHelp("i", "field info"),
+			key.WithKeys("vi"),
+			key.WithHelp("vi", "field info"),
 		),
+		// View (v…) namespace member. Was the flat `c` squatter on the reserved
+		// change prefix; sources is a VIEW of where values come from, not a
+		// mutation, so it lands in v… rather than c… (canon 60 §10 group 2).
 		Sources: key.NewBinding(
-			key.WithKeys("c"),
-			key.WithHelp("c", "config sources"),
+			key.WithKeys("vs"),
+			key.WithHelp("vs", "config sources"),
 		),
 		Confirm: key.NewBinding(
 			key.WithKeys("enter"),
@@ -61,6 +66,12 @@ func NewConfigKeyMap(cfg *config.Config) ConfigKeyMap {
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "cancel"),
 		),
+		// Edit-dialog only. `tab` is shared with NextPage, but the two live in
+		// disjoint modes — SwitchLayer is matched solely in Model.updateEdit
+		// (state == viewEdit) and NextPage solely via the pager in
+		// Model.updateList — exactly like the already-sanctioned enter overlap
+		// (Edit vs Confirm). Kept on `tab` rather than rebound to `ctrl+e`; see
+		// the canon-60 §10 deviation note in the fan-out report.
 		SwitchLayer: key.NewBinding(
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "change layer"),
@@ -69,13 +80,16 @@ func NewConfigKeyMap(cfg *config.Config) ConfigKeyMap {
 			key.WithKeys(" "),
 			key.WithHelp("space", "expand/collapse"),
 		),
+		// `l`/`h` dropped (canon 60 §4.4): they meant "fold" only here while
+		// meaning left/right in nine other TUIs. left/right stay (sanctioned via
+		// ReservedAlternates) and the zo/zc fold chords cover the vim spelling.
 		Expand: key.NewBinding(
-			key.WithKeys("right", "l"),
-			key.WithHelp("l/→", "expand"),
+			key.WithKeys("right"),
+			key.WithHelp("→", "expand"),
 		),
 		Collapse: key.NewBinding(
-			key.WithKeys("left", "h"),
-			key.WithHelp("h/←", "collapse/parent"),
+			key.WithKeys("left"),
+			key.WithHelp("←", "collapse/parent"),
 		),
 		NextPage: key.NewBinding(
 			key.WithKeys("tab"),
@@ -85,35 +99,40 @@ func NewConfigKeyMap(cfg *config.Config) ConfigKeyMap {
 			key.WithKeys("shift+tab"),
 			key.WithHelp("shift+tab", "prev page"),
 		),
-		// "L" (not "l"): lowercase l is claimed by tree expand, and the
-		// z-fold chords own the z-prefixed vocabulary.
+		// Toggle (t…) namespace member — a layer CYCLE, so RULE T (canon 60
+		// §4.2) puts it in t…, freeing the flat `L`.
 		CycleLayer: key.NewBinding(
-			key.WithKeys("L"),
-			key.WithHelp("L", "cycle layer"),
+			key.WithKeys("tl"),
+			key.WithHelp("tl", "cycle layer"),
 		),
+		// View (v…) namespace member (canon 60 §4.1).
 		Preview: key.NewBinding(
-			key.WithKeys("p"),
-			key.WithHelp("p", "toggle preview"),
+			key.WithKeys("vp"),
+			key.WithHelp("vp", "toggle preview"),
 		),
+		// View (v…) namespace member. Was the flat `v` squatter on the reserved
+		// view prefix.
 		ViewMode: key.NewBinding(
-			key.WithKeys("v"),
-			key.WithHelp("v", "toggle view"),
+			key.WithKeys("vm"),
+			key.WithHelp("vm", "toggle view"),
 		),
+		// Toggle (t…) namespace members — RULE T: every display/filter cycle
+		// moves into t…. Uppercase-in-chord (tS/tM) is established house style.
 		MaturityFilter: key.NewBinding(
-			key.WithKeys("m"),
-			key.WithHelp("m", "cycle maturity"),
+			key.WithKeys("tm"),
+			key.WithHelp("tm", "cycle maturity"),
 		),
 		MaturityFilterBack: key.NewBinding(
-			key.WithKeys("M"),
-			key.WithHelp("M", "cycle maturity back"),
+			key.WithKeys("tM"),
+			key.WithHelp("tM", "cycle maturity back"),
 		),
 		SortMode: key.NewBinding(
-			key.WithKeys("s"),
-			key.WithHelp("s", "cycle sort"),
+			key.WithKeys("ts"),
+			key.WithHelp("ts", "cycle sort"),
 		),
 		SortModeBack: key.NewBinding(
-			key.WithKeys("S"),
-			key.WithHelp("S", "cycle sort back"),
+			key.WithKeys("tS"),
+			key.WithHelp("tS", "cycle sort back"),
 		),
 	}
 
@@ -142,11 +161,31 @@ func (k ConfigKeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{k.Base.Quit}
 }
 
+// Namespaces returns the which-key chord namespaces for the config editor,
+// built from the NAMED KeyMap fields so ApplyTUIOverrides is reflected and
+// MakeTUIInfo can match each member back to a stable snake_case ConfigKey
+// (namespace.go's ConfigKey-stability rule — never construct members inline).
+//
+// v… is "show me a different rendering of the current thing" (view mode,
+// preview pane, config sources, field info); t… is RULE T, every display or
+// filter cycle (sort, maturity, layer). Order here is the wire order
+// ProcessChord relies on.
+func (k ConfigKeyMap) Namespaces() []keymap.Namespace {
+	return []keymap.Namespace{
+		{Prefix: "v", Label: "View", Bindings: []key.Binding{
+			k.ViewMode, k.Preview, k.Sources, k.Info,
+		}},
+		{Prefix: "t", Label: "Toggle", Bindings: []key.Binding{
+			k.SortMode, k.SortModeBack, k.MaturityFilter, k.MaturityFilterBack, k.CycleLayer,
+		}},
+	}
+}
+
 // FullHelp returns keybindings for the expanded help view.
 func (k ConfigKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		// Page navigation
-		{k.NextPage, k.PrevPage, k.CycleLayer},
+		{k.NextPage, k.PrevPage},
 		// Navigation
 		{k.Base.Up, k.Base.Down, k.Base.PageUp, k.Base.PageDown},
 		// Tree navigation
@@ -154,9 +193,11 @@ func (k ConfigKeyMap) FullHelp() [][]key.Binding {
 		// Folds
 		{k.Base.FoldOpenAll, k.Base.FoldCloseAll, k.Base.FoldOpen, k.Base.FoldClose, k.Base.FoldToggle},
 		// Actions
-		{k.Edit, k.Delete, k.Info, k.Sources, k.Preview},
-		// Filtering/Sorting
-		{k.ViewMode, k.MaturityFilter, k.MaturityFilterBack, k.SortMode, k.SortModeBack},
+		{k.Edit, k.Delete},
+		// View (v…) chords
+		{k.ViewMode, k.Preview, k.Sources, k.Info},
+		// Toggle (t…) chords
+		{k.SortMode, k.SortModeBack, k.MaturityFilter, k.MaturityFilterBack, k.CycleLayer},
 		// Exit
 		{k.Base.Quit, k.Base.Help},
 	}
@@ -167,23 +208,26 @@ func (k ConfigKeyMap) FullHelp() [][]key.Binding {
 // overlay and the keys registry stay truthful (see NewConfigKeyMap for the
 // Base-disable rationale).
 func (k ConfigKeyMap) Sections() []keymap.Section {
+	ns := k.Namespaces()
 	return []keymap.Section{
 		keymap.NavigationSection(
 			k.Up, k.Down, k.PageUp, k.PageDown, k.Top, k.Bottom,
-			k.NextPage, k.PrevPage, k.CycleLayer,
+			k.NextPage, k.PrevPage,
 			k.Tab1, k.Tab2, k.Tab3, k.Tab4, k.Tab5,
 		),
 		keymap.NewSection("Tree Actions",
-			k.Edit, k.Delete, k.Info, k.Sources, k.Toggle, k.Expand, k.Collapse,
+			k.Edit, k.Delete, k.Toggle, k.Expand, k.Collapse,
 		),
 		// Fold vocabulary is Base's vim chords (zR/zM/zo/zc/za); the TUI routes
 		// its ad-hoc z-chord through these bindings via key.Matches.
 		keymap.FoldSection(
 			k.FoldOpen, k.FoldClose, k.FoldToggle, k.FoldOpenAll, k.FoldCloseAll,
 		),
-		keymap.NewSection(keymap.SectionFilter,
-			k.Preview, k.ViewMode, k.MaturityFilter, k.MaturityFilterBack, k.SortMode, k.SortModeBack,
-		),
+		// The v… and t… namespaces ARE the former Filter section. Each member is
+		// exported exactly once (here, via Namespace.Section()) so the merged
+		// registry carries one ConfigKey per binding.
+		ns[0].Section(),
+		ns[1].Section(),
 		// Edit-modal bindings share physical keys (enter/tab) with tree/page
 		// bindings but live in a disjoint context; distinct fields keep their
 		// override identities unambiguous.

@@ -43,9 +43,11 @@ type ReleaseKeyMap struct {
 func NewReleaseKeyMap(cfg *config.Config) ReleaseKeyMap {
 	km := ReleaseKeyMap{
 		Base: keymap.Load(cfg, "grove.release"),
+		// `x` dropped (E4): space is the canonical select key and `x` means
+		// cut/discard elsewhere in the fleet.
 		Toggle: key.NewBinding(
-			key.WithKeys(" ", "x"),
-			key.WithHelp("space/x", "toggle selection"),
+			key.WithKeys(" "),
+			key.WithHelp("space", "toggle selection"),
 		),
 		Tab: key.NewBinding(
 			key.WithKeys("tab"),
@@ -75,41 +77,55 @@ func NewReleaseKeyMap(cfg *config.Config) ReleaseKeyMap {
 			key.WithKeys("s"),
 			key.WithHelp("s", "apply suggestion"),
 		),
+		// View (v…) namespace member. Was the flat `v` squatter on the reserved
+		// view prefix.
 		ViewChangelog: key.NewBinding(
-			key.WithKeys("v"),
-			key.WithHelp("v", "view changelog"),
+			key.WithKeys("vc"),
+			key.WithHelp("vc", "view changelog"),
 		),
+		// Stays flat: `e` IS the canonical edit key (StandardActions).
 		EditChangelog: key.NewBinding(
 			key.WithKeys("e"),
 			key.WithHelp("e", "edit staged changelog"),
 		),
+		// Change (c…) namespace member (canon 60 §4.3).
 		EditRepoChangelog: key.NewBinding(
-			key.WithKeys("E"),
-			key.WithHelp("E", "edit repo CHANGELOG.md"),
+			key.WithKeys("ce"),
+			key.WithHelp("ce", "edit repo CHANGELOG.md"),
 		),
+		// Change (c…) namespace member. Was the flat `g` squatter on the
+		// reserved goto prefix — this rebind is what fully vacates flat `g`
+		// fleet-wide (canon 60 §4.4).
 		GenerateChangelog: key.NewBinding(
-			key.WithKeys("g"),
-			key.WithHelp("g", "generate changelog (LLM)"),
+			key.WithKeys("cg"),
+			key.WithHelp("cg", "generate changelog (LLM)"),
 		),
+		// Change (c…) namespace member; uppercase-in-chord marks the
+		// all-repos variant of cg, matching flow-status' cM/cA house style.
 		GenerateAll: key.NewBinding(
-			key.WithKeys("L"),
-			key.WithHelp("L", "generate all changelogs"),
+			key.WithKeys("cG"),
+			key.WithHelp("cG", "generate all changelogs"),
 		),
+		// Change (c…) namespace member (canon 60 §4.3).
 		WriteChangelog: key.NewBinding(
-			key.WithKeys("w"),
-			key.WithHelp("w", "write changelog to repo"),
+			key.WithKeys("cw"),
+			key.WithHelp("cw", "write changelog to repo"),
 		),
+		// View (v…) namespace member (canon 60 §4.1).
 		ViewDocs: key.NewBinding(
-			key.WithKeys("V"),
-			key.WithHelp("V", "view docs sections"),
+			key.WithKeys("vs"),
+			key.WithHelp("vs", "view docs sections"),
 		),
+		// View (v…) namespace member (canon 60 §4.1).
 		DiffDocs: key.NewBinding(
-			key.WithKeys("D"),
-			key.WithHelp("D", "docs diff (notebook vs repo)"),
+			key.WithKeys("vd"),
+			key.WithHelp("vd", "docs diff (notebook vs repo)"),
 		),
+		// Change (c…) namespace member. `G` is a RESERVED key (bottom) and this
+		// was the fleet's only real reserved-key violation; cd retires it.
 		RegenDocs: key.NewBinding(
-			key.WithKeys("G"),
-			key.WithHelp("G", "regenerate docs section"),
+			key.WithKeys("cd"),
+			key.WithHelp("cd", "regenerate docs section"),
 		),
 		EditRules: key.NewBinding(
 			key.WithKeys("r"),
@@ -119,17 +135,19 @@ func NewReleaseKeyMap(cfg *config.Config) ReleaseKeyMap {
 			key.WithKeys("R"),
 			key.WithHelp("R", "reset all rules to *"),
 		),
+		// Toggle (t…) namespace members — RULE T (canon 60 §4.2): every
+		// display/mode toggle moves into t…, no exceptions.
 		ToggleDryRun: key.NewBinding(
-			key.WithKeys("d"),
-			key.WithHelp("d", "toggle dry-run mode"),
+			key.WithKeys("td"),
+			key.WithHelp("td", "toggle dry-run mode"),
 		),
 		TogglePush: key.NewBinding(
-			key.WithKeys("P"),
-			key.WithHelp("P", "toggle push to remote"),
+			key.WithKeys("tp"),
+			key.WithHelp("tp", "toggle push to remote"),
 		),
 		ToggleSyncDeps: key.NewBinding(
-			key.WithKeys("S"),
-			key.WithHelp("S", "toggle sync dependencies"),
+			key.WithKeys("ts"),
+			key.WithHelp("ts", "toggle sync dependencies"),
 		),
 		Approve: key.NewBinding(
 			key.WithKeys("a"),
@@ -154,6 +172,32 @@ func (k ReleaseKeyMap) ShortHelp() []key.Binding {
 	}
 }
 
+// Namespaces returns the which-key chord namespaces for the release TUI, built
+// from the NAMED KeyMap fields so ApplyTUIOverrides is reflected and
+// MakeTUIInfo can match each member back to a stable snake_case ConfigKey
+// (namespace.go's ConfigKey-stability rule — never construct members inline).
+//
+// v… renders something about the selected repo (changelog, docs sections, docs
+// diff); t… is RULE T, the run-mode toggles; c… mutates what will be released
+// (generate/write changelogs, edit the repo CHANGELOG, regenerate docs). The
+// semver triad (m/n/p/s/a) deliberately stays flat — grove-release IS a version
+// picker, so those are its subject matter (canon 60 §5.3). Order here is the
+// wire order ProcessChord relies on.
+func (k ReleaseKeyMap) Namespaces() []keymap.Namespace {
+	return []keymap.Namespace{
+		{Prefix: "v", Label: "View", Bindings: []key.Binding{
+			k.ViewChangelog, k.ViewDocs, k.DiffDocs,
+		}},
+		{Prefix: "t", Label: "Toggle", Bindings: []key.Binding{
+			k.ToggleDryRun, k.TogglePush, k.ToggleSyncDeps,
+		}},
+		{Prefix: "c", Label: "Change", Bindings: []key.Binding{
+			k.GenerateChangelog, k.GenerateAll, k.WriteChangelog,
+			k.EditRepoChangelog, k.RegenDocs,
+		}},
+	}
+}
+
 // FullHelp returns all key bindings for the full help view.
 func (k ReleaseKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
@@ -164,13 +208,14 @@ func (k ReleaseKeyMap) FullHelp() [][]key.Binding {
 		// Version bumps
 		{k.SelectMajor, k.SelectMinor, k.SelectPatch, k.ApplySuggestion},
 		// Changelog
-		{k.ViewChangelog, k.EditChangelog, k.EditRepoChangelog},
-		{k.GenerateChangelog, k.GenerateAll, k.WriteChangelog},
-		// Docs
-		{k.ViewDocs, k.DiffDocs, k.RegenDocs},
+		{k.EditChangelog},
+		// View (v…) chords
+		{k.ViewChangelog, k.ViewDocs, k.DiffDocs},
+		// Change (c…) chords
+		{k.GenerateChangelog, k.GenerateAll, k.WriteChangelog, k.EditRepoChangelog, k.RegenDocs},
 		// LLM rules
 		{k.EditRules, k.ResetRules},
-		// Settings
+		// Toggle (t…) chords
 		{k.ToggleDryRun, k.TogglePush, k.ToggleSyncDeps},
 		// Actions
 		{k.Approve, k.Back, k.Base.Quit, k.Base.Help},
@@ -184,6 +229,11 @@ func (k ReleaseKeyMap) Sections() []keymap.Section {
 	nav := k.Base.NavigationSection()
 	nav.Bindings = []key.Binding{k.Up, k.Down, k.Tab}
 
+	// The v…/t…/c… namespaces replace the old Changelog / Docs / Settings
+	// sections. Each member is exported exactly once (via Namespace.Section())
+	// so the merged registry carries one ConfigKey per binding.
+	ns := k.Namespaces()
+
 	return []keymap.Section{
 		nav,
 		keymap.SelectionSection(k.Toggle, k.SelectAll, k.SelectNone),
@@ -191,17 +241,14 @@ func (k ReleaseKeyMap) Sections() []keymap.Section {
 			k.SelectMajor, k.SelectMinor, k.SelectPatch, k.ApplySuggestion,
 		),
 		keymap.NewSectionWithIcon("Changelog", theme.IconDiff,
-			k.ViewChangelog, k.EditChangelog, k.EditRepoChangelog, k.GenerateChangelog, k.GenerateAll, k.WriteChangelog,
+			k.EditChangelog,
 		),
-		keymap.NewSectionWithIcon("Docs", theme.IconNote,
-			k.ViewDocs, k.DiffDocs, k.RegenDocs,
-		),
+		ns[0].Section(),
+		ns[2].Section(),
 		keymap.NewSectionWithIcon("LLM Rules", theme.IconRobot,
 			k.EditRules, k.ResetRules,
 		),
-		keymap.NewSection(keymap.SectionSettings,
-			k.ToggleDryRun, k.TogglePush, k.ToggleSyncDeps,
-		),
+		ns[1].Section(),
 		keymap.ActionsSection(k.Approve, k.Back),
 		k.Base.SystemSection(),
 	}

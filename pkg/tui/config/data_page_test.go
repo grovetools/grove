@@ -84,10 +84,11 @@ func TestDataPageCyclesLayers(t *testing.T) {
 	m := newDataModel(t, layered, filepath.Dir(projPath))
 	dp := m.dataPage
 
+	// The layer cycler is the `tl` chord now (the flat `L` moved into the t…
+	// namespace), so each cycle is two keystrokes.
 	pressL := func() {
 		t.Helper()
-		updated, _ := m.Update(runeKey('L'))
-		m = updated.(Model)
+		m = pressChord(t, m, "tl")
 	}
 
 	// Starts on Global, title shows layer name + global file path.
@@ -132,8 +133,8 @@ func TestDataPageCyclesLayers(t *testing.T) {
 		t.Errorf("audit key = %q, want %q", node.Audit.Key, "stale_section")
 	}
 
-	// Footer/filter-state line advertises the cycle key.
-	if fs := dp.inner.renderFilterState(); !strings.Contains(fs, "[L: layer →]") {
+	// Footer/filter-state line advertises the cycle key (the `tl` chord).
+	if fs := dp.inner.renderFilterState(); !strings.Contains(fs, "[tl: layer →]") {
 		t.Errorf("filter state %q missing cycle hint", fs)
 	}
 
@@ -157,8 +158,7 @@ func TestDataPageEditAndDeleteRouting(t *testing.T) {
 
 	// Cycle Global → Ecosystem → Notebook → Project.
 	for i := 0; i < 3; i++ {
-		updated, _ := m.Update(runeKey('L'))
-		m = updated.(Model)
+		m = pressChord(t, m, "tl")
 	}
 	p := m.activeLayerPage()
 	if p == nil || p.Layer() != config.SourceProject {
@@ -263,8 +263,7 @@ func TestDataPageSurvivesPagerReassignment(t *testing.T) {
 	}
 
 	// And the cycler still works afterwards.
-	updated, _ = m.Update(runeKey('L'))
-	m = updated.(Model)
+	m = pressChord(t, m, "tl")
 	if m.dataPage.Layer() != config.SourceEcosystem {
 		t.Fatalf("cycle key inert after keystroke: layer = %s", m.dataPage.Layer())
 	}
