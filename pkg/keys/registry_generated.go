@@ -1137,6 +1137,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "Inspect", Keys: []string{"i"}, Description: "inspect session health", Enabled: true, ConfigKey: "inspect"},
 					{Name: "Cleanup", Keys: []string{"x"}, Description: "cleanup session", Enabled: true, ConfigKey: "cleanup"},
 					{Name: "CleanupStale", Keys: []string{"X"}, Description: "cleanup all stale", Enabled: true, ConfigKey: "cleanup_stale"},
+					{Name: "ExpandRuns", Keys: []string{"r"}, Description: "expand/collapse retries", Enabled: true, ConfigKey: "expand_runs"},
 				},
 			},
 			{
