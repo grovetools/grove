@@ -110,6 +110,27 @@ func TestReleaseChordSeamConsumesEscAndStrayKeys(t *testing.T) {
 	}
 }
 
+// TestReleaseChordKeysDoNotScrollViewport locks in the pre-seam stand-down:
+// Update feeds every message to the viewport before the chord seam runs, and
+// the viewport's own motions (u/d/f/b/space) collide with the chord
+// continuation keys, so `t` then `d` used to scroll the changelog/diff panel on
+// its way to toggling dry-run.
+func TestReleaseChordKeysDoNotScrollViewport(t *testing.T) {
+	m := newChordReleaseModel(t)
+	m.viewport.Height = 5
+	m.viewport.SetContent(strings.Repeat("line\n", 200))
+	m.currentView = viewSettings
+
+	before := m.viewport.YOffset
+	got := pressReleaseChord(t, m, "td")
+	if got.viewport.YOffset != before {
+		t.Errorf("chord key `d` scrolled the viewport: offset %d -> %d", before, got.viewport.YOffset)
+	}
+	if got.dryRun == m.dryRun {
+		t.Error("td did not toggle dry-run")
+	}
+}
+
 // TestReleaseWhichKeyPopupRendersBottomAnchored asserts View() docks the popup
 // at the bottom of the frame once the show-delay has elapsed.
 func TestReleaseWhichKeyPopupRendersBottomAnchored(t *testing.T) {

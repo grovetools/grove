@@ -534,8 +534,12 @@ func (m Model) updateInfo(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// updateSources handles keys in the config-sources overlay. Sources is no
+// longer a press-again-to-close toggle: it is the `vs` chord, and the chord
+// seam runs only at the top level (E3), so an overlay state never sees the two
+// keystrokes that would re-match it. esc/q are the closers.
 func (m Model) updateSources(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if key.Matches(msg, m.keys.Cancel) || key.Matches(msg, m.keys.Base.Quit) || key.Matches(msg, m.keys.Sources) {
+	if key.Matches(msg, m.keys.Cancel) || key.Matches(msg, m.keys.Base.Quit) {
 		m.state = viewList
 		return m, nil
 	}

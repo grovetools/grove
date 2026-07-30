@@ -159,9 +159,19 @@ func (m releaseTuiModel) Init() tea.Cmd {
 }
 
 func (m releaseTuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Always update the viewport, regardless of the message type
+	// Always update the viewport, regardless of the message type — with one
+	// stand-down: a keystroke that is the continuation of an armed which-key
+	// chord belongs to the chord, not to the pager. The viewport's default
+	// motions (u/d/f/b/space/j/k) overlap the chord continuation keys (td, cd,
+	// vd, …), so without this guard pressing `t` then `d` scrolled the
+	// changelog/diff panel behind the popup on its way to toggling dry-run.
+	// Armed() is read BEFORE ProcessChord mutates the buffer, so the prefix
+	// keystroke itself (v/t/c — none of them viewport motions) still reaches
+	// the viewport and only the second key is withheld.
 	var vpCmd tea.Cmd
-	m.viewport, vpCmd = m.viewport.Update(msg)
+	if _, isKey := msg.(tea.KeyMsg); !isKey || !m.whichKey.Armed() {
+		m.viewport, vpCmd = m.viewport.Update(msg)
+	}
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:

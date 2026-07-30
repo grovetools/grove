@@ -1,7 +1,6 @@
 package config
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -9,18 +8,16 @@ import (
 
 	"github.com/grovetools/grove/pkg/configui"
 	grovekeymap "github.com/grovetools/grove/pkg/keymap"
-	"github.com/grovetools/grove/pkg/setup"
 )
 
 // newChordModel builds a config Model with the Data tab active and a realistic
 // window size, so View() renders a full frame the which-key popup can dock to.
+// It goes through newConfigModel so it inherits the filter pin — these tests
+// fire the very toggles that persist UI state, so an unpinned model would make
+// every later test in the package depend on this one's leftovers.
 func newChordModel(t *testing.T) Model {
 	t.Helper()
-	layered, path := writeProjectLayer(t)
-	svc := setup.NewService(false)
-	m := New(layered, setup.NewYAMLHandler(svc), setup.NewTOMLHandler(svc), grovekeymap.NewConfigKeyMap(nil))
-	m.workspacePath = filepath.Dir(path)
-	m.pager.SetActive(6) // Data tab
+	m := newConfigModel(t, grovekeymap.NewConfigKeyMap(nil))
 	m.width, m.height = 100, 40
 	// The Data page builds its node list lazily; expand it so row-scoped
 	// actions (field info) have a node under the cursor.

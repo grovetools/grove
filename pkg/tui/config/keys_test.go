@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -11,6 +12,27 @@ import (
 	grovekeymap "github.com/grovetools/grove/pkg/keymap"
 	"github.com/grovetools/grove/pkg/setup"
 )
+
+// TestMain sandboxes the XDG state dir for the whole package. Model.saveUIState
+// persists the preview/view-mode/maturity/sort filters to
+// $XDG_STATE_HOME/grove/config-ui.json, so any test that fires one of those
+// toggles otherwise writes the DEVELOPER'S real UI state — and, because
+// loadUIStateFromDisk seeds the next run's filters from that same file, leaks
+// across runs: a flipped maturity filter empties the Data page's node list and
+// the z-chord tests fail intermittently on the following invocation.
+// GROVE_HOME wins over XDG_STATE_HOME in paths.StateDir, so it is cleared too;
+// the tests that genuinely need a grove home set their own with t.Setenv.
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "grove-config-ui-state")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("GROVE_HOME", "")
+	os.Setenv("XDG_STATE_HOME", dir)
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
+}
 
 // runeKey builds a KeyMsg for a single printable rune (e.g. 'z', 'M', 'a').
 func runeKey(r rune) tea.KeyMsg {
@@ -40,6 +62,17 @@ func newConfigModel(t *testing.T, keys grovekeymap.ConfigKeyMap) Model {
 	m := New(layered, setup.NewYAMLHandler(svc), setup.NewTOMLHandler(svc), keys)
 	m.workspacePath = filepath.Dir(path)
 	m.pager.SetActive(6) // Data tab
+
+	// New() seeds the filters from the on-disk UI state, and any sibling test
+	// that fires a preview/view-mode/sort/maturity toggle writes that file back
+	// — so without an explicit pin the tree a test walks depends on which tests
+	// ran before it (a persisted ViewConfigured empties the Data page outright).
+	// Re-assert the shipped defaults so every model starts from the same tree.
+	m.filters.ShowPreview = true
+	m.filters.ViewMode = configui.ViewAll
+	m.filters.MaturityFilter = configui.MaturityStable
+	m.filters.SortMode = configui.SortConfiguredFirst
+	m.refreshAllPages()
 	return m
 }
 
