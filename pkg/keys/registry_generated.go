@@ -359,6 +359,13 @@ var TUIRegistry = []TUIRegistryEntry{
 				},
 			},
 			{
+				Name: "Search",
+				Bindings: []BindingEntry{
+					{Name: "Search", Keys: []string{"/"}, Description: "search", Enabled: true, ConfigKey: "search"},
+					{Name: "ReEnterSearch", Keys: []string{"i"}, Description: "re-enter search (vim insert)", Enabled: true, ConfigKey: "re_enter_search"},
+				},
+			},
+			{
 				Name: "Selection",
 				Bindings: []BindingEntry{
 					{Name: "Select", Keys: []string{" "}, Description: "select", Enabled: true, ConfigKey: "select"},
@@ -1126,7 +1133,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "Session",
 				Bindings: []BindingEntry{
 					{Name: "MarkComplete", Keys: []string{"c"}, Description: "mark complete", Enabled: true, ConfigKey: "mark_complete"},
-					{Name: "Kill", Keys: []string{"ctrl+k"}, Description: "kill session", Enabled: true, ConfigKey: "kill"},
+					{Name: "Kill", Keys: []string{"ctrl+k"}, Description: "cleanup session (alias for x)", Enabled: true, ConfigKey: "kill"},
 					{Name: "Inspect", Keys: []string{"i"}, Description: "inspect session health", Enabled: true, ConfigKey: "inspect"},
 					{Name: "Cleanup", Keys: []string{"x"}, Description: "cleanup session", Enabled: true, ConfigKey: "cleanup"},
 					{Name: "CleanupStale", Keys: []string{"X"}, Description: "cleanup all stale", Enabled: true, ConfigKey: "cleanup_stale"},
