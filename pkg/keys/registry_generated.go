@@ -1127,6 +1127,9 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "MarkComplete", Keys: []string{"c"}, Description: "mark complete", Enabled: true, ConfigKey: "mark_complete"},
 					{Name: "Kill", Keys: []string{"ctrl+k"}, Description: "kill session", Enabled: true, ConfigKey: "kill"},
+					{Name: "Inspect", Keys: []string{"i"}, Description: "inspect session health", Enabled: true, ConfigKey: "inspect"},
+					{Name: "Cleanup", Keys: []string{"x"}, Description: "cleanup session", Enabled: true, ConfigKey: "cleanup"},
+					{Name: "CleanupStale", Keys: []string{"X"}, Description: "cleanup all stale", Enabled: true, ConfigKey: "cleanup_stale"},
 				},
 			},
 			{

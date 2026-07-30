@@ -398,6 +398,20 @@ var SchemaFields = []FieldMeta{
 						Description: "Drawer page selected at startup",
 					},
 					{
+						Path:        []string{"tui", "drawer", "files"},
+						Type:        FieldObject,
+						Description: "Settings for the accessed-files drawer pane",
+						RefType:     "DrawerFilesConfig",
+						Children: []FieldMeta{
+							{
+								Path:        []string{"tui", "drawer", "files", "view"},
+								Type:        FieldSelect,
+								Description: "Initial view for the accessed-files drawer pane",
+								Options:     []string{"flat", "tree"},
+							},
+						},
+					},
+					{
 						Path:        []string{"tui", "drawer", "page_order"},
 						Type:        FieldArray,
 						Description: "Ordered drawer page names",
