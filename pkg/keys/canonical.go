@@ -78,10 +78,13 @@ var ReservedKeys = map[string]string{
 // action for each key still lives in ReservedKeys; this is the *additional*
 // allowed set.
 var ReservedAlternates = map[string][]string{
-	"enter":  {"fold toggle"},   // tree row: enter toggles the fold
-	"left":   {"fold close"},    // horizontal = structural: collapse
-	"right":  {"fold open"},     // horizontal = structural: expand
-	" ":      {"fold toggle"},   // space toggles the fold in a tree
+	// canon 60 §4.4/§7.2: a tree row's enter/space legitimately EXPANDS as
+	// well as toggles — core-logs binds both to `expand`, which normalizes to
+	// "fold open". Same family, so it is an alternate, not a violation.
+	"enter":  {"fold toggle", "fold open"},
+	"left":   {"fold close"}, // horizontal = structural: collapse
+	"right":  {"fold open"},  // horizontal = structural: expand
+	" ":      {"fold toggle", "fold open"},
 	"esc":    {"cancel/clear"},  // esc's job is cancel-the-current-thing
 	"ctrl+g": {"clear focus"},   // the ctrl+g canon merge (see ReservedKeys)
 	"X":      {"close", "kill"}, // uppercase-X = "remove this from my world"
@@ -391,6 +394,45 @@ func NormalizeAction(name string) string {
 		// deviation — it keeps the `yy`=copy binding from minting a reserved
 		// violation. Safe: "copy path"/"copy chunk" don't strip to bare "copy".
 		"copy": "yank",
+
+		// ── canon 60 §7.1: label-only reconciliations ──
+		// These are true synonyms, not deviations: the KEY is already canonical,
+		// only the ConfigKey spelling differs. Renaming the ConfigKeys instead
+		// would break users' grove.toml overrides.
+		//
+		// ⚠ Do NOT add "end"→"bottom" or "home"→"top" here. nb-browser,
+		// git-viewer-changes and git-viewer-log used to bind `home`/`end` as
+		// SEPARATE bindings alongside gg/G; an alias would normalize those to
+		// top/bottom on keys that match none of StandardActions{"bottom",["G"]}
+		// and flip the (currently clean) consistency check. Canon 60 §7.1 fixed
+		// that by binding surgery — folding home/end into Top/Bottom — instead.
+		"half up":                "page up",               // core-logs ctrl+u=half_up
+		"half down":              "page down",             // core-logs ctrl+d=half_down
+		"goto top":               "top",                   // core-logs gg=goto_top
+		"goto end":               "bottom",                // core-logs G=goto_end
+		"open editor":            "edit",                  // core-logs e=open_editor
+		"scroll tui left":        "left",                  // grove-keys h
+		"scroll tui right":       "right",                 // grove-keys l
+		"focus current":          "focus",                 // nav-history/manage .
+		"focus ecosystem cursor": "focus",                 // nav-sessionize .
+		"focus selected":         "focus",                 // nb-browser, tend-runner .
+		"open plan":              "confirm",               // flow-plan-list o
+		"open ecosystem":         "confirm",               // nav-sessionize o
+		"move in move mode":      "move row in move mode", // nav-windows/manage j/k
+		// Paging/layer/view switching all mean "advance to the next one of
+		// these". Collapsing them is what clears the grove-config `tab`
+		// intra-TUI conflict (next_page / switch_layer) with no rebind — see
+		// canon 60 §7.1 and the coordinator handoff §3.1.
+		"next group":       "next",
+		"next page":        "next",
+		"prev group":       "prev",
+		"prev page":        "prev",
+		"switch view":      "next",
+		"switch layer":     "next",
+		"groups":           "manage groups", // nav-manage E
+		"toggle worktrees": "worktrees",     // nav-sessionize w
+		"send input":       "insert",        // flow-status i
+		"re enter search":  "insert",        // nb-browser i
 	}
 	// Alias lookup on the FULL form first, so multi-word aliases win before
 	// suffix-stripping can mangle them (e.g. "select session" → "confirm").
@@ -506,6 +548,15 @@ func Analyze(bindings []KeyBinding) AnalysisReport {
 			// collapse to one (no conflict emitted).
 			if isIntentional(b.TUI, k, normAction) {
 				continue
+			}
+			// A sanctioned family member is not a competing "meaning" either
+			// — collapse it onto the key's primary canonical action so
+			// ReservedAlternates and the semantic-conflict pass agree
+			// (canon 60 §7.5). The reserved-key pass below already consults
+			// isReservedAlternate; without this the same six families
+			// (enter, space, left, right, X, ctrl+g) read as conflicts here.
+			if isReservedAlternate(k, normAction) {
+				normAction = NormalizeAction(ReservedKeys[k])
 			}
 			if keyUsage[k] == nil {
 				keyUsage[k] = make(map[string]string)

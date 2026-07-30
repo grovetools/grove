@@ -52,35 +52,25 @@ func TestAnalyzePrefixSquatters_Synthetic(t *testing.T) {
 	}
 }
 
-// TestAnalyzePrefixSquatters_Registry runs the check over the live registry and
-// asserts a representative membership set, logging the total rather than
-// hard-asserting an exact count so registry drift does not spuriously fail.
+// TestAnalyzePrefixSquatters_Registry asserts the live registry has ZERO
+// prefix squatters.
+//
+// This assertion is inverted from what it used to be. Through Phases 3–5 the
+// fixture pinned a representative membership set (core-logs/v, memory-view/t)
+// because squatters were expected to exist while the migration was in flight.
+// The canon-60 chord fan-out vacated the last of them across all nine repos,
+// so the honest fixture is now "none", and the close-out promotes the squatter
+// check from advisory to strict on the strength of it. A regression here means
+// some TUI has re-bound a flat g/z/t/v/c and silently disarmed its which-key
+// namespace — which no other test would catch.
 func TestAnalyzePrefixSquatters_Registry(t *testing.T) {
 	sq := Analyze(getTUIBindingsFromRegistry()).PrefixSquatters
-	t.Logf("registry prefix squatters: %d", len(sq))
-
-	have := map[string]bool{} // "tui/key"
-	for _, s := range sq {
-		have[s.TUI+"/"+s.Key] = true
-	}
-	// flow-status (Phase 3), nb-browser (Phase 4) and the nav TUIs (Phase 5)
-	// were migrated: their flat v/c/t/g squatters were vacated onto namespace
-	// chords, so they are intentionally NO LONGER squatters (nav-sessionize's
-	// c/v moved to tc/tv and the bare-g jump mini-leaders became the g… goto
-	// namespace). core-logs/v (toggle_preview) stands in as the representative
-	// flat-view squatter and memory-view/t as the flat-toggle one, until later
-	// phases restructure them too.
-	want := []string{
-		"core-logs/v",
-		"memory-view/t",
-	}
-	for _, w := range want {
-		if !have[w] {
-			t.Errorf("expected registry squatter %q, not found in %d squatters", w, len(sq))
-		}
-	}
 	if len(sq) == 0 {
-		t.Error("expected a non-empty squatter set from the live registry")
+		return
+	}
+	for _, s := range sq {
+		t.Errorf("prefix squatter %s/%s = %q blocks the %s namespace — move it into the chord, or record a deviation",
+			s.TUI, s.Key, s.Action, s.Namespace)
 	}
 }
 

@@ -15,6 +15,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// inScratchProject chdirs into a throwaway project named `name` whose `make
+// build` is a no-op, and returns a func that chdirs back. Subtests that run
+// the REAL build path use it so `grove build --filter <name>` resolves to the
+// scratch project rather than to whatever repo the test happens to be run
+// from — a real build of this repo has side effects on tracked, generated
+// files (see the note in VerboseMode).
+func inScratchProject(t *testing.T, name string) func() {
+	t.Helper()
+
+	dir := filepath.Join(t.TempDir(), name)
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "grove.yml"),
+		[]byte(fmt.Sprintf("name: %s\nversion: \"1.0\"\n", name)), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Makefile"),
+		[]byte("\nbuild:\n\t@echo \"scratch build\"\n"), 0o644))
+
+	original, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	return func() { _ = os.Chdir(original) }
+}
+
 func TestBuildCommand(t *testing.T) {
 	// Build the grove binary if needed
 	groveBin := filepath.Join(repoRoot(), "bin", "grove")
@@ -33,7 +55,15 @@ func TestBuildCommand(t *testing.T) {
 	})
 
 	t.Run("VerboseMode", func(t *testing.T) {
-		// Test with a filter to match the current project
+		// Run the REAL build path (not --dry-run) against a scratch project,
+		// never the developer's own checkout. `grove build --filter grove`
+		// used to match this very repo, whose `make build` runs the
+		// keys-registry target — so `go test ./...` silently regenerated
+		// pkg/keys/registry_generated.go underneath whoever was editing it.
+		// That defeats the serial-regeneration constraint the hotkey wave was
+		// sequenced around, and it is invisible until the diff shows up.
+		defer inScratchProject(t, "grove")()
+
 		cmd := exec.Command(groveBin, "build", "--verbose", "--filter", "grove")
 		output, err := cmd.CombinedOutput()
 
@@ -68,6 +98,9 @@ func TestBuildCommand(t *testing.T) {
 	})
 
 	t.Run("ParallelExecution", func(t *testing.T) {
+		// Scratch project, same reason as VerboseMode above.
+		defer inScratchProject(t, "grove")()
+
 		// Test that --jobs flag is accepted
 		cmd := exec.Command(groveBin, "build", "--verbose", "--jobs", "2", "--filter", "grove")
 		output, err := cmd.CombinedOutput()

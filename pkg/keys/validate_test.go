@@ -103,27 +103,23 @@ func TestDetectShadowedPrefixes_Synthetic(t *testing.T) {
 	}
 }
 
-// TestDetectShadowedPrefixes_Registry runs the check over the live registry. The
-// expected set is {core-logs/y}; drift-tolerant — if the live registry differs
-// the expectation (not the predicate) is adjusted. nb-browser/y was removed in
-// Phase 4 (Confirm dropped its `y` half and Copy moved to `yy`), and
-// nav-manage/g was removed in Phase 5 (the flat-g jump mini-leader became the
-// g… goto namespace, so gg is no longer shadowed).
+// TestDetectShadowedPrefixes_Registry asserts the live registry has ZERO
+// shadowed prefixes.
+//
+// This assertion is inverted from what it used to be. The old fixture pinned
+// {core-logs/y} as an expected shadowing — and it was WRONG: core-logs binds a
+// flat `y` and no `yy` at all, so nothing there was ever shadowed. (The only
+// two `yy` bindings in the fleet are both nb-browser's.) The fixture had been
+// stale since Phase 4 and was what made the fan-out briefing believe there was
+// a core-logs y/yy shadowing bug to fix. There never was one.
+//
+// "Zero" is the assertion the close-out's strict flip actually needs. Note it
+// currently holds partly by luck: four TUIs still bind a flat `y`, and none of
+// them happens to also bind `yy`. Canon 60 amendment A8.1 (add `y` to
+// ReservedPrefixes) is what would make it hold by construction.
 func TestDetectShadowedPrefixes_Registry(t *testing.T) {
-	got := DetectShadowedPrefixes()
-	t.Logf("registry prefix shadowings: %d", len(got))
-
-	have := map[string]bool{} // "tui/key"
-	for _, s := range got {
-		have[s.TUI+"/"+s.Key] = true
-	}
-	want := []string{"core-logs/y"}
-	for _, w := range want {
-		if !have[w] {
-			t.Errorf("expected registry shadowing %q, not found in %+v", w, got)
-		}
-	}
-	if len(got) != len(want) {
-		t.Logf("NOTE: shadowing count %d differs from expected %d — reconcile if registry drifted", len(got), len(want))
+	for _, s := range DetectShadowedPrefixes() {
+		t.Errorf("prefix shadowing %s/%s: flat %q fires before %v can ever arm",
+			s.TUI, s.Key, s.Key, s.ShadowedKeys)
 	}
 }
