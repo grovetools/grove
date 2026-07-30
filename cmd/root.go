@@ -155,9 +155,24 @@ func Execute() error {
 		// Skip if it looks like a flag (let cobra handle it)
 		if !strings.HasPrefix(potentialTool, "-") {
 			// Check if it's a registered tool in our ecosystem
-			if _, _, _, found := sdk.FindTool(potentialTool); found {
+			if repoName, _, alias, found := sdk.FindTool(potentialTool); found {
+				// Delegate using the tool's effective alias — that is the
+				// binary's real name. Delegating the identifier as typed broke
+				// every tool whose alias differs from its repo name: `grove
+				// daemon status` searched for a binary literally named
+				// "daemon" (the binary is "groved") and failed.
+				binName := alias
+				if binName == "" {
+					binName = repoName
+				}
 				// Delegate immediately with all remaining args (including -h, --help, etc.)
-				return delegateToTool(potentialTool, os.Args[2:])
+				if err := delegateToTool(binName, os.Args[2:]); err != nil {
+					// This path bypasses cobra, so nothing downstream prints
+					// the error — surface it here instead of exiting silently.
+					fmt.Fprintln(os.Stderr, "Error:", err)
+					os.Exit(1)
+				}
+				return nil
 			}
 		}
 	}
