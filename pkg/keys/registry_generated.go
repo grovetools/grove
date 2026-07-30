@@ -402,6 +402,16 @@ var TUIRegistry = []TUIRegistryEntry{
 				},
 			},
 			{
+				Name: "Fold",
+				Bindings: []BindingEntry{
+					{Name: "FoldOpen", Keys: []string{"zo", "l"}, Description: "open fold", Enabled: true, ConfigKey: "fold_open"},
+					{Name: "FoldClose", Keys: []string{"zc", "h"}, Description: "close fold", Enabled: true, ConfigKey: "fold_close"},
+					{Name: "FoldToggle", Keys: []string{"za"}, Description: "toggle fold", Enabled: true, ConfigKey: "fold_toggle"},
+					{Name: "FoldOpenAll", Keys: []string{"zR"}, Description: "open all", Enabled: true, ConfigKey: "fold_open_all"},
+					{Name: "FoldCloseAll", Keys: []string{"zM"}, Description: "close all", Enabled: true, ConfigKey: "fold_close_all"},
+				},
+			},
+			{
 				Name: "Panes",
 				Bindings: []BindingEntry{
 					{Name: "ToggleColumns", Keys: []string{"T"}, Description: "toggle columns", Enabled: true, ConfigKey: "toggle_columns"},
