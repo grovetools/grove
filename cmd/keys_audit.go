@@ -43,13 +43,14 @@ type auditConflict struct {
 //     keys.ValidateRegistry (empty fields, malformed or duplicate ConfigKeys).
 //     These are objective invariants the generator must uphold.
 //   - WARNINGS (advisory, never gate by default): reserved-key violations,
-//     canonical-consistency failures, intra-TUI key conflicts, and semantic
-//     conflicts. The ecosystem carries a large population of intentional and
-//     context-scoped (page/pane) key reuse that the Phase B–E hotkey review is
-//     still working through; gating on it here would block indefinitely.
-//   - --strict promotes reserved-key violations, consistency failures, and
-//     intra-TUI conflicts to errors (semantic conflicts stay advisory), so a
-//     future, cleaned-up ecosystem can enforce them.
+//     canonical-consistency failures, intra-TUI key conflicts, prefix
+//     squatters, prefix shadowing, and cross-TUI semantic conflicts.
+//   - --strict promotes all of those EXCEPT semantic conflicts to errors.
+//     Squatters and shadowing joined that set in the canon-60 close-out;
+//     they had been hard-coded advisory while the namespace-chord migration
+//     was in flight. Semantic conflicts stay advisory by design: a key
+//     meaning different things in different TUIs is often correct (see
+//     pkg/keys/deviations.go), so it is a report, not an invariant.
 //
 // Intentional deviations recorded in pkg/keys/deviations.go are already
 // suppressed by keys.Analyze, so they never appear here — deliberate choices
@@ -62,14 +63,16 @@ func newKeysAuditCmd() *cobra.Command {
 	cmd.Long = `Audit the generated TUI keybinding registry.
 
 Always errors on structural problems (malformed or duplicate ConfigKeys, empty
-fields). Reserved-key violations, consistency failures, and key conflicts are
-reported as advisory warnings; pass --strict to promote them to errors.
+fields). Reserved-key violations, consistency failures, key conflicts, prefix
+squatters and prefix shadowing are reported as advisory warnings; pass --strict
+to promote them to errors. Cross-TUI semantic conflicts stay advisory even
+under --strict.
 
 Intentional deviations (pkg/keys/deviations.go) are suppressed, so only
 un-sanctioned issues surface. Use --json for machine-readable output.`
 
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output report in JSON format")
-	cmd.Flags().BoolVar(&strict, "strict", false, "Promote reserved-key violations, consistency failures, and conflicts to errors")
+	cmd.Flags().BoolVar(&strict, "strict", false, "Promote reserved-key violations, consistency failures, conflicts, squatters and shadowing to errors")
 
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.LoadDefault()
@@ -114,16 +117,22 @@ un-sanctioned issues surface. Use --json for machine-readable output.`
 
 		errorCount := len(structural)
 		warningCount := len(report.SemanticConflicts)
+		// The Phase-2 deferred severity flip, now taken: squatters and
+		// shadowing join reserved violations, consistency failures and
+		// intra-TUI conflicts in the strict error set. They were held
+		// advisory while the namespace-chord migrations were in flight —
+		// gating then would have broken --strict CI on known debt. The
+		// canon-60 fan-out vacated the last flat prefix across all nine
+		// repos, so both checks now read zero and the gate has something
+		// real to protect: a TUI that re-binds a flat g/z/t/v/c silently
+		// disarms its which-key namespace, and nothing else catches it.
 		if strict {
-			errorCount += len(report.ReservedKeyViolations) + len(inconsistent) + len(tuiConflicts)
+			errorCount += len(report.ReservedKeyViolations) + len(inconsistent) + len(tuiConflicts) +
+				len(report.PrefixSquatters) + len(shadowed)
 		} else {
-			warningCount += len(report.ReservedKeyViolations) + len(inconsistent) + len(tuiConflicts)
+			warningCount += len(report.ReservedKeyViolations) + len(inconsistent) + len(tuiConflicts) +
+				len(report.PrefixSquatters) + len(shadowed)
 		}
-		// Phase 2: prefix squatters + shadowing stay advisory warnings even under
-		// --strict this phase. Phase 5 promotes them into the strict error set
-		// once the namespace-chord migrations (Phases 3–5) vacate the 28 flat
-		// prefixes; strict-gating now would break any --strict CI on known debt.
-		warningCount += len(report.PrefixSquatters) + len(shadowed)
 
 		if jsonOutput {
 			out, _ := json.MarshalIndent(auditReport{
@@ -204,9 +213,9 @@ un-sanctioned issues surface. Use --json for machine-readable output.`
 			}
 		}
 
-		// Reserved prefix squatters (Phase 2). Always advisory warnings this
-		// phase — even under --strict — see the Phase-5 promotion note above.
-		// Reuses the reserved-violations render loop + FreeKeysForTUI hint.
+		// Reserved prefix squatters. Promoted into the strict set by the
+		// canon-60 close-out (see the severity note above). Reuses the
+		// reserved-violations render loop + FreeKeysForTUI hint.
 		if len(report.PrefixSquatters) > 0 {
 			fmt.Println("\n" + t.Header.Render(" RESERVED PREFIX SQUATTERS "))
 			fmt.Println(t.Muted.Render(strings.Repeat("─", 50)))
@@ -220,17 +229,18 @@ un-sanctioned issues surface. Use --json for machine-readable output.`
 					hint = t.Muted.Render(fmt.Sprintf("  (free here: %s)", strings.Join(free[:n], ", ")))
 				}
 				fmt.Printf("  [%s] %s in %s: flat binding %q blocks the %s namespace%s\n",
-					warnLabel("warn"), t.Highlight.Render(s.Key), t.Bold.Render(s.TUI), s.Action, s.Namespace, hint)
+					sev(strict), t.Highlight.Render(s.Key), t.Bold.Render(s.TUI), s.Action, s.Namespace, hint)
 			}
 		}
 
-		// Prefix shadowing (Phase 2). Always advisory warnings this phase.
+		// Prefix shadowing. Promoted into the strict set by the canon-60
+		// close-out (see the severity note above).
 		if len(shadowed) > 0 {
 			fmt.Println("\n" + t.Header.Render(" PREFIX SHADOWING "))
 			fmt.Println(t.Muted.Render(strings.Repeat("─", 50)))
 			for _, sh := range shadowed {
 				fmt.Printf("  [%s] %s in %s shadows %s\n",
-					warnLabel("warn"), t.Highlight.Render(sh.Key), t.Bold.Render(sh.TUI), strings.Join(sh.ShadowedKeys, ", "))
+					sev(strict), t.Highlight.Render(sh.Key), t.Bold.Render(sh.TUI), strings.Join(sh.ShadowedKeys, ", "))
 			}
 		}
 
