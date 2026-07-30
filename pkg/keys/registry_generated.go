@@ -30,7 +30,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "Toggle (t…)",
 				Bindings: []BindingEntry{
 					{Name: "CycleLevel", Keys: []string{"tl"}, Description: "cycle log level", Enabled: true, ConfigKey: "cycle_level"},
-					{Name: "ToggleScope", Keys: []string{"ts"}, Description: "cycle scope", Enabled: true, ConfigKey: "toggle_scope"},
+					{Name: "ToggleScope", Keys: []string{"tw"}, Description: "cycle scope", Enabled: true, ConfigKey: "toggle_scope"},
 					{Name: "ToggleSystem", Keys: []string{"tS"}, Description: "toggle system logs", Enabled: true, ConfigKey: "toggle_system"},
 					{Name: "ToggleFilters", Keys: []string{"tf"}, Description: "toggle filters", Enabled: true, ConfigKey: "toggle_filters"},
 					{Name: "ToggleEvents", Keys: []string{"te"}, Description: "toggle events only", Enabled: true, ConfigKey: "toggle_events"},
@@ -1170,7 +1170,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "ToggleView", Keys: []string{"tv"}, Description: "toggle view", Enabled: true, ConfigKey: "toggle_view"},
 					{Name: "ToggleFilter", Keys: []string{"tf"}, Description: "toggle filter view", Enabled: true, ConfigKey: "toggle_filter"},
-					{Name: "ScopeToggle", Keys: []string{"ts"}, Description: "local/global scope", Enabled: true, ConfigKey: "scope_toggle"},
+					{Name: "ScopeToggle", Keys: []string{"tw"}, Description: "local/global scope", Enabled: true, ConfigKey: "scope_toggle"},
 				},
 			},
 			{
@@ -1229,7 +1229,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "Toggle (t…)",
 				Bindings: []BindingEntry{
 					{Name: "CycleDocType", Keys: []string{"td"}, Description: "cycle type filter", Enabled: true, ConfigKey: "cycle_doc_type"},
-					{Name: "CycleScope", Keys: []string{"ts"}, Description: "local/global scope", Enabled: true, ConfigKey: "cycle_scope"},
+					{Name: "CycleScope", Keys: []string{"tw"}, Description: "local/global scope", Enabled: true, ConfigKey: "cycle_scope"},
 					{Name: "CycleMode", Keys: []string{"tm"}, Description: "cycle mode (hybrid/fts/vector)", Enabled: true, ConfigKey: "cycle_mode"},
 				},
 			},

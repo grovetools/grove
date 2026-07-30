@@ -433,6 +433,28 @@ func NormalizeAction(name string) string {
 		"toggle worktrees": "worktrees",     // nav-sessionize w
 		"send input":       "insert",        // flow-status i
 		"re enter search":  "insert",        // nb-browser i
+
+		// ── the consolidation pass: chord SECOND letters ──
+		// The chord fan-out standardized structure (every toggle lives under
+		// t…) but not meaning, so the same chord arrived at the same second
+		// letter by independent local mnemonic. Some of those "collisions"
+		// are not collisions at all — they are one action wearing three
+		// ConfigKey spellings. Collapsing those first is free (no rebinds),
+		// and it is what separates the genuine second-letter conflicts from
+		// the bookkeeping. Each family below normalizes onto the spelling the
+		// plurality of TUIs already used.
+		"cycle scope":  "toggle scope", // memory-view ts
+		"scope toggle": "toggle scope", // hooks-browser ts
+		"sort":         "toggle sort",  // nb-browser ts
+		"sort mode":    "toggle sort",  // grove-config ts (NOT "sort mode back", its tS)
+		// `Y` is the Ring-1 alternate yank payload (yy is the primary), and
+		// both holders of it are copying something. Same family as the
+		// existing "copy"→"yank" above; neither strips to bare "copy".
+		"copy chunk":      "yank",            // memory-view Y
+		"copy raw text":   "yank",            // core-logs Y
+		"toggle filters":  "toggle filter",   // core-logs tf
+		"toggle archives": "toggle archived", // nb-browser ta
+		"mark complete":   "set completed",   // hooks-browser cc
 	}
 	// Alias lookup on the FULL form first, so multi-word aliases win before
 	// suffix-stripping can mangle them (e.g. "select session" → "confirm").

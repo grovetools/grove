@@ -177,6 +177,51 @@ var IntentionalDeviations = []Deviation{
 	{TUI: "hooks-browser", Key: "7", Action: "workspace", Reason: "canon 60 §5.1; digits are tab-N in cx/git-viewer/grove-config/memory"},
 	{TUI: "hooks-browser", Key: "8", Action: "workspace", Reason: "canon 60 §5.1; digits are tab-N in cx/git-viewer/grove-config/memory"},
 	{TUI: "hooks-browser", Key: "9", Action: "workspace", Reason: "canon 60 §5.1; digits are tab-N in cx/git-viewer/grove-config/memory"},
+
+	// ══ the consolidation pass — chord SECOND letters ══
+	//
+	// The fan-out standardized structure (every toggle is a t… chord) but not
+	// meaning: five groups picked second letters by local mnemonic, so the
+	// same chord arrived at different actions. The label-only duplicates were
+	// collapsed in NormalizeAction (free); what remains below is genuine
+	// divergence, resolved by one rule:
+	//
+	//   THE MEANING HELD BY THE MOST TUIs WINS THE CHORD. Ties go to the more
+	//   general noun. The TUI-local sense is recorded here.
+	//
+	// Only `ts` was worth a rebind — it carried four meanings across eight
+	// TUIs, more than any human tracks. Scope moved to `tw` in core-logs,
+	// hooks-browser and memory-view; sort keeps `ts` on the strength of its
+	// three TUIs. Everything else is a 2–3-way split between honest local
+	// mnemonics, which is the shape canon 60 already sanctioned for nav's
+	// tb/tc/tp — forcing those apart would trade a readable mnemonic for an
+	// arbitrary letter and break muscle memory for no gain.
+
+	// ── t… ──
+	{TUI: "grove-release", Key: "ts", Action: "toggle sync deps", Reason: "ts=sort in cx-view/grove-config/nb-browser; release-local sync-deps toggle"},
+	{TUI: "nav-sessionize", Key: "ts", Action: "toggle git status", Reason: "ts=sort elsewhere; nav-local git-status column"},
+	{TUI: "cx-view", Key: "th", Action: "toggle hot", Reason: "th=on-hold in flow-plan-list/nav-sessionize/nb-browser; cx-local hot-context filter"},
+	{TUI: "git-viewer-changes", Key: "ta", Action: "all files", Reason: "ta=archived in flow-plan-list/nb-browser; git-viewer-local show-all-files"},
+	{TUI: "core-logs", Key: "tc", Action: "component summary", Reason: "tc=columns in flow-plan-list/nb-browser; core-logs-local component filter"},
+	{TUI: "nav-sessionize", Key: "tf", Action: "toggle plan stats", Reason: "tf=filter in core-logs/hooks-browser; nav-local plan-stats column"},
+	{TUI: "grove-config", Key: "tS", Action: "sort mode back", Reason: "tS=system in core-logs; grove-config's tS is the reverse partner of its own ts=sort"},
+	{TUI: "grove-config", Key: "tl", Action: "cycle layer", Reason: "tl=level in core-logs; config-local layer cycle"},
+	{TUI: "nav-sessionize", Key: "tl", Action: "toggle link", Reason: "tl=level in core-logs; nav-local link column"},
+	{TUI: "grove-config", Key: "tm", Action: "maturity filter", Reason: "tm=mode in memory-view (and metric in gemini-query); config-local maturity filter"},
+	{TUI: "grove-release", Key: "td", Action: "toggle dry run", Reason: "td=doc-type in memory-view; release-local dry-run gate"},
+	{TUI: "grove-release", Key: "tp", Action: "toggle push", Reason: "tp=preview in nb-browser; release-local push toggle"},
+	{TUI: "nav-sessionize", Key: "tv", Action: "toggle task results", Reason: "tv=view in hooks-browser; nav-local task-results column"},
+
+	// ── c… ──
+	{TUI: "grove-release", Key: "cd", Action: "regen docs", Reason: "cd=deps in flow-status; release-local docs regeneration"},
+	{TUI: "flow-status", Key: "cr", Action: "set responder", Reason: "cr=change-ref in git-viewer-rebase; flow-local responder setting"},
+	{TUI: "grove-release", Key: "cw", Action: "write changelog", Reason: "cw=base-working in git-viewer-changes; release-local changelog write"},
+
+	// ── v… ──
+	{TUI: "grove-release", Key: "vc", Action: "view changelog", Reason: "vc=context in flow-status; release-local changelog view"},
+	{TUI: "git-viewer-changes", Key: "vf", Action: "diff full", Reason: "vf=frontmatter in flow-status; git-viewer-local full-diff view"},
+	{TUI: "grove-config", Key: "vm", Action: "view mode", Reason: "vm=memory in flow-status; config-local view-mode cycle"},
+	{TUI: "grove-release", Key: "vs", Action: "view docs", Reason: "vs=skill-pane in flow-status (and sources in grove-config); release-local docs sections"},
 }
 
 // isIntentional reports whether (tui, key, normAction) is an allowlisted
