@@ -258,9 +258,9 @@ var TUIRegistry = []TUIRegistryEntry{
 				},
 			},
 			{
-				Name: "Danger",
+				Name: "Toggle (t…)",
 				Bindings: []BindingEntry{
-					{Name: "ToggleForce", Keys: []string{"f"}, Description: "toggle FORCE (discards uncommitted work)", Enabled: true, ConfigKey: "toggle_force"},
+					{Name: "ToggleForce", Keys: []string{"tf"}, Description: "toggle FORCE (discards uncommitted work)", Enabled: true, ConfigKey: "toggle_force"},
 				},
 			},
 			{
@@ -295,9 +295,14 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "Toggle", Keys: []string{" "}, Description: "toggle checkbox", Enabled: true, ConfigKey: "toggle"},
 					{Name: "Submit", Keys: []string{"enter"}, Description: "submit form", Enabled: true, ConfigKey: "submit"},
-					{Name: "ToggleAdvanced", Keys: []string{"a"}, Description: "toggle advanced", Enabled: true, ConfigKey: "toggle_advanced"},
 					{Name: "Insert", Keys: []string{"i"}, Description: "insert mode", Enabled: true, ConfigKey: "insert"},
 					{Name: "Escape", Keys: []string{"esc"}, Description: "normal mode", Enabled: true, ConfigKey: "escape"},
+				},
+			},
+			{
+				Name: "Toggle (t…)",
+				Bindings: []BindingEntry{
+					{Name: "ToggleAdvanced", Keys: []string{"ta"}, Description: "toggle advanced", Enabled: true, ConfigKey: "toggle_advanced"},
 				},
 			},
 			{
@@ -427,6 +432,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "ToggleAutoComplete", Keys: []string{"cA"}, Description: "toggle auto-complete", Enabled: true, ConfigKey: "toggle_auto_complete"},
 					{Name: "Rename", Keys: []string{"cn"}, Description: "rename job", Enabled: true, ConfigKey: "rename"},
 					{Name: "EditDeps", Keys: []string{"cd"}, Description: "edit dependencies", Enabled: true, ConfigKey: "edit_deps"},
+					{Name: "ToggleClaw", Keys: []string{"cC"}, Description: "toggle claw", Enabled: true, ConfigKey: "toggle_claw"},
 				},
 			},
 			{
@@ -446,7 +452,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "Run", Keys: []string{"r"}, Description: "run job", Enabled: true, ConfigKey: "run"},
 					{Name: "Edit", Keys: []string{"e"}, Description: "quick edit in Editor pane", Enabled: true, ConfigKey: "edit"},
-					{Name: "Confirm", Keys: []string{"enter", "y"}, Description: "open in own pane / confirm", Enabled: true, ConfigKey: "confirm"},
+					{Name: "Confirm", Keys: []string{"enter"}, Description: "open in own pane / confirm", Enabled: true, ConfigKey: "confirm"},
 					{Name: "AddJob", Keys: []string{"A"}, Description: "add job", Enabled: true, ConfigKey: "add_job"},
 					{Name: "AddFromRecipe", Keys: []string{"P"}, Description: "add from recipe", Enabled: true, ConfigKey: "add_from_recipe"},
 					{Name: "AddXmlPlan", Keys: []string{"x"}, Description: "add XML plan job", Enabled: true, ConfigKey: "add_xml_plan"},
@@ -456,7 +462,6 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "DemoteToNote", Keys: []string{"D"}, Description: "demote to note", Enabled: true, ConfigKey: "demote_to_note"},
 					{Name: "Archive", Keys: []string{"X"}, Description: "archive selected", Enabled: true, ConfigKey: "archive"},
 					{Name: "SendInput", Keys: []string{"i"}, Description: "input to agent", Enabled: true, ConfigKey: "send_input"},
-					{Name: "ToggleClaw", Keys: []string{"C"}, Description: "toggle claw", Enabled: true, ConfigKey: "toggle_claw"},
 					{Name: "CopyPath", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true, ConfigKey: "copy_path"},
 				},
 			},
@@ -1513,10 +1518,10 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "Right", Keys: []string{"l", "right"}, Description: "right", Enabled: true, ConfigKey: "right"},
 					{Name: "PageUp", Keys: []string{"ctrl+u", "pgup"}, Description: "page up", Enabled: true, ConfigKey: "page_up"},
 					{Name: "PageDown", Keys: []string{"ctrl+d", "pgdown"}, Description: "page down", Enabled: true, ConfigKey: "page_down"},
-					{Name: "Home", Keys: []string{"home"}, Description: "start", Enabled: true, ConfigKey: "home"},
-					{Name: "End", Keys: []string{"end"}, Description: "end", Enabled: true, ConfigKey: "end"},
-					{Name: "Top", Keys: []string{"gg"}, Description: "top", Enabled: true, ConfigKey: "top"},
-					{Name: "Bottom", Keys: []string{"G"}, Description: "bottom", Enabled: true, ConfigKey: "bottom"},
+					{Name: "Home", Keys: []string{"home"}, Description: "start", Enabled: false, ConfigKey: "home"},
+					{Name: "End", Keys: []string{"end"}, Description: "end", Enabled: false, ConfigKey: "end"},
+					{Name: "Top", Keys: []string{"gg", "home"}, Description: "top", Enabled: true, ConfigKey: "top"},
+					{Name: "Bottom", Keys: []string{"G", "end"}, Description: "bottom", Enabled: true, ConfigKey: "bottom"},
 				},
 			},
 			{
@@ -1588,9 +1593,6 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "Filter",
 				Bindings: []BindingEntry{
 					{Name: "FilterByTag", Keys: []string{"&"}, Description: "filter by tag", Enabled: true, ConfigKey: "filter_by_tag"},
-					{Name: "ToggleGitChanges", Keys: []string{"<", ">"}, Description: "git changes", Enabled: true, ConfigKey: "toggle_git_changes"},
-					{Name: "Sort", Keys: []string{"s"}, Description: "toggle sort order", Enabled: true, ConfigKey: "sort"},
-					{Name: "CycleGrouping", Keys: []string{"o"}, Description: "cycle group-by (none/date/status/tag/priority)", Enabled: true, ConfigKey: "cycle_grouping"},
 				},
 			},
 			{
@@ -1602,17 +1604,25 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "ToggleHold", Keys: []string{"th"}, Description: "toggle on-hold", Enabled: true, ConfigKey: "toggle_hold"},
 					{Name: "ToggleColumns", Keys: []string{"tc"}, Description: "toggle columns", Enabled: true, ConfigKey: "toggle_columns"},
 					{Name: "TogglePreview", Keys: []string{"tp"}, Description: "toggle preview", Enabled: true, ConfigKey: "toggle_preview"},
+					{Name: "Sort", Keys: []string{"ts"}, Description: "toggle sort order", Enabled: true, ConfigKey: "sort"},
+					{Name: "CycleGrouping", Keys: []string{"to"}, Description: "cycle group-by (none/date/status/tag/priority)", Enabled: true, ConfigKey: "cycle_grouping"},
+					{Name: "ToggleGitChanges", Keys: []string{"tG"}, Description: "git changes", Enabled: true, ConfigKey: "toggle_git_changes"},
+				},
+			},
+			{
+				Name: "Change (c…)",
+				Bindings: []BindingEntry{
+					{Name: "Rename", Keys: []string{"cn"}, Description: "rename note", Enabled: true, ConfigKey: "rename"},
+					{Name: "CreatePlan", Keys: []string{"cp"}, Description: "promote note to plan", Enabled: true, ConfigKey: "create_plan"},
+					{Name: "PromoteToJob", Keys: []string{"cj"}, Description: "promote note to job", Enabled: true, ConfigKey: "promote_to_job"},
 				},
 			},
 			{
 				Name: "Notes",
 				Bindings: []BindingEntry{
-					{Name: "CreateNote", Keys: []string{"n"}, Description: "create note at cursor", Enabled: true, ConfigKey: "create_note"},
-					{Name: "CreateNoteInbox", Keys: []string{"a"}, Description: "inbox note (quick capture)", Enabled: true, ConfigKey: "create_note_inbox"},
+					{Name: "CreateNote", Keys: []string{"a"}, Description: "create note at cursor", Enabled: true, ConfigKey: "create_note"},
+					{Name: "CreateNoteInbox", Keys: []string{"A"}, Description: "inbox note (quick capture)", Enabled: true, ConfigKey: "create_note_inbox"},
 					{Name: "CreateNoteGlobal", Keys: []string{"I"}, Description: "global note", Enabled: true, ConfigKey: "create_note_global"},
-					{Name: "CreatePlan", Keys: []string{"P"}, Description: "promote note to plan", Enabled: true, ConfigKey: "create_plan"},
-					{Name: "PromoteToJob", Keys: []string{"J"}, Description: "promote note to job", Enabled: true, ConfigKey: "promote_to_job"},
-					{Name: "Rename", Keys: []string{"R"}, Description: "rename note", Enabled: true, ConfigKey: "rename"},
 					{Name: "PriorityUp", Keys: []string{"{"}, Description: "bump priority more critical", Enabled: true, ConfigKey: "priority_up"},
 					{Name: "PriorityDown", Keys: []string{"}"}, Description: "bump priority less critical", Enabled: true, ConfigKey: "priority_down"},
 				},
