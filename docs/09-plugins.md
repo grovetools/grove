@@ -13,10 +13,12 @@ fragment into `~/.config/grove/plugins/foo.toml` → the rail item appears in
 treemux on its next config reload. No restart, no recompile, no hand-edited
 config.
 
-This document is the design. The plugin-author view is
+This document is the design. The plugin-author view is the
+"Ship it: `grove-plugin.toml`" section of
 [treemux `docs/writing-a-panel.md`](https://github.com/grovetools/treemux/blob/main/docs/writing-a-panel.md)
-§10; the protocol a panel speaks is `docs/panel-protocol-v1.md` in the same
-repo.
+— cited by name, because section numbers there have moved once already and a
+stale `§10` is a reference that looks fine and points at nothing. The protocol a
+panel speaks is `docs/panel-protocol-v1.md` in the same repo.
 
 ---
 
