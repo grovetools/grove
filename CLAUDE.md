@@ -49,8 +49,7 @@ When done with your task, offer to invoke the `/concept-maintainer` skill to upd
 ## Smart Test Scopes (tend + cx)
 `grove internal test-smart` — the tend half of the `Validation & Smart E2E`
 on_stop hook — maps this repo's git-dirty files through the `[[test_scopes]]`
-entries in `grove.toml` and runs ONLY the scenarios whose scope matched. If
-nothing matches, or the repo declares no scopes at all, it runs the whole suite.
+entries in `grove.toml` and runs ONLY the scenarios whose scope matched.
 
 Adding a tend E2E scenario does NOT by itself require a scope entry:
 registration is one line appended to the `scenarios` slice in the repo's tend
