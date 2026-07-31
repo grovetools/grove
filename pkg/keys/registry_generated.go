@@ -1825,6 +1825,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "SpawnAgent", Keys: []string{"<action> A"}, Description: "spawn agent pane", Enabled: true, ConfigKey: "spawn_agent"},
 					{Name: "ToggleDrawer", Keys: []string{"<action> d"}, Description: "toggle sessions drawer", Enabled: true, ConfigKey: "toggle_drawer"},
 					{Name: "CycleDrawerPage", Keys: []string{"<action> D"}, Description: "cycle drawer page", Enabled: true, ConfigKey: "cycle_drawer_page"},
+					{Name: "Hush", Keys: []string{"<action> x"}, Description: "hush: collapse drawer + rail (again restores)", Enabled: true, ConfigKey: "hush"},
 					{Name: "ToggleFollowerControl", Keys: []string{"<action> t"}, Description: "toggle follower control mode", Enabled: true, ConfigKey: "toggle_follower_control"},
 					{Name: "GotoLogs", Keys: []string{"<action> g"}, Description: "jump to logs panel", Enabled: true, ConfigKey: "goto_logs"},
 					{Name: "ToggleSplitOrientation", Keys: []string{"<action> |", "<leader> |"}, Description: "toggle split orientation", Enabled: true, ConfigKey: "toggle_split_orientation"},
