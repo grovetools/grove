@@ -429,6 +429,11 @@ var SchemaFields = []FieldMeta{
 						Type:        FieldMap,
 						Description: "Named drawer page definitions",
 					},
+					{
+						Path:        []string{"tui", "drawer", "responsive"},
+						Type:        FieldBool,
+						Description: "Let empty drawer panes give their unused rows to content-bearing siblings (default: false)",
+					},
 				},
 			},
 			{
