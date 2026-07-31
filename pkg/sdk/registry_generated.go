@@ -3,6 +3,7 @@
 package sdk
 
 var toolRegistry = map[string]ToolInfo{
+	"agent":            {Alias: "grove-agent", Description: "Grove's agent runtime: the grove-pi extension package and the grove-agent pi distro"},
 	"agentlogs":        {Alias: "aglogs", Description: "Agent transcript log parsing and monitoring"},
 	"core":             {Alias: "core", Description: "Core libraries and debugging tools for the Grove ecosystem"},
 	"cx":               {Alias: "cx", Description: "LLM context management"},
