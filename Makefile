@@ -63,7 +63,8 @@ keys-audit:
 	@go run . keys audit
 
 # Diff the exported API of the ecosystem's contract packages against each
-# module's last tag (docs/10-api-stability.md). Deliberately NOT part of
+# module's last tag. The contract set and the policy live in the header of
+# scripts/apidiff.sh — there is no docs/ page. Deliberately NOT part of
 # `check`: it reports pre-1.0 drift that is allowed, but must be changelogged.
 # ARGS limits it to specific modules, e.g. `make apidiff ARGS=core`.
 apidiff:

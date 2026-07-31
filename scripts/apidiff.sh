@@ -3,8 +3,16 @@
 # apidiff.sh — diff the exported Go API of the ecosystem's contract packages
 # against each module's most recent tag.
 #
-# The contract set is defined by grove/docs/10-api-stability.md; CONTRACT below
-# is the machine-readable copy of that table. Keep the two in sync.
+# The CONTRACT array below IS the contract set — this script is the only place
+# it is defined in the repo. The prose policy it implements (what a contract
+# package promises, and what a break obliges you to do) is unpublished: it lives
+# in the notebook concept grovetools:grove-extensibility-docs as
+# docs/grove--10-api-stability.md, pending a docgen prompt. It was removed from
+# grove/docs/ because that tree is docgen-generated and a hand-written file there
+# is never re-derived from code. If you publish it, the two halves move together.
+#
+# The policy in one line: contract packages may drift before 1.0, but an
+# incompatible change must be recorded in the module's CHANGELOG.md.
 #
 # Usage:
 #   scripts/apidiff.sh                 # every contract module
@@ -151,7 +159,7 @@ done
 if [ "$incompatible" -ne 0 ]; then
 	echo
 	echo "Incompatible changes to contract packages. Either revert them, or record"
-	echo "the break in the module's CHANGELOG.md as grove/docs/10-api-stability.md requires."
+	echo "the break in the module's CHANGELOG.md under ### Changed or ### Removed."
 	[ "${ALLOW_INCOMPATIBLE:-0}" = "1" ] && exit 0
 	exit 1
 fi
