@@ -1830,6 +1830,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "GotoLogs", Keys: []string{"<action> g"}, Description: "jump to logs panel", Enabled: true, ConfigKey: "goto_logs"},
 					{Name: "ToggleSplitOrientation", Keys: []string{"<action> |", "<leader> |"}, Description: "toggle split orientation", Enabled: true, ConfigKey: "toggle_split_orientation"},
 					{Name: "DrawerPageSessions", Keys: []string{"<action> S"}, Description: "drawer: sessions page", Enabled: true, ConfigKey: "drawer_page_sessions"},
+					{Name: "DrawerPageAgent", Keys: []string{"<action> B"}, Description: "drawer: agent page", Enabled: true, ConfigKey: "drawer_page_agent"},
 					{Name: "DrawerPageToc", Keys: []string{"<action> T"}, Description: "drawer: toc page", Enabled: true, ConfigKey: "drawer_page_toc"},
 					{Name: "DrawerPageFiles", Keys: []string{"<action> V"}, Description: "drawer: files page", Enabled: true, ConfigKey: "drawer_page_files"},
 					{Name: "DrawerPageGit", Keys: []string{"<action> G"}, Description: "drawer: git page", Enabled: true, ConfigKey: "drawer_page_git"},
