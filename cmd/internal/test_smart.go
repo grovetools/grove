@@ -120,14 +120,22 @@ func getDirtyFiles(repoDir string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("git status failed: %w", err)
 	}
+	return parsePorcelain(string(output)), nil
+}
 
+// parsePorcelain extracts the paths from `git status --porcelain -uall` output.
+//
+// The format is XY <path>, or XY <orig> -> <path> for a rename. X and Y are
+// single status characters and EITHER MAY BE A SPACE — " M grove.toml" is the
+// ordinary "modified, not staged" line, which is most of what an agent turn
+// produces. Trimming the whole line before slicing a fixed [3:] therefore ate
+// the first character of the path ("rove.toml") for every such entry, and a
+// mangled path matches no test scope: the smart half of test-smart could only
+// ever fire for untracked ("?? ") files.
+func parsePorcelain(output string) []string {
 	var files []string
-	for _, line := range strings.Split(string(output), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		// porcelain format: XY <path> or XY <orig> -> <path>
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimRight(line, "\r")
 		if len(line) < 4 {
 			continue
 		}
@@ -137,7 +145,7 @@ func getDirtyFiles(repoDir string) ([]string, error) {
 		}
 		files = append(files, path)
 	}
-	return files, nil
+	return files
 }
 
 func dedup(items []string) []string {
