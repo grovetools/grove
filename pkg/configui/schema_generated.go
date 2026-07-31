@@ -380,6 +380,14 @@ var SchemaFields = []FieldMeta{
 				Priority:    62,
 			},
 			{
+				Path:        []string{"tui", "drawer_size"},
+				Type:        FieldString,
+				Description: "Expanded drawer extent along its own axis - columns on the right / rows on the bottom - as an absolute count (35) or a percentage of the terminal (25%)",
+				Layer:       config.SourceGlobal,
+				Priority:    62,
+				RefType:     "DrawerSize",
+			},
+			{
 				Path:        []string{"tui", "drawer"},
 				Type:        FieldObject,
 				Description: "Named global drawer pages and their layouts",
