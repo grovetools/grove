@@ -420,6 +420,16 @@ var SchemaFields = []FieldMeta{
 						},
 					},
 					{
+						Path:        []string{"tui", "drawer", "hide_inapplicable_pages"},
+						Type:        FieldBool,
+						Description: "Omit drawer pages whose scope subject is absent from the page map instead of dimming them; the active page is never hidden (default: false)",
+					},
+					{
+						Path:        []string{"tui", "drawer", "page_map_long_form"},
+						Type:        FieldBool,
+						Description: "Render the drawer page map as labelled pages with their jump keys instead of the compact glyph strip (default: false)",
+					},
+					{
 						Path:        []string{"tui", "drawer", "page_order"},
 						Type:        FieldArray,
 						Description: "Ordered drawer page names",
@@ -432,7 +442,7 @@ var SchemaFields = []FieldMeta{
 					{
 						Path:        []string{"tui", "drawer", "responsive"},
 						Type:        FieldBool,
-						Description: "Let empty drawer panes give their unused rows to content-bearing siblings (default: false)",
+						Description: "Let empty drawer panes give their unused rows to content-bearing siblings (default: true)",
 					},
 				},
 			},
