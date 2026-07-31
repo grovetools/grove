@@ -24,7 +24,7 @@ here gets a changelog entry when it changes and is covered by `make apidiff`
 | **CLI** | `grove`, `flow`, `nb`, `tend`, … — reference in [`07-cli-reference.md`](07-cli-reference.md) | Scripting grove from a shell |
 | **`grove.toml` schema** | `core/config` (Go types), `core/schema/grove.embedded.schema.json` (generated), reference in [`05-configuration.md`](05-configuration.md) | Configuring a workspace; the deepest extension point grove has |
 | **Daemon HTTP API** | 81 routes served by `daemon/internal/daemon/server`; the Go client is `core/pkg/daemon.Client` (94 interface methods, `LocalClient` + `RemoteClient`) | Sidecar services and out-of-process automation. `daemon` is 100% `internal/` **on purpose** — the wire API is the contract, not its Go packages. See [`daemon/docs/reacting-to-grove-events.md`](https://github.com/grovetools/daemon/blob/main/docs/reacting-to-grove-events.md) |
-| **Panel protocol `embed/v1`** | `treemux/pkg/panelproto` (`Version = "embed/v1"`), spec in [`treemux/docs/panel-protocol-v1.md`](https://github.com/grovetools/treemux/blob/main/docs/panel-protocol-v1.md) | Out-of-process sidecar panels. Versioned on the wire — a breaking change means `embed/v2`, not a silent edit |
+| **Panel protocol `embed/v1`** | `core/panelkit/panelproto` (`Version = "embed/v1"`), spec in [`treemux/docs/panel-protocol-v1.md`](https://github.com/grovetools/treemux/blob/main/docs/panel-protocol-v1.md) | Out-of-process sidecar panels. Versioned on the wire — a breaking change means `embed/v2`, not a silent edit |
 | **Plugin manifest** | `~/.config/grove/plugins/*.toml`, described in [`09-plugins.md`](09-plugins.md) | What `grove plugin install` writes and treemux reads |
 
 And these Go packages:
@@ -39,9 +39,20 @@ And these Go packages:
 | `github.com/grovetools/core/pkg/daemon` | core | The typed daemon client |
 | `github.com/grovetools/core/tui/components/pager` | core | `pager.Page` — the drawer-page interface |
 | `github.com/grovetools/core/tui/hostedkeys` | core | The hosted-key claim/grant shapes shared by hosts and panels |
+| `github.com/grovetools/core/panelkit` (and `/window`, `/table`, `/tree`, `/layout`) | core | The panel SDK's widgets |
+| `github.com/grovetools/core/panelkit/panelproto` | core | Go bindings for `embed/v1` |
+| `github.com/grovetools/core/panelkit/sidecar` | core | The out-of-process panel runtime — `Run`, `Connect`, `Client` |
 | `github.com/grovetools/treemux/pkg/keymap` | treemux | Key resolution and hosted-claim arbitration |
 | `github.com/grovetools/treemux/pkg/keyspec` | treemux | `PanelSpec` / `CanonicalPanels` — the rail-panel registry |
-| `github.com/grovetools/treemux/pkg/panelproto` | treemux | Go bindings for `embed/v1` |
+| `github.com/grovetools/treemux/pkg/panelproto` | treemux | **Deprecated**: a frozen alias of `core/panelkit/panelproto`, removed one release after treemux's first tag |
+
+**A Go panel imports one grove module.** The whole SDK — widgets, `embed/v1`
+bindings, sidecar runtime — is in `core`, and none of it imports treemux: a
+sidecar reaches its host over a socket, not over an import. The protocol and
+runtime were written in treemux and moved here because treemux is untagged, so
+a third-party panel could only name it with a `replace` pointing at a local
+checkout. Nothing about the wire contract changed; `embed/v1` is still
+`embed/v1`.
 
 `tuimux/api/types` is contract by proxy: the root package aliases those types,
 and the aliases are what you should import.

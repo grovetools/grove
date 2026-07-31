@@ -25,7 +25,7 @@ set -uo pipefail
 
 # module-dir : space-separated package directories, relative to the module root
 CONTRACT=(
-	"core:config pkg/daemon tui/components/pager tui/hostedkeys"
+	"core:config pkg/daemon tui/components/pager tui/hostedkeys panelkit panelkit/window panelkit/table panelkit/tree panelkit/layout panelkit/panelproto panelkit/sidecar"
 	"tuimux:. embed panels bindings"
 	"treemux:pkg/keymap pkg/keyspec pkg/panelproto"
 )

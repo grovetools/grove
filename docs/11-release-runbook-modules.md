@@ -69,8 +69,15 @@ pushed `origin/main` commits — they are not placeholders):
 The minimum set to make the *published* modules consumable is **`tuimux`,
 `eval`, `grove-openrouter`, `memory`**. Add **`treemux`** if third parties are
 meant to build custom TUIs (the tier-4 "grove distro" story), since
-`treemux/pkg/{keymap,keyspec,panelproto}` are contract packages in
+`treemux/pkg/{keymap,keyspec}` are contract packages in
 [`10-api-stability.md`](10-api-stability.md).
+
+**Writing a sidecar panel no longer needs treemux at all.** The `embed/v1`
+bindings and the panel runtime now live in `core/panelkit`, so a Go panel
+depends on `core` and nothing else of grove's. That was the point of moving
+them: treemux is untagged and private, and a panel author could satisfy the
+import only with a `replace` into a local checkout. `tuimux` going public is
+still on the critical path, because `core`'s own `go.mod` requires it.
 
 ```console
 $ gh repo edit grovetools/tuimux --visibility public --accept-visibility-change-consequences
@@ -170,8 +177,9 @@ diff against (it prints `SKIP (no tags)`).
   required `skills v0.6.3`, a tag that does not exist. It now pins a commit
   pseudo-version; move it to a tag once `skills` cuts its next release.
 - **`treemux`** *does* export contract packages (`pkg/keymap`, `pkg/keyspec`,
-  `pkg/panelproto`). Tagging it establishes the apidiff baseline, so do it
-  before promoting `treemux/internal/app` to `treemux/pkg/panel`.
+  and `pkg/panelproto` until the frozen alias is dropped). Tagging it
+  establishes the apidiff baseline, so do it before promoting
+  `treemux/internal/app` to `treemux/pkg/panel`.
 
 ```console
 $ cd daemon  && make check && git tag -a v0.6.0 -m "daemon v0.6.0"  && git push origin v0.6.0
