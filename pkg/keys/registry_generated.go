@@ -648,9 +648,17 @@ var TUIRegistry = []TUIRegistryEntry{
 				},
 			},
 			{
+				Name: "Open",
+				Bindings: []BindingEntry{
+					{Name: "Edit", Keys: []string{"e"}, Description: "open in editor", Enabled: true, ConfigKey: "edit"},
+					{Name: "Open", Keys: []string{"enter"}, Description: "open in new pane", Enabled: true, ConfigKey: "open"},
+				},
+			},
+			{
 				Name: "Diff",
 				Bindings: []BindingEntry{
-					{Name: "Diff", Keys: []string{"vd", "enter"}, Description: "diff", Enabled: true, ConfigKey: "diff"},
+					{Name: "Diff", Keys: []string{"vd"}, Description: "diff vsplit", Enabled: true, ConfigKey: "diff"},
+					{Name: "DiffHoriz", Keys: []string{"vh"}, Description: "diff hsplit", Enabled: true, ConfigKey: "diff_horiz"},
 					{Name: "DiffFull", Keys: []string{"vf"}, Description: "diff fullscreen", Enabled: true, ConfigKey: "diff_full"},
 					{Name: "ReviewDiff", Keys: []string{"vr"}, Description: "review diff", Enabled: true, ConfigKey: "review_diff"},
 				},
@@ -692,7 +700,6 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Actions",
 				Bindings: []BindingEntry{
-					{Name: "Edit", Keys: []string{"e"}, Description: "edit", Enabled: true, ConfigKey: "edit"},
 					{Name: "Refresh", Keys: []string{"ctrl+r"}, Description: "refresh", Enabled: true, ConfigKey: "refresh"},
 					{Name: "AllFiles", Keys: []string{"ta"}, Description: "all files", Enabled: true, ConfigKey: "all_files"},
 				},
@@ -739,7 +746,8 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Actions",
 				Bindings: []BindingEntry{
-					{Name: "Compare", Keys: []string{"enter"}, Description: "diff since commit", Enabled: true, ConfigKey: "compare"},
+					{Name: "Show", Keys: []string{"enter"}, Description: "commit details", Enabled: true, ConfigKey: "show"},
+					{Name: "Compare", Keys: []string{"td"}, Description: "diff since commit", Enabled: true, ConfigKey: "compare"},
 					{Name: "Rebase", Keys: []string{"R"}, Description: "rebase onto commit", Enabled: true, ConfigKey: "rebase"},
 					{Name: "Worktrees", Keys: []string{"w"}, Description: "worktrees", Enabled: true, ConfigKey: "worktrees"},
 					{Name: "Refresh", Keys: []string{"ctrl+r"}, Description: "refresh", Enabled: true, ConfigKey: "refresh"},
@@ -790,6 +798,7 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Actions",
 				Bindings: []BindingEntry{
+					{Name: "OpenWorkspace", Keys: []string{"o"}, Description: "open workspace", Enabled: true, ConfigKey: "open_workspace"},
 					{Name: "DeleteRemote", Keys: []string{"D"}, Description: "delete remote", Enabled: true, ConfigKey: "delete_remote"},
 					{Name: "Worktrees", Keys: []string{"w"}, Description: "worktrees", Enabled: true, ConfigKey: "worktrees"},
 					{Name: "Refresh", Keys: []string{"ctrl+r"}, Description: "refresh", Enabled: true, ConfigKey: "refresh"},
