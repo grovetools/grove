@@ -1817,6 +1817,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "NavWorkspaces", Keys: []string{"ctrl+f"}, Description: "open Nav panel · workspaces tab", Enabled: true, ConfigKey: "nav_workspaces"},
 					{Name: "NavKeys", Keys: []string{"alt+p"}, Description: "open Nav panel · keys tab", Enabled: true, ConfigKey: "nav_keys"},
 					{Name: "NavHistory", Keys: []string{"alt+h"}, Description: "open Nav panel · history tab", Enabled: true, ConfigKey: "nav_history"},
+					{Name: "JumpAssistant", Keys: []string{"alt+a"}, Description: "jump to Assistant panel", Enabled: true, ConfigKey: "jump_assistant"},
 					{Name: "JumpEditor", Keys: []string{"ctrl+e"}, Description: "jump to Editor panel", Enabled: true, ConfigKey: "jump_editor"},
 					{Name: "JumpShell", Keys: []string{"alt+o"}, Description: "jump to Shell panel", Enabled: true, ConfigKey: "jump_shell"},
 					{Name: "JumpPlan", Keys: []string{"ctrl+p"}, Description: "jump to Plan panel", Enabled: true, ConfigKey: "jump_plan"},
@@ -1833,6 +1834,7 @@ var TUIRegistry = []TUIRegistryEntry{
 			{
 				Name: "Panel Jumps",
 				Bindings: []BindingEntry{
+					{Name: "PanelAssistant", Keys: []string{"<action> z"}, Description: "jump to Assistant panel", Enabled: true, ConfigKey: "panel_assistant"},
 					{Name: "PanelNav", Keys: []string{"<action> f"}, Description: "jump to Nav panel", Enabled: true, ConfigKey: "panel_nav"},
 					{Name: "PanelGit", Keys: []string{"<action> c"}, Description: "jump to Git panel", Enabled: true, ConfigKey: "panel_git"},
 					{Name: "PanelShell", Keys: []string{"<action> o"}, Description: "jump to Shell panel", Enabled: true, ConfigKey: "panel_shell"},
