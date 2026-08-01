@@ -33,7 +33,7 @@ ifneq ($(strip $(GROVE_TARGET_GOOS)),)
 GO_CROSS_ENV = GOOS=$(GROVE_TARGET_GOOS) GOARCH=$(GROVE_TARGET_GOARCH) CGO_ENABLED=0
 endif
 
-.PHONY: all build test clean fmt fmt-check vet lint run check dev build-all schema registry config-schema keys-registry keys-registry-check keys-audit apidiff help
+.PHONY: all build test clean fmt fmt-check vet lint run check dev build-all schema registry config-schema config-schema-check keys-registry keys-registry-check keys-audit apidiff help
 
 all: build
 
@@ -53,10 +53,34 @@ keys-registry:
 	@echo "Generating keys registry..."
 	@go run ./tools/keys-registry-generator
 
-# Fail if the committed registry is stale (regenerate and diff). Keeps
-# pkg/keys/registry_generated.go in lockstep with the TUI keymap sources.
+# The staleness gates over the two generated files, both wired into `check`.
+#
+# They exist because a change to core/config's schema or to treemux's
+# keyspec.go lands in ANOTHER repo, and the file it invalidates is here. Three
+# times running (`[tui] drawer_size`, the `hush` key, `[tui.drawer] responsive`)
+# the authoring agent shipped the source change without the regeneration, and
+# every one was caught by a build gate rather than by whoever wrote it. So:
+# regenerating is part of the definition of done for any change to
+# `core/config`'s schema types or `treemux/pkg/keyspec`, not a follow-up.
+#
+# Resolve a conflict in either file by REGENERATING it, never by merging the
+# text. The generators compose fragments from SIBLING repos in the ecosystem, so
+# a regeneration run while a sibling is behind its main silently drops whatever
+# that sibling has since added — during the drawer-improvements rebase,
+# schema_generated.go had to be regenerated with flow's fragment overlaid from
+# flow's main to avoid losing `handoff_threshold`/`handoff_max`. Check the
+# siblings are current BEFORE regenerating, and diff the result for fields you
+# did not mean to remove.
+#
+# keys-registry-check is known to fail on main against git-viewer's keymaps.
+# That is a main-level fix and deliberately not carried on a feature branch.
 keys-registry-check: keys-registry
 	@git diff --exit-code -- pkg/keys/registry_generated.go
+
+# Fail if the committed config UI schema is stale. Same bargain as
+# keys-registry-check, over the other generated file.
+config-schema-check: config-schema
+	@git diff --exit-code -- pkg/configui/schema_generated.go
 
 # Structural + semantic gate over the generated registry (see cmd/keys_audit.go).
 keys-audit:
@@ -116,7 +140,7 @@ run: build
 	@$(BIN_DIR)/$(BINARY_NAME) $(ARGS)
 
 # Run all checks
-check: schema fmt-check vet lint test keys-registry-check keys-audit
+check: schema fmt-check vet lint test config-schema-check keys-registry-check keys-audit
 
 # Development build with race detector
 dev:
@@ -175,6 +199,7 @@ help:
 	@echo "  make dev           - Build with race detector"
 	@echo "  make build-all     - Build for multiple platforms"
 	@echo "  make config-schema - Generate config UI schema from JSON schemas"
+	@echo "  make config-schema-check - Fail if the committed config UI schema is stale"
 	@echo "  make keys-registry - Generate TUI keybindings registry"
 	@echo "  make apidiff       - Diff contract-package APIs against the last tag"
 	@echo "  make test-e2e ARGS=...- Run E2E test runner binary"

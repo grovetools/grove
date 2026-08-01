@@ -29,6 +29,23 @@ This file contains important instructions for Claude when working with this repo
 - The version information is injected during build time via LDFLAGS
 - For development builds with race detection, use `make dev`
 
+## Generated files: regenerate, never hand-merge
+
+`pkg/configui/schema_generated.go` and `pkg/keys/registry_generated.go` are
+generated from sources in OTHER repos — `core/config`'s schema types and
+`treemux/pkg/keyspec` respectively. A change over there invalidates a file over
+here, so **`make config-schema` / `make keys-registry` are part of the
+definition of done for that change**, not a follow-up. `make check` gates both
+(`config-schema-check`, `keys-registry-check`), but a gate catching it means it
+already shipped past the person who knew why.
+
+Resolve a merge or rebase conflict in either file by **regenerating**, never by
+merging the text. The generators compose fragments from sibling repos, so a
+regeneration run while a sibling is behind its main silently drops whatever that
+sibling has since added. Check the siblings are current first, then diff the
+result for fields you did not mean to remove. The Makefile records the concrete
+instance this rule came from.
+
 ## Looking Up Related Concepts
 
 Before starting work, search for existing concepts that may relate to your task:
