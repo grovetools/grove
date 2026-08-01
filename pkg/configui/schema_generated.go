@@ -440,6 +440,11 @@ var SchemaFields = []FieldMeta{
 						Description: "Named drawer page definitions",
 					},
 					{
+						Path:        []string{"tui", "drawer", "panes"},
+						Type:        FieldMap,
+						Description: "Drawer panes whose backend and view are chosen in config: in-process or an embed/v1 sidecar process or a host-drawn digest",
+					},
+					{
 						Path:        []string{"tui", "drawer", "responsive"},
 						Type:        FieldBool,
 						Description: "Let empty drawer panes give their unused rows to content-bearing siblings (default: true)",
