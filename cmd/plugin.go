@@ -351,7 +351,7 @@ func printConsent(req *plugin.ConsentRequest, out io.Writer) {
 		fmt.Fprintf(out, "      with %s\n", e)
 	}
 
-	if f.Protocol != "" || len(f.Keys) > 0 {
+	if f.Protocol != "" || len(f.Keys) > 0 || len(f.Views) > 0 {
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "  The panel declares:")
 		if f.Protocol != "" {
@@ -361,6 +361,12 @@ func printConsent(req *plugin.ConsentRequest, out io.Writer) {
 		}
 		for _, k := range f.Keys {
 			fmt.Fprintf(out, "      key       %s (while it holds focus, if the host allows it)\n", k)
+		}
+		// Views sit in this block rather than the settings block below because
+		// they are a declaration and not a knob: the user does not edit this
+		// list, they choose one entry from it when they mount the panel.
+		for _, v := range f.Views {
+			fmt.Fprintf(out, "      view      %s\n", v)
 		}
 	}
 

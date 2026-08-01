@@ -51,6 +51,18 @@ type ConsentFacts struct {
 	Icon     string   `json:"icon,omitempty"`
 	Label    string   `json:"label,omitempty"`
 	Keys     []string `json:"keys,omitempty"`
+	// Views is the panel's view declaration, one line per view in declaration
+	// order, with the one a drawer pane would default to marked.
+	//
+	// Flattened to lines for the reason Settings is: this struct is compared and
+	// digested as text. Ordered rather than sorted, because the order IS one of
+	// the facts — it decides which view an installed panel offers a drawer.
+	//
+	// Like the keys above it grants nothing, so it is on the screen for the same
+	// reason: an update that stops offering `compact` to the drawer, or starts
+	// offering something else, changes what the user will see in their drawer and
+	// should not pass silently.
+	Views []string `json:"views,omitempty"`
 	// Settings is the manifest's default settings table, flattened to sorted
 	// "dotted.key = value" lines.
 	//
@@ -75,6 +87,18 @@ func NewConsentFacts(m *Manifest, src ResolvedSource, manifestBytes []byte, runB
 	for _, k := range m.Panel.Keys {
 		keys = append(keys, fmt.Sprintf("%s — %s", k.Key, k.Description))
 	}
+	preferred := m.Panel.PreferredDrawerView()
+	views := make([]string, 0, len(m.Panel.Views))
+	for _, name := range m.Panel.ViewNames() {
+		line := fmt.Sprintf("%s — %s", name, m.Panel.Views[name].Description)
+		switch {
+		case name == preferred:
+			line += " (what a drawer pane gets by default)"
+		case m.Panel.Views[name].Drawer:
+			line += " (also offered to a drawer pane)"
+		}
+		views = append(views, line)
+	}
 	sum := sha256.Sum256(manifestBytes)
 	return ConsentFacts{
 		Name:           m.Plugin.Name,
@@ -90,6 +114,7 @@ func NewConsentFacts(m *Manifest, src ResolvedSource, manifestBytes []byte, runB
 		Icon:           m.Panel.Icon,
 		Label:          m.Panel.Label,
 		Keys:           keys,
+		Views:          views,
 		Settings:       FlattenSettings(m.Panel.Settings),
 	}
 }
@@ -149,6 +174,14 @@ func (f ConsentFacts) Digest() string {
 		"label=" + f.Label,
 		"settings=" + strings.Join(f.Settings, "\x1f"),
 	}
+	// Appended only when there are views, so a manifest that declares none
+	// hashes exactly as it did before views existed. Every plugin installed
+	// before this field hashes the same way it did when it was approved, and an
+	// unconditional line would have re-opened the prompt for all of them to ask
+	// about something none of them says.
+	if len(f.Views) > 0 {
+		parts = append(parts, "views="+strings.Join(f.Views, "\x1f"))
+	}
 	return exectrust.Digest(parts)
 }
 
@@ -177,6 +210,10 @@ func Diff(old, next ConsentFacts) []FactChange {
 	add("env", strings.Join(old.Env, " "), strings.Join(next.Env, " "))
 	add("protocol", old.Protocol, next.Protocol)
 	add("keys", strings.Join(old.Keys, ", "), strings.Join(next.Keys, ", "))
+	// One row rather than one per view: the order is part of what changed (it
+	// decides the drawer default), and a per-line diff keyed on the view name
+	// would report a reordering as nothing at all.
+	add("views", strings.Join(old.Views, ", "), strings.Join(next.Views, ", "))
 	add("label", old.Label, next.Label)
 	// One line per changed setting rather than one "settings" row: an update
 	// that retunes a default should say which one and from what.

@@ -58,6 +58,27 @@ func RenderFragment(m *Manifest, runBinary string, pin *Pin) ([]byte, error) {
 		}
 		panel["keys"] = keys
 	}
+	// The view declaration travels into the config as an ARRAY, which is where
+	// the author's declaration order stops being implicit: `[panel.views.<name>]`
+	// is a map once decoded, and the host's whole use of `drawer` is "the FIRST
+	// view declared suitable". Freezing the order here is what lets the host read
+	// a preference without holding a view vocabulary of its own.
+	//
+	// `drawer` is written even when false, because false is a statement the
+	// author made — this layout is not for a narrow pane — and the host reports
+	// on it.
+	if names := m.Panel.ViewNames(); len(names) > 0 {
+		views := make([]map[string]any, 0, len(names))
+		for _, name := range names {
+			v := m.Panel.Views[name]
+			views = append(views, map[string]any{
+				"name":        name,
+				"description": v.Description,
+				"drawer":      v.Drawer,
+			})
+		}
+		panel["views"] = views
+	}
 	// Settings are the panel's defaults, written out so the file the user edits
 	// to retune the panel already shows every knob it has. Editing this table
 	// is the supported way to configure an installed panel; the host delivers

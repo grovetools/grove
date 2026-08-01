@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -71,6 +72,14 @@ const ProtocolEmbedV1 = "embed/v1"
 //	[[panel.keys]]
 //	key         = "ctrl+f"
 //	description = "jump to the notebook"
+//
+//	[panel.views.full]
+//	description = "clock, history and help"
+//	drawer      = false
+//
+//	[panel.views.compact]
+//	description = "one line: state and time remaining"
+//	drawer      = true
 type Manifest struct {
 	SchemaVersion int      `toml:"schema_version"`
 	Plugin        Plugin   `toml:"plugin"`
@@ -123,6 +132,50 @@ type Panel struct {
 	// because a value the user has approved is one they should have read. An
 	// update that changes a default re-opens the prompt with a diff.
 	Settings map[string]any `toml:"settings"`
+	// Views are the panel's own named layouts — `[panel.views.<name>]`, keyed by
+	// the name the panel answers to.
+	//
+	// The names are an OPEN SET the panel defines. They are not checked against
+	// any list this package holds and no host branches on one: a panel may have
+	// two views or six and call them `compact`, `graph`, `tree` or `tiny`,
+	// because only the panel knows what its own layouts are. What the host reads
+	// is one bool per view (see View.Drawer), and it reads it off the
+	// DECLARATION rather than off the name.
+	//
+	// Declaring none is normal and stays working: `view` was carried on the wire
+	// before this table existed, and a panel that never declares a view still
+	// gets whatever the user asks for.
+	Views map[string]View `toml:"views"`
+	// ViewOrder is the order the manifest declares the views in, recovered from
+	// the document because a TOML table of tables decodes into an unordered map.
+	// Filled by ParseManifest; see manifest_views.go for why the order matters
+	// and Panel.ViewNames for what happens when it is absent.
+	ViewOrder []string `toml:"-"`
+}
+
+// View is one of the panel's own layouts, declared so the host can default and
+// report rather than guess.
+//
+// Like [Key] it is a DECLARATION and grants nothing. A `view` in the user's
+// config naming something absent from this table still reaches the panel
+// verbatim: the host cannot know the name was wrong, and a panel that receives a
+// name it does not implement renders its default and may say so. Nothing here is
+// enforcement — the manifest is read and reported on, never obeyed.
+type View struct {
+	// Description is what the view shows, in the author's words. Required: it is
+	// the only thing that tells a user what they would be asking for, both on the
+	// consent screen and in the fragment they edit to choose one.
+	Description string `toml:"description"`
+	// Drawer says whether the author means this view for a drawer pane — a narrow
+	// column a few rows tall. It is the one field a host acts on, in exactly two
+	// ways: a drawer pane naming no view gets the first view declared `true`, and
+	// a view declared `false` mounted in a drawer warns and mounts anyway.
+	//
+	// `false` is a real answer rather than an absent one. A panel whose full
+	// layout is a title, a clock, a history list and a footer has no drawer width
+	// at which mounting it is right, and saying so is information the host can
+	// use.
+	Drawer bool `toml:"drawer"`
 }
 
 // Key is a host hotkey the panel intends to claim over the control plane. It
@@ -182,6 +235,9 @@ func ParseManifest(data []byte) (*Manifest, error) {
 			m.Unknown = append(m.Unknown, strings.Join(e.Key(), "."))
 		}
 	}
+	// The decode has already accepted the bytes, so this is a second read of a
+	// document known to parse — for the one fact the decoder throws away.
+	m.Panel.ViewOrder = viewOrder(data)
 	if err := m.Validate(); err != nil {
 		return nil, err
 	}
@@ -263,7 +319,83 @@ func (m *Manifest) Validate() error {
 			return err
 		}
 	}
+	// Views are validated for the two things a host and a reader need of them: a
+	// name that can be compared verbatim against the user's `view`, and a
+	// sentence explaining what asking for it would get you. Nothing here checks
+	// the name against a vocabulary, because there is no vocabulary to check it
+	// against — that is the point of the field.
+	//
+	// A manifest declaring no views, or declaring none for the drawer, is VALID.
+	// The first is every panel written before views existed; the second is a
+	// panel stating that none of its layouts belongs in a narrow column, which is
+	// an answer rather than an omission.
+	for _, name := range m.Panel.ViewNames() {
+		key := "panel.views." + name
+		if strings.TrimSpace(name) == "" {
+			return errors.New("panel.views has a view with a blank name")
+		}
+		if name != strings.TrimSpace(name) {
+			return fmt.Errorf("panel.views name %q must not begin or end with whitespace — it is compared verbatim against the user's `view`", name)
+		}
+		if err := printable(key, name); err != nil {
+			return err
+		}
+		if strings.TrimSpace(m.Panel.Views[name].Description) == "" {
+			return fmt.Errorf("%s.description is required — it is the only thing that says what asking for this view would get", key)
+		}
+		if err := printable(key+".description", m.Panel.Views[name].Description); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// ViewNames returns the declared view names in the order the manifest declares
+// them, which is the order preference is read from.
+//
+// Any name the recovered order missed is appended, sorted, rather than dropped:
+// the order is a refinement of the map and never its authority, so a hand-built
+// Manifest (a test, a caller assembling one in memory) and a document whose
+// order could not be read both still validate and still render every view they
+// declare. Sorted so that fallback is deterministic — the fragment's contents
+// feed a digest an approval is bound to.
+func (p *Panel) ViewNames() []string {
+	if len(p.Views) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(p.Views))
+	seen := make(map[string]bool, len(p.Views))
+	for _, name := range p.ViewOrder {
+		if _, ok := p.Views[name]; ok && !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	rest := make([]string, 0, len(p.Views)-len(names))
+	for name := range p.Views {
+		if !seen[name] {
+			rest = append(rest, name)
+		}
+	}
+	sort.Strings(rest)
+	return append(names, rest...)
+}
+
+// PreferredDrawerView is the first view the author declared drawer-suitable, or
+// empty when they declared none.
+//
+// It is what a drawer pane mounts when the user names no view, and the reason
+// declaration order is recovered at all. The host resolves this from the config
+// it was copied into (config.DrawerPaneConfig.EffectiveView); here it is what the
+// consent screen reports, so a user can see which view an install is offering a
+// drawer before they approve it.
+func (p *Panel) PreferredDrawerView() string {
+	for _, name := range p.ViewNames() {
+		if p.Views[name].Drawer {
+			return name
+		}
+	}
+	return ""
 }
 
 // BinaryName is the basename the built binary is installed under.
