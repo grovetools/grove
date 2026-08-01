@@ -494,6 +494,29 @@ var SchemaFields = []FieldMeta{
 				RefType:     "AgentPaneConfig",
 				Children: []FieldMeta{
 					{
+						Path:        []string{"tui", "agent", "auto_approve"},
+						Type:        FieldObject,
+						Description: "Answer matching agent permission prompts by pressing Enter in the pane",
+						RefType:     "AgentAutoApproveConfig",
+						Children: []FieldMeta{
+							{
+								Path:        []string{"tui", "agent", "auto_approve", "approve_patterns"},
+								Type:        FieldArray,
+								Description: "Dialog text that makes a permission prompt eligible for auto-approval; replaces the built-in static-analysis-miss list",
+							},
+							{
+								Path:        []string{"tui", "agent", "auto_approve", "deny_patterns"},
+								Type:        FieldArray,
+								Description: "Dialog text that vetoes auto-approval; extends the built-in deny floor rather than replacing it",
+							},
+							{
+								Path:        []string{"tui", "agent", "auto_approve", "enabled"},
+								Type:        FieldBool,
+								Description: "Answer matching agent permission prompts automatically",
+							},
+						},
+					},
+					{
 						Path:        []string{"tui", "agent", "repaint_nudge"},
 						Type:        FieldBool,
 						Description: "Automatically SIGWINCH-nudge agent panes after output bursts to heal rendering corruption",
