@@ -138,6 +138,20 @@ clean:
 		fmt.Println("  Makefile")
 	}
 
+	// Mint the ecosystem identity card before git init, so the card is part of
+	// the initial commit and travels with every clone from here on. Layout and
+	// remotes are derived from whatever git state already exists: a directory
+	// that was already a repo keeps its remotes, and a directory about to be
+	// `git init`ed simply has none yet.
+	if _, err := config.WriteEcosystemCard(groveYmlPath, deriveEcosystemCard(targetDir, nil)); err != nil {
+		return fmt.Errorf("failed to write the ecosystem card: %w", err)
+	}
+	card, err := config.LoadEcosystemCard(groveYmlPath)
+	if err != nil {
+		return fmt.Errorf("failed to read back the ecosystem card: %w", err)
+	}
+	fmt.Printf("  ecosystem card (id %s, layout %s)\n", card.ID, card.Layout)
+
 	// Initialize git if not already a git repo
 	gitDir := filepath.Join(targetDir, ".git")
 	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
@@ -209,8 +223,8 @@ func checkAndPromptDiscoverability(ecosystemPath string) error {
 	if !isatty.IsTerminal(os.Stdin.Fd()) && !isatty.IsCygwinTerminal(os.Stdin.Fd()) {
 		fmt.Printf("\n%s This ecosystem is not in a configured grove and won't be\n", theme.IconWarning)
 		fmt.Printf("   discovered by grove tools.\n")
-		fmt.Printf("   Run in an interactive terminal to add it, or manually update\n")
-		fmt.Printf("   ~/.config/grove/grove.override.yml\n")
+		fmt.Printf("   Run in an interactive terminal to add it, or declare it yourself in\n")
+		fmt.Printf("   %s under [machine.ecosystems.<name>].\n", config.MachineConfigPath())
 		return nil
 	}
 
@@ -220,7 +234,7 @@ func checkAndPromptDiscoverability(ecosystemPath string) error {
 		fmt.Printf("\n%s This ecosystem is not in a configured grove and won't be\n", theme.IconWarning)
 		fmt.Printf("   discovered by grove tools.\n")
 		fmt.Printf("   Error: %v\n", err)
-		fmt.Printf("   Manually update ~/.config/grove/grove.override.yml\n")
+		fmt.Printf("   Declare it yourself in %s under [machine.ecosystems.<name>].\n", config.MachineConfigPath())
 		return nil
 	}
 
@@ -239,14 +253,18 @@ func checkAndPromptDiscoverability(ecosystemPath string) error {
 		return nil
 	}
 
-	// Update the config file where groves are defined - add the ecosystem itself as a grove
-	configPath, err := updateGlobalConfig(groveName, absPath, result.SelectedNotebook)
+	// Record the ecosystem as one of this machine's subscriptions.
+	configPath, err := registerMachineEcosystem(groveName, absPath, result.SelectedNotebook)
 	if err != nil {
 		return fmt.Errorf("failed to update config: %w", err)
 	}
 
-	fmt.Printf("\n%s Added grove '%s' (%s)\n", theme.IconSuccess, groveName, absPath)
+	fmt.Printf("\n%s Subscribed to ecosystem '%s' (%s)\n", theme.IconSuccess, groveName, absPath)
 	fmt.Printf("  Updated %s\n", configPath)
+	if owner := legacyGrovesOwner(groveName); owner != "" {
+		fmt.Printf("  %s a legacy [groves.%s] entry in %s still takes precedence;\n", theme.IconWarning, groveName, owner)
+		fmt.Printf("     run `grove machine migrate` and delete it when ready.\n")
+	}
 
 	return nil
 }

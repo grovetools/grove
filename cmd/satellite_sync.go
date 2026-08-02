@@ -5,26 +5,33 @@ package cmd
 // precedence), sync-token verification, and the create-or-merge writer for the
 // laptop's ~/.config/grove/sync.toml.
 //
-// PUSH-ONLY INVARIANT (load-bearing safety property): a laptop [[workspaces]]
-// entry written by this code NEVER carries `pull = true`. Pull belongs only in
-// the VM's sync.toml (bootstrap step 5) — a pulling laptop would let the
-// satellite overwrite local notebooks. renderLaptopSyncWorkspaces is the single
-// entry-rendering choke point and refuses Pull outright; the merge path is
-// append-only and never edits existing entries (the previous file content stays
-// a byte-for-byte prefix, mirroring the registry-splice philosophy).
+// PUSH-ONLY INVARIANT, in its true scope (load-bearing safety property):
+// SATELLITE-ROLE entries are push-only. A laptop [[workspaces]] entry written
+// here for a satellite NEVER carries `pull = true`, because a pulling laptop
+// would let a disposable VM overwrite local notebooks. Pull belongs in the VM's
+// own sync.toml (bootstrap step 5).
+//
+// The invariant does NOT say "this machine may not pull". A workstation
+// mirroring its OWN notebook (role = "peer") or subscribing to the machine
+// registry (role = "registry") pulls legitimately — those relationships are not
+// a disposable guest. The refusal is therefore scoped by
+// config.RolePushOnly(role): role ∈ {empty (legacy), satellite}. Legacy
+// role-less entries keep the old hard guarantee byte for byte.
+//
+// Enforcement lives in the shared editor (core/config/sync_edit.go), which is
+// the single entry-rendering choke point for `satellite up`, `join`, and
+// `materialize`; its merge path is append-only and never edits existing entries
+// (the previous file content stays a byte-for-byte prefix).
 
 import (
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/grovetools/core/config"
-	"github.com/pelletier/go-toml/v2"
 )
 
 const (
@@ -151,44 +158,39 @@ func splitWorkspacesFlag(v string) []string {
 	return out
 }
 
-// laptopSyncWorkspace is one to-be-written [[workspaces]] entry for the LAPTOP
-// sync.toml. Pull exists only so the push-only refusal is a real, testable
-// code path — nothing in this package ever sets it.
-type laptopSyncWorkspace struct {
-	Name string
-	Pull bool
+// renderLaptopSyncWorkspaces renders the laptop's [[workspaces]] entries for a
+// satellite: it STAMPS role = "satellite" on every entry it generates, which
+// is what makes them push-only by construction (config.RolePushOnly). The
+// rendering itself is the shared editor's, so there is exactly one place that
+// can emit an entry — and it refuses a pull-enabled satellite entry.
+func renderLaptopSyncWorkspaces(entries []config.SyncWorkspace) (string, error) {
+	stamped := make([]config.SyncWorkspace, 0, len(entries))
+	for _, e := range entries {
+		if e.Role == "" {
+			e.Role = config.SyncRoleSatellite
+		}
+		stamped = append(stamped, e)
+	}
+	return config.RenderSyncWorkspaces(stamped)
 }
 
-// laptopSyncEntries wraps plain names as push-only entries.
-func laptopSyncEntries(names []string) []laptopSyncWorkspace {
-	entries := make([]laptopSyncWorkspace, 0, len(names))
+// laptopSyncEntries wraps plain workspace names as satellite-role entries.
+func laptopSyncEntries(names []string) []config.SyncWorkspace {
+	entries := make([]config.SyncWorkspace, 0, len(names))
 	for _, n := range names {
-		entries = append(entries, laptopSyncWorkspace{Name: n})
+		entries = append(entries, config.SyncWorkspace{Name: n, Role: config.SyncRoleSatellite})
 	}
 	return entries
 }
 
-// renderLaptopSyncWorkspaces renders [[workspaces]] entries for the laptop
-// sync.toml. HARD INVARIANT: it refuses to emit an entry with Pull set —
-// every laptop entry this package writes flows through here (both the
-// create-from-scratch and merge-append paths), making this the single
-// enforcement point for the push-only safety property.
-func renderLaptopSyncWorkspaces(entries []laptopSyncWorkspace) (string, error) {
-	var b strings.Builder
-	for _, e := range entries {
-		if e.Pull {
-			return "", fmt.Errorf("refusing to write laptop sync workspace %q with pull = true: the laptop sync config is PUSH-ONLY (a pull entry would let the satellite overwrite local notebooks); pull belongs only in the VM's sync.toml", e.Name)
-		}
-		if e.Name == "" {
-			return "", fmt.Errorf("refusing to write a laptop sync workspace with an empty name")
-		}
-		fmt.Fprintf(&b, "\n[[workspaces]]\nname = %q\n", e.Name)
-	}
-	return b.String(), nil
-}
-
 // validateManagedLaptopPushOnly is the pre-clone half of the pull refusal.
 // setupLaptopSyncConfig repeats the same check at write time for TOCTOU safety.
+//
+// The refusal is role-scoped: an existing `pull = true` entry blocks managed
+// satellite setup only when its role is push-only — legacy (role-less) or
+// satellite. A role = "peer" or role = "registry" entry pulls legitimately
+// (this machine mirroring its own notebook, or the machine registry) and must
+// not stop a satellite from being provisioned alongside it.
 func validateManagedLaptopPushOnly(configDir string) error {
 	path := filepath.Join(configDir, syncConfigFileName)
 	data, err := os.ReadFile(path)
@@ -203,8 +205,9 @@ func validateManagedLaptopPushOnly(configDir string) error {
 		return err
 	}
 	for _, ws := range cfg.Workspaces {
-		if ws.Pull {
-			return fmt.Errorf("refusing managed satellite setup: existing workspace %q in %s has pull = true; remove/segregate that pull profile before provisioning", ws.Name, path)
+		if ws.Pull && config.RolePushOnly(ws.Role) {
+			return fmt.Errorf("refusing managed satellite setup: existing workspace %q in %s has pull = true under a push-only role (%q); remove/segregate that pull profile, or declare role = %q if it is this machine's own notebook",
+				ws.Name, path, ws.Role, config.SyncRolePeer)
 		}
 	}
 	return nil
@@ -222,6 +225,13 @@ func setupLaptopSyncConfig(configDir string, port int, workspaces []string, out 
 			"  ssh <user>@<vm-ip> \"sudo /usr/local/bin/grove-syncd --data-dir /var/lib/grove-syncd token create laptop\" > %s\n"+
 			"  chmod 600 %s",
 			tokenPath, err, tokenPath, tokenPath)
+	}
+	// The same push-only check `up` ran before provisioning, repeated here at
+	// write time (TOCTOU) and phrased in satellite terms — the shared editor
+	// refuses the same file, but the operator asked for a satellite, so the
+	// error should say what that means for the satellite.
+	if err := validateManagedLaptopPushOnly(configDir); err != nil {
+		return err
 	}
 	syncPath := filepath.Join(configDir, syncConfigFileName)
 	if _, err := os.Stat(syncPath); err != nil {
@@ -299,150 +309,72 @@ func verifySatelliteSyncTokenOverSSH(entry satelliteConfigEntry, tokenPath strin
 	return verifySatelliteSyncToken(ssh.outputCommand, syncTokenProbeCmd(entry.SyncRemoteAddr), strings.TrimSpace(string(token)), ssh.dest(), tokenPath)
 }
 
-// createLaptopSyncConfig writes a fresh push-only sync.toml: server pointed at
-// the daemon's local forward, token_command reading the fetched token, one
-// name-only [[workspaces]] entry per workspace — never a pull key.
+// createLaptopSyncConfig writes a fresh sync.toml through the shared editor:
+// server pointed at the daemon's local forward, token_command reading the
+// fetched token, one satellite-role [[workspaces]] entry per workspace — never
+// a pull key.
 func createLaptopSyncConfig(path string, port int, tokenPath string, workspaces []string, out io.Writer) error {
-	entries, err := renderLaptopSyncWorkspaces(laptopSyncEntries(workspaces))
+	res, err := config.ApplySyncEdit(path, laptopSyncEdit(port, tokenPath, workspaces))
 	if err != nil {
 		return err
 	}
-	var b strings.Builder
-	b.WriteString("# Laptop sync client config — generated by `grove satellite up`.\n")
-	b.WriteString("# PUSH-ONLY: workspace entries here must never set pull = true; the\n")
-	b.WriteString("# satellite VM pulls, the laptop only pushes (safety invariant).\n")
-	fmt.Fprintf(&b, "server = \"http://127.0.0.1:%d\"\n", port)
-	fmt.Fprintf(&b, "token_command = %q\n", "cat "+tokenPath)
-	b.WriteString(entries)
-	content := b.String()
-
-	// Refuse to persist anything the sync loader could not parse, or —
-	// defense in depth behind the renderer's refusal — anything carrying a
-	// pull-enabled workspace.
-	parsed, err := parseLaptopSyncContent(path, content)
-	if err != nil {
-		return err
-	}
-	for _, ws := range parsed.Workspaces {
-		if ws.Pull {
-			return fmt.Errorf("internal: generated %s would contain a pull-enabled workspace %q; refusing to write", path, ws.Name)
-		}
-	}
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		return err
-	}
-	fmt.Fprintf(out, "Wrote laptop sync config %s (push-only, %d workspace(s): %s).\n",
-		path, len(workspaces), strings.Join(workspaces, ", "))
+	reportSyncEdit(out, res, workspaces)
 	return nil
 }
 
 // mergeLaptopSyncConfig appends the missing workspace entries to an existing
-// sync.toml. Append-only by construction: the previous file content is kept
-// byte-for-byte as a prefix (comments, formatting, and existing entries
-// untouched); only absent workspaces gain a new push-only entry. A server
-// port that disagrees with sync_local_port is WARNED about, never rewritten.
+// sync.toml. Append-only by construction (the shared editor keeps the previous
+// content as a byte-for-byte prefix); only absent workspaces gain a new
+// satellite-role entry. A server that disagrees with sync_local_port is WARNED
+// about, never rewritten.
 func mergeLaptopSyncConfig(path string, port int, workspaces []string, out io.Writer) error {
-	data, err := os.ReadFile(path)
+	res, err := config.ApplySyncEdit(path, laptopSyncEdit(port, "", workspaces))
 	if err != nil {
 		return err
 	}
-	existing, err := parseLaptopSyncContent(path, string(data))
-	if err != nil {
-		return fmt.Errorf("existing sync config is not usable — fix it (or move it aside) and re-run: %w", err)
-	}
-
-	warnSyncServerMismatch(out, path, existing.Server, port)
-
-	// Managed full-satellite setup refuses an already pulling laptop. Merely
-	// preserving it would let guest writes bypass incoming review and escrow.
-	// A user may operate pull separately, but not through this managed profile.
-	for _, ws := range existing.Workspaces {
-		if ws.Pull {
-			return fmt.Errorf("refusing managed satellite setup: existing workspace %q in %s has pull = true; remove/segregate that pull profile before provisioning a push-only laptop", ws.Name, path)
-		}
-	}
-
-	have := make(map[string]bool, len(existing.Workspaces))
-	for _, ws := range existing.Workspaces {
-		have[ws.Name] = true
-	}
-	var missing []string
-	for _, name := range workspaces {
-		if !have[name] {
-			missing = append(missing, name)
-		}
-	}
-	if len(missing) == 0 {
-		fmt.Fprintf(out, "Laptop sync config %s already lists all configured workspaces — left untouched.\n", path)
-		return nil
-	}
-
-	appended, err := renderLaptopSyncWorkspaces(laptopSyncEntries(missing))
-	if err != nil {
-		return err
-	}
-	content := string(data)
-	if !strings.HasSuffix(content, "\n") {
-		content += "\n"
-	}
-	content += "\n# Added by `grove satellite up` (push-only laptop entries)." + appended
-
-	// The merged result must still parse as a sync config, and the append
-	// must not have grown the pull-enabled set (defense in depth: the
-	// renderer already refuses pull entries).
-	merged, err := parseLaptopSyncContent(path, content)
-	if err != nil {
-		return fmt.Errorf("refusing to write merged sync config: %w", err)
-	}
-	if countPullEntries(merged) != countPullEntries(existing) {
-		return fmt.Errorf("internal: merging %s would add a pull-enabled workspace; refusing to write", path)
-	}
-	if err := writeValidatedTOML(path, content); err != nil {
-		return err
-	}
-	fmt.Fprintf(out, "Appended %d push-only workspace entr%s to %s: %s\n",
-		len(missing), map[bool]string{true: "y", false: "ies"}[len(missing) == 1], path, strings.Join(missing, ", "))
+	reportSyncEdit(out, res, workspaces)
 	return nil
+}
+
+// laptopSyncEdit builds the edit `satellite up` applies: satellite-role
+// entries only, pointed at the daemon-owned local forward.
+func laptopSyncEdit(port int, tokenPath string, workspaces []string) config.SyncEdit {
+	edit := config.SyncEdit{
+		Server:     fmt.Sprintf("http://127.0.0.1:%d", port),
+		Workspaces: laptopSyncEntries(workspaces),
+		Header: []string{
+			"# Laptop sync client config — generated by `grove satellite up`.",
+			"# Satellite-role entries are PUSH-ONLY: they must never set pull = true.",
+			"# The satellite VM pulls, this machine only pushes (safety invariant).",
+		},
+		Note: "Added by `grove satellite up` (satellite-role, push-only entries).",
+	}
+	if tokenPath != "" {
+		edit.TokenCommand = "cat " + tokenPath
+	}
+	return edit
+}
+
+// reportSyncEdit prints what the editor actually did, warnings included.
+func reportSyncEdit(out io.Writer, res config.SyncEditResult, requested []string) {
+	for _, w := range res.Warnings {
+		fmt.Fprintf(out, "warning: %s\n", w)
+	}
+	switch {
+	case res.Created:
+		fmt.Fprintf(out, "Wrote laptop sync config %s (push-only, %d workspace(s): %s).\n",
+			res.Path, len(requested), strings.Join(requested, ", "))
+	case len(res.Added) == 0:
+		fmt.Fprintf(out, "Laptop sync config %s already lists all configured workspaces — left untouched.\n", res.Path)
+	default:
+		fmt.Fprintf(out, "Appended %d push-only workspace entr%s to %s: %s\n",
+			len(res.Added), map[bool]string{true: "y", false: "ies"}[len(res.Added) == 1],
+			res.Path, strings.Join(res.Added, ", "))
+	}
 }
 
 // parseLaptopSyncContent decodes sync.toml content into the canonical
 // config.SyncConfig schema (the exact shape core's LoadSyncConfigFrom reads).
 func parseLaptopSyncContent(path, content string) (*config.SyncConfig, error) {
-	var cfg config.SyncConfig
-	if err := toml.Unmarshal([]byte(content), &cfg); err != nil {
-		return nil, fmt.Errorf("%s does not parse as TOML: %w", path, err)
-	}
-	if err := cfg.Validate(); err != nil {
-		return nil, fmt.Errorf("%s is not a valid sync config: %w", path, err)
-	}
-	return &cfg, nil
-}
-
-// countPullEntries counts pull-enabled workspaces (merge sanity check).
-func countPullEntries(cfg *config.SyncConfig) int {
-	n := 0
-	for _, ws := range cfg.Workspaces {
-		if ws.Pull {
-			n++
-		}
-	}
-	return n
-}
-
-// warnSyncServerMismatch warns when an existing sync.toml's server does not
-// point at the daemon forward (http://127.0.0.1:<sync_local_port>). The file
-// is the user's — it is never rewritten here.
-func warnSyncServerMismatch(out io.Writer, path, server string, port int) {
-	if server == "" {
-		return
-	}
-	expected := fmt.Sprintf("http://127.0.0.1:%d", port)
-	if strings.TrimRight(server, "/") == expected {
-		return
-	}
-	if u, err := url.Parse(server); err == nil && u.Port() == strconv.Itoa(port) {
-		return // same port, host spelled differently (e.g. localhost)
-	}
-	fmt.Fprintf(out, "warning: %s server = %q does not match the daemon sync forward %s (registry sync_local_port %d); leaving it unchanged — align --sync-port or edit the file manually.\n",
-		path, server, expected, port)
+	return config.ParseSyncContent(path, content)
 }

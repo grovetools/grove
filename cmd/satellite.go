@@ -704,6 +704,14 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		//    provisioning, and the provider did the minimal guest prep itself.
 		if usesBootstrap {
 			bootstrapStart := time.Now()
+			// satellite-bootstrap.sh hardcodes the ecosystem root it clones
+			// into and the path the VM grove.toml points at. A configured
+			// code_dir moves every mirror verb but NOT the bootstrap, so say
+			// so once, here, rather than leaving the two silently disagreeing.
+			if cd := strings.TrimSpace(reposCfg.CodeDir); cd != "" && cd != bootstrapRemoteCodeDir {
+				fmt.Printf("warning: [satellites.%s.repos] code_dir = %q, but the bootstrap provisions the ecosystem at %s\n", name, cd, bootstrapRemoteCodeDir)
+				fmt.Printf("  the mirror verbs will use %s — point the VM's grove.toml there too, or drop code_dir\n", cd)
+			}
 			provArgs, secretStdin := buildBootstrapProvision(prov, ghToken, claudeToken)
 			// The resolved sync workspaces drive the VM's pull-enabled sync.toml
 			// (bootstrap step 5). Always passed — an explicitly empty flag value
@@ -859,12 +867,20 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 		if prebuilt {
 			mirrorRepos := resolveSatelliteMirrorRepos(nil, false, reposCfg, resolvedSyncWorkspaces)
 			if len(mirrorRepos) > 0 {
+				// The ecosystem root the mirror ships into is the target's
+				// property, not a constant: [satellites.<name>.repos] code_dir
+				// wins, and only in its absence does this fall back to where
+				// this CLI's own provisioning puts it.
+				mirrorCodeDir, cdErr := resolveRemoteCodeDir("", false, reposCfg.CodeDir)
+				if cdErr != nil {
+					return cdErr
+				}
 				fmt.Printf("\nMirroring %d repo(s) to %q...\n", len(mirrorRepos), name)
 				// force=false: a fresh VM has every repo MISSING (bootstrap
 				// seeds no checkouts), so the unfetched-commits interlock
 				// never triggers here — and if it somehow did (re-run against
 				// a VM someone committed on), holding is the right call.
-				if err := pushSatelliteReposOverSSH(name, entry, sourceAbs, defaultRemoteCodeDir, mirrorRepos, false, false, true, false); err != nil {
+				if err := pushSatelliteReposOverSSH(name, entry, sourceAbs, mirrorCodeDir, mirrorRepos, false, false, true, false); err != nil {
 					fmt.Printf("warning: repo mirror failed: %v\n", err)
 					fmt.Printf("  retry with: grove satellite repos push %s\n", name)
 				}

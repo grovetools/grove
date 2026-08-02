@@ -69,11 +69,22 @@ func collectLayerFiles(startDir string) []layerFile {
 		}
 
 		// Global fragments: modular *.toml files next to the global config.
+		// sync.toml and machine.toml are NOT fragments — each has its own
+		// standalone typed loader and is excluded from the glob by core (see
+		// config.isExcludedGlobalFragment). They still parse-check here, under
+		// their real kind, so a typo in either is reported as what it is
+		// instead of being mislabeled a fragment.
 		if files, err := filepath.Glob(filepath.Join(configDir, "*.toml")); err == nil {
 			sort.Strings(files)
 			for _, f := range files {
 				switch filepath.Base(f) {
 				case "grove.toml", "grove.yml", "grove.override.toml":
+					continue
+				case "sync.toml":
+					add("sync client config (standalone typed loader)", f)
+					continue
+				case config.MachineConfigFileName:
+					add("machine config (standalone typed loader)", f)
 					continue
 				}
 				add("global fragment", f)
@@ -204,6 +215,17 @@ func (c *configLayersCheck) Run(ctx context.Context, opts doctor.RunOptions) doc
 	for _, f := range files {
 		if _, err := parseLayerFile(f.Path); err != nil {
 			failures = append(failures, fmt.Sprintf("%s [%s]: %v", f.Path, f.Kind, compactError(err)))
+			continue
+		}
+		// machine.toml has a typed loader with its own validation (paths
+		// present, no name claimed by both an ecosystem and a root). A file
+		// that parses as TOML but fails that validation is silently ignored at
+		// load time, which is exactly the class of failure this check exists
+		// to surface.
+		if filepath.Base(f.Path) == config.MachineConfigFileName {
+			if _, err := config.LoadMachineConfigFrom(f.Path); err != nil {
+				failures = append(failures, fmt.Sprintf("%s [%s]: %v", f.Path, f.Kind, compactError(err)))
+			}
 		}
 	}
 

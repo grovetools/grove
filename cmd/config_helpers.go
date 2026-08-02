@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/grovetools/core/config"
-	"gopkg.in/yaml.v3"
 )
 
 // getGlobalOverridePath returns the path to the global override config file.
@@ -100,8 +99,11 @@ func expandPath(path string) string {
 	return path
 }
 
-// findGrovesConfigFile finds the config file where groves are defined.
-// It checks layers in order: global override, global, then falls back to global override for new entries.
+// findGrovesConfigFile finds the config file where LEGACY [groves.*] entries
+// are defined. New registrations no longer go here — they are machine.toml
+// subscriptions (see registerMachineEcosystem) — but an existing entry still
+// wins over a compiled subscription, so callers use this to tell the user
+// which file is actually in charge.
 func findGrovesConfigFile() (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -135,70 +137,82 @@ func findGrovesConfigFile() (string, error) {
 	return getGlobalOverridePath()
 }
 
-// updateGlobalConfig adds a new grove to the appropriate config file.
-// It finds where groves are already defined and edits that file,
-// preserving all existing content.
-func updateGlobalConfig(groveName, grovePath, notebook string) (string, error) {
-	targetPath, err := findGrovesConfigFile()
-	if err != nil {
+// machineSubscriptionHeader is the comment block written above the first
+// subscription in a machine.toml this tooling creates.
+var machineSubscriptionHeader = []string{
+	"# This machine's intent: name, ecosystem subscriptions, bare scan roots.",
+	"# Dotfiles-portable on purpose — a restored copy plus a freshly minted",
+	"# machine id is a NEW machine with the SAME intent.",
+	"",
+}
+
+// registerMachineEcosystem records a directory as one of this machine's
+// ecosystem subscriptions in ~/.config/grove/machine.toml, and returns the
+// file written.
+//
+// This replaces writing a [groves.<name>] entry into the global config. The
+// subscription compiles into the same cfg.Groves map every discovery consumer
+// already reads, so nothing downstream changes — but the declaration now lives
+// where "which ecosystems does this machine want" is answerable, which is what
+// makes declared-but-missing and materialize possible.
+//
+// Old configs keep working untouched: compilation fills only absent keys, so
+// an existing [groves.<name>] still wins.
+func registerMachineEcosystem(groveName, grovePath, notebook string) (string, error) {
+	cfgPath := config.MachineConfigPath()
+	if cfgPath == "" {
+		return "", fmt.Errorf("cannot resolve the grove config directory")
+	}
+	if _, err := config.WriteMachineSubscriptions(cfgPath, config.MachineSubscriptions{
+		Ecosystems: map[string]config.MachineEcosystem{
+			groveName: {Path: grovePath, Notebook: notebook},
+		},
+		Header: machineSubscriptionHeader,
+	}); err != nil {
 		return "", err
 	}
+	return cfgPath, nil
+}
 
-	// Ensure the config directory exists
-	configDir := filepath.Dir(targetPath)
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		return "", fmt.Errorf("failed to create config directory: %w", err)
-	}
+// updateGlobalConfig registers an ecosystem for discovery. Kept under its
+// historical name because several call sites read as "put this on the map";
+// the map is now machine.toml.
+func updateGlobalConfig(groveName, grovePath, notebook string) (string, error) {
+	return registerMachineEcosystem(groveName, grovePath, notebook)
+}
 
-	// Load existing config as a generic map to preserve all fields
-	var doc map[string]interface{}
-	if data, err := os.ReadFile(targetPath); err == nil {
-		if err := yaml.Unmarshal(data, &doc); err != nil {
-			return "", fmt.Errorf("failed to parse existing config: %w", err)
-		}
-	}
-
-	// Initialize doc if nil
-	if doc == nil {
-		doc = make(map[string]interface{})
-	}
-
-	// Get or create the groves section
-	var groves map[string]interface{}
-	if g, ok := doc["groves"]; ok {
-		if gMap, ok := g.(map[string]interface{}); ok {
-			groves = gMap
-		} else {
-			groves = make(map[string]interface{})
-		}
-	} else {
-		groves = make(map[string]interface{})
-	}
-
-	// Create the grove entry
-	groveEntry := map[string]interface{}{
-		"path":    grovePath,
-		"enabled": true,
-	}
-	if notebook != "" {
-		groveEntry["notebook"] = notebook
-	}
-
-	// Add/update the specific grove
-	groves[groveName] = groveEntry
-	doc["groves"] = groves
-
-	// Marshal and write back - this preserves all other fields
-	data, err := yaml.Marshal(doc)
+// legacyGrovesOwner reports the config file that already declares
+// [groves.<name>], or "" when none does. A legacy entry outranks the
+// subscription just written, so surfaces that register an ecosystem say so
+// rather than letting the user wonder why their new path is ignored.
+func legacyGrovesOwner(groveName string) string {
+	cwd, err := os.Getwd()
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal config: %w", err)
+		cwd = "."
 	}
-
-	if err := os.WriteFile(targetPath, data, 0o600); err != nil {
-		return "", fmt.Errorf("failed to write config: %w", err)
+	layered, err := config.LoadLayered(cwd)
+	if err != nil {
+		return ""
 	}
-
-	return targetPath, nil
+	declares := func(cfg *config.Config) bool {
+		if cfg == nil {
+			return false
+		}
+		_, ok := cfg.Groves[groveName]
+		return ok
+	}
+	if declares(layered.Global) {
+		return layered.FilePaths[config.SourceGlobal]
+	}
+	for _, frag := range layered.GlobalFragments {
+		if declares(frag.Config) {
+			return frag.Path
+		}
+	}
+	if layered.GlobalOverride != nil && declares(layered.GlobalOverride.Config) {
+		return layered.GlobalOverride.Path
+	}
+	return ""
 }
 
 // deriveGroveName derives a grove name from a path.

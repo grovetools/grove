@@ -329,13 +329,25 @@ func (m *Model) commitEcosystem(raw string) (name string, imported bool, err err
 		}
 	}
 
-	entry := map[string]interface{}{
-		"path":        path,
-		"enabled":     true,
-		"description": "My projects",
-		"notebook":    "nb",
+	// The registration is a machine.toml subscription, not a [groves.*] entry
+	// in the shareable global config: which ecosystems THIS machine wants is
+	// machine intent. It compiles into the same groves map the config UI reads
+	// back, so the page's read path is unchanged.
+	cfgPath := config.MachineConfigPath()
+	if cfgPath == "" {
+		return "", false, fmt.Errorf("cannot resolve the grove config directory")
 	}
-	if err := SaveGlobalSetting(m.tomlHandler, m.yamlHandler, m.layered, []string{"groves", name}, entry); err != nil {
+	if _, err := config.WriteMachineSubscriptions(cfgPath, config.MachineSubscriptions{
+		Ecosystems: map[string]config.MachineEcosystem{
+			name: {Path: path, Notebook: "nb", Description: "My projects"},
+		},
+		Header: []string{
+			"# This machine's intent: name, ecosystem subscriptions, bare scan roots.",
+			"# Dotfiles-portable on purpose — a restored copy plus a freshly minted",
+			"# machine id is a NEW machine with the SAME intent.",
+			"",
+		},
+	}); err != nil {
 		return "", false, err
 	}
 	return name, imported, nil

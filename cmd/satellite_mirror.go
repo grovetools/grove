@@ -19,8 +19,88 @@ import (
 	"github.com/grovetools/core/tui/components/table"
 )
 
-// defaultRemoteCodeDir is where satellite-bootstrap.sh clones the superrepo.
-const defaultRemoteCodeDir = "~/code/grovetools"
+// bootstrapRemoteCodeDir is where satellite-bootstrap.sh clones the superrepo
+// (its step 3, and the path its generated VM grove.toml points `[groves.*]` at).
+//
+// It is deliberately NOT "the default remote code dir" any more: the ecosystem
+// root on the far side is a property of the TARGET, not of this CLI, and a
+// materialized peer puts it wherever its subscription says. This const is only
+// the last resort of resolveRemoteCodeDir — the value a satellite this CLI
+// provisioned itself is known to have.
+const bootstrapRemoteCodeDir = "~/code/grovetools"
+
+// remoteCodeDirUnsafe are the characters a remote ecosystem root may not
+// contain. The value is embedded into generated remote shell inside double
+// quotes (remoteCodeDirExpr), so anything that keeps its meaning there — shell
+// expansion, quoting, command separators, redirection, globbing — has to be
+// refused at the boundary rather than trusted. Spaces and unicode stay legal:
+// double quotes handle them, and a path with a space is a path, not an attack.
+const remoteCodeDirUnsafe = "\"'`$\\;&|<>()\n\r\t*?"
+
+// validateRemoteCodeDir checks a remote ecosystem root before it reaches the
+// script generators. It must be absolute or ~-relative — a relative path would
+// resolve against whatever directory the ssh command happens to start in.
+func validateRemoteCodeDir(dir string) error {
+	if strings.TrimSpace(dir) == "" {
+		return fmt.Errorf("remote ecosystem root is empty")
+	}
+	if i := strings.IndexAny(dir, remoteCodeDirUnsafe); i >= 0 {
+		return fmt.Errorf("remote ecosystem root %q contains an unsafe character (%q) for a remote path", dir, string(dir[i]))
+	}
+	if dir != "~" && !strings.HasPrefix(dir, "~/") && !strings.HasPrefix(dir, "/") {
+		return fmt.Errorf("remote ecosystem root %q must be absolute or ~-relative", dir)
+	}
+	for _, seg := range strings.Split(dir, "/") {
+		if seg == ".." {
+			return fmt.Errorf("remote ecosystem root %q may not contain a %q segment", dir, "..")
+		}
+	}
+	return nil
+}
+
+// resolveRemoteCodeDir picks the ecosystem root on the target, in precedence
+// order:
+//
+//  1. an explicitly passed --remote-code-dir (flagSet distinguishes "the user
+//     typed the default" from "the flag was never given");
+//  2. the target's own declaration — [satellites.<name>.repos] code_dir, which
+//     is the satellite's half of the same subscription a materialized peer
+//     carries in its machine config;
+//  3. bootstrapRemoteCodeDir, where a satellite THIS CLI provisioned has its
+//     ecosystem.
+func resolveRemoteCodeDir(flagValue string, flagSet bool, configured string) (string, error) {
+	dir := bootstrapRemoteCodeDir
+	switch {
+	case flagSet:
+		dir = flagValue
+	case strings.TrimSpace(configured) != "":
+		dir = strings.TrimSpace(configured)
+	case strings.TrimSpace(flagValue) != "":
+		// A caller that pre-seeded the variable without going through cobra.
+		dir = strings.TrimSpace(flagValue)
+	}
+	if err := validateRemoteCodeDir(dir); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// resolveSatelliteCodeDir is resolveRemoteCodeDir with the config lookup done
+// for the named satellite — the form every verb's RunE uses.
+func resolveSatelliteCodeDir(name, flagValue string, flagSet bool) (string, error) {
+	if flagSet {
+		return resolveRemoteCodeDir(flagValue, true, "")
+	}
+	reposCfg, err := loadSatelliteReposOptions(name)
+	if err != nil {
+		return "", err
+	}
+	return resolveRemoteCodeDir(flagValue, false, reposCfg.CodeDir)
+}
+
+// remoteCodeDirFlagUsage is the shared --remote-code-dir help text: the flag
+// still works exactly as before, it just no longer hardcodes the answer.
+const remoteCodeDirFlagUsage = "Ecosystem root on the target (default: [satellites.<name>.repos] code_dir, else " + bootstrapRemoteCodeDir + ")"
 
 // satelliteStageBase is the base directory for the VM-side staging dirs the
 // repos/worktree verbs ship bundles through. Default /tmp (matching the

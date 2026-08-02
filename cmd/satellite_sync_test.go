@@ -242,22 +242,24 @@ pull = true
 }
 
 // TestRenderLaptopSyncWorkspacesRefusesPull pins the hard invariant at its
-// enforcement point: the renderer errors on any pull-enabled entry.
+// enforcement point: the renderer errors on a pull-enabled satellite entry.
+// The entries it generates carry role = "satellite", which is what makes them
+// push-only by construction.
 func TestRenderLaptopSyncWorkspacesRefusesPull(t *testing.T) {
-	if _, err := renderLaptopSyncWorkspaces([]laptopSyncWorkspace{{Name: "cloud", Pull: true}}); err == nil {
+	if _, err := renderLaptopSyncWorkspaces([]config.SyncWorkspace{{Name: "cloud", Pull: true}}); err == nil {
 		t.Fatal("renderer must refuse pull = true for a laptop workspace entry")
 	} else if !strings.Contains(err.Error(), "PUSH-ONLY") {
 		t.Fatalf("refusal should explain the push-only invariant: %v", err)
 	}
-	if _, err := renderLaptopSyncWorkspaces([]laptopSyncWorkspace{{Name: ""}}); err == nil {
+	if _, err := renderLaptopSyncWorkspaces([]config.SyncWorkspace{{Name: ""}}); err == nil {
 		t.Fatal("renderer must refuse an empty workspace name")
 	}
-	// Happy path renders name-only entries.
+	// Happy path renders satellite-role entries.
 	got, err := renderLaptopSyncWorkspaces(laptopSyncEntries([]string{"cloud"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "\n[[workspaces]]\nname = \"cloud\"\n" {
+	if got != "\n[[workspaces]]\nname = \"cloud\"\nrole = \"satellite\"\n" {
 		t.Fatalf("rendered entry = %q", got)
 	}
 }

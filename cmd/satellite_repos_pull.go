@@ -22,6 +22,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -281,7 +282,7 @@ type satellitePullOutcome struct {
 
 // pullSatelliteReposOverSSH wires pullSatelliteRepos to the pinned transport
 // from the registry entry (same C2 never-TOFU stance as push).
-func pullSatelliteReposOverSSH(name string, entry satelliteConfigEntry, sourceAbs, remoteCodeDir string, repos []string, strict, dryRun bool) error {
+func pullSatelliteReposOverSSH(name string, entry satelliteConfigEntry, sourceAbs, remoteCodeDir string, repos []string, strict, dryRun, create bool) error {
 	tmpDir, err := os.MkdirTemp("", "grove-satellite-repos-pull-")
 	if err != nil {
 		return err
@@ -291,7 +292,7 @@ func pullSatelliteReposOverSSH(name string, entry satelliteConfigEntry, sourceAb
 	if err != nil {
 		return fmt.Errorf("satellite %q: %w", name, err)
 	}
-	_, err = pullSatelliteRepos(ssh, name, sourceAbs, remoteCodeDir, satelliteReposPullStageDir, repos, strict, dryRun)
+	_, err = pullSatelliteRepos(ssh, name, sourceAbs, remoteCodeDir, satelliteReposPullStageDir, repos, strict, dryRun, create)
 	return err
 }
 
@@ -310,7 +311,17 @@ func pullSatelliteReposOverSSH(name string, entry satelliteConfigEntry, sourceAb
 // (Ref set) — so plan-scoped callers (`satellite worktree pull --ff`) can act
 // on them; they are valid even when an error is also returned (per-repo
 // isolation: the successes stand). Empty on dry runs.
-func pullSatelliteRepos(transport satelliteReposTransport, name, sourceAbs, remoteCodeDir, stageDir string, repos []string, strict, dryRun bool) ([]satellitePullOutcome, error) {
+//
+// create is the PULL-BOOTSTRAP switch (`--create`). Without it a repo with no
+// local checkout is reported and skipped, which is right for the mirror's
+// steady state — pull is a return path, not a provisioning tool. With it, a
+// repo the target has and this machine lacks is created here: `git init`, a
+// full bundle (no local objects means no incremental base), and — uniquely for
+// repos THIS RUN created — a checkout of the fetched head, because an empty
+// directory holding nothing but refs/satellite/… is not a materialized repo.
+// Pre-existing repos keep the invariant unchanged: their branches, index, and
+// working tree are never touched.
+func pullSatelliteRepos(transport satelliteReposTransport, name, sourceAbs, remoteCodeDir, stageDir string, repos []string, strict, dryRun, create bool) ([]satellitePullOutcome, error) {
 	if !repoNameRe.MatchString(name) {
 		return nil, fmt.Errorf("invalid satellite name %q for ref mapping (allowed: A-Za-z0-9._-)", name)
 	}
@@ -326,14 +337,23 @@ func pullSatelliteRepos(transport satelliteReposTransport, name, sourceAbs, remo
 
 	// A pull target must be a local git checkout (the fetch lands there);
 	// non-strict (config-derived) sets skip non-repo names with a notice,
-	// same stance as push.
+	// same stance as push. Under --create a missing repo is not a skip but a
+	// creation candidate: it stays in the mirror set and is git-init'd below,
+	// but only once the probe proves the target actually has it (initializing
+	// a repo the target lacks would leave an empty directory behind).
 	var mirror []string
+	bootstrap := map[string]bool{}
 	for _, r := range repos {
 		if _, err := os.Stat(filepath.Join(sourceAbs, r, ".git")); err != nil {
-			if strict {
-				return nil, fmt.Errorf("--repos %q: no git repo %s/%s to pull into", r, sourceAbs, r)
+			if create {
+				bootstrap[r] = true
+				mirror = append(mirror, r)
+				continue
 			}
-			fmt.Printf("(%s: not a git repo under %s — skipped)\n", r, sourceAbs)
+			if strict {
+				return nil, fmt.Errorf("--repos %q: no git repo %s/%s to pull into (pass --create to bootstrap it)", r, sourceAbs, r)
+			}
+			fmt.Printf("(%s: not a git repo under %s — skipped; --create bootstraps it)\n", r, sourceAbs)
 			continue
 		}
 		mirror = append(mirror, r)
@@ -345,6 +365,10 @@ func pullSatelliteRepos(transport satelliteReposTransport, name, sourceAbs, remo
 
 	local := map[string]repoTip{}
 	for _, r := range mirror {
+		if bootstrap[r] {
+			// Nothing on disk yet: no tip, no objects, no bundle base.
+			continue
+		}
 		tip, err := localRepoTip(filepath.Join(sourceAbs, r))
 		if err != nil {
 			return nil, fmt.Errorf("read local HEAD of %s: %w", r, err)
@@ -360,6 +384,11 @@ func pullSatelliteRepos(transport satelliteReposTransport, name, sourceAbs, remo
 	}
 	remote := parseRemoteHeadsBranches(out)
 	deltas := computeSatellitePullDelta(mirror, local, remote, func(repo, sha string) bool {
+		if bootstrap[repo] {
+			// No repo on disk — probing it would just fail; the answer is
+			// definitionally "the object is not here".
+			return false
+		}
 		return localRepoHasObject(filepath.Join(sourceAbs, repo), sha)
 	})
 	printSatelliteDelta(deltas)
@@ -383,6 +412,9 @@ func pullSatelliteRepos(transport satelliteReposTransport, name, sourceAbs, remo
 			fmt.Printf("\n(dry-run) nothing new on %q — no bundles would transfer.\n", name)
 		} else {
 			fmt.Printf("\n(dry-run) would pull %d repo(s): %s\n", len(fetches), strings.Join(deltaRepoNames(fetches), ", "))
+			if created := bootstrapNames(fetches, bootstrap); len(created) > 0 {
+				fmt.Printf("(dry-run) would create %d local repo(s) under %s: %s\n", len(created), sourceAbs, strings.Join(created, ", "))
+			}
 		}
 		return nil, nil
 	}
@@ -411,6 +443,18 @@ func pullSatelliteRepos(transport satelliteReposTransport, name, sourceAbs, remo
 			continue
 		}
 		repoDir := filepath.Join(sourceAbs, d.Repo)
+		// Bootstrap creation happens HERE, not during the pre-probe filter:
+		// only now is it proven that the target actually holds this repo and
+		// has commits to send, so a failed run never leaves an empty repo
+		// behind for a name the target does not have.
+		if bootstrap[d.Repo] {
+			if err := initBootstrapRepo(repoDir); err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v — skipped\n", d.Repo, err)
+				failed = append(failed, d.Repo)
+				continue
+			}
+			fmt.Printf("%s: created %s (empty repo; the full history arrives below)\n", d.Repo, repoDir)
+		}
 		var bases []string
 		if prev, ok := localRefSHA(repoDir, ref); ok {
 			bases = append(bases, prev)
@@ -419,10 +463,13 @@ func pullSatelliteRepos(transport satelliteReposTransport, name, sourceAbs, remo
 			bases = append(bases, tip)
 		}
 		plans = append(plans, pullPlan{delta: d, ref: ref})
+		// A just-created repo has no objects at all, so it gets no candidate
+		// bases and the VM bundles the full tip.
 		reqs = append(reqs, satellitePullBundleReq{Repo: d.Repo, Bases: bases})
 	}
 
 	var pulled []string
+	var created []string
 	if len(plans) > 0 {
 		fmt.Printf("\nCreating %d bundle(s) on %q (stage %s)...\n", len(plans), name, stageDir)
 		if err := transport.runScript(buildSatelliteReposPullBundleScript(remoteCodeDir, stageDir, reqs)); err != nil {
@@ -459,6 +506,25 @@ func pullSatelliteRepos(transport satelliteReposTransport, name, sourceAbs, remo
 			pulled = append(pulled, p.delta.Repo)
 			outcomes = append(outcomes, satellitePullOutcome{Repo: p.delta.Repo, Branch: p.delta.Branch, SHA: p.delta.RemoteSHA, Ref: p.ref})
 
+			// Repos this run created have no branches and no working tree to
+			// protect, so the checkout that would be a violation for an
+			// existing repo is the whole point here: land the fetched head on
+			// a real branch and populate the worktree.
+			if bootstrap[p.delta.Repo] {
+				if err := checkoutBootstrapRepo(repoDir, p.delta.Branch, p.delta.RemoteSHA); err != nil {
+					fmt.Fprintf(os.Stderr, "%s: created and fetched, but the checkout failed: %v\n", p.delta.Repo, err)
+					failed = append(failed, p.delta.Repo)
+					continue
+				}
+				created = append(created, p.delta.Repo)
+				branch := p.delta.Branch
+				if branch == "" {
+					branch = "(detached)"
+				}
+				fmt.Printf("%s: bootstrapped at %s %s (%s)\n", p.delta.Repo, branch, shortSHA(p.delta.RemoteSHA), repoDir)
+				continue
+			}
+
 			// Per-repo summary: ref written, sha range, integration hints.
 			// Local branch heads were NOT moved — merging is the user's call.
 			upstream := local[p.delta.Repo].Branch
@@ -478,7 +544,72 @@ func pullSatelliteRepos(transport satelliteReposTransport, name, sourceAbs, remo
 		fmt.Fprintf(os.Stderr, "warning: could not remove the VM stage dir %s: %v (the next pull recreates it fresh)\n", stageDir, err)
 	}
 	fmt.Printf("\nSatellite %q pulled (%s) — local branches untouched.\n", name, strings.Join(pulled, ", "))
+	if len(created) > 0 {
+		fmt.Printf("Bootstrapped %d new local repo(s) under %s: %s\n", len(created), sourceAbs, strings.Join(created, ", "))
+	}
 	return outcomes, nil
+}
+
+// bootstrapNames filters deltas down to the repos that would be created by a
+// --create run, preserving delta order (the dry-run report).
+func bootstrapNames(deltas []repoDelta, bootstrap map[string]bool) []string {
+	var out []string
+	for _, d := range deltas {
+		if bootstrap[d.Repo] {
+			out = append(out, d.Repo)
+		}
+	}
+	return out
+}
+
+// initBootstrapRepo creates an empty repo at repoDir for the pull to fetch
+// into. init.defaultBranch is pinned so the unborn HEAD is deterministic and
+// git stays quiet about its default-branch advice; checkoutBootstrapRepo
+// replaces it with the target's actual branch straight after the fetch.
+func initBootstrapRepo(repoDir string) error {
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", repoDir, err)
+	}
+	// A directory that already exists but is not a repo is fine to init into;
+	// one that already IS a repo never reaches here (the pre-probe filter).
+	cmd := exec.Command("git", "-c", "init.defaultBranch=main", "init", "--quiet", repoDir) //nolint:gosec // G204: internal args
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git init %s: %v: %s", repoDir, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// checkoutBootstrapRepo lands a freshly bootstrapped repo on the head the pull
+// just fetched: the target's branch when it had one, detached otherwise.
+//
+// It writes the branch ref directly rather than `git checkout -b`, because the
+// repo's HEAD is still unborn at this point and the ref/HEAD/worktree steps
+// then stay independently checkable. ONLY ever called for repos this run
+// created — the "pull never moves local branches" invariant is intact for
+// every pre-existing repo.
+func checkoutBootstrapRepo(repoDir, branch, sha string) error {
+	if !hexSHARe.MatchString(sha) {
+		return fmt.Errorf("refusing to check out %q: not a sha", sha)
+	}
+	if branch == "" {
+		if _, err := gitOutput(repoDir, "checkout", "--force", "--detach", sha); err != nil {
+			return err
+		}
+		return nil
+	}
+	if err := validateBranchRefSegments(branch); err != nil {
+		return err
+	}
+	if _, err := gitOutput(repoDir, "update-ref", "refs/heads/"+branch, sha); err != nil {
+		return err
+	}
+	if _, err := gitOutput(repoDir, "symbolic-ref", "HEAD", "refs/heads/"+branch); err != nil {
+		return err
+	}
+	if _, err := gitOutput(repoDir, "reset", "--hard", "--quiet"); err != nil {
+		return err
+	}
+	return nil
 }
 
 // --- the verb ---
@@ -489,6 +620,7 @@ func newSatelliteReposPullCmd() *cobra.Command {
 		sourceDir     string
 		remoteCodeDir string
 		dryRun        bool
+		create        bool
 	)
 	cmd := cli.NewStandardCommand("pull <name>", "Fetch VM-side commits back into refs/satellite/<name>/… locally")
 	cmd.Long = `Fetch commits made on a satellite VM back into the laptop's repos.
@@ -514,16 +646,26 @@ commits are safe locally, so overwriting the VM checkout loses nothing.
 Repo-set precedence matches push: --repos flag > [satellites.<name>.repos]
 workspaces > the resolved [satellites.<name>.sync] workspaces.
 
+--create bootstraps repos this machine does not have yet: a repo present on the
+VM with no local checkout is git-init'd, fetched in full, and checked out at the
+VM's branch — the pull-side half of materializing an ecosystem onto a new
+machine. Repos that already exist keep the guarantee above untouched; only the
+ones this run creates are ever checked out. Without --create a missing local
+repo is reported and skipped, as before.
+
 Notes:
   - idempotent and cheap to re-run: nothing new means no bundles transfer.
   - repos missing or unreadable on the VM are reported and skipped.
+  - --create only creates repos the VM actually has: nothing is initialized for
+    a name the probe reports MISSING.
   - per-repo failure isolation: one bad repo never blocks the rest.`
 	cmd.Args = cobra.ExactArgs(1)
 	cmd.SilenceUsage = true
 	cmd.Flags().StringVar(&reposFlag, "repos", "", "Comma-separated repos to pull (overrides [satellites.<name>.repos]/.sync workspaces)")
 	cmd.Flags().StringVar(&sourceDir, "source-dir", "", "Local ecosystem worktree root (default: the go.work root above cwd)")
-	cmd.Flags().StringVar(&remoteCodeDir, "remote-code-dir", defaultRemoteCodeDir, "Ecosystem root on the VM")
+	cmd.Flags().StringVar(&remoteCodeDir, "remote-code-dir", "", remoteCodeDirFlagUsage)
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Stop after printing the VM-vs-local delta table (transfers nothing)")
+	cmd.Flags().BoolVar(&create, "create", false, "Bootstrap repos missing locally: git init + full fetch + checkout at the VM's branch")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		entry, ok := loadMergedSatellites()[name]
@@ -545,6 +687,10 @@ Notes:
 		}
 		flagSet := cmd.Flags().Changed("repos")
 		repos := resolveSatelliteMirrorRepos(requested, flagSet, reposCfg, resolveSatelliteSyncWorkspaces(syncCfg, "", false))
+		codeDir, err := resolveRemoteCodeDir(remoteCodeDir, cmd.Flags().Changed("remote-code-dir"), reposCfg.CodeDir)
+		if err != nil {
+			return err
+		}
 
 		if sourceDir == "" {
 			root, err := defaultUpgradeSourceDir()
@@ -560,7 +706,7 @@ Notes:
 
 		// An explicit --repos list is strict (unknown names are errors);
 		// config-derived sets skip non-repos with a notice — same as push.
-		return pullSatelliteReposOverSSH(name, entry, sourceAbs, remoteCodeDir, repos, flagSet, dryRun)
+		return pullSatelliteReposOverSSH(name, entry, sourceAbs, codeDir, repos, flagSet, dryRun, create)
 	}
 	return cmd
 }

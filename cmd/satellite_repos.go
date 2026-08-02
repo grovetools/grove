@@ -66,6 +66,18 @@ type satelliteReposOptions struct {
 	// Workspaces are the repo names (ecosystem-root subdirectories) mirrored
 	// onto the satellite. Unset falls back to the resolved .sync workspaces.
 	Workspaces []string `yaml:"workspaces"`
+	// CodeDir is the ecosystem root ON THE TARGET — what every mirror verb's
+	// --remote-code-dir defaults to for this satellite (resolveRemoteCodeDir).
+	// It lives in this CLI-only subtable rather than beside ssh_addr in
+	// [satellites.<name>] on purpose: a scalar in that table would make an
+	// otherwise CLI-only entry look like a registry row to the daemon.
+	//
+	// Set it when the target's ecosystem is NOT where this CLI's own
+	// provisioning puts it (bootstrapRemoteCodeDir) — a hand-provisioned host,
+	// a peer machine, or a scratch root. A satellite provisioned by
+	// `grove satellite up` also needs its VM-side grove.toml pointed at the
+	// same path; `up` warns when the two disagree.
+	CodeDir string `yaml:"code_dir"`
 }
 
 // loadSatelliteReposOptions reads [satellites.<name>.repos] from the layered
@@ -590,7 +602,7 @@ Exit status:
 	cmd.SilenceUsage = true
 	cmd.Flags().StringVar(&reposFlag, "repos", "", "Comma-separated repos to mirror (overrides [satellites.<name>.repos]/.sync workspaces)")
 	cmd.Flags().StringVar(&sourceDir, "source-dir", "", "Local ecosystem worktree root (default: the go.work root above cwd)")
-	cmd.Flags().StringVar(&remoteCodeDir, "remote-code-dir", defaultRemoteCodeDir, "Ecosystem root on the VM")
+	cmd.Flags().StringVar(&remoteCodeDir, "remote-code-dir", "", remoteCodeDirFlagUsage)
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Stop after printing the local-vs-VM delta table")
 	cmd.Flags().BoolVar(&assumeYes, "yes", false, "Skip the mirror confirmation prompt")
 	cmd.Flags().BoolVar(&force, "force", false, "Ship repos whose VM heads hold unfetched commits, DISCARDING those commits")
@@ -615,6 +627,10 @@ Exit status:
 		}
 		flagSet := cmd.Flags().Changed("repos")
 		repos := resolveSatelliteMirrorRepos(requested, flagSet, reposCfg, resolveSatelliteSyncWorkspaces(syncCfg, "", false))
+		codeDir, err := resolveRemoteCodeDir(remoteCodeDir, cmd.Flags().Changed("remote-code-dir"), reposCfg.CodeDir)
+		if err != nil {
+			return err
+		}
 
 		if sourceDir == "" {
 			root, err := defaultUpgradeSourceDir()
@@ -630,7 +646,7 @@ Exit status:
 
 		// An explicit --repos list is strict (unknown names are errors, like
 		// upgrade's --repos); config-derived sets skip non-repos with a notice.
-		return exitOnSatellitePartial(pushSatelliteReposOverSSH(name, entry, sourceAbs, remoteCodeDir, repos, flagSet, dryRun, assumeYes, force))
+		return exitOnSatellitePartial(pushSatelliteReposOverSSH(name, entry, sourceAbs, codeDir, repos, flagSet, dryRun, assumeYes, force))
 	}
 	return cmd
 }

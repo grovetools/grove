@@ -117,12 +117,23 @@ func TestEcosystemCommitCreate(t *testing.T) {
 	if g.Path != dir || g.Enabled == nil || !*g.Enabled || g.Notebook != "nb" || g.Description != "My projects" {
 		t.Errorf("groves entry wrong: %+v", g)
 	}
+	// The registration is a machine.toml subscription, not a [groves.*] entry
+	// in the shareable global config — which is therefore left byte-identical.
+	machineRaw, err := os.ReadFile(filepath.Join(filepath.Dir(globalPath), config.MachineConfigFileName))
+	if err != nil {
+		t.Fatalf("read machine config: %v", err)
+	}
+	for _, want := range []string{"[machine.ecosystems.eco-fresh]", dir, "My projects"} {
+		if !strings.Contains(string(machineRaw), want) {
+			t.Errorf("machine.toml missing %q:\n%s", want, machineRaw)
+		}
+	}
 	raw, err := os.ReadFile(globalPath)
 	if err != nil {
 		t.Fatalf("read global config: %v", err)
 	}
-	if !strings.Contains(string(raw), "enabled = true") {
-		t.Errorf("typed bool missing from file:\n%s", raw)
+	if string(raw) != "[tui]\ntheme = \"kanagawa-dark\"\n" {
+		t.Errorf("global config was written to; it must stay untouched:\n%s", raw)
 	}
 	if reloaded.Final.TUI == nil || reloaded.Final.TUI.Theme != "kanagawa-dark" {
 		t.Error("seeded theme lost — global config clobbered")

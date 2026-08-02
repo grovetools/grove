@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/grovetools/core/cli"
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/spf13/cobra"
@@ -70,7 +71,6 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 
 	// Create service for file operations
 	service := setup.NewService(bootstrapDryRun)
-	yamlHandler := setup.NewYAMLHandler(service)
 
 	groveBinDir := paths.BinDir()
 	groveSymlink := filepath.Join(groveBinDir, "grove")
@@ -96,19 +96,13 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 		fmt.Printf("[dry-run] Would link %s -> %s\n", setup.AbbreviatePath(groveSymlink), setup.AbbreviatePath(execPath))
 	}
 
-	// 3. Create/update ~/.config/grove/grove.yml
-	root, err := yamlHandler.LoadGlobalConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Add ecosystem to groves section
-	_ = setup.SetValue(root, map[string]interface{}{
-		"path":    ecosystemDir,
-		"enabled": true,
-	}, "groves", ecosystemName)
-
-	if err := yamlHandler.SaveGlobalConfig(root); err != nil {
+	// 3. Subscribe this machine to the ecosystem (~/.config/grove/machine.toml).
+	// Intent lives in machine.toml now; it compiles into the same groves map
+	// the global config used to carry.
+	machineCfgPath := config.MachineConfigPath()
+	if bootstrapDryRun {
+		fmt.Printf("[dry-run] Would subscribe to ecosystem %q in %s\n", ecosystemName, machineCfgPath)
+	} else if machineCfgPath, err = registerMachineEcosystem(ecosystemName, ecosystemDir, ""); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
@@ -116,6 +110,7 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	fmt.Printf("Registered ecosystem: %s\n", ecosystemName)
 	fmt.Printf("  Path: %s\n", ecosystemDir)
+	fmt.Printf("  Subscription: %s\n", machineCfgPath)
 	fmt.Println()
 
 	// Check if PATH already includes the Grove bin directory

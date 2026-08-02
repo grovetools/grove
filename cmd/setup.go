@@ -1067,17 +1067,10 @@ func (m *setupModel) generateTOMLConfig() ([]byte, string) {
 		}
 	}
 
-	// Ecosystem/groves
-	if m.selectedSteps["ecosystem"] {
-		config["groves"] = map[string]interface{}{
-			m.ecosystemName: map[string]interface{}{
-				"path":        m.ecosystemPath,
-				"enabled":     true,
-				"description": "My projects",
-				"notebook":    "nb",
-			},
-		}
-	}
+	// Ecosystem registration is NOT part of this file: it is a machine.toml
+	// subscription, written by setupEcosystemFiles. Keeping it out of the
+	// generated global config is what makes the config dotfiles-shareable
+	// while the subscription stays machine-local.
 
 	// Notebook: define a named notebook and point the default rule at it
 	if m.selectedSteps["notebook"] {
@@ -1160,15 +1153,7 @@ func (m *setupModel) generateYAMLConfig() ([]byte, string) {
 		_ = setup.SetValue(root, []string{"w", "e", "r", "t", "y", "o", "a", "f", "g", "v"}, "tmux", "available_keys")
 	}
 
-	// Ecosystem/groves
-	if m.selectedSteps["ecosystem"] {
-		_ = setup.SetValue(root, map[string]interface{}{
-			"path":        m.ecosystemPath,
-			"enabled":     true,
-			"description": "My projects",
-			"notebook":    "nb",
-		}, "groves", m.ecosystemName)
-	}
+	// Ecosystem registration lives in machine.toml — see generateTOMLConfig.
 
 	// Notebook: define a named notebook and point the default rule at it
 	if m.selectedSteps["notebook"] {
@@ -1220,6 +1205,12 @@ func (m *setupModel) setupEcosystemFiles() {
 		format = setup.ManifestTOML
 	}
 	_ = m.service.ScaffoldEcosystem(m.ecosystemPath, m.ecosystemName, format)
+	// The registration is a machine.toml subscription, written AFTER the
+	// scaffold: a failed scaffold must not leave a subscription pointing at a
+	// half-created directory.
+	if !m.service.IsDryRun() {
+		_, _ = registerMachineEcosystem(m.ecosystemName, m.ecosystemPath, "nb")
+	}
 }
 
 func (m *setupModel) setupFirstProject() {
@@ -2092,12 +2083,15 @@ Add projects to this directory and they will be automatically discovered by Grov
 			pretty.InfoPretty(fmt.Sprintf("Directory %s already exists; registering it without modifying its contents", ecosystemPath))
 		}
 
-		root, _ := yamlHandler.LoadGlobalConfig()
-		_ = setup.SetValue(root, map[string]interface{}{
-			"path":    ecosystemPath,
-			"enabled": true,
-		}, "groves", ecosystemName)
-		_ = yamlHandler.SaveGlobalConfig(root)
+		// Registration is a machine.toml subscription, not a [groves.*] entry
+		// in the shareable global config.
+		if !service.IsDryRun() {
+			if path, err := registerMachineEcosystem(ecosystemName, ecosystemPath, ""); err == nil {
+				pretty.InfoPretty(fmt.Sprintf("Subscribed to ecosystem %s (%s)", ecosystemName, path))
+			} else {
+				pretty.InfoPretty(fmt.Sprintf("Could not write the ecosystem subscription: %v", err))
+			}
+		}
 	}
 
 	if runAll || selectedOnly["notebook"] {

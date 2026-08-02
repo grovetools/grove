@@ -71,7 +71,11 @@ var seedFragmentDenylist = []string{
 	"grove.toml", // the VM's own main config (bootstrap-written topology)
 	"grove.yml",  // ditto, YAML form
 	"grove.override.*",
-	"sync.toml",     // VM sync client config (push-only laptop topology)
+	"sync.toml", // VM sync client config (push-only laptop topology)
+	// machine.toml is this MACHINE's identity and intent — its name and its
+	// ecosystem subscriptions. Shipping it would tell a disposable VM it is
+	// the laptop and hand it a subscription list it cannot honor.
+	config.MachineConfigFileName,
 	"secrets*.toml", // secret-bearing conventions never leave the laptop
 	"keys*.toml",
 	"groves.toml", // laptop-topology fragments meaningless on the VM
@@ -434,8 +438,8 @@ Two inputs, both in the [satellites.<name>] registry entry:
   topic = "mysat-notify"
 
 Denylist (hard error, matched by basename): grove.toml, grove.yml,
-grove.override.*, sync.toml, secrets*.toml, keys*.toml, groves.toml,
-notebooks.toml, projects.toml. The VM's own grove.toml carries its topology
+grove.override.*, sync.toml, machine.toml, secrets*.toml, keys*.toml,
+groves.toml, notebooks.toml, projects.toml. The VM's own grove.toml carries its topology
 (bootstrap-written) and is never touched — everything here is additive
 fragment files beside it. Fragments containing a top-level 'satellites' key
 (registry recursion) or a [daemon] table (topology) are refused regardless of

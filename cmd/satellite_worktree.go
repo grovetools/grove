@@ -638,7 +638,10 @@ func pullSatelliteWorktree(transport satelliteReposTransport, name, containerAbs
 	if err != nil {
 		return err
 	}
-	outcomes, pullErr := pullSatelliteRepos(transport, name, containerAbs, remoteWT, stageDir, repos, false, dryRun)
+	// create=false: a plan worktree's repo set is created by `worktree push`,
+	// never by the pull — bootstrapping is a materialize concern, and the
+	// container's members must stay linked worktrees of the local ecosystem.
+	outcomes, pullErr := pullSatelliteRepos(transport, name, containerAbs, remoteWT, stageDir, repos, false, dryRun, false)
 	if dryRun || !ff {
 		if !dryRun && pullErr == nil && len(outcomes) > 0 {
 			fmt.Printf("(tip: --ff fast-forwards clean, strictly-behind laptop checkouts to the fetched tips)\n")
@@ -901,7 +904,7 @@ Exit status:
 	cmd.SilenceUsage = true
 	cmd.Flags().StringVar(&planFlag, "plan", "", "Plan whose worktree to push (default: the enclosing worktree's plan)")
 	cmd.Flags().StringVar(&reposFlag, "repos", "", "Comma-separated repos to push (default: the worktree's registered repo set)")
-	cmd.Flags().StringVar(&remoteCodeDir, "remote-code-dir", defaultRemoteCodeDir, "Ecosystem root on the VM")
+	cmd.Flags().StringVar(&remoteCodeDir, "remote-code-dir", "", remoteCodeDirFlagUsage)
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Stop after printing the local-vs-VM delta table")
 	cmd.Flags().BoolVar(&assumeYes, "yes", false, "Skip the push confirmation prompt")
 	cmd.Flags().BoolVar(&force, "force", false, "Push repos whose VM worktree holds unfetched commits, DISCARDING those commits")
@@ -915,7 +918,11 @@ Exit status:
 		if err != nil {
 			return err
 		}
-		return exitOnSatellitePartial(pushSatelliteWorktreeOverSSH(name, entry, containerAbs, remoteCodeDir, worktreeName, planName, repos, dryRun, assumeYes, force))
+		codeDir, err := resolveSatelliteCodeDir(name, remoteCodeDir, cmd.Flags().Changed("remote-code-dir"))
+		if err != nil {
+			return err
+		}
+		return exitOnSatellitePartial(pushSatelliteWorktreeOverSSH(name, entry, containerAbs, codeDir, worktreeName, planName, repos, dryRun, assumeYes, force))
 	}
 	return cmd
 }
@@ -959,7 +966,7 @@ Notes:
 	cmd.SilenceUsage = true
 	cmd.Flags().StringVar(&planFlag, "plan", "", "Plan whose worktree to pull (default: the enclosing worktree's plan)")
 	cmd.Flags().StringVar(&reposFlag, "repos", "", "Comma-separated repos to pull (default: the worktree's registered repo set)")
-	cmd.Flags().StringVar(&remoteCodeDir, "remote-code-dir", defaultRemoteCodeDir, "Ecosystem root on the VM")
+	cmd.Flags().StringVar(&remoteCodeDir, "remote-code-dir", "", remoteCodeDirFlagUsage)
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Stop after printing the VM-vs-local delta table (transfers nothing)")
 	cmd.Flags().BoolVar(&ff, "ff", false, "Fast-forward clean, strictly-behind laptop checkouts to the fetched tips (never force-moves)")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
@@ -972,7 +979,11 @@ Notes:
 		if err != nil {
 			return err
 		}
-		return pullSatelliteWorktreeOverSSH(name, entry, containerAbs, remoteCodeDir, worktreeName, repos, dryRun, ff)
+		codeDir, err := resolveSatelliteCodeDir(name, remoteCodeDir, cmd.Flags().Changed("remote-code-dir"))
+		if err != nil {
+			return err
+		}
+		return pullSatelliteWorktreeOverSSH(name, entry, containerAbs, codeDir, worktreeName, repos, dryRun, ff)
 	}
 	return cmd
 }

@@ -352,7 +352,7 @@ func TestSatelliteReposPullEngineExecution(t *testing.T) {
 	transport := &localPullTransport{t: t}
 
 	// --- dry-run: no stage dir, no refs, no scripts beyond the probe ---
-	if _, err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, true); err != nil {
+	if _, err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, true, false); err != nil {
 		t.Fatalf("dry-run pull: %v", err)
 	}
 	if _, err := os.Stat(stage); !os.IsNotExist(err) {
@@ -366,7 +366,7 @@ func TestSatelliteReposPullEngineExecution(t *testing.T) {
 	}
 
 	// --- real pull ---
-	if _, err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, false); err != nil {
+	if _, err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, false, false); err != nil {
 		t.Fatalf("pull: %v", err)
 	}
 	// Branch-mapped ref carries the VM tip.
@@ -414,7 +414,7 @@ func TestSatelliteReposPullEngineExecution(t *testing.T) {
 
 	// --- idempotent re-pull: everything up-to-date, no bundle script runs ---
 	before := len(transport.scripts)
-	if _, err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, false); err != nil {
+	if _, err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, false, false); err != nil {
 		t.Fatalf("re-pull: %v", err)
 	}
 	if len(transport.scripts) != before {
@@ -427,7 +427,7 @@ func TestSatelliteReposPullEngineExecution(t *testing.T) {
 	// --- incremental follow-up: more VM commits; the bundle request seeds
 	// its bases from the previous satellite ref (and the local tip) ---
 	agentVMSHA2 := commit(agentVM, "w3.txt", "three", "agent c3")
-	if _, err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, false); err != nil {
+	if _, err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, false, false); err != nil {
 		t.Fatalf("incremental pull: %v", err)
 	}
 	if got, ok := localRefSHA(agentLaptop, "refs/satellite/sat1/agent-work"); !ok || got != agentVMSHA2 {
@@ -444,7 +444,7 @@ func TestSatelliteReposPullEngineExecution(t *testing.T) {
 	git(detVM, "checkout", "-q", "--detach", "HEAD")
 	detVMSHA2 := commit(detVM, "d3.txt", "more vm work", "detached vm commit 2")
 	transport.failScpFor = map[string]bool{"agentrepo": true}
-	_, err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, false)
+	_, err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, false, false)
 	if err == nil || !strings.Contains(err.Error(), "agentrepo") {
 		t.Fatalf("failed transfer must surface the repo, got %v", err)
 	}
@@ -469,15 +469,172 @@ func TestSatelliteReposPullStrictness(t *testing.T) {
 	root := t.TempDir()
 	transport := &localPullTransport{t: t}
 	// Strict: unknown name is an error before any transport use.
-	_, err := pullSatelliteRepos(transport, "sat1", root, root, filepath.Join(root, "stage"), []string{"nope"}, true, false)
+	_, err := pullSatelliteRepos(transport, "sat1", root, root, filepath.Join(root, "stage"), []string{"nope"}, true, false, false)
 	if err == nil || !strings.Contains(err.Error(), "nope") {
 		t.Fatalf("strict pull with a non-repo must error, got %v", err)
 	}
 	// Non-strict: skipped with a notice, nothing to do, no error.
-	if _, err := pullSatelliteRepos(transport, "sat1", root, root, filepath.Join(root, "stage"), []string{"nope"}, false, false); err != nil {
+	if _, err := pullSatelliteRepos(transport, "sat1", root, root, filepath.Join(root, "stage"), []string{"nope"}, false, false, false); err != nil {
 		t.Fatalf("non-strict pull must skip non-repos, got %v", err)
 	}
 	if len(transport.scripts) != 0 {
 		t.Fatal("no transport scripts expected for an empty pullable set")
+	}
+}
+
+// TestSatelliteReposPullCreateBootstrapsMissingRepos covers the pull-bootstrap
+// path (--create): a repo present on the VM with no local checkout is created
+// (init + full bundle + checkout at the VM's branch), a repo the VM does NOT
+// have is never initialized even though it was named, and repos that already
+// exist locally keep the untouched-branch guarantee.
+func TestSatelliteReposPullCreateBootstrapsMissingRepos(t *testing.T) {
+	for _, tool := range []string{"bash", "git"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("%s not on PATH", tool)
+		}
+	}
+	root := t.TempDir()
+	laptop := filepath.Join(root, "laptop")
+	vmCode := filepath.Join(root, "vm-code")
+	stage := filepath.Join(root, "pull-stage")
+
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		out, err := gitOutput(dir, args...)
+		if err != nil {
+			t.Fatalf("git %v in %s: %v", args, dir, err)
+		}
+		return out
+	}
+	commit := func(dir, file, content, msg string) string {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, file), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		git(dir, "add", ".")
+		git(dir, "commit", "-m", msg)
+		return git(dir, "rev-parse", "HEAD")
+	}
+	mkRepo := func(parent, name string) string {
+		t.Helper()
+		dir := filepath.Join(parent, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		git(dir, "init", "-b", "main")
+		git(dir, "config", "user.email", "t@t")
+		git(dir, "config", "user.name", "t")
+		return dir
+	}
+
+	// The laptop has only `known`; the VM additionally has `fresh` (on a
+	// non-default branch) and `detfresh` (detached). `absent` exists nowhere.
+	knownLaptop := mkRepo(laptop, "known")
+	knownSHA := commit(knownLaptop, "k.txt", "base", "base")
+
+	if err := os.MkdirAll(vmCode, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(vmCode, "clone", "-q", knownLaptop, filepath.Join(vmCode, "known"))
+	freshVM := mkRepo(vmCode, "fresh")
+	git(freshVM, "checkout", "-q", "-b", "vm-branch")
+	freshSHA := commit(freshVM, "f.txt", "vm only", "vm only commit")
+	detVM := mkRepo(vmCode, "detfresh")
+	commit(detVM, "d.txt", "vm only", "vm only commit")
+	git(detVM, "checkout", "-q", "--detach", "HEAD")
+	detSHA := git(detVM, "rev-parse", "HEAD")
+
+	repos := []string{"known", "fresh", "detfresh", "absent"}
+
+	// --- without --create nothing is created (today's behavior) ---
+	transport := &localPullTransport{t: t}
+	if _, err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, false, false); err != nil {
+		t.Fatalf("pull without --create: %v", err)
+	}
+	for _, name := range []string{"fresh", "detfresh", "absent"} {
+		if _, err := os.Stat(filepath.Join(laptop, name)); !os.IsNotExist(err) {
+			t.Fatalf("%s must not be created without --create: %v", name, err)
+		}
+	}
+
+	// --- dry-run --create reports the creations and performs none ---
+	transport = &localPullTransport{t: t}
+	if _, err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, true, true); err != nil {
+		t.Fatalf("dry-run --create: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(laptop, "fresh")); !os.IsNotExist(err) {
+		t.Fatalf("dry-run --create must create nothing: %v", err)
+	}
+
+	// --- --create bootstraps the two VM-only repos ---
+	transport = &localPullTransport{t: t}
+	outcomes, err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, false, true)
+	if err != nil {
+		t.Fatalf("pull --create: %v", err)
+	}
+
+	// Branch case: real branch, checked out, clean worktree, content present.
+	freshLocal := filepath.Join(laptop, "fresh")
+	if got := git(freshLocal, "rev-parse", "HEAD"); got != freshSHA {
+		t.Errorf("fresh HEAD = %q, want %q", got, freshSHA)
+	}
+	if got := git(freshLocal, "rev-parse", "--abbrev-ref", "HEAD"); got != "vm-branch" {
+		t.Errorf("fresh branch = %q, want vm-branch", got)
+	}
+	if got := git(freshLocal, "status", "--porcelain"); got != "" {
+		t.Errorf("bootstrapped repo has a dirty worktree:\n%s", got)
+	}
+	if _, err := os.Stat(filepath.Join(freshLocal, "f.txt")); err != nil {
+		t.Errorf("bootstrapped repo was not checked out: %v", err)
+	}
+	if got, ok := localRefSHA(freshLocal, "refs/satellite/sat1/vm-branch"); !ok || got != freshSHA {
+		t.Errorf("refs/satellite/sat1/vm-branch = %q, want %q", got, freshSHA)
+	}
+
+	// Detached case: detached HEAD at the VM sha, still a real checkout.
+	detLocal := filepath.Join(laptop, "detfresh")
+	if got := git(detLocal, "rev-parse", "HEAD"); got != detSHA {
+		t.Errorf("detfresh HEAD = %q, want %q", got, detSHA)
+	}
+	if got := git(detLocal, "rev-parse", "--abbrev-ref", "HEAD"); got != "HEAD" {
+		t.Errorf("detfresh should be detached, got branch %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(detLocal, "d.txt")); err != nil {
+		t.Errorf("detached bootstrap was not checked out: %v", err)
+	}
+
+	// A repo the VM does not have is never initialized, even under --create.
+	if _, err := os.Stat(filepath.Join(laptop, "absent")); !os.IsNotExist(err) {
+		t.Errorf("absent must not be created (MISSING on the VM): %v", err)
+	}
+
+	// The pre-existing repo keeps the invariant: same branch tip, clean tree.
+	if got := git(knownLaptop, "rev-parse", "main"); got != knownSHA {
+		t.Errorf("known main moved: %q, want %q", got, knownSHA)
+	}
+
+	// Outcomes cover the bootstrapped repos so worktree-level callers can act.
+	seen := map[string]string{}
+	for _, o := range outcomes {
+		seen[o.Repo] = o.SHA
+	}
+	if seen["fresh"] != freshSHA {
+		t.Errorf("outcome for fresh = %q, want %q", seen["fresh"], freshSHA)
+	}
+	if seen["detfresh"] != detSHA {
+		t.Errorf("outcome for detfresh = %q, want %q", seen["detfresh"], detSHA)
+	}
+
+	// Idempotent: a second --create run has nothing left to fetch and leaves
+	// the bootstrapped checkouts alone.
+	transport = &localPullTransport{t: t}
+	if _, err := pullSatelliteRepos(transport, "sat1", laptop, vmCode, stage, repos, false, false, true); err != nil {
+		t.Fatalf("second --create pull: %v", err)
+	}
+	if got := git(freshLocal, "rev-parse", "HEAD"); got != freshSHA {
+		t.Errorf("re-run moved fresh HEAD: %q", got)
+	}
+	if got := git(freshLocal, "status", "--porcelain"); got != "" {
+		t.Errorf("re-run dirtied the bootstrapped worktree:\n%s", got)
 	}
 }

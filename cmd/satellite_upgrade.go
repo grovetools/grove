@@ -114,7 +114,7 @@ Notes:
 	cmd.Flags().StringVar(&reposFlag, "repos", "", "Comma-separated repos to deploy; listed repos are forced even when already up-to-date (default: every changed repo)")
 	cmd.Flags().BoolVar(&allRepos, "all", false, "Force-deploy every repo, including ones already at the local tip")
 	cmd.Flags().StringVar(&sourceDir, "source-dir", "", "Local ecosystem worktree root (default: the go.work root above cwd)")
-	cmd.Flags().StringVar(&remoteCodeDir, "remote-code-dir", defaultRemoteCodeDir, "Superrepo checkout on the VM")
+	cmd.Flags().StringVar(&remoteCodeDir, "remote-code-dir", "", remoteCodeDirFlagUsage)
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Stop after printing the local-vs-VM delta table")
 	cmd.Flags().BoolVar(&assumeYes, "yes", false, "Skip the deploy and restart confirmation prompts")
 	cmd.Flags().BoolVar(&prebuilt, "prebuilt", false, "Cross-compile locally and ship verified binaries — no VM-side git or build")
@@ -133,6 +133,11 @@ Notes:
 		if entry.isExec() {
 			return fmt.Errorf("satellite %q is an exec-only satellite (kind %q): it runs no groved or grove-syncd for `upgrade` to restart — reinstall its prebuilt stack with `grove satellite up %s` instead", name, satelliteKindExec, name)
 		}
+		codeDir, err := resolveSatelliteCodeDir(name, remoteCodeDir, cmd.Flags().Changed("remote-code-dir"))
+		if err != nil {
+			return err
+		}
+		remoteCodeDir = codeDir
 
 		// Full Tart is prebuilt-only and always linux/arm64. Do not let the
 		// upgrade verb's historical GCP linux/amd64 default silently ship an
