@@ -42,7 +42,10 @@ Because names collide after such a restore, every surface renders
 Subcommands:
   init    — mint the identity (if absent) and record the display name
   status  — show id, name, subscriptions, config/state paths, sync origin
-  migrate — move legacy [groves.*] declarations into machine.toml`,
+  migrate — move legacy [groves.*] declarations into machine.toml
+  retire  — remove a decommissioned machine's note from the registry
+
+To see the OTHER machines in this account, use ` + "`grove machines`" + `.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
@@ -50,6 +53,7 @@ Subcommands:
 	cmd.AddCommand(newMachineInitCmd())
 	cmd.AddCommand(newMachineStatusCmd())
 	cmd.AddCommand(newMachineMigrateCmd())
+	cmd.AddCommand(newMachineRetireCmd())
 	return cmd
 }
 
