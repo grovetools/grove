@@ -154,7 +154,7 @@ func Execute() error {
 		potentialTool := os.Args[1]
 
 		// Skip if it looks like a flag (let cobra handle it)
-		if !strings.HasPrefix(potentialTool, "-") {
+		if !strings.HasPrefix(potentialTool, "-") && !builtinClaimsArgs(potentialTool, os.Args[2:]) {
 			// Check if it's a registered tool in our ecosystem
 			if repoName, _, alias, found := sdk.FindTool(potentialTool); found {
 				// Delegate using the tool's effective alias — that is the
@@ -179,6 +179,59 @@ func Execute() error {
 	}
 
 	return rootCmd.Execute()
+}
+
+// builtinClaimsArgs reports whether grove's OWN command tree handles
+// `grove <name> <rest...>`, and delegation must therefore stand down.
+//
+// The delegation shortcut above runs before cobra parses anything, keyed only
+// on the registered tool name. That is right for `grove flow`, `grove nb`,
+// `grove treemux` — names grove has no command for. It is wrong when a
+// registered REPO name collides with a built-in command: `sync` is both an
+// ecosystem repo (alias grove-syncd) and grove's notebook-sync command, and
+// the shortcut sent every `grove sync ...` to the server binary. That made
+// `grove sync doctor` and `grove sync adopt` unreachable — not shadowed in
+// help, unreachable, answering "unknown command for grove-syncd".
+//
+// The rule is deliberately narrow: the built-in wins only for the subcommands
+// it actually declares. `grove sync serve` and `grove sync token create` still
+// reach grove-syncd, because grove declares no such subcommands — so no
+// existing delegation is taken away.
+func builtinClaimsArgs(name string, rest []string) bool {
+	var builtin *cobra.Command
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == name {
+			builtin = c
+			break
+		}
+	}
+	if builtin == nil {
+		return false
+	}
+	// A built-in with no subcommands of its own owns the whole invocation.
+	if !builtin.HasSubCommands() {
+		return true
+	}
+	// Otherwise the first non-flag token decides. No token at all (`grove sync`,
+	// `grove sync --help`) means the built-in's own help, which is the surface
+	// that can point at both halves.
+	for _, arg := range rest {
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		for _, sub := range builtin.Commands() {
+			if sub.Name() == arg {
+				return true
+			}
+			for _, alias := range sub.Aliases {
+				if alias == arg {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return true
 }
 
 // findWorkspaceRoot uses grove-core's workspace detection to find the workspace root.

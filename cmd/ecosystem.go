@@ -19,10 +19,11 @@ func newEcosystemCmd() *cobra.Command {
 		Long: `Manage Grove ecosystems (monorepos).
 
 Commands:
-  init     Create a new Grove ecosystem
-  adopt    Backfill an identity card into an existing ecosystem
-  import   Import an existing repository into the ecosystem
-  list     List repositories in the ecosystem
+  init         Create a new Grove ecosystem
+  adopt        Backfill an identity card into an existing ecosystem
+  import       Import an existing repository into the ecosystem
+  list         List repositories in the ecosystem
+  materialize  Clone a subscribed ecosystem onto this machine
 
 Examples:
   # Create a new ecosystem
@@ -30,6 +31,9 @@ Examples:
 
   # Give an existing ecosystem an identity card
   grove ecosystem adopt
+
+  # Make this machine's disk agree with a subscription
+  grove ecosystem materialize grovetools
 
   # Import an existing repo as submodule
   grove ecosystem import ../my-existing-tool
@@ -43,6 +47,7 @@ Examples:
 	cmd.AddCommand(newEcosystemAdoptCmd())
 	cmd.AddCommand(newEcosystemImportCmd())
 	cmd.AddCommand(newEcosystemListCmd())
+	cmd.AddCommand(newEcosystemMaterializeCmd())
 
 	return cmd
 }

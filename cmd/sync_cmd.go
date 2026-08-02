@@ -1,16 +1,21 @@
 package cmd
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
+	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/grovetools/core/config"
-	"github.com/spf13/cobra"
+	"github.com/grovetools/core/pkg/daemon"
+	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/core/pkg/registry"
 )
 
 func init() {
@@ -21,11 +26,15 @@ func newSyncCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sync",
 		Short: "Notebook synchronization tools",
-		Long: `Manage notebook synchronization with grove-syncd servers.
+		Long: `Manage this machine's notebook synchronization with a grove-syncd server.
 
 Subcommands:
   doctor — diagnose sync configuration and notebook health
-  adopt  — adopt a notebook from a remote sync server`,
+  adopt  — bring an existing notebook workspace under replication
+
+These are CLIENT-side verbs. Anything else after ` + "`grove sync`" + ` is passed
+through to the grove-syncd SERVER binary, so ` + "`grove sync serve`" + ` and
+` + "`grove sync token create`" + ` still reach the server they always did.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
@@ -144,138 +153,254 @@ func runSyncDoctor(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// newSyncAdoptCmd implements `grove sync adopt <workspace>`
+// newSyncAdoptCmd implements `grove sync adopt <workspace>`.
+//
+// Adoption is three things, and the daemon already owns all three: subscribe
+// the workspace, make the daemon act on it now, and report what actually
+// happened. It deliberately does no hashing of its own — the anti-entropy pass
+// walks the tree, and a second walk here would only produce a number that
+// disagrees with the one sync.db keeps.
 func newSyncAdoptCmd() *cobra.Command {
+	var (
+		mode      string
+		role      string
+		pull      bool
+		waitFor   time.Duration
+		noKick    bool
+		excludes  []string
+		maxSizeMB int
+	)
 	cmd := &cobra.Command{
 		Use:   "adopt <workspace>",
-		Short: "Adopt a notebook workspace from a remote sync server",
-		Long: `Fetch the remote manifest from the configured sync server and adopt
-the workspace in place. Files matching the remote manifest are registered
-in the local sync database with the server's document IDs and versions,
-with zero writes to the notebook tree (respecting notebook-read-only mode).
+		Short: "Adopt a notebook workspace into notebook sync",
+		Long: `Bring an existing notebook workspace under grove-syncd replication.
 
-Divergent files are printed; they will result in conflicts when the daemon
-next runs. The manifest is not written to disk; adoption is purely a
-sync database operation.
+Three steps, in order:
 
-For Syncthing migration: remove Syncthing folder access and run
+  1. write the [[workspaces]] subscription into ~/.config/grove/sync.toml
+     (append-only: an existing entry for this workspace is left exactly as you
+     wrote it, and every other byte of the file is preserved);
+  2. wait for the running daemon to reload and kick an immediate anti-entropy
+     pass, so the workspace is reconciled now instead of at the next hourly one;
+  3. poll the daemon's sync status and report the REAL counts — documents
+     tracked, outbox pending, hydration progress.
+
+Adoption never writes to the notebook tree. Hash-equal files are registered
+against the server's document ids by the daemon's own reconcile; divergent
+files surface as conflicts on the conflicts feed, where they can be inspected.
+
+For a Syncthing migration: remove Syncthing's folder access first, then run
 	grove sync adopt <workspace>
-followed by deregistering the device from your Syncthing configuration.`,
+and deregister the device from your Syncthing configuration.`,
 		Args: cobra.ExactArgs(1),
-		RunE: runSyncAdopt,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runSyncAdopt(cmd.Context(), cmd.OutOrStdout(), syncAdoptOptions{
+				workspace: args[0],
+				mode:      mode,
+				role:      role,
+				pull:      pull,
+				excludes:  excludes,
+				maxSize:   int64(maxSizeMB) << 20,
+				waitFor:   waitFor,
+				noKick:    noKick,
+			})
+		},
 	}
+	cmd.Flags().StringVar(&mode, "mode", "", "Subscription mode (full, plans-only, search-only); empty = the schema default")
+	cmd.Flags().StringVar(&role, "role", config.SyncRolePeer, "Relationship with the peer holding this workspace (peer, registry, satellite)")
+	cmd.Flags().BoolVar(&pull, "pull", true, "Also apply the server's changes locally (peer/registry roles only)")
+	cmd.Flags().StringSliceVar(&excludes, "exclude", nil, "Glob to exclude from this workspace (repeatable)")
+	cmd.Flags().IntVar(&maxSizeMB, "max-file-size-mb", 0, "Skip files larger than this (0 = the schema default)")
+	cmd.Flags().DurationVar(&waitFor, "wait", 60*time.Second, "How long to wait for the daemon to pick the workspace up (0 = do not wait)")
+	cmd.Flags().BoolVar(&noKick, "no-kick", false, "Do not ask the daemon for an immediate pass; wait for the scheduled one")
 	return cmd
 }
 
-func runSyncAdopt(cmd *cobra.Command, args []string) error {
-	workspaceName := args[0]
+// syncAdoptOptions is one adoption request.
+type syncAdoptOptions struct {
+	workspace string
+	mode      string
+	role      string
+	pull      bool
+	excludes  []string
+	maxSize   int64
+	waitFor   time.Duration
+	noKick    bool
+}
 
-	// Load sync configuration
+func runSyncAdopt(ctx context.Context, out io.Writer, opts syncAdoptOptions) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	workspaceName := strings.TrimSpace(opts.workspace)
+	if workspaceName == "" {
+		return fmt.Errorf("a workspace name is required")
+	}
+
 	syncCfg, err := config.LoadSyncConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load sync configuration: %w", err)
 	}
-
 	if syncCfg == nil || syncCfg.Server == "" {
-		return fmt.Errorf("sync server not configured; create ~/.config/grove/sync.toml and set server URL")
+		return fmt.Errorf("no sync server is configured; run `grove join <server-url>` first")
 	}
 
-	// Load ecosystem config to get notebook root
+	// Locate the tree so a typo fails here rather than as a workspace that
+	// silently syncs nothing. Resolution mirrors what the daemon does
+	// (registry.WorkspaceRoot ~ syntheticNodeFor/nodeWorkspaceRoot), so the
+	// path reported is the path that will be watched.
 	ecosystemCfg, err := config.LoadDefault()
 	if err != nil {
 		return fmt.Errorf("failed to load ecosystem config: %w", err)
 	}
-
-	// Find the workspace root directory
-	var workspaceRoot string
-	if ecosystemCfg.Notebooks != nil && ecosystemCfg.Notebooks.Definitions != nil {
-		for _, nb := range ecosystemCfg.Notebooks.Definitions {
-			if nb.RootDir == "" {
-				continue
-			}
-			wsPath := filepath.Join(nb.RootDir, "workspaces", workspaceName)
-			if _, err := os.Stat(wsPath); err == nil {
-				workspaceRoot = wsPath
-				break
-			}
-		}
-	}
-
+	workspaceRoot := registry.WorkspaceRoot(ecosystemCfg, workspaceName)
 	if workspaceRoot == "" {
-		return fmt.Errorf("workspace %q not found in ecosystem config", workspaceName)
+		return fmt.Errorf("cannot resolve a local directory for workspace %q — check your notebook configuration", workspaceName)
 	}
+	if info, statErr := os.Stat(workspaceRoot); statErr != nil || !info.IsDir() {
+		return fmt.Errorf("workspace %q resolves to %s, which does not exist; create it (or fix the name) before adopting", workspaceName, workspaceRoot)
+	}
+	fmt.Fprintf(out, "Workspace %q → %s\n", workspaceName, workspaceRoot)
+	fmt.Fprintf(out, "Server:    %s\n", syncCfg.Server)
 
-	// Note: The sync database is owned by the daemon and accessed via /api/sync/* on the unix socket.
-	// For the adopt command, we focus on reading the remote manifest and reporting what would be adopted.
-	// The actual database updates happen via daemon API calls.
-
-	fmt.Fprintf(cmd.OutOrStdout(), "Fetching manifest from %s for workspace %q...\n", syncCfg.Server, workspaceName)
-
-	// Note: In Phase 1, this would call the server's GET /sync/snapshot endpoint
-	// For now, this is a placeholder that demonstrates the adoption logic
-
-	conflictCount := 0
-	adoptedCount := 0
-
-	// Walk the workspace tree and hash each file
-	err = filepath.WalkDir(workspaceRoot, func(fpath string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if d.IsDir() {
-			return nil
-		}
-
-		// Skip hidden files and common exclusions
-		name := d.Name()
-		if name[0] == '.' || name == "notebooks.toml" {
-			return nil
-		}
-
-		// Compute SHA-256 of the file
-		f, err := os.Open(fpath)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-
-		h := sha256.New()
-		if _, err := io.Copy(h, f); err != nil {
-			return err
-		}
-
-		hash := hex.EncodeToString(h.Sum(nil))
-		relativePath := filepath.ToSlash(filepath.Join(workspaceName, fpath[len(workspaceRoot)+1:]))
-
-		// In a real implementation, we would:
-		// 1. Compare hash against manifest hash
-		// 2. If match: register document with server UUID + version, store base_content from local file
-		// 3. If mismatch: mark as conflicting
-
-		// For now, just print adoption info
-		_ = hash
-		_ = relativePath
-		adoptedCount++
-
-		return nil
+	// 1. Subscribe. The role-aware editor is the only writer, so a pull-enabled
+	// entry under a push-only role is refused here rather than discovered later.
+	entry := config.SyncWorkspace{
+		Name:        workspaceName,
+		Role:        strings.TrimSpace(opts.role),
+		Mode:        strings.TrimSpace(opts.mode),
+		Pull:        opts.pull,
+		Excludes:    opts.excludes,
+		MaxFileSize: opts.maxSize,
+	}
+	res, err := config.ApplySyncEdit(config.SyncConfigPath(), config.SyncEdit{
+		Workspaces: []config.SyncWorkspace{entry},
+		Note:       "Added by `grove sync adopt`.",
 	})
 	if err != nil {
-		return fmt.Errorf("failed to walk workspace: %w", err)
+		return err
+	}
+	for _, w := range res.Warnings {
+		fmt.Fprintf(out, "warning: %s\n", w)
+	}
+	added := len(res.Added) > 0
+	if added {
+		fmt.Fprintf(out, "✓ subscribed %q (role=%s, pull=%t) in %s\n", workspaceName, displayRole(entry.Role), entry.Pull, res.Path)
+		config.ResetLoadCache()
+	} else {
+		fmt.Fprintf(out, "· %q is already subscribed in %s — left exactly as it is\n", workspaceName, res.Path)
 	}
 
-	// Summary
-	fmt.Fprintf(cmd.OutOrStdout(), "\nAdoption summary:\n")
-	fmt.Fprintf(cmd.OutOrStdout(), "  Adopted: %d files\n", adoptedCount)
-	if conflictCount > 0 {
-		fmt.Fprintf(cmd.OutOrStdout(), "  Conflicts: %d files (will be reported when daemon starts)\n", conflictCount)
+	// 2. Let the daemon see it, then kick.
+	if opts.waitFor <= 0 {
+		fmt.Fprintf(out, "\nNot waiting for the daemon (--wait 0). Run `grove status` to watch progress.\n")
+		return nil
 	}
-
-	if conflictCount > 0 {
-		fmt.Fprintf(cmd.OutOrStdout(), "\n✓ adoption complete. Next: resolve conflicts or remove Syncthing folder access.\n")
+	status, picked := waitForWorkspacePickup(ctx, out, workspaceName, opts.waitFor)
+	reportSyncAuthFailure(out, status)
+	if !picked {
+		if status == nil {
+			return fmt.Errorf("no running daemon answered; the subscription is written — start groved to begin replicating %q", workspaceName)
+		}
+		fmt.Fprintf(out, "\n! the daemon has not picked up %q within %s. The subscription is written;\n", workspaceName, opts.waitFor)
+		fmt.Fprintf(out, "  it reloads on config change and at startup.\n")
 		return nil
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "\n✓ adoption complete. Hash-equal files registered with server UUIDs.\n")
+	if !opts.noKick {
+		if _, err := daemon.New().SyncRepush(ctx, workspaceName); err != nil {
+			fmt.Fprintf(out, "· could not kick an immediate pass (%v); the scheduled one will cover it.\n", err)
+		} else {
+			fmt.Fprintf(out, "✓ anti-entropy pass kicked\n")
+		}
+	}
+
+	// 3. Report what actually happened. These are the daemon's own counters,
+	// which is the entire difference between this and what it replaced.
+	final := pollAdoptionProgress(ctx, out, workspaceName, opts.waitFor)
+	reportAdoptionResult(out, workspaceName, final)
 	return nil
+}
+
+// pollAdoptionProgress follows the workspace until its hydration pass finishes
+// or the budget runs out, printing progress as it goes. It returns the last
+// status it managed to read.
+func pollAdoptionProgress(ctx context.Context, out io.Writer, workspace string, budget time.Duration) *models.SyncStatus {
+	deadline := time.Now().Add(budget)
+	var last *models.SyncStatus
+	sawRunning := false
+	for {
+		status := syncStatusSoft(ctx)
+		if status != nil {
+			last = status
+			ws := workspaceStatus(status, workspace)
+			switch {
+			case ws == nil:
+				// The daemon dropped it again — nothing more to poll.
+				return last
+			case ws.Hydration != nil && ws.Hydration.Running:
+				sawRunning = true
+				fmt.Fprintf(out, "  hydrating: %d scanned, %d enqueued, %d quarantined\n",
+					ws.Hydration.Scanned, ws.Hydration.Enqueued, ws.Hydration.Quarantined)
+			case sawRunning && ws.Hydration != nil && !ws.Hydration.Running:
+				return last
+			case status.OutboxPending == 0 && ws.Cursor > 0:
+				// Nothing queued and the workspace has a cursor: converged.
+				return last
+			}
+		}
+		if time.Now().After(deadline) {
+			return last
+		}
+		select {
+		case <-ctx.Done():
+			return last
+		case <-time.After(time.Second):
+		}
+	}
+}
+
+// reportAdoptionResult prints the real counters. Every number here comes from
+// the daemon's sync.db; none is computed by this process.
+func reportAdoptionResult(out io.Writer, workspace string, status *models.SyncStatus) {
+	fmt.Fprintf(out, "\nAdoption status for %q:\n", workspace)
+	if status == nil {
+		fmt.Fprintf(out, "  <the daemon stopped answering; run `grove status` to check>\n")
+		return
+	}
+	ws := workspaceStatus(status, workspace)
+	if ws == nil {
+		fmt.Fprintf(out, "  <the daemon is no longer tracking this workspace>\n")
+		return
+	}
+	fmt.Fprintf(out, "  Documents tracked (all workspaces): %d\n", status.Documents)
+	if status.DocumentsDiverged > 0 {
+		fmt.Fprintf(out, "  Diverged:                          %d — inspect with `grove status`\n", status.DocumentsDiverged)
+	}
+	fmt.Fprintf(out, "  Outbox pending:                    %d (parked %d)\n", status.OutboxPending, status.OutboxParked)
+	fmt.Fprintf(out, "  Cursor:                            %d\n", ws.Cursor)
+	if !ws.LastSyncedAt.IsZero() {
+		fmt.Fprintf(out, "  Last synced:                       %s\n", ws.LastSyncedAt.Format(time.RFC3339))
+	}
+	if h := ws.Hydration; h != nil {
+		state := "finished"
+		if h.Running {
+			state = "running"
+		}
+		fmt.Fprintf(out, "  Hydration (%s):                 %d scanned, %d enqueued, %d quarantined\n",
+			state, h.Scanned, h.Enqueued, h.Quarantined)
+	}
+	if status.OutboxPending > 0 {
+		fmt.Fprintf(out, "\nStill draining. Watch it with `grove status` or the Notebook Sync panel.\n")
+	} else {
+		fmt.Fprintf(out, "\n✓ %q is adopted and converged.\n", workspace)
+	}
+}
+
+// displayRole renders an empty role as what it means rather than as a blank.
+func displayRole(role string) string {
+	if role == "" {
+		return "legacy/push-only"
+	}
+	return role
 }

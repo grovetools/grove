@@ -262,23 +262,27 @@ func syncTokenProbeCmd(remoteAddr string) string {
 // production, a fake in tests). The stat in setupLaptopSyncConfig only proves
 // a token FILE exists; a stale token from a previous VM passes it vacuously
 // and the daemon then 401-loops silently — this probe is the backstop.
-// Decision logic:
-//   - 2xx      → token accepted.
-//   - 401/403  → the token is stale for THIS VM; error carries the
-//     fetch-a-fresh-token remediation.
+//
+// The status→verdict mapping is classifySyncTokenStatus (sync_token_verify.go),
+// shared with `grove join`'s direct-HTTP probe. Only the transport and the
+// remediation wording differ: this one can tell the user exactly which VM file
+// to re-fetch, which the HTTP variant cannot.
+//   - accepted  → 2xx.
+//   - rejected  → 401/403; the token is stale for THIS VM.
 //   - probe/transport error → distinct network-failure message (not a token
 //     problem — curl exits nonzero when syncd is unreachable, so a dead syncd
 //     lands here too).
-//   - anything else → syncd answered but not usably; also not a token verdict.
+//   - unhealthy → syncd answered but not usably; also not a token verdict.
 func verifySatelliteSyncToken(runRemote func(command, stdin string) (string, error), probeCmd, token, sshDest, tokenPath string) error {
 	status, err := runRemote(probeCmd, syncTokenProbeStdinHeader+token+"\n")
 	if err != nil {
 		return fmt.Errorf("could not run the sync capabilities probe on the VM (network/SSH/syncd failure, not a token verdict — check the VM and its grove-syncd service, then re-run): %w", err)
 	}
-	switch status = strings.TrimSpace(status); {
-	case strings.HasPrefix(status, "2"):
+	status = strings.TrimSpace(status)
+	switch classifySyncTokenStatus(status) {
+	case syncTokenAccepted:
 		return nil
-	case status == "401" || status == "403":
+	case syncTokenRejected:
 		return fmt.Errorf("the laptop sync token at %s is stale for this VM (syncd returned %s; the token is likely left over from a previous satellite, and the daemon would 401-loop silently)\n"+
 			"remediation — fetch the token this VM's bootstrap minted, then re-run:\n"+
 			"  ssh %s 'sudo cat /root/laptop-sync.token' > %s && chmod 600 %s",
