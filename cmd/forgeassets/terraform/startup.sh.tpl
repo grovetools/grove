@@ -16,7 +16,10 @@ apt-get update -y
 # Deliberately small: this is a SERVICE host, not the satellite's build host.
 # No Go, no zig, no gh, no gcloud — the Forgejo binary is a pinned download and
 # grove-syncd arrives cross-built from the laptop.
-apt-get install -y ca-certificates curl git sqlite3 openssl
+# unzip is not incidental: `forgejo dump` writes a zip, so without it the box
+# cannot unpack its own backup — which is the restore drill the forge is gated
+# on (adversarial review §9, job 18).
+apt-get install -y ca-certificates curl git sqlite3 openssl unzip
 
 mkdir -p /var/lib/grove-forge
 

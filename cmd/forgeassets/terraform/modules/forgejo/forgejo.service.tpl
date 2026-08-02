@@ -24,7 +24,12 @@ ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
-ReadWritePaths=/var/lib/forgejo /var/log/forgejo
+# Only paths install.sh.tpl actually creates may be listed: under
+# ProtectSystem=strict systemd fails the whole mount namespace (226/NAMESPACE)
+# on a ReadWritePaths entry that does not exist. Forgejo's log dir is
+# /var/lib/forgejo/log (see app.ini ROOT_PATH), which this covers; there is no
+# /var/log/forgejo.
+ReadWritePaths=/var/lib/forgejo
 CapabilityBoundingSet=
 
 [Install]

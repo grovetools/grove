@@ -46,6 +46,39 @@ if [ -n "$FORGE_IP" ]; then
 fi
 %{ endif ~}
 
+# Forgejo REQUIRES SECRET_KEY and INTERNAL_TOKEN to exist in app.ini. When they
+# are absent it generates them and saves them back into app.ini — which fails
+# under the unit's ProtectSystem=strict (/etc is read-only to the service) and
+# crash-loops the forge before it ever serves. The trial's working install
+# generated both up front; so does this.
+#
+# They are generated ONCE and re-injected on every run: regenerating them would
+# invalidate every existing session and API token on the instance. They live in
+# the pet's own state dir, never in terraform state and never in metadata.
+FORGEJO_SECRETS=/var/lib/forgejo/secrets.env
+if [ ! -f "$FORGEJO_SECRETS" ]; then
+  ( umask 077
+    {
+      printf 'SECRET_KEY=%s\n' "$("$FORGEJO_BIN" generate secret SECRET_KEY)"
+      printf 'INTERNAL_TOKEN=%s\n' "$("$FORGEJO_BIN" generate secret INTERNAL_TOKEN)"
+      printf 'JWT_SECRET=%s\n' "$("$FORGEJO_BIN" generate secret JWT_SECRET)"
+      # LFS_JWT_SECRET has the same 32-byte base64 shape as JWT_SECRET and is
+      # required because app.ini sets LFS_START_SERVER = true.
+      printf 'LFS_JWT_SECRET=%s\n' "$("$FORGEJO_BIN" generate secret JWT_SECRET)"
+    } > "$FORGEJO_SECRETS" )
+  chown root:root "$FORGEJO_SECRETS"
+  chmod 0600 "$FORGEJO_SECRETS"
+fi
+# shellcheck disable=SC1090
+. "$FORGEJO_SECRETS"
+# A repeated section header is merged by Forgejo's ini reader, the same way the
+# ROOT_URL block above repeats [server]. All FOUR secrets are needed: Forgejo
+# persists [security] SECRET_KEY/INTERNAL_TOKEN, [oauth2] JWT_SECRET and
+# [server] LFS_JWT_SECRET independently, and any one of them missing is its own
+# separate crash loop before the forge ever serves a request.
+printf '\n[security]\nSECRET_KEY = %s\nINTERNAL_TOKEN = %s\n\n[oauth2]\nJWT_SECRET = %s\n\n[server]\nLFS_JWT_SECRET = %s\n' \
+  "$SECRET_KEY" "$INTERNAL_TOKEN" "$JWT_SECRET" "$LFS_JWT_SECRET" >> /etc/forgejo/app.ini
+
 chown root:${user} /etc/forgejo/app.ini
 chmod 0640 /etc/forgejo/app.ini
 
