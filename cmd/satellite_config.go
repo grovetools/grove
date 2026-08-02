@@ -439,9 +439,10 @@ Two inputs, both in the [satellites.<name>] registry entry:
 
 Denylist (hard error, matched by basename): grove.toml, grove.yml,
 grove.override.*, sync.toml, machine.toml, secrets*.toml, keys*.toml,
-groves.toml, notebooks.toml, projects.toml. The VM's own grove.toml carries its topology
-(bootstrap-written) and is never touched — everything here is additive
-fragment files beside it. Fragments containing a top-level 'satellites' key
+groves.toml, notebooks.toml, projects.toml. The VM's own grove.toml, machine.toml and
+sync.toml come from the config seed 'up' renders ('grove satellite config seed
+<name>' prints it) and are never touched here — everything below is additive
+fragment files beside them. Fragments containing a top-level 'satellites' key
 (registry recursion) or a [daemon] table (topology) are refused regardless of
 filename.
 
@@ -451,6 +452,51 @@ priority. The rendered custom fragment ships with priority 1000, so
 [satellites.<name>.config] overrides seeded fragments; notebook- and
 project-level config layers still override all global fragments.`
 	cmd.AddCommand(newSatelliteConfigPushCmd())
+	cmd.AddCommand(newSatelliteConfigSeedCmd())
+	return cmd
+}
+
+// newSatelliteConfigSeedCmd prints the config seed `up` would provision a
+// satellite with. It writes nothing and touches no VM.
+//
+// It exists because the seed is now the ONLY thing that determines a
+// satellite's config, and a surface that renders it without provisioning is
+// what makes that auditable: you can read exactly which ecosystem the VM will
+// declare, which workspaces it will pull, and under which role, before paying
+// for a machine. It is also how the E2E scenario asserts that `satellite up`
+// and the adoption verbs agree about a machine's config.
+func newSatelliteConfigSeedCmd() *cobra.Command {
+	var syncWorkspaces string
+	cmd := cli.NewStandardCommand("seed <name>", "Print the VM config seed `satellite up` would provision (writes nothing)")
+	cmd.Long = `Render the grove.toml / machine.toml / sync.toml a satellite VM would be
+provisioned with, without provisioning anything.
+
+This is the exact bundle 'grove satellite up' ships to the bootstrap script,
+produced by the same shared config-seed writer every other grove machine's
+config goes through (core/config/config_seed.go). Workspaces resolve the same
+way 'up' resolves them: --sync-workspaces, else [satellites.<name>.sync]
+workspaces, else the built-in default.
+
+The VM's entries are role = "peer" and pull — a satellite materializes its own
+notebook from its own syncd. The laptop's entries for the same satellite stay
+push-only role = "satellite"; see 'grove satellite up --help'.`
+	cmd.Args = cobra.ExactArgs(1)
+	cmd.SilenceUsage = true
+	cmd.Flags().StringVar(&syncWorkspaces, "sync-workspaces", "", "Comma-separated workspaces to render (default: [satellites.<name>.sync] workspaces, else cloud,grovetools)")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		name := args[0]
+		syncOpts, err := loadSatelliteSyncOptions(name)
+		if err != nil {
+			return err
+		}
+		workspaces := resolveSatelliteSyncWorkspaces(syncOpts, syncWorkspaces, cmd.Flags().Changed("sync-workspaces"))
+		bundle, err := buildSatelliteConfigSeed(name, workspaces).Bundle()
+		if err != nil {
+			return err
+		}
+		fmt.Fprint(os.Stdout, bundle)
+		return nil
+	}
 	return cmd
 }
 

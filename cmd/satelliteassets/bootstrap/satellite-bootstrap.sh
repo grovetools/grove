@@ -18,12 +18,21 @@
 #                          setup-token`) arrives on stdin; implies --claude.
 #   --dotfiles-repo <url>  clone the given dotfiles repo on the VM and run
 #                          its install.sh (best-effort, non-fatal). Default off.
-#   --workspaces <a,b>     comma-separated workspace names the VM subscribes to:
-#                          each gets notebook dirs and a pull=true entry in the
-#                          VM's sync.toml (the VM pulls; the laptop only pushes).
-#                          Default: cloud,grovetools. An empty value means no
-#                          sync workspaces. `grove satellite up` passes this
-#                          from its resolved [satellites.<name>.sync] config.
+#   --config-seed <path>   REQUIRED. Local file holding the VM's config seed:
+#                          the grove.toml / machine.toml / sync.toml this VM
+#                          boots with, plus the notebook directories to create,
+#                          rendered by `grove satellite up` through core/config's
+#                          shared config-seed writer (core/config/config_seed.go,
+#                          grove/cmd/satellite_seed.go). Step 5 only UNPACKS it —
+#                          this script no longer authors config. That is what
+#                          puts the VM's `[[workspaces]]` entries through the
+#                          role-aware editor's single rendering choke point
+#                          instead of a `printf` loop, and what lets the CLI
+#                          parse the generated TOML before it ever ships.
+#                          Format: `#!grove-config-seed v1`, then `#!dir <p>` /
+#                          `#!file <name> <mode>` directives with content lines
+#                          between them. It replaces the old --workspaces flag:
+#                          the workspace list is now part of the seed.
 #   --prebuilt             prebuilt-binaries mode: the grove stack (grove,
 #                          groved, flow, nb, treemux, tuimux, grove-syncd) was
 #                          cross-compiled on the laptop and installed on the VM
@@ -59,7 +68,7 @@ set -euo pipefail
 CLAUDE_INSTALL_URL="https://claude.ai/install.sh"
 
 usage() {
-  echo "usage: $0 <ssh-destination> [--gh-token-stdin] [--claude] [--claude-token-stdin] [--dotfiles-repo <url>] [--workspaces <a,b>] [--prebuilt --syncd-unit <path>] [--ssh-identity <path> --ssh-known-hosts <path> --ssh-host-key-algorithm <name> --ssh-port <port>]" >&2
+  echo "usage: $0 <ssh-destination> --config-seed <path> [--gh-token-stdin] [--claude] [--claude-token-stdin] [--dotfiles-repo <url>] [--prebuilt --syncd-unit <path>] [--ssh-identity <path> --ssh-known-hosts <path> --ssh-host-key-algorithm <name> --ssh-port <port>]" >&2
   exit 2
 }
 
@@ -70,7 +79,7 @@ GH_TOKEN_STDIN=false
 CLAUDE=false
 CLAUDE_TOKEN_STDIN=false
 DOTFILES_REPO=""
-WORKSPACES="cloud,grovetools"
+CONFIG_SEED=""
 PREBUILT=false
 SYNCD_UNIT=""
 SSH_IDENTITY=""
@@ -90,9 +99,9 @@ while [ $# -gt 0 ]; do
       DOTFILES_REPO="$2"
       shift
       ;;
-    --workspaces)
+    --config-seed)
       [ $# -ge 2 ] || usage
-      WORKSPACES="$2"
+      CONFIG_SEED="$2"
       shift
       ;;
     --prebuilt) PREBUILT=true ;;
@@ -125,18 +134,21 @@ if $PREBUILT && [ -z "$SYNCD_UNIT" ]; then
   exit 2
 fi
 
-# Workspace names end up in remote paths and generated TOML — restrict them to
-# a safe character class before anything ships. Empty --workspaces = none.
-if [ -n "$WORKSPACES" ]; then
-  IFS=',' read -ra WS_CHECK <<< "$WORKSPACES"
-  for ws in ${WS_CHECK[@]+"${WS_CHECK[@]}"}; do
-    case "$ws" in
-      '' | *[!A-Za-z0-9._-]*)
-        echo "--workspaces: invalid workspace name '$ws' (allowed: A-Za-z0-9._-, comma-separated)" >&2
-        exit 2
-        ;;
-    esac
-  done
+# The config seed is mandatory: this script no longer knows how to author the
+# VM's config, so without one there is nothing to write in step 5. Its first
+# line pins the format version, which is checked here (cheaply, on the laptop)
+# rather than after the payload has already crossed the wire.
+if [ -z "$CONFIG_SEED" ]; then
+  echo "--config-seed <path> is required (rendered by 'grove satellite up'; see the header)" >&2
+  exit 2
+fi
+if [ ! -r "$CONFIG_SEED" ]; then
+  echo "--config-seed: $CONFIG_SEED is not readable" >&2
+  exit 2
+fi
+if [ "$(head -n 1 "$CONFIG_SEED")" != '#!grove-config-seed v1' ]; then
+  echo "--config-seed: $CONFIG_SEED is not a v1 grove config seed" >&2
+  exit 2
 fi
 
 # --- read secrets from stdin (never argv) -----------------------------------
@@ -219,7 +231,7 @@ REMOTE
 
 if $PREBUILT; then
   log "[3/8] prebuilt: preparing empty ecosystem root (repos arrive via 'grove satellite repos push')"
-  # grove.toml (step 5) points [groves.grovetools].path at ~/code/grovetools.
+  # The config seed (step 5) declares the ecosystem at ~/code/grovetools.
   # In prebuilt mode there is no source clone: right after this bootstrap,
   # `grove satellite up --prebuilt` mirrors the laptop's committed repo tips
   # (git bundles over the pinned transport, fetched + force-checked-out on
@@ -321,51 +333,68 @@ echo "required binaries OK: grove groved flow nb treemux tuimux"
 REMOTE
 fi
 
-log "[5/8] VM grove configuration (grove.toml, sync.toml, notebook dirs)"
-# The workspace list rides stdin's first line (same pattern as the dotfiles
-# repo URL): the remote heredoc stays fully quoted, so nothing from the laptop
-# is interpolated into remote shell — the names were validated above.
+log "[5/8] VM grove configuration (unpacking the CLI-rendered config seed)"
+# This script does not author config any more: it unpacks what the CLI
+# rendered. The seed and the remote script share one stdin — the seed goes
+# first and is terminated by a sentinel, so the outer command can drain it into
+# a temp file before handing the rest to bash. Nothing from the seed is ever
+# interpolated into remote shell: the unpacker reads it line by line, and both
+# the file names and their modes are re-validated against a closed set on this
+# side of the wire.
 {
-  printf '%s\n' "$WORKSPACES"
+  cat "$CONFIG_SEED"
+  printf '%s\n' '#!grove-config-seed-end'
   cat <<'REMOTE'
+# --- config-seed unpacker (begin) ---
+# Delimited so TestSatelliteConfigSeedUnpacksThroughTheRealBootstrapBlock can
+# extract and execute exactly this block against a temp HOME — the CLI's
+# renderer and the VM's unpacker are then proven to agree, not assumed to.
 set -euo pipefail
-mkdir -p "$HOME/.config/grove"
-WS_LIST=()
-if [ -n "$GROVE_SYNC_WORKSPACES" ]; then
-  IFS=',' read -ra WS_LIST <<< "$GROVE_SYNC_WORKSPACES"
-fi
-for ws in ${WS_LIST[@]+"${WS_LIST[@]}"}; do
-  mkdir -p "$HOME/notebooks/grovetools/workspaces/$ws/inbox" \
-           "$HOME/notebooks/grovetools/workspaces/$ws/plans" \
-           "$HOME/notebooks/grovetools/workspaces/$ws/concepts" \
-           "$HOME/notebooks/grovetools/workspaces/$ws/daily" \
-           "$HOME/notebooks/grovetools/workspaces/$ws/quick"
-done
-cat > "$HOME/.config/grove/grove.toml" <<'CFG'
-# grove-satellite PoC — written by satellite-bootstrap.sh
-[groves.grovetools]
-description = "Grove ecosystem (satellite)"
-enabled = true
-notebook = "grovetools"
-path = "~/code/grovetools"
-
-[notebooks.definitions.grovetools]
-root_dir = "~/notebooks/grovetools"
-
-[daemon.ssh]
-enabled = true
-CFG
-{
-  printf '# grove-satellite PoC — the VM PULLS (materializes) subscribed workspaces.\n'
-  printf '# Written by satellite-bootstrap.sh (--workspaces %s).\n' "$GROVE_SYNC_WORKSPACES"
-  printf 'server = "http://127.0.0.1:8788"\n'
-  printf 'token_command = "cat ~/.config/grove/sync.token"\n'
-  for ws in ${WS_LIST[@]+"${WS_LIST[@]}"}; do
-    printf '\n[[workspaces]]\nname = "%s"\npull = true\n' "$ws"
-  done
-} > "$HOME/.config/grove/sync.toml"
+: "${GROVE_CONFIG_SEED:?config seed was not received}"
+CFG_DIR="$HOME/.config/grove"
+mkdir -p "$CFG_DIR"
+target=""
+while IFS= read -r line; do
+  case "$line" in
+    '#!grove-config-seed v1') ;;
+    '#!dir '*)
+      dir="${line#\#!dir }"
+      case "$dir" in
+        '' | /* | '~'* | *..*)
+          echo "config seed: refusing directory '$dir'" >&2; exit 1 ;;
+      esac
+      mkdir -p "$HOME/$dir"
+      ;;
+    '#!file '*)
+      rest="${line#\#!file }"
+      name="${rest%% *}"
+      mode="${rest##* }"
+      case "$name" in
+        grove.toml | machine.toml | sync.toml) ;;
+        *) echo "config seed: refusing to write unexpected file '$name'" >&2; exit 1 ;;
+      esac
+      case "$mode" in
+        600 | 644) ;;
+        *) echo "config seed: refusing mode '$mode' for '$name'" >&2; exit 1 ;;
+      esac
+      target="$CFG_DIR/$name"
+      : > "$target"
+      chmod "0$mode" "$target"
+      ;;
+    '#!'*)
+      echo "config seed: unknown directive '$line'" >&2; exit 1 ;;
+    *)
+      [ -n "$target" ] || { echo "config seed: content before any file header" >&2; exit 1; }
+      printf '%s\n' "$line" >> "$target"
+      ;;
+  esac
+done < "$GROVE_CONFIG_SEED"
+rm -f "$GROVE_CONFIG_SEED"
+[ -n "$target" ] || { echo "config seed: contained no files" >&2; exit 1; }
+echo "config seed applied to $CFG_DIR"
+# --- config-seed unpacker (end) ---
 REMOTE
-} | "${SSH[@]}" 'IFS= read -r GROVE_SYNC_WORKSPACES; export GROVE_SYNC_WORKSPACES; exec bash -l -s'
+} | "${SSH[@]}" 'set -eu; seed=$(mktemp); while IFS= read -r l; do if [ "$l" = "#!grove-config-seed-end" ]; then break; fi; printf "%s\n" "$l" >> "$seed"; done; export GROVE_CONFIG_SEED="$seed"; exec bash -l -s'
 
 log "[6/8] grove-syncd: build (CGO fts5), install, migrate, mint tokens, systemd"
 if $PREBUILT; then

@@ -86,6 +86,12 @@ func AllScenarios() []*harness.Scenario {
 		SatelliteTartLifecycleScenario(),
 		SatelliteTartFullLifecycleScenario(),
 		SatelliteDockerLifecycleScenario(),
+
+		// The unified-identity full loop: join → subscribe → materialize →
+		// presence note on a second origin → satellite config seed → satellite
+		// round trip, against a real grove-syncd and two real groveds
+		// (tests/scenarios_identity_loop.go).
+		IdentityUnifiedLoopScenario(),
 	}
 }
 

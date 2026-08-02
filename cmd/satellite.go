@@ -286,7 +286,23 @@ and records sync_local_port/sync_remote_addr in the registry entry so the
 laptop daemon binds 127.0.0.1:<port> and forwards note-sync to the VM's syncd
 over its pinned SSH connection — no manual tunnel. Workspaces come from a
 [satellites.<name>.sync] block (workspaces = ["cloud", "grovetools"]) with
---sync-workspaces overriding; --sync-port 0 disables the whole sync half.`
+--sync-workspaces overriding; --sync-port 0 disables the whole sync half.
+
+VM configuration (materialization): 'up' RENDERS the VM's grove.toml,
+machine.toml and sync.toml locally — through the same shared config-seed
+writer and role-aware sync editor every other grove machine uses — and ships
+them to the bootstrap, which only unpacks them. The VM declares its ecosystem
+as machine intent ([machine.ecosystems.grovetools]) and its workspaces as
+pull-enabled role="peer" entries (the VM materializes its own notebook from
+its own syncd; the laptop's entries stay push-only role="satellite").
+
+CAPABILITY LOSS ON THE SATELLITE TIER — the VM's ecosystem is FLAT, regardless
+of what the ecosystem card's layout says. A satellite gets its repos as
+independent clones/mirrors, not as a submodule-anchored superrepo, so
+submodule-anchored worktree and plan tooling does NOT work on the VM. This is
+deliberate for a disposable execution tier: 'grove ecosystem materialize' on a
+peer machine honors the card's layout and gets full parity; 'satellite up'
+trades it for a cheap, replaceable node.`
 	cmd.Args = cobra.ExactArgs(1)
 	cmd.SilenceUsage = true
 	cmd.Flags().StringVar(&project, "project", "", "GCP project id (terraform var project_id) [required unless [satellites.<name>.infra] project is set]")
@@ -713,10 +729,17 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 				fmt.Printf("  the mirror verbs will use %s — point the VM's grove.toml there too, or drop code_dir\n", cd)
 			}
 			provArgs, secretStdin := buildBootstrapProvision(prov, ghToken, claudeToken)
-			// The resolved sync workspaces drive the VM's pull-enabled sync.toml
-			// (bootstrap step 5). Always passed — an explicitly empty flag value
-			// means "no sync workspaces" on the VM too.
-			provArgs = append(provArgs, "--workspaces", strings.Join(resolvedSyncWorkspaces, ","))
+			// The VM's grove.toml / machine.toml / sync.toml are RENDERED HERE,
+			// by core/config's shared config-seed writer, and shipped to
+			// bootstrap step 5 as a bundle it only unpacks. The resolved sync
+			// workspaces become the VM's pull-enabled peer-role entries and
+			// their notebook skeletons; an empty list means no sync.toml at
+			// all. See satellite_seed.go for why the VM's role is `peer`.
+			seedPath, seedErr := writeSatelliteConfigSeed(endpoint.LocalRunDir, name, resolvedSyncWorkspaces)
+			if seedErr != nil {
+				return fmt.Errorf("render VM config seed: %w", seedErr)
+			}
+			provArgs = append(provArgs, "--config-seed", seedPath)
 			// Prebuilt mode: tell bootstrap to SKIP the clone/build/source-unit-copy
 			// steps and install the CLI-shipped grove-syncd unit instead. Exec
 			// kind ships no unit, so --syncd-unit is omitted; the bootstrap
