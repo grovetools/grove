@@ -336,6 +336,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Name: "Actions",
 				Bindings: []BindingEntry{
 					{Name: "NewPlan", Keys: []string{"n"}, Description: "create new plan", Enabled: true, ConfigKey: "new_plan"},
+					{Name: "NewRollingPlan", Keys: []string{"R"}, Description: "create rolling plan", Enabled: true, ConfigKey: "new_rolling_plan"},
 					{Name: "SetActive", Keys: []string{"s"}, Description: "set active plan", Enabled: true, ConfigKey: "set_active"},
 					{Name: "EditNotes", Keys: []string{"e"}, Description: "edit notes", Enabled: true, ConfigKey: "edit_notes"},
 					{Name: "ReviewPlan", Keys: []string{"r"}, Description: "review changes", Enabled: true, ConfigKey: "review_plan"},
@@ -1446,6 +1447,12 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "ManageGroups", Keys: []string{"E"}, Description: "manage groups", Enabled: true, ConfigKey: "manage_groups"},
 					{Name: "NewGroup", Keys: []string{"N"}, Description: "new group", Enabled: true, ConfigKey: "new_group"},
 					{Name: "MapToGroup", Keys: []string{"M"}, Description: "map to group", Enabled: true, ConfigKey: "map_to_group"},
+				},
+			},
+			{
+				Name: "Workspaces",
+				Bindings: []BindingEntry{
+					{Name: "NewRepo", Keys: []string{"a"}, Description: "add repo to ecosystem", Enabled: true, ConfigKey: "new_repo"},
 				},
 			},
 			{
