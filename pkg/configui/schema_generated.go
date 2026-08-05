@@ -329,6 +329,13 @@ var SchemaFields = []FieldMeta{
 				Priority:    59,
 			},
 			{
+				Path:        []string{"tui", "plugin_order"},
+				Type:        FieldArray,
+				Description: "Preferred plugin rail order by plugin ID; omitted plugins follow sorted by ID",
+				Layer:       config.SourceGlobal,
+				Priority:    60,
+			},
+			{
 				Path:        []string{"tui", "plugins"},
 				Type:        FieldMap,
 				Description: "Process-based plugin panels",
