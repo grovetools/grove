@@ -916,6 +916,13 @@ var SchemaFields = []FieldMeta{
 		RefType:     "SecurityConfig",
 		Children: []FieldMeta{
 			{
+				Path:        []string{"security", "inherit_worktree_trust"},
+				Type:        FieldBool,
+				Description: "When true (the default) a new worktree inherits its owner checkout's exec-trust decision for member repos whose config carries identical exec values; set false to require a fresh review in every worktree",
+				Layer:       config.SourceGlobal,
+				Priority:    94,
+			},
+			{
 				Path:        []string{"security", "exec_trust"},
 				Type:        FieldSelect,
 				Description: "Exec-provenance gate policy for config from untrusted (repo-controlled) layers",

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/exectrust"
+	"github.com/grovetools/core/pkg/worktreeregistry"
 	"github.com/spf13/cobra"
 )
 
@@ -43,15 +45,24 @@ Bare 'grove config trust' is report-only. --yes records the decision, keyed to
 a digest of exactly the commands shown: if the repo later edits or adds one,
 the gate closes again and you are asked about the new content.
 
+Trust is keyed to a config file's PATH, so a worktree checkout of a repo you
+already reviewed starts out untrusted again. --inherit relocates that existing
+decision onto every registered worktree whose copy of a repo's grove.toml
+carries byte-identical exec values. A worktree whose branch CHANGED them keeps
+the gate shut and is listed as differing, so nothing runs unreviewed.
+
   grove config trust            review what would be enabled
   grove config trust --yes      allow the config files in scope
   grove config trust --revoke   withdraw trust for the files in scope
-  grove config trust --list     list every config file you have trusted`,
+  grove config trust --list     list every config file you have trusted
+  grove config trust --inherit  preview worktree trust inherited from owners
+  grove config trust --inherit --yes   record it`,
 		RunE: runConfigTrust,
 	}
 	cmd.Flags().Bool("yes", false, "Trust the config files in scope")
 	cmd.Flags().Bool("revoke", false, "Withdraw trust for the config files in scope")
 	cmd.Flags().Bool("list", false, "List every trusted config file")
+	cmd.Flags().Bool("inherit", false, "Relocate owner-checkout trust onto registered worktrees with identical exec config")
 	cmd.Flags().Bool("json", false, "Output as JSON")
 	return cmd
 }
@@ -61,12 +72,19 @@ func runConfigTrust(cmd *cobra.Command, args []string) error {
 	listOnly, _ := cmd.Flags().GetBool("list")
 	doTrust, _ := cmd.Flags().GetBool("yes")
 	doRevoke, _ := cmd.Flags().GetBool("revoke")
+	doInherit, _ := cmd.Flags().GetBool("inherit")
 
 	if doTrust && doRevoke {
 		return fmt.Errorf("--yes and --revoke are mutually exclusive")
 	}
+	if doInherit && doRevoke {
+		return fmt.Errorf("--inherit and --revoke are mutually exclusive")
+	}
 	if listOnly {
 		return runConfigTrustList(jsonOutput)
+	}
+	if doInherit {
+		return runConfigTrustInherit(doTrust, jsonOutput)
 	}
 
 	cwd, _ := os.Getwd()
@@ -121,6 +139,138 @@ func runConfigTrustList(jsonOutput bool) error {
 		fmt.Fprintf(w, "%s\t%s\n", e.TrustedAt, e.Path)
 	}
 	return w.Flush()
+}
+
+// runConfigTrustInherit relocates owner-checkout trust decisions onto every
+// registered worktree. Unlike the cwd-scoped paths above this sweeps the whole
+// worktree registry, because the per-worktree approval tax is exactly what it
+// exists to remove — visiting each worktree to run it there would be the
+// problem, not the fix.
+func runConfigTrustInherit(apply, jsonOutput bool) error {
+	entries, err := worktreeregistry.ListAll()
+	if err != nil {
+		return fmt.Errorf("failed to read the worktree registry: %w", err)
+	}
+
+	var candidates []config.InheritCandidate
+	// owner tracks which worktree each candidate came from, for grouping.
+	owningWorktree := map[string]string{}
+	for _, e := range entries {
+		if e == nil || e.IsArchived() || e.Owner == "" || len(e.Repos) == 0 {
+			continue
+		}
+		if _, statErr := os.Stat(e.AbsPath); statErr != nil {
+			continue // zombie entry; the worktree is gone from disk
+		}
+		for _, c := range config.WorktreeInheritCandidates(e.Owner, e.AbsPath, e.Repos) {
+			owningWorktree[c.Dest] = e.AbsPath
+			candidates = append(candidates, c)
+		}
+	}
+
+	if len(candidates) == 0 {
+		if jsonOutput {
+			return printJSON(map[string]interface{}{"outcomes": []config.InheritOutcome{}, "granted": 0})
+		}
+		fmt.Println("No live registered worktrees with member repos — nothing to inherit.")
+		return nil
+	}
+
+	outcomes, err := config.InheritExecTrust(candidates, apply)
+	if err != nil {
+		return err
+	}
+	if jsonOutput {
+		return printJSON(map[string]interface{}{
+			"outcomes": outcomes,
+			"granted":  config.InheritGrantedCount(outcomes),
+			"applied":  apply,
+		})
+	}
+	printInheritReport(outcomes, owningWorktree, apply)
+	return nil
+}
+
+// printInheritReport summarizes the sweep. The grant list is collapsed to a
+// per-worktree count — hundreds of individual paths are noise — but the two
+// outcomes that need a human decision (a branch that changed its exec config,
+// an owner that was never trusted) are named explicitly.
+func printInheritReport(outcomes []config.InheritOutcome, owningWorktree map[string]string, apply bool) {
+	byReason := map[config.InheritSkipReason]int{}
+	grantsPerWorktree := map[string]int{}
+	var differing, untrustedSources []config.InheritOutcome
+
+	for _, o := range outcomes {
+		if o.Granted {
+			grantsPerWorktree[owningWorktree[o.Dest]]++
+			continue
+		}
+		byReason[o.Reason]++
+		switch o.Reason {
+		case config.InheritDigestMismatch:
+			differing = append(differing, o)
+		case config.InheritSourceUntrusted:
+			untrustedSources = append(untrustedSources, o)
+		}
+	}
+
+	granted := config.InheritGrantedCount(outcomes)
+	verb := "would inherit"
+	if apply {
+		verb = "inherited"
+	}
+	fmt.Printf("%d of %d worktree config file(s) %s trust from their owner checkout, across %d worktree(s).\n",
+		granted, len(outcomes), verb, len(grantsPerWorktree))
+
+	if n := byReason[config.InheritAlreadyTrusted]; n > 0 {
+		fmt.Printf("  %d already trusted.\n", n)
+	}
+	if n := byReason[config.InheritNoExecConfig]; n > 0 {
+		fmt.Printf("  %d carry no exec-bearing config (nothing to trust).\n", n)
+	}
+	if n := byReason[config.InheritDestUnreadable] + byReason[config.InheritSourceUnreadable]; n > 0 {
+		fmt.Printf("  %d skipped — config file missing or unparseable.\n", n)
+	}
+
+	if len(untrustedSources) > 0 {
+		owners := map[string]struct{}{}
+		for _, o := range untrustedSources {
+			owners[o.Source] = struct{}{}
+		}
+		fmt.Println()
+		fmt.Printf("%d file(s) could not inherit because their OWNER checkout is not trusted yet\n", len(untrustedSources))
+		fmt.Printf("(%d distinct owner config file(s)). Inheritance relocates an existing decision;\n", len(owners))
+		fmt.Println("it cannot invent one. Review and trust the owners first, then re-run:")
+		fmt.Println()
+		fmt.Println("    grove run -- grove config trust        # review each owner repo")
+		fmt.Println("    grove run -- grove config trust --yes  # then allow them")
+		fmt.Println("    grove config trust --inherit --yes     # then fan out to worktrees")
+	}
+
+	if len(differing) > 0 {
+		fmt.Println()
+		fmt.Printf("%d file(s) carry DIFFERENT exec config than their owner — the branch changed a\n", len(differing))
+		fmt.Println("command, so the gate stays shut. Review these where they live:")
+		fmt.Println()
+		shown := differing
+		const maxShown = 20
+		if len(shown) > maxShown {
+			shown = shown[:maxShown]
+		}
+		for _, o := range shown {
+			fmt.Printf("    %s\n", filepath.Dir(o.Dest))
+		}
+		if len(differing) > len(shown) {
+			fmt.Printf("    ... and %d more (use --json for the full list)\n", len(differing)-len(shown))
+		}
+	}
+
+	if granted > 0 && !apply {
+		fmt.Println()
+		fmt.Println("This is a preview; nothing has been recorded. To apply:")
+		fmt.Println()
+		fmt.Println("    grove config trust --inherit --yes")
+	}
 }
 
 // applyConfigTrust records the current digest for every file in scope that is
