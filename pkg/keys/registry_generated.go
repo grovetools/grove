@@ -714,6 +714,8 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "Tab2", Keys: []string{"2"}, Description: "tab 2", Enabled: true, ConfigKey: "tab2"},
 					{Name: "Tab3", Keys: []string{"3"}, Description: "tab 3", Enabled: true, ConfigKey: "tab3"},
 					{Name: "Tab4", Keys: []string{"4"}, Description: "tab 4", Enabled: true, ConfigKey: "tab4"},
+					{Name: "Tab5", Keys: []string{"5"}, Description: "tab 5", Enabled: true, ConfigKey: "tab5"},
+					{Name: "Tab6", Keys: []string{"6"}, Description: "tab 6", Enabled: true, ConfigKey: "tab6"},
 				},
 			},
 			{
@@ -763,6 +765,8 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "Tab2", Keys: []string{"2"}, Description: "tab 2", Enabled: true, ConfigKey: "tab2"},
 					{Name: "Tab3", Keys: []string{"3"}, Description: "tab 3", Enabled: true, ConfigKey: "tab3"},
 					{Name: "Tab4", Keys: []string{"4"}, Description: "tab 4", Enabled: true, ConfigKey: "tab4"},
+					{Name: "Tab5", Keys: []string{"5"}, Description: "tab 5", Enabled: true, ConfigKey: "tab5"},
+					{Name: "Tab6", Keys: []string{"6"}, Description: "tab 6", Enabled: true, ConfigKey: "tab6"},
 				},
 			},
 			{
@@ -814,6 +818,8 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "Tab2", Keys: []string{"2"}, Description: "tab 2", Enabled: true, ConfigKey: "tab2"},
 					{Name: "Tab3", Keys: []string{"3"}, Description: "tab 3", Enabled: true, ConfigKey: "tab3"},
 					{Name: "Tab4", Keys: []string{"4"}, Description: "tab 4", Enabled: true, ConfigKey: "tab4"},
+					{Name: "Tab5", Keys: []string{"5"}, Description: "tab 5", Enabled: true, ConfigKey: "tab5"},
+					{Name: "Tab6", Keys: []string{"6"}, Description: "tab 6", Enabled: true, ConfigKey: "tab6"},
 				},
 			},
 			{
@@ -1476,6 +1482,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "ToggleBinary", Keys: []string{"ty"}, Description: "toggle tool/version", Enabled: true, ConfigKey: "toggle_binary"},
 					{Name: "ToggleLink", Keys: []string{"tl"}, Description: "toggle remote", Enabled: true, ConfigKey: "toggle_link"},
 					{Name: "ToggleTaskResults", Keys: []string{"tv"}, Description: "toggle validation matrix", Enabled: true, ConfigKey: "toggle_task_results"},
+					{Name: "ToggleReview", Keys: []string{"te"}, Description: "toggle review column", Enabled: true, ConfigKey: "toggle_review"},
 				},
 			},
 			{
