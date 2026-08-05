@@ -183,3 +183,52 @@ variable "syncd_port" {
   type        = number
   default     = 8788
 }
+
+# ---- backup ----------------------------------------------------------------
+
+variable "backup_enabled" {
+  description = "Provision the off-VM GCS backup target. False (the default) means no bucket, no IAM binding and no OAuth scope: the forge keeps the module's no-GCP-access posture."
+  type        = bool
+  default     = false
+}
+
+variable "backup_bucket" {
+  description = "GCS bucket receiving the forge's backups. Required when backup_enabled."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = !can(regex("://", var.backup_bucket))
+    error_message = "backup_bucket must be a bare bucket name, not a gs:// URL."
+  }
+}
+
+variable "backup_create_bucket" {
+  description = "Create the backup bucket, rather than joining one that already exists. False is what a REPLACEMENT forge wants: it needs read access to the outgoing forge's bucket, not ownership of it."
+  type        = bool
+  default     = true
+}
+
+variable "backup_location" {
+  description = "GCS location for the backup bucket. Should match the VM's region so a restore is a same-region read."
+  type        = string
+  default     = "US"
+}
+
+variable "backup_retention_days" {
+  description = "Delete backup objects older than this many days."
+  type        = number
+  default     = 180
+}
+
+variable "backup_nearline_days" {
+  description = "Move live backup objects to Nearline storage after this many days."
+  type        = number
+  default     = 30
+}
+
+variable "backup_noncurrent_days" {
+  description = "Delete superseded object versions this many days after they stop being current."
+  type        = number
+  default     = 30
+}

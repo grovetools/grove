@@ -104,6 +104,19 @@ func TestForgeTFVarsFullyConfiguredGolden(t *testing.T) {
 			},
 			Syncd: &config.ForgeSyncdServiceConfig{Enabled: &enabled, Port: 9788},
 		},
+		// Backups on, so the golden pins the ENABLED shape too: this is the
+		// one block that widens the module's no-IAM-roles/no-scopes posture,
+		// and a silent change to what it renders is exactly the class of
+		// surprise this golden exists to catch.
+		Backup: &config.ForgeBackupConfig{
+			Enabled:          &enabled,
+			Bucket:           "example-project-grove-forge-backups",
+			Location:         "us-central1",
+			RetentionDays:    365,
+			NearlineDays:     14,
+			NoncurrentDays:   45,
+			NtfyTopicCommand: "true",
+		},
 	}
 	got, err := forgeTFVars(cfg)
 	if err != nil {

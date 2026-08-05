@@ -276,6 +276,20 @@ release download, and grove-syncd's systemd unit waits for the binary.`
 			}
 		}
 
+		// Before the backup payload, because both reach the VM over SSH and a
+		// certificate that no longer covers the address is the more urgent of
+		// the two problems: it silently breaks every pinning client.
+		if err := reconcileForgeTLS(out, outputs, forgeCfg); err != nil {
+			return err
+		}
+
+		// After syncd, because the backup script backs syncd up: installing
+		// the timer first would give it one scheduled window in which the
+		// binary it calls does not exist yet.
+		if err := shipForgeBackup(out, outputs, forgeCfg); err != nil {
+			return err
+		}
+
 		fmt.Fprintf(out, "\nNext:\n")
 		step := 1
 		if outputs.ForgejoTunnelCmd != "" {
@@ -350,7 +364,16 @@ Run 'grove forge backup' first.`
 		if err := runInherited(dir, "terraform", "-chdir="+dir, "init", "-input=false"); err != nil {
 			return fmt.Errorf("terraform init: %w", err)
 		}
-		if err := runInherited(dir, "terraform", "-chdir="+dir, "destroy", "-input=false"); err != nil {
+		// -auto-approve, unconditionally, and that is not a loosening: this
+		// verb has ALREADY demanded --force AND the instance name typed back.
+		// Terraform's own "only 'yes' will be accepted" question is a fourth
+		// gate on top of three, and on a non-tty it is not a gate at all — it
+		// fails with "error asking for approval: EOF" after printing the whole
+		// destroy plan, leaving the operator with a half-run verb and no way to
+		// script the teardown. `up --yes` was fixed for exactly this (job 17
+		// finding D4); `down` kept the defect because nothing had tried to run
+		// it non-interactively until the restore drill did.
+		if err := runInherited(dir, "terraform", "-chdir="+dir, "destroy", "-input=false", "-auto-approve"); err != nil {
 			return fmt.Errorf("terraform destroy: %w", err)
 		}
 		// The cached outputs describe a machine that no longer exists.
@@ -383,40 +406,7 @@ func checkForgeDownGates(vmName string, force bool, confirm string) error {
 	return nil
 }
 
-// ---- backup / restore (job 18) ---------------------------------------------
-
-func newForgeBackupCmd() *cobra.Command {
-	cmd := cli.NewStandardCommand("backup", "Back up the forge's durable state (not yet implemented)")
-	cmd.Long = `Snapshot the forge's durable state: the Forgejo SQLite database and its
-repository tree.
-
-NOT YET IMPLEMENTED. The verb exists because the gate does: the adversarial
-phasing review's §9 says nothing may depend on the forge by default until an
-automated encrypted backup AND a clean-VM restore drill are proven. That work is
-job 18 of the hosted-git-and-prs plan; this command is where it lands, so that
-'grove forge down' can keep pointing at a real remediation instead of a plan.`
-	cmd.Args = cobra.NoArgs
-	cmd.SilenceUsage = true
-	cmd.RunE = func(*cobra.Command, []string) error {
-		return fmt.Errorf("`grove forge backup` is not implemented yet (hosted-git-and-prs job 18: encrypted backup + restore drill). Until it lands, snapshot the boot disk out of band before `grove forge down`")
-	}
-	return cmd
-}
-
-func newForgeRestoreCmd() *cobra.Command {
-	cmd := cli.NewStandardCommand("restore", "Restore the forge from a backup (not yet implemented)")
-	cmd.Long = `Restore a forge from a backup taken by 'grove forge backup'.
-
-NOT YET IMPLEMENTED — see 'grove forge backup'. The restore DRILL (a clean VM
-brought back to a working forge from a backup alone) is the gate, not the code:
-a backup nobody has restored is a hypothesis.`
-	cmd.Args = cobra.NoArgs
-	cmd.SilenceUsage = true
-	cmd.RunE = func(*cobra.Command, []string) error {
-		return fmt.Errorf("`grove forge restore` is not implemented yet (hosted-git-and-prs job 18: encrypted backup + restore drill)")
-	}
-	return cmd
-}
+// backup / restore live in forge_backup.go — see newForgeBackupCmd.
 
 // ---- terraform outputs -----------------------------------------------------
 

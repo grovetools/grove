@@ -1,0 +1,14 @@
+[Unit]
+Description=Run the grove forge backup on a schedule
+Documentation=https://github.com/grovetools/sync/blob/main/docs/runbooks/gcs-backup.md
+
+[Timer]
+OnCalendar=__SCHEDULE__
+# A VM that was off when the timer should have fired runs it at next boot
+# instead of silently skipping a day.
+Persistent=true
+RandomizedDelaySec=15min
+Unit=grove-forge-backup.service
+
+[Install]
+WantedBy=timers.target

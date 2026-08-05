@@ -31,3 +31,8 @@ forgejo_http_port = 3000
 forgejo_site_name = "grove forge"
 syncd_enabled     = true
 syncd_port        = 8788
+
+# --- backup ---
+# [forge.backup] absent or disabled: no bucket, no IAM binding, and the
+# service account keeps its no-OAuth-scope attachment.
+backup_enabled = false

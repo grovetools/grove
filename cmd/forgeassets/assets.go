@@ -34,8 +34,33 @@ import (
 //go:embed terraform
 var assets embed.FS
 
+// The on-VM backup payload: the script pair and their systemd units.
+//
+// Deliberately NOT rendered by the startup script. startup.sh.tpl guards
+// itself with /var/lib/grove-forge/startup-done and therefore runs exactly
+// once per VM lifetime — it can provision a fresh forge but cannot converge an
+// existing one. Backups have to be installable on the forge that is already
+// running, so they follow grove-syncd's precedent instead: shipped from the
+// laptop over the pinned SSH connection after terraform apply, every `up`.
+//
+//go:embed backup
+var backupAssets embed.FS
+
 // terraformRoot is the embedded module root inside the asset FS.
 const terraformRoot = "terraform"
+
+// backupRoot is the embedded on-VM backup payload.
+const backupRoot = "backup"
+
+// BackupFS returns the embedded backup payload, rooted at the payload
+// directory (the two scripts and the four unit files at ".").
+func BackupFS() (fs.FS, error) {
+	sub, err := fs.Sub(backupAssets, backupRoot)
+	if err != nil {
+		return nil, fmt.Errorf("embedded forge backup payload missing (%s): %w", backupRoot, err)
+	}
+	return sub, nil
+}
 
 // TerraformFS returns the embedded terraform root, rooted at the module
 // directory (main.tf, variables.tf, outputs.tf and modules/ at ".").

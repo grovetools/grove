@@ -51,6 +51,9 @@ locals {
   # --tunnel-through-iap`) keeps working when the laptop's public IP rotates.
   iap_cidr = "35.235.240.0/20"
 
+  # A zone's region is its zone minus the trailing "-<letter>".
+  region = join("-", slice(split("-", var.zone), 0, 2))
+
   ssh_source_ranges = var.enable_iap_ssh ? [var.allowed_cidr, local.iap_cidr] : [var.allowed_cidr]
   # Forgejo speaks plain HTTP, so its port never opens to the operator CIDR:
   # admin passwords, tokens and git auth would cross the internet in cleartext.
@@ -66,6 +69,16 @@ locals {
   tls_mode = var.domain == "" ? "self-signed" : var.tls_mode
 
   service_account_email = var.service_account_email != "" ? var.service_account_email : one(google_service_account.forge[*].email)
+
+  # The no-scope default (item 3 above) is absolute until backups are turned
+  # on, and then it widens by exactly one entry. devstorage.read_write, not
+  # cloud-platform: the metadata server can mint a token that speaks GCS and
+  # nothing else, and backup.tf's single bucket-scoped IAM binding decides
+  # which bucket that token may touch. Scope is the coarse cap; IAM is the
+  # authority. Neither alone would be enough.
+  service_account_scopes = var.backup_enabled ? distinct(concat(var.service_account_scopes, [
+    "https://www.googleapis.com/auth/devstorage.read_write",
+  ])) : var.service_account_scopes
 }
 
 # ---- identity -------------------------------------------------------------
@@ -76,6 +89,31 @@ resource "google_service_account" "forge" {
   account_id   = var.vm_name
   display_name = "grove forge services VM"
   description  = "Dedicated identity for ${var.vm_name}. Granted NO IAM roles and attached with NO OAuth scopes: the forge needs no GCP API access, so a compromised VM has no project-wide read."
+}
+
+# ---- address ---------------------------------------------------------------
+
+# A RESERVED address, not an ephemeral one — and this is a correctness
+# requirement, not a convenience.
+#
+# With tls_mode = "self-signed" the certificate generated at first boot carries
+# the external IP as its only SAN, and clients pin it ([sync] ca_cert). An
+# ephemeral address is released on every instance STOP, so the instance comes
+# back on a different IP and every pinned client fails verification — not with
+# "cannot connect", which is diagnosable, but with a certificate error against a
+# service that is up and healthy.
+#
+# That was theoretical while nothing ever stopped the forge. It stopped being
+# theoretical the moment `allow_stopping_for_update` made a stop part of a
+# routine converge, and it was never really theoretical at all: GCE host
+# maintenance can stop an instance without anyone asking it to. Reserving the
+# address costs the same ~$3.65/mo the in-use ephemeral one already cost.
+resource "google_compute_address" "forge" {
+  name         = "${var.vm_name}-ip"
+  project      = var.project_id
+  region       = local.region
+  address_type = "EXTERNAL"
+  description  = "Stable external address for the grove forge. Self-signed TLS pins this IP as its SAN, so it must survive a stop."
 }
 
 # ---- network ---------------------------------------------------------------
@@ -156,6 +194,20 @@ resource "google_compute_instance" "forge" {
   zone         = var.zone
   tags         = [var.vm_name]
 
+  # GCE refuses to change a running instance's OAuth scopes (and its machine
+  # type) — the API requires a stop first. Without this, turning backups on
+  # fails the apply with "Changing the service account scopes ... requires
+  # stopping the instance", and the forge's scopes could never be converged at
+  # all: the only path left would be destroy-and-recreate, which for a PET is
+  # the accident this whole module is shaped to prevent.
+  #
+  # This permits a stop/start, not a replacement. The boot disk — which is the
+  # forge's entire value, every ref and the PR database — survives a stop
+  # untouched. Terraform stops the instance only for changes GCE cannot make
+  # live, and destruction stays gated where it always was: `grove forge down`,
+  # behind --force plus the instance name typed back.
+  allow_stopping_for_update = true
+
   # The pet's disk is its state. Deleting the instance without deleting this
   # disk is the difference between a rebuild and a data loss, so `grove forge
   # down` double-confirms and the disk is called out in its prompt.
@@ -171,13 +223,13 @@ resource "google_compute_instance" "forge" {
     network = var.network
 
     access_config {
-      # ephemeral external IP
+      nat_ip = google_compute_address.forge.address
     }
   }
 
   service_account {
     email  = local.service_account_email
-    scopes = var.service_account_scopes
+    scopes = local.service_account_scopes
   }
 
   metadata = {

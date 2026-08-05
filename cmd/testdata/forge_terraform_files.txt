@@ -1,3 +1,4 @@
+backup.tf
 main.tf
 modules/forgejo/app.ini.tpl
 modules/forgejo/forgejo.service.tpl

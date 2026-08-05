@@ -8,7 +8,7 @@
 # first boot, so status dials the syncd port and computes it off the wire.
 
 output "external_ip" {
-  description = "Ephemeral external IP of the forge VM"
+  description = "Reserved external IP of the forge VM. Stable across stops, which is what keeps a self-signed certificate's IP SAN valid."
   value       = google_compute_instance.forge.network_interface[0].access_config[0].nat_ip
 }
 
@@ -61,4 +61,9 @@ output "firewall_rules" {
     ],
     var.syncd_enabled ? ["${var.vm_name}-allow-syncd: tcp/${var.syncd_port} from ${join(",", local.syncd_source_ranges)}"] : [],
   )
+}
+
+output "backup_bucket" {
+  description = "GCS bucket holding this forge's backups, or empty when backups are not provisioned."
+  value       = var.backup_enabled ? var.backup_bucket : ""
 }

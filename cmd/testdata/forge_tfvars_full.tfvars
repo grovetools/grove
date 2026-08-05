@@ -34,3 +34,12 @@ forgejo_http_port = 3080
 forgejo_site_name = "solar forge"
 syncd_enabled     = true
 syncd_port        = 9788
+
+# --- backup ---
+backup_enabled = true
+backup_bucket          = "example-project-grove-forge-backups"
+backup_create_bucket   = true
+backup_location        = "us-central1"
+backup_retention_days  = 365
+backup_nearline_days   = 14
+backup_noncurrent_days = 45

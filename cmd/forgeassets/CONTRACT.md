@@ -46,6 +46,8 @@ to `terraform.tfvars` in the module dir so `terraform destroy` (from
 
 Variables the embedded module additionally declares, which the CLI never sets:
 `network`, `service_account_scopes` (default `[]` — the no-scope posture),
+`backup_enabled` (default `false`), `backup_bucket`, `backup_location`,
+`backup_retention_days`, `backup_nearline_days`, `backup_noncurrent_days`,
 `forgejo_extra_cidrs`, `syncd_extra_cidrs`.
 
 ## Outputs the CLI reads
@@ -56,6 +58,7 @@ Variables the embedded module additionally declares, which the CLI never sets:
 | `forge_url` | no | Printed by `status`; the value that belongs in `[forge] url`. Domain-less deployments are IAP-tunnel-only, so this is `http://localhost:<port>`. |
 | `forgejo_tunnel_command` | no | Printed by `up`/`status` when non-empty: the IAP tunnel that makes `forge_url` answer on a domain-less deployment. |
 | `syncd_addr` | no | Printed by `status`; the endpoint whose TLS fingerprint is pinned. |
+| `backup_bucket` | no | The bucket `grove forge backup`/`restore` read and write; empty when backups are off. |
 | `tls_mode` | no | Printed by `status`. |
 | `service_account_email` | no | Printed by `status` (audit: is this the dedicated one?). |
 | `firewall_rules` | no | Printed by `status` — the whole exposed surface in one place. |
@@ -81,6 +84,14 @@ These are not preferences; the trial's hardening ledger is where each came from.
    a service account with no IAM roles and attaches it with
    `service_account_scopes = []`. The default compute SA can read every GCS
    bucket in the project; the forge needs no GCP API access at all.
+
+   `backup_enabled = true` is the ONE deliberate widening, and it widens by
+   exactly two things: the OAuth scope `devstorage.read_write` (not
+   `cloud-platform` — the metadata server can mint a token that speaks GCS and
+   nothing else) and one `roles/storage.objectAdmin` binding on the backup
+   bucket alone (not a project-wide role). Scope is the coarse cap, IAM says
+   which bucket; neither alone would be enough. A bring-your-own module that
+   grants project-level storage roles does not meet this contract.
 3. **TLS on every non-loopback listener.** `grove-syncd` refuses a non-loopback
    bind without `--tls-cert/--tls-key` (sync/cmd/serve.go), and the unit this
    module writes never passes `--insecure`.

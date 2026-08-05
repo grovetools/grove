@@ -185,6 +185,8 @@ func forgeTFVars(cfg *config.ForgeConfig) (string, error) {
 	fmt.Fprintf(&b, "syncd_enabled     = %t\n", services.SyncdEnabled())
 	fmt.Fprintf(&b, "syncd_port        = %d\n", services.EffectiveSyncdPort())
 
+	b.WriteString(forgeBackupTFVars(cfg))
+
 	return b.String(), nil
 }
 
