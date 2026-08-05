@@ -65,7 +65,7 @@ variable "ssh_pubkey_file" {
 }
 
 variable "allowed_cidr" {
-  description = "Operator CIDR allowed to reach tcp/22 and the service ports — your laptop's public IP as a /32. Deliberately no default: never apply this open."
+  description = "Operator CIDR allowed to reach tcp/22 and the (TLS) syncd port — your laptop's public IP as a /32. Forgejo's plain-HTTP port is NOT opened to this CIDR: it is IAP-tunnel-only. Deliberately no default: never apply this open."
   type        = string
 
   validation {
@@ -81,7 +81,7 @@ variable "enable_iap_ssh" {
 }
 
 variable "forgejo_extra_cidrs" {
-  description = "Additional CIDRs allowed to reach the Forgejo HTTP port. Empty by default: the forge is laptop-IP/tunnel-only until the owner opts into wider access. 0.0.0.0/0 is refused."
+  description = "Additional CIDRs allowed to reach the Forgejo HTTP port, on top of Google's IAP range (the only default source). Empty by default: the forge is IAP-tunnel-only until the owner opts into wider access. Forgejo is plain HTTP, so anything added here sees cleartext in transit. 0.0.0.0/0 is refused."
   type        = list(string)
   default     = []
 

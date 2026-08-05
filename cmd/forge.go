@@ -245,7 +245,14 @@ release download, and grove-syncd's systemd unit waits for the binary.`
 		if err := runInherited(dir, "terraform", "-chdir="+dir, "init", "-input=false"); err != nil {
 			return fmt.Errorf("terraform init: %w", err)
 		}
-		if err := runInherited(dir, "terraform", "-chdir="+dir, "apply", "-input=false"); err != nil {
+		// --yes must reach terraform too: grove's prompt was already skipped
+		// above, and without -auto-approve a non-tty apply dies at terraform's
+		// own approval question after printing the whole plan.
+		applyArgs := []string{"-chdir=" + dir, "apply", "-input=false"}
+		if assumeYes {
+			applyArgs = append(applyArgs, "-auto-approve")
+		}
+		if err := runInherited(dir, "terraform", applyArgs...); err != nil {
 			return fmt.Errorf("terraform apply: %w", err)
 		}
 
@@ -270,11 +277,21 @@ release download, and grove-syncd's systemd unit waits for the binary.`
 		}
 
 		fmt.Fprintf(out, "\nNext:\n")
-		fmt.Fprintf(out, "  1. Point the daemon at it:  [forge] url = %q\n", outputs.ForgeURL)
-		fmt.Fprintf(out, "  2. Enable the poller:       [forge.poll] enabled = true\n")
-		fmt.Fprintf(out, "  3. Give the daemon a token: [forge] token_command = \"...\"  (never a literal token)\n")
+		step := 1
+		if outputs.ForgejoTunnelCmd != "" {
+			// A domain-less forge is IAP-tunnel-only: the URL below answers
+			// only while this tunnel runs.
+			fmt.Fprintf(out, "  %d. Start the IAP tunnel:    %s\n", step, outputs.ForgejoTunnelCmd)
+			step++
+		}
+		fmt.Fprintf(out, "  %d. Point the daemon at it:  [forge] url = %q\n", step, outputs.ForgeURL)
+		step++
+		fmt.Fprintf(out, "  %d. Enable the poller:       [forge.poll] enabled = true\n", step)
+		step++
+		fmt.Fprintf(out, "  %d. Give the daemon a token: [forge] token_command = \"...\"  (never a literal token)\n", step)
+		step++
 		if outputs.TLSMode == config.ForgeTLSSelfSigned {
-			fmt.Fprintf(out, "  4. Pin the certificate:     `grove forge status` prints its SHA-256 fingerprint\n")
+			fmt.Fprintf(out, "  %d. Pin the certificate:     `grove forge status` prints its SHA-256 fingerprint\n", step)
 		}
 		return nil
 	}
@@ -412,6 +429,7 @@ type forgeOutputs struct {
 	VMName              string   `json:"vm_name"`
 	Zone                string   `json:"zone"`
 	ForgeURL            string   `json:"forge_url"`
+	ForgejoTunnelCmd    string   `json:"forgejo_tunnel_command"`
 	SyncdAddr           string   `json:"syncd_addr"`
 	TLSMode             string   `json:"tls_mode"`
 	ServiceAccountEmail string   `json:"service_account_email"`

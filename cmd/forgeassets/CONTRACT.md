@@ -53,7 +53,8 @@ Variables the embedded module additionally declares, which the CLI never sets:
 | Output | Required | Used for |
 |---|---|---|
 | `external_ip` | **yes** | The address `up` host-key-scans, ships binaries to, and records. |
-| `forge_url` | no | Printed by `status`; the value that belongs in `[forge] url`. |
+| `forge_url` | no | Printed by `status`; the value that belongs in `[forge] url`. Domain-less deployments are IAP-tunnel-only, so this is `http://localhost:<port>`. |
+| `forgejo_tunnel_command` | no | Printed by `up`/`status` when non-empty: the IAP tunnel that makes `forge_url` answer on a domain-less deployment. |
 | `syncd_addr` | no | Printed by `status`; the endpoint whose TLS fingerprint is pinned. |
 | `tls_mode` | no | Printed by `status`. |
 | `service_account_email` | no | Printed by `status` (audit: is this the dedicated one?). |
@@ -72,6 +73,10 @@ These are not preferences; the trial's hardening ledger is where each came from.
    instance and sourced from the operator CIDR (optionally plus Google's IAP
    range `35.235.240.0/20` for SSH). The embedded module enforces this with
    variable validations, including on the "extra CIDRs" escape hatches.
+   Forgejo's plain-HTTP port goes further: it admits ONLY the IAP range —
+   cleartext never crosses the open wire, and the operator reaches it through
+   `forgejo_tunnel_command`. VM-to-VM consumers (CI runners) use the VPC's
+   internal address, which needs no rule from this module.
 2. **A dedicated identity with no scopes.** `service_account_email = ""` creates
    a service account with no IAM roles and attaches it with
    `service_account_scopes = []`. The default compute SA can read every GCS

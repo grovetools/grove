@@ -28,8 +28,13 @@ output "zone" {
 }
 
 output "forge_url" {
-  description = "Base URL of the Forgejo instance — the value that belongs in [forge] url"
-  value       = var.domain != "" ? "https://${var.domain}" : "http://${google_compute_instance.forge.network_interface[0].access_config[0].nat_ip}:${var.forgejo_http_port}"
+  description = "Base URL of the Forgejo instance — the value that belongs in [forge] url. Domain-less deployments are IAP-tunnel-only, so the URL is localhost: it answers only while the forgejo_tunnel_command tunnel is up."
+  value       = var.domain != "" ? "https://${var.domain}" : "http://localhost:${var.forgejo_http_port}"
+}
+
+output "forgejo_tunnel_command" {
+  description = "The IAP tunnel that carries operator traffic to Forgejo's plain-HTTP port. Empty for domain deployments, which terminate TLS instead of tunneling."
+  value       = var.domain != "" ? "" : "gcloud compute start-iap-tunnel ${google_compute_instance.forge.name} ${var.forgejo_http_port} --local-host-port=localhost:${var.forgejo_http_port} --zone=${var.zone} --project=${var.project_id}"
 }
 
 output "syncd_addr" {

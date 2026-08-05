@@ -145,6 +145,9 @@ func renderForgeOutputs(w io.Writer, out forgeOutputs) {
 	if out.ForgeURL != "" {
 		fmt.Fprintf(w, "  forge:    %s\n", out.ForgeURL)
 	}
+	if out.ForgejoTunnelCmd != "" {
+		fmt.Fprintf(w, "  tunnel:   %s\n", out.ForgejoTunnelCmd)
+	}
 	if out.SyncdAddr != "" {
 		fmt.Fprintf(w, "  syncd:    %s (TLS: %s)\n", out.SyncdAddr, out.TLSMode)
 	}

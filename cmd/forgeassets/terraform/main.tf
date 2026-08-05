@@ -8,12 +8,15 @@
 # Security posture encoded here, item by item, from the trial's hardening ledger
 # (plan hosted-git-and-prs, inbox note 20260802-hosted-git-prs-deferred-infra):
 #
-#   1. TLS or tunnel-only for the service ports — every service terminates TLS
+#   1. TLS or tunnel-only for the service ports — grove-syncd terminates TLS
 #      (modules/syncd renders the material; self-signed is pinned by
-#      fingerprint, ACME is DNS-01 only).
+#      fingerprint, ACME is DNS-01 only), and Forgejo's plain-HTTP :3000 is
+#      reachable ONLY through Google's IAP TCP-forwarding range: the operator
+#      rides an authenticated, encrypted IAP tunnel, never the open wire.
 #   2. No 0.0.0.0/0 ingress ANYWHERE. Every rule is tag-scoped to this instance
-#      and sourced from the operator CIDR, optionally plus Google's IAP range
-#      for SSH. The variable validations refuse the open internet outright.
+#      and sourced from the operator CIDR (SSH, syncd) or the IAP range
+#      (SSH, Forgejo). The variable validations refuse the open internet
+#      outright.
 #   3. A dedicated service account with no IAM roles, attached with no OAuth
 #      scopes — closing the trial's "the default compute SA can read every
 #      bucket in the project" finding.
@@ -42,14 +45,19 @@ data "google_compute_image" "os" {
 }
 
 locals {
-  # Google's IAP TCP-forwarding source range. Reaching :22 through it needs an
-  # IAM grant as well, so adding it here widens nothing on its own — it just
-  # means `gcloud compute ssh --tunnel-through-iap` keeps working when the
-  # laptop's public IP rotates.
-  iap_ssh_cidr = "35.235.240.0/20"
+  # Google's IAP TCP-forwarding source range. Reaching a port through it needs
+  # an IAM grant as well, so admitting it here widens nothing on its own — it
+  # just means `gcloud compute start-iap-tunnel` (and `ssh
+  # --tunnel-through-iap`) keeps working when the laptop's public IP rotates.
+  iap_cidr = "35.235.240.0/20"
 
-  ssh_source_ranges     = var.enable_iap_ssh ? [var.allowed_cidr, local.iap_ssh_cidr] : [var.allowed_cidr]
-  forgejo_source_ranges = concat([var.allowed_cidr], var.forgejo_extra_cidrs)
+  ssh_source_ranges = var.enable_iap_ssh ? [var.allowed_cidr, local.iap_cidr] : [var.allowed_cidr]
+  # Forgejo speaks plain HTTP, so its port never opens to the operator CIDR:
+  # admin passwords, tokens and git auth would cross the internet in cleartext.
+  # IAP-only means every laptop byte transits Google's encrypted, IAM-gated
+  # frontend; VM-to-VM traffic (CI runners) rides the VPC's internal range and
+  # needs no rule here at all.
+  forgejo_source_ranges = concat([local.iap_cidr], var.forgejo_extra_cidrs)
   syncd_source_ranges   = concat([var.allowed_cidr], var.syncd_extra_cidrs)
 
   # A domain-less instance has no name to put in a certificate and no zone to
@@ -89,7 +97,7 @@ resource "google_compute_firewall" "ssh" {
 resource "google_compute_firewall" "forgejo" {
   name        = "${var.vm_name}-allow-forgejo"
   network     = var.network
-  description = "Forgejo HTTP. Operator CIDR only unless forgejo_extra_cidrs opts into wider access; tunnel through IAP for anything else."
+  description = "Forgejo HTTP, IAP TCP-forwarding range only — plain HTTP never crosses the open wire. Operator access is an IAP tunnel (see the forge_url output); forgejo_extra_cidrs opts into direct reach."
 
   allow {
     protocol = "tcp"
