@@ -1862,6 +1862,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "GroupShell", Keys: []string{"<leader> s"}, Description: "enter shell group (then 1-9)", Enabled: true, ConfigKey: "group_shell"},
 					{Name: "GroupEditor", Keys: []string{"<leader> f"}, Description: "enter file/editor group (then 1-9)", Enabled: true, ConfigKey: "group_editor"},
 					{Name: "GroupAgent", Keys: []string{"<leader> a"}, Description: "enter agent group (then 1-9)", Enabled: true, ConfigKey: "group_agent"},
+					{Name: "GroupPlugin", Keys: []string{"<leader> p"}, Description: "enter plugin group (then 1-9)", Enabled: true, ConfigKey: "group_plugin"},
 					{Name: "JumpWindowNumber", Keys: []string{"<leader> 1", "<leader> 2", "<leader> 3", "<leader> 4", "<leader> 5", "<leader> 6", "<leader> 7", "<leader> 8", "<leader> 9"}, Description: "jump to window N (Nth group item / job-detail tab when armed)", Enabled: true, ConfigKey: "jump_window_number"},
 					{Name: "CommandPalette", Keys: []string{"<leader> space"}, Description: "open command palette", Enabled: true, ConfigKey: "command_palette"},
 					{Name: "NeedsYouQueue", Keys: []string{"<leader> !"}, Description: "open needs-you queue", Enabled: true, ConfigKey: "needs_you_queue"},
