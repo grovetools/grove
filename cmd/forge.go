@@ -67,6 +67,7 @@ no infrastructure flags, so what terraform sees is always what the config says:
 	cmd.AddCommand(newForgePlanCmd())
 	cmd.AddCommand(newForgeUpCmd())
 	cmd.AddCommand(newForgeStatusCmd())
+	cmd.AddCommand(newForgeWGCmd())
 	cmd.AddCommand(newForgeDownCmd())
 	cmd.AddCommand(newForgeBackupCmd())
 	cmd.AddCommand(newForgeRestoreCmd())
@@ -274,6 +275,12 @@ release download, and grove-syncd's systemd unit waits for the binary.`
 			if err := shipForgeSyncd(out, syncdPlan, outputs, forgeCfg); err != nil {
 				return err
 			}
+		}
+
+		// Join the mesh before TLS reconciliation: an enabled mesh address is a
+		// required SAN, so this ordering widens the certificate exactly once.
+		if err := reconcileForgeWireGuard(out, outputs, forgeCfg); err != nil {
+			return err
 		}
 
 		// Before the backup payload, because both reach the VM over SSH and a

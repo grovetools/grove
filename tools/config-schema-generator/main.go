@@ -83,6 +83,7 @@ var defaultManifest = SchemaManifest{Fragments: []ManifestEntry{
 	{Namespace: "", Path: "core/schema/definitions/base.schema.json"},
 	{Namespace: "gemini", Path: "grove-gemini/gemini.schema.json"},
 	{Namespace: "flow", Path: "flow/flow.schema.json"},
+	{Namespace: "forge", Path: "core/forge.schema.json"},
 	{Namespace: "logging", Path: "core/logging.schema.json"},
 }}
 

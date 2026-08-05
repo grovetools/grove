@@ -5,6 +5,7 @@
     { "namespace": "",        "path": "core/pkg/claudenotebook/claude.schema.json" },
     { "namespace": "gemini",  "path": "grove-gemini/gemini.schema.json" },
     { "namespace": "flow",    "path": "flow/flow.schema.json" },
+    { "namespace": "forge",   "path": "core/forge.schema.json" },
     { "namespace": "logging", "path": "core/logging.schema.json" }
   ]
 }

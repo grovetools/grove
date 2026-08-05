@@ -49,7 +49,11 @@ type forgeStatusReport struct {
 	// presented, colon-separated hex. Empty when not probed or unreachable.
 	TLSFingerprint string `json:"tls_fingerprint,omitempty"`
 	// ProbeError explains an empty fingerprint.
-	ProbeError string `json:"probe_error,omitempty"`
+	ProbeError   string `json:"probe_error,omitempty"`
+	MeshAddress  string `json:"mesh_address"`
+	MeshEndpoint string `json:"-"`
+	MeshPubkey   string `json:"mesh_pubkey"`
+	ProbeTarget  string `json:"probe_target"`
 }
 
 func newForgeStatusCmd() *cobra.Command {
@@ -70,8 +74,15 @@ Everything else is read from local state and works offline.`
 
 		// A missing [forge] block is not fatal for status: "nothing is
 		// configured" is exactly what an operator is asking about.
-		if forgeCfg, err := loadForgeConfig(); err == nil {
+		var forgeCfg *config.ForgeConfig
+		if loaded, err := loadForgeConfig(); err == nil {
+			forgeCfg = loaded
 			report.ConfiguredURL = strings.TrimSpace(forgeCfg.URL)
+			if forgeCfg.Wireguard.IsEnabled() {
+				report.MeshAddress = strings.TrimSpace(forgeCfg.Wireguard.Address)
+				report.MeshEndpoint = strings.TrimSpace(forgeCfg.Wireguard.Endpoint)
+				report.MeshPubkey, _ = cachedForgeWireGuardPubkey()
+			}
 		}
 
 		outputs, ok, err := loadCachedForgeOutputs()
@@ -81,8 +92,15 @@ Everything else is read from local state and works offline.`
 		report.Provisioned = ok
 		report.Outputs = outputs
 
-		if ok && !noProbe && outputs.SyncdAddr != "" {
-			fp, perr := probeTLSFingerprint(outputs.SyncdAddr)
+		report.ProbeTarget = outputs.SyncdAddr
+		if forgeCfg != nil && forgeCfg.Wireguard.IsEnabled() {
+			_, port, splitErr := net.SplitHostPort(outputs.SyncdAddr)
+			if splitErr == nil && forgeMeshIP(forgeCfg) != "" {
+				report.ProbeTarget = net.JoinHostPort(forgeMeshIP(forgeCfg), port)
+			}
+		}
+		if ok && !noProbe && report.ProbeTarget != "" {
+			fp, perr := probeTLSFingerprint(report.ProbeTarget)
 			if perr != nil {
 				report.ProbeError = perr.Error()
 			} else {
@@ -117,6 +135,13 @@ func renderForgeStatus(w io.Writer, report forgeStatusReport) {
 
 	fmt.Fprintf(w, "Forge %s (%s)\n", report.Outputs.VMName, report.Outputs.Zone)
 	renderForgeOutputs(w, report.Outputs)
+	if report.MeshAddress != "" {
+		pubkey := report.MeshPubkey
+		if pubkey == "" {
+			pubkey = "not cached (run `grove forge up`)"
+		}
+		fmt.Fprintf(w, "  mesh:     %s via %s; pubkey %s; enrolled? see `grove forge wg status`\n", report.MeshAddress, report.MeshEndpoint, pubkey)
+	}
 
 	if report.ConfiguredURL != "" && report.Outputs.ForgeURL != "" && report.ConfiguredURL != report.Outputs.ForgeURL {
 		// Worth shouting about: the daemon polls the configured URL, so a
@@ -131,7 +156,10 @@ func renderForgeStatus(w io.Writer, report forgeStatusReport) {
 			fmt.Fprintln(w, "  Self-signed: pin this value on clients. It changes only if the VM is rebuilt.")
 		}
 	case report.ProbeError != "":
-		fmt.Fprintf(w, "\nTLS: could not probe %s — %s\n", report.Outputs.SyncdAddr, report.ProbeError)
+		fmt.Fprintf(w, "\nTLS: could not probe %s — %s\n", report.ProbeTarget, report.ProbeError)
+		if report.MeshAddress != "" {
+			fmt.Fprintln(w, "  The mesh or syncd/TLS may be unhealthy; run `grove forge wg status` to distinguish enrollment/hub reachability from service health.")
+		}
 	}
 }
 

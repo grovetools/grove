@@ -466,7 +466,7 @@ func forgeRestoreScript(gs, timestamp string) string {
 // ---- TLS reconciliation -----------------------------------------------------
 
 // reconcileForgeTLS regenerates the self-signed certificate when it no longer
-// covers the forge's current external address.
+// covers the forge's complete configured address/name set.
 //
 // This exists because of a failure this job hit for real. The startup script
 // generates the certificate once — it guards itself with
@@ -493,8 +493,14 @@ func reconcileForgeTLS(w io.Writer, outputs forgeOutputs, forgeCfg *config.Forge
 	}
 	defer cleanup()
 
+	waitForFirstBoot := ""
+	if forgeCfg != nil && forgeCfg.Wireguard.IsEnabled() {
+		// A fresh VM's startup script owns first certificate creation. Wait for
+		// that one-shot step so this same `up` can widen it with the mesh SAN.
+		waitForFirstBoot = "i=0; while ! sudo test -f /etc/grove-forge/tls/cert.pem && [ $i -lt 120 ]; do sleep 1; i=$((i+1)); done; "
+	}
 	sans, err := ssh.outputCommand(
-		"if sudo test -f /etc/grove-forge/tls/cert.pem; then "+
+		waitForFirstBoot+"if sudo test -f /etc/grove-forge/tls/cert.pem; then "+
 			"sudo openssl x509 -in /etc/grove-forge/tls/cert.pem -noout -ext subjectAltName; "+
 			"else echo NO_CERT_YET; fi", "")
 	if err != nil {
@@ -511,13 +517,20 @@ func reconcileForgeTLS(w io.Writer, outputs forgeOutputs, forgeCfg *config.Forge
 		fmt.Fprintln(w, "  Re-run `grove forge up` once it finishes to verify the certificate covers the address.")
 		return nil
 	}
-	if strings.Contains(sans, "IP Address:"+outputs.ExternalIP) {
+	target := forgeTLSTarget(forgeCfg, outputs.ExternalIP)
+	var missing []string
+	for _, needle := range target.Needles {
+		if !strings.Contains(sans, needle) {
+			missing = append(missing, needle)
+		}
+	}
+	if len(missing) == 0 {
 		return nil
 	}
 
-	fmt.Fprintf(w, "\nThe forge's certificate does not cover %s — regenerating.\n", outputs.ExternalIP)
+	fmt.Fprintf(w, "\nThe forge's certificate is missing required SANs %s — regenerating.\n", strings.Join(missing, ", "))
 	fmt.Fprintf(w, "  (its SANs are: %s)\n", strings.TrimSpace(strings.ReplaceAll(sans, "\n", " ")))
-	if err := ssh.runScript(forgeTLSRegenScript(outputs.ExternalIP)); err != nil {
+	if err := ssh.runScript(forgeTLSRegenScript(target)); err != nil {
 		return fmt.Errorf("regenerate the forge certificate: %w", err)
 	}
 	fmt.Fprintln(w, "Certificate regenerated. EVERY CLIENT PINNING THE OLD ONE MUST BE UPDATED:")
@@ -525,13 +538,45 @@ func reconcileForgeTLS(w io.Writer, outputs forgeOutputs, forgeCfg *config.Forge
 	return nil
 }
 
-func forgeTLSRegenScript(ip string) string {
+type forgeTLSTargetSet struct {
+	CN      string
+	SANs    []string
+	Needles []string
+}
+
+func forgeTLSTarget(forgeCfg *config.ForgeConfig, externalIP string) forgeTLSTargetSet {
+	domain := ""
+	if forgeCfg != nil {
+		domain = forgeCfg.Services.EffectiveDomain()
+	}
+	target := forgeTLSTargetSet{CN: strings.TrimSpace(externalIP)}
+	if domain != "" {
+		target.CN = domain
+	}
+	if externalIP = strings.TrimSpace(externalIP); externalIP != "" {
+		target.SANs = append(target.SANs, "IP:"+externalIP)
+		target.Needles = append(target.Needles, "IP Address:"+externalIP)
+	}
+	if forgeCfg != nil && forgeCfg.Wireguard.IsEnabled() {
+		if meshIP := forgeMeshIP(forgeCfg); meshIP != "" {
+			target.SANs = append(target.SANs, "IP:"+meshIP)
+			target.Needles = append(target.Needles, "IP Address:"+meshIP)
+		}
+	}
+	if domain != "" {
+		target.SANs = append(target.SANs, "DNS:"+domain)
+		target.Needles = append(target.Needles, "DNS:"+domain)
+	}
+	return target
+}
+
+func forgeTLSRegenScript(target forgeTLSTargetSet) string {
 	return strings.Join([]string{
 		"set -euo pipefail",
 		"TLS_DIR=/etc/grove-forge/tls",
 		"sudo cp \"$TLS_DIR/cert.pem\" \"$TLS_DIR/cert.pem.bak\" 2>/dev/null || true",
 		"sudo openssl req -x509 -newkey rsa:4096 -nodes -days 3650 " +
-			"-subj \"/CN=" + ip + "\" -addext \"subjectAltName=IP:" + ip + "\" " +
+			"-subj " + shellQuote("/CN="+target.CN) + " -addext " + shellQuote("subjectAltName="+strings.Join(target.SANs, ",")) + " " +
 			"-keyout \"$TLS_DIR/key.pem\" -out \"$TLS_DIR/cert.pem\"",
 		"sudo chmod 0600 \"$TLS_DIR/key.pem\"",
 		"sudo chmod 0644 \"$TLS_DIR/cert.pem\"",
