@@ -33,9 +33,15 @@ type ConsentFacts struct {
 	Description string `json:"description"`
 	Homepage    string `json:"homepage,omitempty"`
 
-	// Source is the display form of what is being installed: url@ref.
+	// Source is the display form of what is being installed: url@ref, or
+	// "<path> (working tree)" for a development install.
 	Source string `json:"source"`
 	Commit string `json:"commit"`
+	// Dev reports that this approval covers a working tree rather than a
+	// commit. It is a consent fact in its own right, not a display detail: it
+	// is the difference between approving something fixed and approving
+	// whatever that directory contains the next time the panel is rebuilt.
+	Dev bool `json:"dev,omitempty"`
 	// ManifestDigest hashes the grove-plugin.toml bytes, so an edit anywhere
 	// in the manifest re-opens the question even if no field below changed.
 	ManifestDigest string `json:"manifest_digest"`
@@ -106,6 +112,7 @@ func NewConsentFacts(m *Manifest, src ResolvedSource, manifestBytes []byte, runB
 		Homepage:       m.Plugin.Homepage,
 		Source:         src.Display(),
 		Commit:         src.Commit,
+		Dev:            src.Dev,
 		ManifestDigest: "sha256:" + hex.EncodeToString(sum[:]),
 		Build:          append([]string(nil), m.Build.Command...),
 		Run:            append([]string{runBinary}, m.Panel.Args...),
@@ -181,6 +188,14 @@ func (f ConsentFacts) Digest() string {
 	// about something none of them says.
 	if len(f.Views) > 0 {
 		parts = append(parts, "views="+strings.Join(f.Views, "\x1f"))
+	}
+	// Appended only when set, for the same round-tripping reason as views: no
+	// previously-approved plugin re-opens its prompt. When it IS set it must be
+	// in the digest, so an approval granted to a pinned commit can never be
+	// reused to run a mutable working tree — the exec-trust store would
+	// otherwise see the same value for two materially different things.
+	if f.Dev {
+		parts = append(parts, "dev=true")
 	}
 	return exectrust.Digest(parts)
 }

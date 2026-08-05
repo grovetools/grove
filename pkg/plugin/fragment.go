@@ -113,7 +113,19 @@ func RenderFragment(m *Manifest, runBinary string, pin *Pin) ([]byte, error) {
 	header.WriteString("#\n")
 	fmt.Fprintf(&header, "# plugin:  %s — %s\n", m.Plugin.Name, m.Plugin.Description)
 	fmt.Fprintf(&header, "# source:  %s\n", pin.Spec)
-	fmt.Fprintf(&header, "# pinned:  %s\n", pin.Commit)
+	if pin.Dev {
+		// Saying "pinned" here would be false, and this header is the only
+		// place a user looking at their config finds out why the panel keeps
+		// changing under them.
+		header.WriteString("# mode:    DEVELOPMENT — built in place from the working tree above.\n")
+		header.WriteString("#          Nothing is pinned: `grove plugin update` rebuilds whatever\n")
+		header.WriteString("#          that directory contains at the time.\n")
+		if pin.Commit != "" {
+			fmt.Fprintf(&header, "# head:    %s (at install time, for the record only)\n", pin.Commit)
+		}
+	} else {
+		fmt.Fprintf(&header, "# pinned:  %s\n", pin.Commit)
+	}
 	if m.Plugin.Homepage != "" {
 		fmt.Fprintf(&header, "# home:    %s\n", m.Plugin.Homepage)
 	}

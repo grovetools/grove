@@ -66,12 +66,28 @@ root:
   grove plugin install ~/src/my-panel@v0.1.0
 
 The ref is resolved to an exact commit and recorded. Re-running install with
-the same pin does nothing.`,
+the same pin does nothing.
+
+DEVELOPMENT INSTALLS
+
+  grove plugin install --dev ~/Code/grove-plugins/grove-panel-foo
+
+--dev installs a panel you are writing. It builds the directory IN PLACE
+instead of cloning it, so the build sees whatever workspace you develop in —
+a go.work, a replace, an unpublished sibling module — exactly as your own
+` + "`go build`" + ` does. A normal install builds in a managed checkout where none
+of that applies, which is why a panel depending on an unreleased module can
+be built by hand but not installed.
+
+Nothing is pinned. The approval covers a directory, not a commit, and
+` + "`grove plugin update <name>`" + ` rebuilds whatever is in it at the time. Removing
+a dev install never deletes your source.`,
 		Args: cobra.ExactArgs(1),
 		RunE: runPluginInstall,
 	}
 	cmd.Flags().String("ref", "", "Tag, branch or commit to install (overrides @ref in the source)")
 	cmd.Flags().Bool("yes", false, "Approve the install without prompting")
+	cmd.Flags().Bool("dev", false, "Build a local directory in place, unpinned, for panel development")
 	cmd.Flags().Bool("force", false, "Reinstall even when the pinned commit is already installed")
 	cmd.Flags().Bool("json", false, "Output as JSON")
 	return cmd
@@ -126,9 +142,10 @@ func runPluginInstall(cmd *cobra.Command, args []string) error {
 	ref, _ := cmd.Flags().GetString("ref")
 	yes, _ := cmd.Flags().GetBool("yes")
 	force, _ := cmd.Flags().GetBool("force")
+	dev, _ := cmd.Flags().GetBool("dev")
 
 	in := newInstaller(yes, jsonOutput)
-	res, err := in.Install(cmd.Context(), args[0], plugin.Options{Ref: ref, Force: force})
+	res, err := in.Install(cmd.Context(), args[0], plugin.Options{Ref: ref, Force: force, Dev: dev})
 	if err != nil {
 		return pluginErr(err)
 	}
@@ -205,6 +222,7 @@ func runPluginList(cmd *cobra.Command, _ []string) error {
 				"binary":   st.Pin.Binary,
 				"fragment": st.Pin.Fragment,
 				"protocol": st.Pin.Consent.Protocol,
+				"dev":      st.Pin.Dev,
 				"approved": st.Approved,
 				"intact":   st.FragmentPresent && st.BinaryPresent,
 			})
@@ -235,11 +253,26 @@ func runPluginList(cmd *cobra.Command, _ []string) error {
 			state = "no binary"
 		case !st.Approved:
 			state = "edited"
+		case st.Pin.Dev:
+			// Reported last so a genuinely broken dev install still shows what
+			// is broken. "dev" is not a fault, but it is never "ok" either:
+			// the binary on disk came from a directory that has very likely
+			// moved on since, and the PINNED column below is showing a commit
+			// that nothing is actually pinned to.
+			state = "dev"
 		}
-		if state != "ok" {
+		// "dev" is a mode, not a fault, so it does not join the broken list —
+		// there is no remedy to print for it.
+		if state != "ok" && state != "dev" {
 			broken = append(broken, st)
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", st.Name, st.Pin.Consent.Source, shortCommit(st.Pin.Commit), protocol, state)
+		// The PINNED column would otherwise print the HEAD recorded at install
+		// time, which reads as a pin and is not one.
+		pinned := shortCommit(st.Pin.Commit)
+		if st.Pin.Dev {
+			pinned = "—"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", st.Name, st.Pin.Consent.Source, pinned, protocol, state)
 	}
 	if err := w.Flush(); err != nil {
 		return err
@@ -318,14 +351,35 @@ func printConsent(req *plugin.ConsentRequest, out io.Writer) {
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "  plugin    %s — %s\n", f.Name, f.Description)
 	fmt.Fprintf(out, "  source    %s\n", f.Source)
-	fmt.Fprintf(out, "  commit    %s\n", f.Commit)
+	if f.Dev {
+		// The commit line would read as a pin. What is actually being approved
+		// here is a directory, and that difference is the single most important
+		// thing on this screen — every other fact below is read from a manifest
+		// that can be edited a second after this prompt is answered.
+		if f.Commit != "" {
+			fmt.Fprintf(out, "  head      %s (right now — not a pin)\n", f.Commit)
+		}
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "  ⚠ DEVELOPMENT INSTALL — this approval covers a directory, not a commit.")
+		fmt.Fprintln(out, "    The panel is built in place, so it picks up your workspace (go.work,")
+		fmt.Fprintln(out, "    replaces, unpublished siblings) the way your own build does. Every")
+		fmt.Fprintln(out, "    rebuild runs whatever that directory contains at the time, including")
+		fmt.Fprintln(out, "    changes nobody has reviewed. Approve it for code you are writing.")
+	} else {
+		fmt.Fprintf(out, "  commit    %s\n", f.Commit)
+	}
 	if f.Homepage != "" {
 		fmt.Fprintf(out, "  home      %s\n", f.Homepage)
 	}
 
 	if req.IsUpdate() {
 		fmt.Fprintln(out)
-		if len(req.Changes) == 0 {
+		if len(req.Changes) == 0 && f.Dev {
+			// There is no pin to move. What changed is the source, which this
+			// screen cannot show and does not cover.
+			fmt.Fprintln(out, "  Nothing in the manifest has changed. The source may have — a")
+			fmt.Fprintln(out, "  development install rebuilds the directory either way.")
+		} else if len(req.Changes) == 0 {
 			fmt.Fprintln(out, "  Nothing you approved has changed; only the pin moves.")
 		} else {
 			fmt.Fprintf(out, "  Changed since you approved %s:\n", req.Previous.Source)
@@ -338,7 +392,14 @@ func printConsent(req *plugin.ConsentRequest, out io.Writer) {
 
 	fmt.Fprintln(out)
 	if len(f.Build) > 0 {
-		fmt.Fprintln(out, "  grove will run this once, in the checkout, to build it:")
+		if f.Dev {
+			// Neither "once" nor "in the checkout" is true here, and both
+			// matter: it runs in the user's own directory, every rebuild.
+			fmt.Fprintf(out, "  grove will run this in %s to build it,\n", req.SourceDir)
+			fmt.Fprintln(out, "  now and on every rebuild:")
+		} else {
+			fmt.Fprintln(out, "  grove will run this once, in the checkout, to build it:")
+		}
 		fmt.Fprintf(out, "      %s\n", strings.Join(f.Build, " "))
 	} else {
 		fmt.Fprintln(out, "  There is no build step: the repository ships the program itself.")
@@ -393,8 +454,14 @@ func printConsent(req *plugin.ConsentRequest, out io.Writer) {
 	fmt.Fprintf(out, "      %s\n", req.FragmentPath)
 	fmt.Fprintf(out, "      %s\n", req.BinaryPath)
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "  Approving covers this commit only. It is recorded in grove's trust store")
-	fmt.Fprintln(out, "  (`grove config trust --list`); an update asks again with a diff.")
+	if f.Dev {
+		fmt.Fprintln(out, "  Approving covers the DIRECTORY above, not a commit — that is what makes")
+		fmt.Fprintln(out, "  this a development install. It is recorded in grove's trust store")
+		fmt.Fprintln(out, "  (`grove config trust --list`); a rebuild does not ask again.")
+	} else {
+		fmt.Fprintln(out, "  Approving covers this commit only. It is recorded in grove's trust store")
+		fmt.Fprintln(out, "  (`grove config trust --list`); an update asks again with a diff.")
+	}
 	fmt.Fprintln(out)
 }
 

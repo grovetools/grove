@@ -35,8 +35,15 @@ type Pin struct {
 	// remote's default branch. `update` re-resolves THIS, which is what makes
 	// moving the pin an explicit act.
 	Ref string `json:"ref,omitempty"`
-	// Commit is the exact commit installed. This is the pin.
+	// Commit is the exact commit installed. This is the pin — except on a dev
+	// entry, where it is the working tree's HEAD at install time and pins
+	// nothing.
 	Commit string `json:"commit"`
+	// Dev marks an entry installed with `--dev`: built in place from a working
+	// tree, so SourceDir belongs to the user rather than to grove and the
+	// entry is not reproducible from Commit. Omitted when false so every
+	// lockfile written before this field round-trips byte-identically.
+	Dev bool `json:"dev,omitempty"`
 	// ManifestDigest is a hash of the grove-plugin.toml bytes at Commit.
 	ManifestDigest string `json:"manifest_digest"`
 	// ConsentDigest is the digest recorded in the exec-trust store when the

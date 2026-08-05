@@ -55,6 +55,10 @@ type Options struct {
 	Ref string
 	// Force reinstalls even when the resolved commit is already installed.
 	Force bool
+	// Dev installs from a local working tree in place: no clone, no ref, no
+	// pin, and the build runs where the user develops so it resolves
+	// dependencies the same way their own `go build` does. See DevSource.
+	Dev bool
 }
 
 // Result reports what an install did.
@@ -79,28 +83,41 @@ func (in *Installer) Install(ctx context.Context, spec string, opts Options) (*R
 		return nil, err
 	}
 
-	srcDir, err := SourceDir(src.Slug)
-	if err != nil {
-		return nil, err
-	}
-	_, statErr := os.Stat(srcDir)
-	freshCheckout := os.IsNotExist(statErr)
-
-	in.progress("Fetching %s", src.URL)
-	if err := Fetch(src, srcDir); err != nil {
-		if freshCheckout {
-			_ = os.RemoveAll(srcDir)
+	var (
+		srcDir        string
+		commit        string
+		freshCheckout bool
+	)
+	if opts.Dev {
+		// No fetch, no resolve, no checkout — and note that freshCheckout stays
+		// false, so none of the abandon paths below can delete the directory.
+		// This is the user's own tree, not a checkout grove owns.
+		if srcDir, commit, err = DevSource(src); err != nil {
+			return nil, err
 		}
-		return nil, err
+		in.progress("Development install — building in place in %s", srcDir)
+	} else {
+		if srcDir, err = SourceDir(src.Slug); err != nil {
+			return nil, err
+		}
+		_, statErr := os.Stat(srcDir)
+		freshCheckout = os.IsNotExist(statErr)
+
+		in.progress("Fetching %s", src.URL)
+		if err := Fetch(src, srcDir); err != nil {
+			if freshCheckout {
+				_ = os.RemoveAll(srcDir)
+			}
+			return nil, err
+		}
+		if commit, err = Resolve(srcDir, src.Ref); err != nil {
+			return nil, err
+		}
+		if err := Checkout(srcDir, commit); err != nil {
+			return nil, err
+		}
 	}
-	commit, err := Resolve(srcDir, src.Ref)
-	if err != nil {
-		return nil, err
-	}
-	if err := Checkout(srcDir, commit); err != nil {
-		return nil, err
-	}
-	resolved := ResolvedSource{Source: src, Commit: commit, Dir: srcDir}
+	resolved := ResolvedSource{Source: src, Commit: commit, Dir: srcDir, Dev: opts.Dev}
 
 	manifest, manifestBytes, err := LoadManifest(srcDir)
 	if err != nil {
@@ -125,7 +142,16 @@ func (in *Installer) Install(ctx context.Context, spec string, opts Options) (*R
 	if err != nil {
 		return nil, err
 	}
-	versionDir, err := VersionDir(name, commit)
+	// A dev install keys its version directory on the literal "dev" rather than
+	// on a commit: there is no pin, and keying on HEAD would accumulate a
+	// directory per commit for builds that are not reproducible from any of
+	// them. Successive dev installs overwrite the one slot, which is the honest
+	// shape — only the latest build exists.
+	version := commit
+	if opts.Dev {
+		version = "dev"
+	}
+	versionDir, err := VersionDir(name, version)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +160,12 @@ func (in *Installer) Install(ctx context.Context, spec string, opts Options) (*R
 	facts := NewConsentFacts(manifest, resolved, manifestBytes, binPath)
 	digest := facts.Digest()
 
-	if existing != nil && existing.ConsentDigest == digest && !opts.Force {
+	// A dev install never short-circuits as "unchanged". The digest covers the
+	// manifest, not the source, and the source is a directory the user is
+	// actively editing — "nothing changed" is the one thing this mode can never
+	// conclude. Rebuilding every time is the whole point of `install --dev`
+	// being the iteration loop.
+	if existing != nil && existing.ConsentDigest == digest && !opts.Force && !opts.Dev {
 		if installed(existing) {
 			in.progress("%s is already installed at %s", name, facts.Source)
 			return &Result{Name: name, Pin: existing, Action: "unchanged"}, nil
@@ -200,6 +231,7 @@ func (in *Installer) Install(ctx context.Context, spec string, opts Options) (*R
 		URL:            src.URL,
 		Ref:            src.Ref,
 		Commit:         commit,
+		Dev:            opts.Dev,
 		ManifestDigest: facts.ManifestDigest,
 		ConsentDigest:  digest,
 		Consent:        facts,
@@ -246,7 +278,19 @@ func (in *Installer) Update(ctx context.Context, name string, opts Options) (*Re
 	if pin == nil {
 		return nil, fmt.Errorf("%q is not installed", name)
 	}
-	if opts.Ref == "" {
+	// A dev entry stays a dev entry across updates. `update` on one means
+	// "rebuild from the working tree", which is the iteration loop — so it
+	// carries the mode forward rather than quietly re-pinning the panel to a
+	// commit the user never asked for. A ref is meaningless here and DevSource
+	// rejects one, so an explicit --ref becomes a clear error rather than a
+	// silent mode switch.
+	if pin.Dev {
+		opts.Dev = true
+		if opts.Ref != "" {
+			return nil, fmt.Errorf("%s is a development install, which builds the working tree as it is — `--ref %s` cannot apply to it; reinstall without --dev to pin it", name, opts.Ref)
+		}
+	}
+	if opts.Ref == "" && !opts.Dev {
 		opts.Ref = pin.Ref
 	}
 	// The spec may carry its own ref; the pin's ref (or --ref) is the one
@@ -292,7 +336,10 @@ func (in *Installer) Remove(name string, keepSource bool) ([]string, error) {
 	}
 	removed = append(removed, removeBinary(pin, versionsDir)...)
 
-	if !keepSource && pin.SourceDir != "" && !lock.UsesSourceDir(pin.SourceDir, name) {
+	// pin.Dev is the guard that matters most in this function: a dev pin's
+	// SourceDir is the user's own working tree, not a checkout grove created,
+	// and removing a plugin must never delete the source someone is writing.
+	if !keepSource && !pin.Dev && pin.SourceDir != "" && !lock.UsesSourceDir(pin.SourceDir, name) {
 		if err := os.RemoveAll(pin.SourceDir); err == nil {
 			removed = append(removed, pin.SourceDir)
 		}

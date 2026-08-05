@@ -29,15 +29,28 @@ type Source struct {
 // and checked out.
 type ResolvedSource struct {
 	Source
-	// Commit is the exact commit the checkout is pinned at.
+	// Commit is the exact commit the checkout is pinned at. On a development
+	// install it is the working tree's HEAD, recorded for the record only:
+	// nothing is pinned to it and the build does not use it.
 	Commit string
-	// Dir is the checkout.
+	// Dir is the checkout — or, on a development install, the user's own
+	// working tree.
 	Dir string
+	// Dev marks a development install: built in place, from whatever is in the
+	// working tree right now.
+	Dev bool
 }
 
 // Display renders the source the way the user typed it, with the ref that was
 // actually installed.
 func (r ResolvedSource) Display() string {
+	if r.Dev {
+		// Deliberately not url@ref: there is no ref, and rendering one would
+		// state a pin that does not exist. This string is also a consent fact,
+		// so "working tree" is what the user approves and what an update diff
+		// shows changing if the panel is later installed properly.
+		return r.URL + " (working tree)"
+	}
 	url := strings.TrimPrefix(r.URL, "https://")
 	url = strings.TrimSuffix(url, ".git")
 	ref := r.Ref
@@ -45,6 +58,48 @@ func (r ResolvedSource) Display() string {
 		ref = shortCommit(r.Commit)
 	}
 	return url + "@" + ref
+}
+
+// DevSource prepares a development install. It is the whole of what `--dev`
+// changes about resolution, and it is deliberately tiny: there is no clone, no
+// ref resolution and no checkout, because the source IS the directory the user
+// is editing.
+//
+// That single fact is what makes the mode useful. `grove plugin install` builds
+// in its own managed checkout under DataDir, where no go.work applies and every
+// dependency must therefore resolve through the module graph — so a panel built
+// against an unpublished sibling cannot be installed at all. Building in place
+// puts the build back inside whatever workspace the user develops in, and the
+// deps resolve the same way they do when they run `go build` by hand.
+//
+// The cost is that nothing is pinned: the approval covers a directory whose
+// contents can change immediately afterwards. That is stated on the consent
+// screen rather than mitigated, because a development install that froze the
+// source would not be one.
+func DevSource(src Source) (dir, commit string, err error) {
+	if !filepath.IsAbs(src.URL) {
+		return "", "", fmt.Errorf("--dev needs a path to a local directory, not %s — a development install builds in place and there is nothing local to build for a remote source", src.URL)
+	}
+	if src.Ref != "" {
+		return "", "", fmt.Errorf("--dev builds the working tree as it is, so it cannot also install %q — drop the ref, or install without --dev to pin it", src.Ref)
+	}
+	info, err := os.Stat(src.URL)
+	if err != nil || !info.IsDir() {
+		return "", "", fmt.Errorf("%s is not a directory", src.URL)
+	}
+	// EvalSymlinks so the path recorded in the pin is the one the build and any
+	// later `go.work` lookup actually walk up from.
+	dir, err = filepath.EvalSymlinks(src.URL)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve %s: %w", src.URL, err)
+	}
+	// HEAD is recorded so `grove plugin list` can say which commit the tree was
+	// on, but it is not a pin and a dirty tree is not an error — building
+	// uncommitted work is the point of the mode.
+	if out, err := git(dir, "rev-parse", "HEAD"); err == nil {
+		commit = strings.TrimSpace(out)
+	}
+	return dir, commit, nil
 }
 
 var (
