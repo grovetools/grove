@@ -110,7 +110,13 @@ type Panel struct {
 	// Label is the human-readable name the rail shows. Empty falls back to
 	// plugin.name, which is constrained to a bare key and is often not what
 	// the author would choose to display.
-	Label           string   `toml:"label"`
+	Label string `toml:"label"`
+	// Icon is either a core theme icon NAME ("rss" — mode-aware, degrades to
+	// its ASCII form) or the plugin's own LITERAL glyph ("", an emoji, a
+	// short ASCII mark) — a third-party panel is not limited to the names the
+	// host compiled in. The host resolves it with theme.ResolveIconOr: an
+	// unknown name (or a literal glyph under ASCII icon mode, which has no
+	// ASCII form to degrade to) falls back to a generic mark.
 	Icon            string   `toml:"icon"`
 	Protocol        string   `toml:"protocol"`
 	ProtocolTimeout string   `toml:"protocol_timeout"`
