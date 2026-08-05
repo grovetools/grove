@@ -69,6 +69,10 @@ const ProtocolEmbedV1 = "embed/v1"
 //	work_minutes  = 25
 //	break_minutes = 5
 //
+//	[panel.notebook]
+//	subtree     = "hn/clippings"
+//	description = "stories you clip from the feed"
+//
 //	[[panel.keys]]
 //	key         = "ctrl+f"
 //	description = "jump to the notebook"
@@ -157,6 +161,10 @@ type Panel struct {
 	// Filled by ParseManifest; see manifest_views.go for why the order matters
 	// and Panel.ViewNames for what happens when it is absent.
 	ViewOrder []string `toml:"-"`
+	// Notebook is the panel's declared notebook subtree — `[panel.notebook]`,
+	// present only when the panel saves content into the user's notebook. Like
+	// Keys and Views it is reported and bound, never enforced; see [Notebook].
+	Notebook *Notebook `toml:"notebook"`
 }
 
 // View is one of the panel's own layouts, declared so the host can default and
@@ -191,6 +199,31 @@ type View struct {
 // enforces it.
 type Key struct {
 	Key         string `toml:"key"`
+	Description string `toml:"description"`
+}
+
+// Notebook is the panel's declared notebook subtree — `[panel.notebook]`.
+//
+// A panel that saves content into the user's notebook (clippings, captures,
+// logs) says WHERE here, so the user reads it before approving the install.
+// Like [Key] and [View] it is a DECLARATION, not a grant: the host never
+// resolves the path, never creates it and never fences the panel into it — a
+// process the user approved writes wherever its own authority reaches, and
+// pretending otherwise would dress a disclosure up as a sandbox. What the
+// declaration buys is honesty at the one moment it matters: the consent
+// screen names the subtree, the approval digest binds it, and an update that
+// moves it re-opens the prompt.
+type Notebook struct {
+	// Subtree is the notebook-relative path the panel writes under, e.g.
+	// "hn/clippings". Held to build.binary's path rules — relative, no `..`
+	// escapes, printable — not because the host walks it (it never does) but
+	// because it is rendered on the consent screen, and a path that escapes or
+	// pretends to be absolute reads as a claim about directories the notebook
+	// does not contain.
+	Subtree string `toml:"subtree"`
+	// Description is what the panel saves there, in the author's words.
+	// Required: it is the only thing that tells the user what kind of content
+	// would appear in their notebook.
 	Description string `toml:"description"`
 }
 
@@ -353,8 +386,42 @@ func (m *Manifest) Validate() error {
 			return err
 		}
 	}
+	// The notebook section is optional — most panels save nothing — but a panel
+	// that declares one must declare it whole: a subtree without a description
+	// is a path the user cannot judge, and a description without a subtree is a
+	// promise about nowhere.
+	if nb := m.Panel.Notebook; nb != nil {
+		if strings.TrimSpace(nb.Subtree) == "" {
+			return errors.New("panel.notebook.subtree is required — name the notebook subtree the panel writes under")
+		}
+		if err := validateRelPath("panel.notebook.subtree", nb.Subtree); err != nil {
+			return err
+		}
+		// build.binary tolerates a trailing slash because Clean eats it before
+		// anything reads the path; here nothing ever Cleans it — the string goes
+		// to the consent screen verbatim — so the manifest has to write the
+		// canonical form itself.
+		if strings.HasPrefix(nb.Subtree, "/") || strings.HasSuffix(nb.Subtree, "/") {
+			return fmt.Errorf("panel.notebook.subtree %q must not begin or end with a slash — it names a subtree relative to the notebook root", nb.Subtree)
+		}
+		if len(nb.Subtree) > maxNotebookSubtreeLen {
+			return fmt.Errorf("panel.notebook.subtree is %d characters — longer than a path the consent screen can show legibly (%d)", len(nb.Subtree), maxNotebookSubtreeLen)
+		}
+		if strings.TrimSpace(nb.Description) == "" {
+			return errors.New("panel.notebook.description is required — it is shown at the install consent prompt")
+		}
+		if err := printable("panel.notebook.description", nb.Description); err != nil {
+			return err
+		}
+	}
 	return nil
 }
+
+// maxNotebookSubtreeLen bounds the declared subtree the way maxSettingsDepth
+// bounds nesting: not as attack surface, but as legibility. The subtree is
+// rendered inline in one consent-screen sentence, and a path longer than this
+// has outgrown what a user can meaningfully read there.
+const maxNotebookSubtreeLen = 128
 
 // ViewNames returns the declared view names in the order the manifest declares
 // them, which is the order preference is read from.

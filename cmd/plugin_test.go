@@ -93,6 +93,21 @@ func TestConsentScreenReportsUnknownManifestKeys(t *testing.T) {
 	}
 }
 
+// The notebook declaration is a claim about the user's own data, so the
+// screen renders it as a sentence naming the subtree and what lands there —
+// a disclosure, not a mount: the host never resolves or enforces the path.
+func TestConsentScreenNamesTheNotebookSubtree(t *testing.T) {
+	f := facts()
+	f.NotebookSubtree = "hn/clippings"
+	f.NotebookDescription = "stories you clip from the feed"
+	var buf bytes.Buffer
+	printConsent(&plugin.ConsentRequest{Facts: f}, &buf)
+
+	if !strings.Contains(buf.String(), "notebook  writes under hn/clippings/ in your notebook — stories you clip from the feed") {
+		t.Errorf("the consent screen never states the notebook subtree:\n%s", buf.String())
+	}
+}
+
 // A panel with no build step is a legitimate shape (a shell panel), and the
 // screen has to say so rather than showing an empty command.
 func TestConsentScreenNamesTheAbsenceOfABuildStep(t *testing.T) {

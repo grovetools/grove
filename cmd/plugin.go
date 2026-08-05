@@ -412,7 +412,7 @@ func printConsent(req *plugin.ConsentRequest, out io.Writer) {
 		fmt.Fprintf(out, "      with %s\n", e)
 	}
 
-	if f.Protocol != "" || len(f.Keys) > 0 || len(f.Views) > 0 {
+	if f.Protocol != "" || len(f.Keys) > 0 || len(f.Views) > 0 || f.NotebookSubtree != "" {
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "  The panel declares:")
 		if f.Protocol != "" {
@@ -428,6 +428,13 @@ func printConsent(req *plugin.ConsentRequest, out io.Writer) {
 		// list, they choose one entry from it when they mount the panel.
 		for _, v := range f.Views {
 			fmt.Fprintf(out, "      view      %s\n", v)
+		}
+		// The notebook line is a disclosure, not a mount: the host neither
+		// creates nor guards the subtree, it only makes sure the user has read
+		// the author's claim about their notebook before approving the process
+		// that will act on it.
+		if f.NotebookSubtree != "" {
+			fmt.Fprintf(out, "      notebook  writes under %s/ in your notebook — %s\n", f.NotebookSubtree, f.NotebookDescription)
 		}
 	}
 

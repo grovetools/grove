@@ -69,6 +69,18 @@ type ConsentFacts struct {
 	// offering something else, changes what the user will see in their drawer and
 	// should not pass silently.
 	Views []string `json:"views,omitempty"`
+	// NotebookSubtree and NotebookDescription carry the panel's
+	// [panel.notebook] declaration: the notebook subtree it says it writes,
+	// and what it saves there. Two fields rather than one prejoined line
+	// because the consent screen renders them into a sentence with words
+	// between them; the digest and Diff join them themselves (notebookFact).
+	//
+	// Like Keys and Views it grants nothing — the host never resolves the
+	// path — and it is on the screen for the same reason: content appearing in
+	// the user's notebook is a fact about their data, and an update that moves
+	// the subtree should not pass silently.
+	NotebookSubtree     string `json:"notebook_subtree,omitempty"`
+	NotebookDescription string `json:"notebook_description,omitempty"`
 	// Settings is the manifest's default settings table, flattened to sorted
 	// "dotted.key = value" lines.
 	//
@@ -106,7 +118,7 @@ func NewConsentFacts(m *Manifest, src ResolvedSource, manifestBytes []byte, runB
 		views = append(views, line)
 	}
 	sum := sha256.Sum256(manifestBytes)
-	return ConsentFacts{
+	facts := ConsentFacts{
 		Name:           m.Plugin.Name,
 		Description:    m.Plugin.Description,
 		Homepage:       m.Plugin.Homepage,
@@ -124,6 +136,11 @@ func NewConsentFacts(m *Manifest, src ResolvedSource, manifestBytes []byte, runB
 		Views:          views,
 		Settings:       FlattenSettings(m.Panel.Settings),
 	}
+	if m.Panel.Notebook != nil {
+		facts.NotebookSubtree = m.Panel.Notebook.Subtree
+		facts.NotebookDescription = m.Panel.Notebook.Description
+	}
+	return facts
 }
 
 // FlattenSettings renders a settings table as sorted "dotted.key = value"
@@ -189,6 +206,13 @@ func (f ConsentFacts) Digest() string {
 	if len(f.Views) > 0 {
 		parts = append(parts, "views="+strings.Join(f.Views, "\x1f"))
 	}
+	// Appended only when declared, for the reason views are: a manifest without
+	// [panel.notebook] must hash byte-identically to how it did before the
+	// section existed, so no previously-approved plugin re-opens its prompt to
+	// ask about something it never said.
+	if f.NotebookSubtree != "" {
+		parts = append(parts, "notebook="+notebookFact(f))
+	}
 	// Appended only when set, for the same round-tripping reason as views: no
 	// previously-approved plugin re-opens its prompt. When it IS set it must be
 	// in the digest, so an approval granted to a pinned commit can never be
@@ -198,6 +222,17 @@ func (f ConsentFacts) Digest() string {
 		parts = append(parts, "dev=true")
 	}
 	return exectrust.Digest(parts)
+}
+
+// notebookFact renders the notebook declaration as one comparable
+// "subtree — description" line, empty when the manifest declares none. The
+// digest and Diff both go through it, so the two can never disagree about
+// what the declaration says.
+func notebookFact(f ConsentFacts) string {
+	if f.NotebookSubtree == "" {
+		return ""
+	}
+	return f.NotebookSubtree + " — " + f.NotebookDescription
 }
 
 // FactChange is one line of an update diff.
@@ -229,6 +264,10 @@ func Diff(old, next ConsentFacts) []FactChange {
 	// decides the drawer default), and a per-line diff keyed on the view name
 	// would report a reordering as nothing at all.
 	add("views", strings.Join(old.Views, ", "), strings.Join(next.Views, ", "))
+	// The subtree and its description diff as one row: what the panel writes
+	// into the notebook is one fact, and a moved subtree with a reworded
+	// description is one change rather than two unrelated ones.
+	add("notebook", notebookFact(old), notebookFact(next))
 	add("label", old.Label, next.Label)
 	// One line per changed setting rather than one "settings" row: an update
 	// that retunes a default should say which one and from what.

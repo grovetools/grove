@@ -79,6 +79,17 @@ func RenderFragment(m *Manifest, runBinary string, pin *Pin) ([]byte, error) {
 		}
 		panel["views"] = views
 	}
+	// The notebook declaration travels into the config for the reason keys do:
+	// the file the user edits should repeat what the consent screen said the
+	// panel writes into their notebook. It grants nothing and no host reads
+	// it — the subtree is never resolved, created or fenced — it is the
+	// consent screen's claim, kept where the user can find it again.
+	if m.Panel.Notebook != nil {
+		panel["notebook"] = map[string]any{
+			"subtree":     m.Panel.Notebook.Subtree,
+			"description": m.Panel.Notebook.Description,
+		}
+	}
 	// Settings are the panel's defaults, written out so the file the user edits
 	// to retune the panel already shows every knob it has. Editing this table
 	// is the supported way to configure an installed panel; the host delivers
