@@ -207,9 +207,7 @@ func probeTLSFingerprint(addr string) (string, error) {
 		return "", fmt.Errorf("%q is not a host:port address", addr)
 	}
 	dialer := &net.Dialer{Timeout: forgeProbeTimeout}
-	conn, err := tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{
-		InsecureSkipVerify: true, //nolint:gosec // G402: the whole purpose is to read an unverifiable cert so it can be pinned
-	})
+	conn, err := tls.DialWithDialer(dialer, "tcp", addr, forgeTLSProbeConfig())
 	if err != nil {
 		return "", err
 	}
@@ -221,6 +219,18 @@ func probeTLSFingerprint(addr string) (string, error) {
 	}
 	sum := sha256.Sum256(certs[0].Raw)
 	return formatFingerprint(sum[:]), nil
+}
+
+// forgeTLSProbeConfig pins compact, classical key shares for this bounded
+// diagnostic handshake. In particular, the default hybrid ML-KEM key share can
+// make the ClientHello too large for constrained WireGuard paths. This is local
+// to the fingerprint probe, not a global TLS policy.
+func forgeTLSProbeConfig() *tls.Config {
+	return &tls.Config{
+		MinVersion:         tls.VersionTLS12,
+		CurvePreferences:   []tls.CurveID{tls.X25519, tls.CurveP256},
+		InsecureSkipVerify: true, //nolint:gosec // G402: the whole purpose is to read an unverifiable cert so it can be pinned
+	}
 }
 
 // formatFingerprint renders bytes as AA:BB:CC..., matching openssl's output.

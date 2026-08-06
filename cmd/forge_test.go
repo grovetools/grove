@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -324,13 +325,41 @@ func TestForgeOutputsCacheRoundTrip(t *testing.T) {
 
 // ---- TLS fingerprint probe -------------------------------------------------
 
+func TestForgeTLSProbeConfigPinsCompactClassicalCurves(t *testing.T) {
+	cfg := forgeTLSProbeConfig()
+	wantCurves := []tls.CurveID{tls.X25519, tls.CurveP256}
+	if !slices.Equal(cfg.CurvePreferences, wantCurves) {
+		t.Fatalf("curve preferences = %v, want %v", cfg.CurvePreferences, wantCurves)
+	}
+	for _, curve := range cfg.CurvePreferences {
+		if curve == tls.X25519MLKEM768 {
+			t.Fatalf("hybrid ML-KEM curve %v was offered", curve)
+		}
+	}
+	if cfg.MinVersion != tls.VersionTLS12 {
+		t.Errorf("minimum TLS version = %#x, want TLS 1.2 (%#x)", cfg.MinVersion, tls.VersionTLS12)
+	}
+	if !cfg.InsecureSkipVerify {
+		t.Error("fingerprint probe unexpectedly verifies the unpinned certificate")
+	}
+}
+
 // TestProbeTLSFingerprintMatchesTheCertificate: the fingerprint `grove forge
 // status` prints is the one an operator would pin, so it must equal the
 // SHA-256 of the leaf DER — computed here from the server's own certificate.
 func TestProbeTLSFingerprintMatchesTheCertificate(t *testing.T) {
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	offeredCurves := make(chan []tls.CurveID, 1)
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
+	srv.TLS = &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+			offeredCurves <- slices.Clone(hello.SupportedCurves)
+			return nil, nil
+		},
+	}
+	srv.StartTLS()
 	defer srv.Close()
 
 	addr := strings.TrimPrefix(srv.URL, "https://")
@@ -344,6 +373,10 @@ func TestProbeTLSFingerprintMatchesTheCertificate(t *testing.T) {
 	want := formatFingerprint(sum[:])
 	if got != want {
 		t.Errorf("fingerprint = %s, want %s", got, want)
+	}
+	wantCurves := []tls.CurveID{tls.X25519, tls.CurveP256}
+	if offered := <-offeredCurves; !slices.Equal(offered, wantCurves) {
+		t.Errorf("ClientHello curves = %v, want compact classical offer %v", offered, wantCurves)
 	}
 	// openssl's rendering, so the value read off the wire and the one written
 	// on the VM compare by eye.
