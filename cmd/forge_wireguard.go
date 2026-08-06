@@ -110,9 +110,135 @@ type forgeWGStatusReport struct {
 }
 
 func newForgeWGCmd() *cobra.Command {
-	cmd := cli.NewStandardCommand("wg", "Inspect the forge's WireGuard mesh client")
+	cmd := cli.NewStandardCommand("wg", "Converge and inspect the forge's WireGuard mesh client")
+	cmd.AddCommand(newForgeWGUpCmd())
 	cmd.AddCommand(newForgeWGStatusCmd())
 	return cmd
+}
+
+type forgeWGUpDeps struct {
+	loadConfig         func() (*config.ForgeConfig, error)
+	loadOutputs        func(string) (forgeOutputs, error)
+	reconcileWireGuard func(io.Writer, forgeOutputs, *config.ForgeConfig) error
+	reconcileTLS       func(io.Writer, forgeOutputs, *config.ForgeConfig) error
+}
+
+func newForgeWGUpCmd() *cobra.Command {
+	return newForgeWGUpCmdWithDeps(forgeWGUpDeps{
+		loadConfig:         loadForgeConfig,
+		loadOutputs:        loadForgeWGUpOutputs,
+		reconcileWireGuard: reconcileForgeWireGuard,
+		reconcileTLS:       reconcileForgeTLS,
+	})
+}
+
+func newForgeWGUpCmdWithDeps(deps forgeWGUpDeps) *cobra.Command {
+	var tfDir string
+	cmd := cli.NewStandardCommand("up", "Converge WireGuard and its TLS SAN on an existing forge (no Terraform)")
+	cmd.Long = `Converge an enabled [forge.wireguard] on an EXISTING forge, then ensure the
+self-signed certificate covers the mesh address.
+
+This command only uses cached outputs (or an existing terraform.tfstate selected
+by --tf-dir) to locate the VM, then connects through the forge's pinned SSH path.
+It does not extract or render a Terraform module, write tfvars, invoke terraform
+or gcloud, or change cloud infrastructure. Use 'grove forge up' to provision a
+new forge or intentionally converge infrastructure.`
+	cmd.Args = cobra.NoArgs
+	cmd.SilenceUsage = true
+	cmd.Flags().StringVar(&tfDir, "tf-dir", "", "Existing forge Terraform state dir to read without invoking Terraform (default: cached forge outputs)")
+	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
+		forgeCfg, err := deps.loadConfig()
+		if err != nil {
+			return err
+		}
+		if forgeCfg.Wireguard == nil {
+			return fmt.Errorf("no [forge.wireguard] block in the grove config — configure and enable it before running `grove forge wg up`")
+		}
+		if err := forgeCfg.Validate(); err != nil {
+			return fmt.Errorf("validate forge configuration: %w", err)
+		}
+		if !forgeCfg.Wireguard.IsEnabled() {
+			return fmt.Errorf("[forge.wireguard] is not enabled with address, endpoint and hub_public_key")
+		}
+		if forgeCfg.Infra == nil || strings.TrimSpace(forgeCfg.Infra.SSHUser) == "" {
+			return fmt.Errorf("[forge.infra] ssh_user is required for the pinned forge SSH connection")
+		}
+		outputs, err := deps.loadOutputs(tfDir)
+		if err != nil {
+			return err
+		}
+
+		out := cmd.OutOrStdout()
+		fmt.Fprintln(out, "Converging WireGuard on the existing forge over pinned SSH.")
+		if err := deps.reconcileWireGuard(out, outputs, forgeCfg); err != nil {
+			return err
+		}
+		// Keep the same safe order as forge up: mesh first, then widen the
+		// certificate once to cover the newly converged address.
+		if err := deps.reconcileTLS(out, outputs, forgeCfg); err != nil {
+			return err
+		}
+		fmt.Fprintln(out, "\nConvergence complete. Cloud infrastructure was not changed; Terraform and gcloud were not run.")
+		return nil
+	}
+	return cmd
+}
+
+// loadForgeWGUpOutputs is deliberately read-only. The normal path consumes the
+// outputs cache used by `forge status`; --tf-dir reads an existing cache or
+// terraform.tfstate in that state directory without validating/extracting a
+// module and without running Terraform.
+func loadForgeWGUpOutputs(tfDir string) (forgeOutputs, error) {
+	if strings.TrimSpace(tfDir) == "" {
+		outputs, ok, err := loadCachedForgeOutputs()
+		if err != nil {
+			return forgeOutputs{}, fmt.Errorf("read cached forge outputs: %w", err)
+		}
+		if !ok || outputs.ExternalIP == "" {
+			return forgeOutputs{}, fmt.Errorf("forge outputs are not cached — run `grove forge up` first, or pass --tf-dir for an existing forge state")
+		}
+		return outputs, nil
+	}
+
+	dir, err := filepath.Abs(tfDir)
+	if err != nil {
+		return forgeOutputs{}, fmt.Errorf("resolve --tf-dir: %w", err)
+	}
+	if raw, readErr := os.ReadFile(filepath.Join(dir, forgeOutputsName)); readErr == nil {
+		var outputs forgeOutputs
+		if err := json.Unmarshal(raw, &outputs); err != nil {
+			return forgeOutputs{}, fmt.Errorf("parse cached forge outputs in %s: %w", dir, err)
+		}
+		if outputs.ExternalIP == "" {
+			return forgeOutputs{}, fmt.Errorf("cached forge outputs in %s have no external_ip", dir)
+		}
+		return outputs, nil
+	} else if !os.IsNotExist(readErr) {
+		return forgeOutputs{}, fmt.Errorf("read cached forge outputs in %s: %w", dir, readErr)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "terraform.tfstate"))
+	if err != nil {
+		return forgeOutputs{}, fmt.Errorf("read existing forge state in %s (no outputs.json or terraform.tfstate): %w", dir, err)
+	}
+	var state struct {
+		Outputs map[string]json.RawMessage `json:"outputs"`
+	}
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return forgeOutputs{}, fmt.Errorf("parse existing forge state in %s: %w", dir, err)
+	}
+	envelope, err := json.Marshal(state.Outputs)
+	if err != nil {
+		return forgeOutputs{}, err
+	}
+	outputs, err := decodeForgeTerraformOutputs(envelope)
+	if err != nil {
+		return forgeOutputs{}, fmt.Errorf("decode existing forge state outputs in %s: %w", dir, err)
+	}
+	if outputs.ExternalIP == "" {
+		return forgeOutputs{}, fmt.Errorf("terraform state in %s has no external_ip — the forge may not be provisioned", dir)
+	}
+	return outputs, nil
 }
 
 func newForgeWGStatusCmd() *cobra.Command {

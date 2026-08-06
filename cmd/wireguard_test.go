@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/base64"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -88,6 +90,156 @@ func TestWireGuardConvergeScriptKeepsPrivateKeyRemote(t *testing.T) {
 	ipScript := wireGuardConvergeScript(cfg, defaultWireGuardPaths("/var/lib/grove-forge"))
 	if strings.Contains(ipScript, "grove-wg-reresolve.timer") {
 		t.Fatal("IP-literal endpoint installed a DNS re-resolution timer")
+	}
+}
+
+func validForgeWGUpConfig() *config.ForgeConfig {
+	wg := testWireGuardConfig()
+	return &config.ForgeConfig{
+		Infra:     &config.ForgeInfraConfig{SSHUser: "grovedev"},
+		Wireguard: &wg,
+	}
+}
+
+func executeForgeWGUpForTest(t *testing.T, deps forgeWGUpDeps, args ...string) (string, error) {
+	t.Helper()
+	cmd := newForgeWGUpCmdWithDeps(deps)
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs(args)
+	err := cmd.Execute()
+	return out.String(), err
+}
+
+func TestForgeWGUpUsesOnlyConvergeSeamsInSafeOrder(t *testing.T) {
+	binDir := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "forbidden-command-ran")
+	for _, name := range []string{"terraform", "gcloud"} {
+		script := "#!/bin/sh\ntouch " + shellQuote(marker) + "\nexit 99\n"
+		if err := os.WriteFile(filepath.Join(binDir, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var calls []string
+	deps := forgeWGUpDeps{
+		loadConfig: func() (*config.ForgeConfig, error) {
+			calls = append(calls, "config")
+			return validForgeWGUpConfig(), nil
+		},
+		loadOutputs: func(tfDir string) (forgeOutputs, error) {
+			calls = append(calls, "outputs:"+tfDir)
+			return forgeOutputs{ExternalIP: "203.0.113.9", TLSMode: "self-signed"}, nil
+		},
+		reconcileWireGuard: func(_ io.Writer, _ forgeOutputs, _ *config.ForgeConfig) error {
+			calls = append(calls, "wireguard")
+			return nil
+		},
+		reconcileTLS: func(_ io.Writer, _ forgeOutputs, _ *config.ForgeConfig) error {
+			calls = append(calls, "tls")
+			return nil
+		},
+	}
+	out, err := executeForgeWGUpForTest(t, deps, "--tf-dir", "/existing/state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(calls, ","), "config,outputs:/existing/state,wireguard,tls"; got != want {
+		t.Fatalf("call order = %q, want %q", got, want)
+	}
+	for _, want := range []string{"existing forge", "infrastructure was not changed", "Terraform and gcloud were not run"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("a forbidden terraform/gcloud command ran (stat err %v)", err)
+	}
+}
+
+func TestForgeWGUpRequiresEnabledValidConfig(t *testing.T) {
+	disabled := validForgeWGUpConfig()
+	off := false
+	disabled.Wireguard.Enabled = &off
+	invalid := validForgeWGUpConfig()
+	invalid.Wireguard.Endpoint = "not-a-host-port"
+
+	for _, tc := range []struct {
+		name    string
+		cfg     *config.ForgeConfig
+		wantErr string
+	}{
+		{"missing block", &config.ForgeConfig{Infra: &config.ForgeInfraConfig{SSHUser: "grovedev"}}, "no [forge.wireguard] block"},
+		{"disabled", disabled, "not enabled"},
+		{"invalid", invalid, "not a host:port"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			outputsCalled := false
+			deps := forgeWGUpDeps{
+				loadConfig: func() (*config.ForgeConfig, error) { return tc.cfg, nil },
+				loadOutputs: func(string) (forgeOutputs, error) {
+					outputsCalled = true
+					return forgeOutputs{}, nil
+				},
+				reconcileWireGuard: func(io.Writer, forgeOutputs, *config.ForgeConfig) error { return nil },
+				reconcileTLS:       func(io.Writer, forgeOutputs, *config.ForgeConfig) error { return nil },
+			}
+			_, err := executeForgeWGUpForTest(t, deps)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, tc.wantErr)
+			}
+			if outputsCalled {
+				t.Fatal("outputs were loaded before invalid WireGuard config was rejected")
+			}
+		})
+	}
+}
+
+func TestLoadForgeWGUpOutputsReadsExistingStateWithoutWriting(t *testing.T) {
+	dir := t.TempDir()
+	state := `{"version":4,"outputs":{"external_ip":{"value":"203.0.113.9","type":"string"},"tls_mode":{"value":"self-signed","type":"string"}}}`
+	statePath := filepath.Join(dir, "terraform.tfstate")
+	if err := os.WriteFile(statePath, []byte(state), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadForgeWGUpOutputs(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ExternalIP != "203.0.113.9" || got.TLSMode != "self-signed" {
+		t.Fatalf("outputs = %+v", got)
+	}
+	after, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(before) != 1 || len(after) != 1 || after[0].Name() != "terraform.tfstate" {
+		t.Fatalf("state dir changed: before=%v after=%v", before, after)
+	}
+	raw, err := os.ReadFile(statePath)
+	if err != nil || string(raw) != state {
+		t.Fatalf("state changed: %v, %q", err, raw)
+	}
+}
+
+func TestForgeWGUpHelpStatesTheSafetyBoundary(t *testing.T) {
+	cmd := newForgeWGUpCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	if err := cmd.Help(); err != nil {
+		t.Fatal(err)
+	}
+	help := out.String()
+	for _, want := range []string{"existing forge", "--tf-dir", "does not extract", "invoke terraform", "infrastructure"} {
+		if !strings.Contains(strings.ToLower(help), strings.ToLower(want)) {
+			t.Errorf("help missing %q:\n%s", want, help)
+		}
 	}
 }
 
