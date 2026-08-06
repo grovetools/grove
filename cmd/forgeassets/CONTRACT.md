@@ -122,6 +122,11 @@ These are not preferences; the trial's hardening ledger is where each came from.
 
 ## State layout and lifecycle
 
+- The embedded module resolves `image_family` for first creation, but ignores
+  later drift of only `boot_disk[0].initialize_params[0].image`. A rolling
+  family advancing must never replace this pet and its stateful boot disk. OS
+  replacement/upgrades require an explicit, separately designed data migration;
+  disk size/type and every other instance field remain Terraform-managed.
 - Default module dir: `~/.local/state/grove/forge/terraform` (singular — there
   is one forge). `up`/`plan`/`down` re-extract the embedded module files there
   on every run so they version with the binary, and never touch

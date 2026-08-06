@@ -214,6 +214,16 @@ resource "google_compute_instance" "forge" {
   # behind --force plus the instance name typed back.
   allow_stopping_for_update = true
 
+  # A rolling image family selects the OS only when this pet is first created.
+  # OS replacement or upgrades require an explicit, separately designed data
+  # migration; they must never happen incidentally because the family advanced.
+  # Keep this path exact: disk size/type and every other VM field must converge.
+  lifecycle {
+    ignore_changes = [
+      boot_disk[0].initialize_params[0].image,
+    ]
+  }
+
   # The pet's disk is its state. Deleting the instance without deleting this
   # disk is the difference between a rebuild and a data loss, so `grove forge
   # down` double-confirms and the disk is called out in its prompt.

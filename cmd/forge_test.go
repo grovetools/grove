@@ -236,6 +236,47 @@ func TestResolveForgeTerraformDirRejectsANonModule(t *testing.T) {
 	}
 }
 
+func TestForgeTerraformIgnoresOnlyRollingImageDrift(t *testing.T) {
+	tfFS, err := forgeassets.TerraformFS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mainTF, err := fs.ReadFile(tfFS, "main.tf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	main := string(mainTF)
+	const lifecycle = `  lifecycle {
+    ignore_changes = [
+      boot_disk[0].initialize_params[0].image,
+    ]
+  }`
+	if got := strings.Count(main, lifecycle); got != 1 {
+		t.Fatalf("exact image-only lifecycle block count = %d, want 1", got)
+	}
+	if got := strings.Count(main, "ignore_changes"); got != 1 {
+		t.Fatalf("ignore_changes declaration count = %d, want exactly 1", got)
+	}
+
+	// The exact block above is deliberately narrow. These neighboring or
+	// broader fields must remain Terraform-managed rather than being folded
+	// into the pet-image exception.
+	for _, forbidden := range []string{
+		"boot_disk",
+		"boot_disk[0].initialize_params",
+		"boot_disk[0].initialize_params[0].size",
+		"boot_disk[0].initialize_params[0].type",
+		"machine_type",
+		"metadata",
+		"network_interface",
+		"service_account",
+	} {
+		if strings.Contains(lifecycle, "      "+forbidden+",\n") {
+			t.Errorf("lifecycle broadly ignores %q", forbidden)
+		}
+	}
+}
+
 func TestForgeTerraformIngressControlsPreserveDefaultsAndGuardOutputs(t *testing.T) {
 	tfFS, err := forgeassets.TerraformFS()
 	if err != nil {
