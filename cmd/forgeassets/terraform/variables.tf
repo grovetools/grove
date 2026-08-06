@@ -80,6 +80,29 @@ variable "enable_iap_ssh" {
   default     = true
 }
 
+variable "ssh_ingress" {
+  description = "SSH source posture: cidr+iap (default), iap break-glass only, or cidr only. enable_iap_ssh remains the compatibility switch within cidr+iap."
+  type        = string
+  default     = "cidr+iap"
+
+  validation {
+    condition     = contains(["cidr+iap", "iap", "cidr"], var.ssh_ingress)
+    error_message = "ssh_ingress must be \"cidr+iap\", \"iap\", or \"cidr\"."
+  }
+}
+
+variable "syncd_ingress_enabled" {
+  description = "Create the public syncd firewall rule. False leaves syncd reachable only through routes that need no ingress rule here, such as the WireGuard mesh."
+  type        = bool
+  default     = true
+}
+
+variable "forgejo_ingress_enabled" {
+  description = "Create the IAP Forgejo firewall rule. False is the supported mesh-only Forgejo end-state; IAP SSH remains the independent break-glass path."
+  type        = bool
+  default     = true
+}
+
 variable "forgejo_extra_cidrs" {
   description = "Additional CIDRs allowed to reach the Forgejo HTTP port, on top of Google's IAP range (the only default source). Empty by default: the forge is IAP-tunnel-only until the owner opts into wider access. Forgejo is plain HTTP, so anything added here sees cleartext in transit. 0.0.0.0/0 is refused."
   type        = list(string)

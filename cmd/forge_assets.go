@@ -161,7 +161,10 @@ func forgeTFVars(cfg *config.ForgeConfig) (string, error) {
 	b.WriteString("\n# --- access (an operator CIDR; the open internet is refused) ---\n")
 	fmt.Fprintf(&b, "ssh_user       = %q\n", strings.TrimSpace(infra.SSHUser))
 	fmt.Fprintf(&b, "allowed_cidr   = %q\n", strings.TrimSpace(infra.CIDR))
-	fmt.Fprintf(&b, "enable_iap_ssh = %t\n", infra.IAPSSHEnabled())
+	fmt.Fprintf(&b, "enable_iap_ssh          = %t\n", infra.IAPSSHEnabled())
+	fmt.Fprintf(&b, "ssh_ingress            = %q\n", infra.EffectiveSSHIngress())
+	fmt.Fprintf(&b, "syncd_ingress_enabled  = %t\n", infra.SyncdIngressIsEnabled())
+	fmt.Fprintf(&b, "forgejo_ingress_enabled = %t\n", infra.ForgejoIngressIsEnabled())
 	if pub := strings.TrimSpace(infra.SSHPubkeyFile); pub != "" {
 		fmt.Fprintf(&b, "ssh_pubkey_file = %q\n", pub)
 	}

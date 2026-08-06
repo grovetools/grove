@@ -15,7 +15,10 @@ image_project = "debian-cloud"
 # --- access (an operator CIDR; the open internet is refused) ---
 ssh_user       = "grovedev"
 allowed_cidr   = "203.0.113.7/32"
-enable_iap_ssh = false
+enable_iap_ssh          = true
+ssh_ingress            = "iap"
+syncd_ingress_enabled  = false
+forgejo_ingress_enabled = false
 ssh_pubkey_file = "~/.ssh/forge.pub"
 
 # --- identity ---

@@ -615,10 +615,13 @@ func forgeOutputsForVerb(tfDir string, forgeCfg *config.ForgeConfig) (forgeOutpu
 // for its temp dir. Extracted from shipForgeSyncd so the backup verbs reach the
 // VM the same way `up` does: host key scanned and pinned at use, never TOFU.
 func forgeSSH(outputs forgeOutputs, forgeCfg *config.ForgeConfig) (*satelliteSSH, func(), error) {
-	addr := outputs.ExternalIP + ":22"
-	hostKey, err := sshKeyscanHostKey(addr)
+	addr, source, err := forgeDialAddr(forgeCfg, outputs)
 	if err != nil {
-		return nil, func() {}, fmt.Errorf("scan forge host key: %w", err)
+		return nil, func() {}, err
+	}
+	hostKey, err := scanForgeSelectedHostKey(addr, source, outputs)
+	if err != nil {
+		return nil, func() {}, err
 	}
 	tmpDir, err := os.MkdirTemp("", "grove-forge-ssh-")
 	if err != nil {

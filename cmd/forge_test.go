@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,8 +20,11 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/grovetools/core/config"
+
+	"github.com/grovetools/grove/cmd/forgeassets"
 )
 
 // sandboxForgeState redirects the grove state dir into the test's temp dir, so
@@ -79,18 +83,21 @@ func TestForgeTFVarsFullyConfiguredGolden(t *testing.T) {
 	disabled := false
 	cfg := &config.ForgeConfig{
 		Infra: &config.ForgeInfraConfig{
-			Project:             "example-project",
-			Zone:                "us-central1-a",
-			VMName:              "grove-forge-prod",
-			MachineType:         "e2-standard-2",
-			DiskSizeGB:          200,
-			ImageFamily:         "debian-12",
-			ImageProject:        "debian-cloud",
-			SSHUser:             "grovedev",
-			SSHPubkeyFile:       "~/.ssh/forge.pub",
-			CIDR:                "203.0.113.7/32",
-			ServiceAccountEmail: "forge@example-project.iam.gserviceaccount.com",
-			EnableIAPSSH:        &disabled,
+			Project:               "example-project",
+			Zone:                  "us-central1-a",
+			VMName:                "grove-forge-prod",
+			MachineType:           "e2-standard-2",
+			DiskSizeGB:            200,
+			ImageFamily:           "debian-12",
+			ImageProject:          "debian-cloud",
+			SSHUser:               "grovedev",
+			SSHPubkeyFile:         "~/.ssh/forge.pub",
+			CIDR:                  "203.0.113.7/32",
+			ServiceAccountEmail:   "forge@example-project.iam.gserviceaccount.com",
+			EnableIAPSSH:          &enabled,
+			SyncdIngressEnabled:   &disabled,
+			ForgejoIngressEnabled: &disabled,
+			SSHIngress:            config.ForgeSSHIngressIAP,
 		},
 		Services: &config.ForgeServicesConfig{
 			Domain:          "forge.example.com",
@@ -229,6 +236,48 @@ func TestResolveForgeTerraformDirRejectsANonModule(t *testing.T) {
 	}
 }
 
+func TestForgeTerraformIngressControlsPreserveDefaultsAndGuardOutputs(t *testing.T) {
+	tfFS, err := forgeassets.TerraformFS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	variables, err := fs.ReadFile(tfFS, "variables.tf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mainTF, err := fs.ReadFile(tfFS, "main.tf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputs, err := fs.ReadFile(tfFS, "outputs.tf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`variable "syncd_ingress_enabled"`, `variable "forgejo_ingress_enabled"`,
+		`default     = true`, `variable "ssh_ingress"`, `default     = "cidr+iap"`,
+		`contains(["cidr+iap", "iap", "cidr"], var.ssh_ingress)`,
+	} {
+		if !strings.Contains(string(variables), want) {
+			t.Errorf("variables.tf missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		`count = var.forgejo_ingress_enabled ? 1 : 0`,
+		`count = var.syncd_enabled && var.syncd_ingress_enabled ? 1 : 0`,
+		`var.ssh_ingress == "iap" ? [local.iap_cidr]`,
+	} {
+		if !strings.Contains(string(mainTF), want) {
+			t.Errorf("main.tf missing %q", want)
+		}
+	}
+	for _, want := range []string{"one(google_compute_firewall.forgejo[*].name)", "one(google_compute_firewall.syncd[*].name)"} {
+		if !strings.Contains(string(outputs), want) {
+			t.Errorf("outputs.tf missing count-zero guard %q", want)
+		}
+	}
+}
+
 // ---- down gates ------------------------------------------------------------
 
 // TestForgeDownRefusesWithoutBothGates is the pet's guard rail. A satellite is
@@ -320,6 +369,135 @@ func TestForgeOutputsCacheRoundTrip(t *testing.T) {
 	}
 	if got.ExternalIP != want.ExternalIP || got.VMName != want.VMName || got.TLSMode != want.TLSMode {
 		t.Errorf("round trip = %+v, want %+v", got, want)
+	}
+}
+
+// ---- W2 mesh cutover controls ---------------------------------------------
+
+func forgeCutoverTestConfig() *config.ForgeConfig {
+	enabled := true
+	return &config.ForgeConfig{
+		Infra:    &config.ForgeInfraConfig{Project: "test-project", SSHUser: "grove", SSHIngress: config.ForgeSSHIngressIAP},
+		Services: &config.ForgeServicesConfig{Forgejo: &config.ForgejoServiceConfig{HTTPPort: 3000}},
+		Wireguard: &config.WireGuardConfig{
+			Enabled:      &enabled,
+			Address:      "10.100.0.7/24",
+			Endpoint:     "hub.example:51820",
+			HubPublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		},
+	}
+}
+
+func TestForgeDialAddrMeshFirstThenExternalFallback(t *testing.T) {
+	oldProbe := forgeTCPProbe
+	t.Cleanup(func() { forgeTCPProbe = oldProbe })
+	cfg := forgeCutoverTestConfig()
+	outputs := forgeOutputs{ExternalIP: "203.0.113.9", VMName: "grove-forge", Zone: "us-east1-b"}
+
+	var probes []string
+	forgeTCPProbe = func(addr string, _ time.Duration) error {
+		probes = append(probes, addr)
+		if strings.HasPrefix(addr, "10.100.0.7:") {
+			return nil
+		}
+		return fmt.Errorf("closed")
+	}
+	addr, source, err := forgeDialAddr(cfg, outputs)
+	if err != nil || addr != "10.100.0.7:22" || source != forgeDialSourceMesh {
+		t.Fatalf("mesh selection = %q %q %v", addr, source, err)
+	}
+	if len(probes) != 1 {
+		t.Fatalf("mesh success still probed fallback: %v", probes)
+	}
+
+	probes = nil
+	forgeTCPProbe = func(addr string, _ time.Duration) error {
+		probes = append(probes, addr)
+		if strings.HasPrefix(addr, "203.0.113.9:") {
+			return nil
+		}
+		return fmt.Errorf("closed")
+	}
+	addr, source, err = forgeDialAddr(cfg, outputs)
+	if err != nil || addr != "203.0.113.9:22" || source != forgeDialSourceExternal {
+		t.Fatalf("fallback selection = %q %q %v", addr, source, err)
+	}
+	if len(probes) != 2 {
+		t.Fatalf("fallback probe order = %v", probes)
+	}
+}
+
+func TestForgeDialAddrTotalFailureNamesBothAndIAP(t *testing.T) {
+	oldProbe := forgeTCPProbe
+	t.Cleanup(func() { forgeTCPProbe = oldProbe })
+	forgeTCPProbe = func(string, time.Duration) error { return fmt.Errorf("closed") }
+	_, _, err := forgeDialAddr(forgeCutoverTestConfig(), forgeOutputs{ExternalIP: "203.0.113.9", VMName: "grove-forge", Zone: "us-east1-b"})
+	if err == nil {
+		t.Fatal("total route failure succeeded")
+	}
+	for _, want := range []string{"10.100.0.7:22", "203.0.113.9:22", "--tunnel-through-iap", "--project=test-project"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
+func TestForgeMeshAndExternalHostKeyMismatchIsHard(t *testing.T) {
+	oldProbe, oldScan := forgeTCPProbe, forgeHostKeyscan
+	t.Cleanup(func() { forgeTCPProbe, forgeHostKeyscan = oldProbe, oldScan })
+	forgeTCPProbe = func(string, time.Duration) error { return nil }
+	forgeHostKeyscan = func(addr string) (string, error) {
+		if strings.HasPrefix(addr, "10.100.0.7:") {
+			return "ssh-ed25519 MESH", nil
+		}
+		return "ssh-ed25519 EXTERNAL", nil
+	}
+	_, err := scanForgeSelectedHostKey("10.100.0.7:22", forgeDialSourceMesh, forgeOutputs{ExternalIP: "203.0.113.9"})
+	if err == nil || !strings.Contains(err.Error(), "mismatch") || !strings.Contains(err.Error(), "refusing to re-pin") {
+		t.Fatalf("mismatch error = %v", err)
+	}
+
+	forgeHostKeyscan = func(string) (string, error) { return "ssh-ed25519 SAME", nil }
+	if key, err := scanForgeSelectedHostKey("10.100.0.7:22", forgeDialSourceMesh, forgeOutputs{ExternalIP: "203.0.113.9"}); err != nil || key != "ssh-ed25519 SAME" {
+		t.Fatalf("matching keys = %q, %v", key, err)
+	}
+}
+
+func TestForgeRootURLReconcileShapeAndTrailer(t *testing.T) {
+	cfg := forgeCutoverTestConfig()
+	if got := forgeMeshRootURL(cfg); got != "http://10.100.0.7:3000/" {
+		t.Fatalf("mesh ROOT_URL = %q", got)
+	}
+	script := forgeRootURLReconcileScript(forgeMeshRootURL(cfg))
+	for _, want := range []string{"/etc/forgejo/app.ini", "ROOT_URL = ", "systemctl restart forgejo.service", "CHANGED=1"} {
+		if !strings.Contains(script, want) {
+			t.Errorf("reconcile script missing %q", want)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "reconcile.sh")
+	if err := os.WriteFile(path, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("bash", "-n", path).CombinedOutput(); err != nil {
+		t.Fatalf("bash -n: %v: %s", err, out)
+	}
+	changed, oldURL, newURL, err := parseForgeRootURLResult("CHANGED=1\nOLD=http://203.0.113.9:3000/\nNEW=http://10.100.0.7:3000/\n")
+	if err != nil || !changed || oldURL != "http://203.0.113.9:3000/" || newURL != "http://10.100.0.7:3000/" {
+		t.Fatalf("parsed trailer = %v %q %q %v", changed, oldURL, newURL, err)
+	}
+}
+
+func TestForgeStatusRendersIAPBreakGlass(t *testing.T) {
+	var out strings.Builder
+	renderForgeStatus(&out, forgeStatusReport{
+		Provisioned:      true,
+		Outputs:          forgeOutputs{VMName: "grove-forge", Zone: "us-east1-b"},
+		IAPSSHBreakGlass: "gcloud compute ssh grove-forge --tunnel-through-iap --zone=us-east1-b",
+	})
+	for _, want := range []string{"break-glass SSH (IAP)", "--tunnel-through-iap"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("status output %q missing %q", out.String(), want)
+		}
 	}
 }
 

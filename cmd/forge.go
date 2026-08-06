@@ -282,6 +282,11 @@ release download, and grove-syncd's systemd unit waits for the binary.`
 		if err := reconcileForgeWireGuard(out, outputs, forgeCfg); err != nil {
 			return err
 		}
+		// Forgejo must advertise the route clients actually use before public
+		// ingress can be removed; otherwise redirects and clone URLs strand them.
+		if err := reconcileForgeRootURL(out, outputs, forgeCfg); err != nil {
+			return err
+		}
 
 		// Before the backup payload, because both reach the VM over SSH and a
 		// certificate that no longer covers the address is the more urgent of

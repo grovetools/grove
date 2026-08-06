@@ -1361,6 +1361,12 @@ var SchemaFields = []FieldMeta{
 				Namespace:   "forge",
 			},
 			{
+				Path:        []string{"infra", "forgejo_ingress_enabled"},
+				Type:        FieldBool,
+				Description: "Create the IAP Forgejo ingress rule",
+				Namespace:   "forge",
+			},
+			{
 				Path:        []string{"infra", "identity_file"},
 				Type:        FieldString,
 				Description: "SSH private key used to reach the forge VM",
@@ -1397,6 +1403,13 @@ var SchemaFields = []FieldMeta{
 				Namespace:   "forge",
 			},
 			{
+				Path:        []string{"infra", "ssh_ingress"},
+				Type:        FieldSelect,
+				Description: "SSH ingress source set: cidr+iap|iap|cidr",
+				Options:     []string{"cidr+iap", "iap", "cidr"},
+				Namespace:   "forge",
+			},
+			{
 				Path:        []string{"infra", "ssh_pubkey_file"},
 				Type:        FieldString,
 				Description: "SSH public key granted access",
@@ -1406,6 +1419,12 @@ var SchemaFields = []FieldMeta{
 				Path:        []string{"infra", "ssh_user"},
 				Type:        FieldString,
 				Description: "SSH login user on the forge VM",
+				Namespace:   "forge",
+			},
+			{
+				Path:        []string{"infra", "syncd_ingress_enabled"},
+				Type:        FieldBool,
+				Description: "Create the public syncd ingress rule",
 				Namespace:   "forge",
 			},
 			{

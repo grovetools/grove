@@ -35,7 +35,10 @@ to `terraform.tfvars` in the module dir so `terraform destroy` (from
 | `image_family` / `image_project` | yes (default ok) | `[forge.infra]`, default `debian-12` / `debian-cloud` |
 | `ssh_pubkey_file` | yes (default ok) | `[forge.infra] ssh_pubkey_file` |
 | `service_account_email` | yes (default `""`) | `[forge.infra] service_account_email`; `""` **must** mean "create a dedicated identity", not "attach the project default" |
-| `enable_iap_ssh` | yes (default ok) | `[forge.infra] enable_iap_ssh` |
+| `enable_iap_ssh` | yes (default ok) | `[forge.infra] enable_iap_ssh`; compatibility switch for `ssh_ingress = "cidr+iap"` |
+| `ssh_ingress` | yes (default `"cidr+iap"`) | `[forge.infra] ssh_ingress`; `cidr+iap`, `iap`, or `cidr` |
+| `syncd_ingress_enabled` | yes (default `true`) | `[forge.infra] syncd_ingress_enabled`; false removes the syncd firewall rule |
+| `forgejo_ingress_enabled` | yes (default `true`) | `[forge.infra] forgejo_ingress_enabled`; false removes the Forgejo firewall rule |
 | `domain` | yes (default `""`) | `[forge.services] domain` |
 | `tls_mode` | yes (default `self-signed`) | `[forge.services] tls_mode` |
 | `acme_email`, `acme_dns_provider` | yes (default `""`) | `[forge.services]` |
@@ -76,10 +79,13 @@ These are not preferences; the trial's hardening ledger is where each came from.
    instance and sourced from the operator CIDR (optionally plus Google's IAP
    range `35.235.240.0/20` for SSH). The embedded module enforces this with
    variable validations, including on the "extra CIDRs" escape hatches.
-   Forgejo's plain-HTTP port goes further: it admits ONLY the IAP range —
-   cleartext never crosses the open wire, and the operator reaches it through
-   `forgejo_tunnel_command`. VM-to-VM consumers (CI runners) use the VPC's
-   internal address, which needs no rule from this module.
+   Forgejo's plain-HTTP port goes further: while its ingress rule is enabled,
+   it admits ONLY the IAP range — cleartext never crosses the open wire, and
+   the operator reaches it through `forgejo_tunnel_command`. VM-to-VM consumers
+   use routes that need no rule from this module. The supported mesh cutover
+   end-state is `enable_iap_ssh = true`, `ssh_ingress = "iap"`, and both service
+   ingress switches false: tcp/22 through authenticated IAP is the sole
+   independent break-glass rule.
 2. **A dedicated identity with no scopes.** `service_account_email = ""` creates
    a service account with no IAM roles and attaches it with
    `service_account_scopes = []`. The default compute SA can read every GCS

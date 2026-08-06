@@ -15,7 +15,10 @@ image_project = "debian-cloud"
 # --- access (an operator CIDR; the open internet is refused) ---
 ssh_user       = "grovedev"
 allowed_cidr   = "203.0.113.7/32"
-enable_iap_ssh = true
+enable_iap_ssh          = true
+ssh_ingress            = "cidr+iap"
+syncd_ingress_enabled  = true
+forgejo_ingress_enabled = true
 
 # --- identity ---
 # Empty means the module creates a dedicated service account with no IAM

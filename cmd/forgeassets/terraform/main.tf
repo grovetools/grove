@@ -54,7 +54,11 @@ locals {
   # A zone's region is its zone minus the trailing "-<letter>".
   region = join("-", slice(split("-", var.zone), 0, 2))
 
-  ssh_source_ranges = var.enable_iap_ssh ? [var.allowed_cidr, local.iap_cidr] : [var.allowed_cidr]
+  ssh_source_ranges = (
+    var.ssh_ingress == "iap" ? [local.iap_cidr] :
+    var.ssh_ingress == "cidr" ? [var.allowed_cidr] :
+    var.enable_iap_ssh ? [var.allowed_cidr, local.iap_cidr] : [var.allowed_cidr]
+  )
   # Forgejo speaks plain HTTP, so its port never opens to the operator CIDR:
   # admin passwords, tokens and git auth would cross the internet in cleartext.
   # IAP-only means every laptop byte transits Google's encrypted, IAM-gated
@@ -133,6 +137,8 @@ resource "google_compute_firewall" "ssh" {
 }
 
 resource "google_compute_firewall" "forgejo" {
+  count = var.forgejo_ingress_enabled ? 1 : 0
+
   name        = "${var.vm_name}-allow-forgejo"
   network     = var.network
   description = "Forgejo HTTP, IAP TCP-forwarding range only — plain HTTP never crosses the open wire. Operator access is an IAP tunnel (see the forge_url output); forgejo_extra_cidrs opts into direct reach."
@@ -147,7 +153,7 @@ resource "google_compute_firewall" "forgejo" {
 }
 
 resource "google_compute_firewall" "syncd" {
-  count = var.syncd_enabled ? 1 : 0
+  count = var.syncd_enabled && var.syncd_ingress_enabled ? 1 : 0
 
   name        = "${var.vm_name}-allow-syncd"
   network     = var.network

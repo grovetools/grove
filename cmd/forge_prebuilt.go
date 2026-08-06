@@ -101,28 +101,12 @@ func shipForgeSyncd(w io.Writer, plan *forgeSyncdShipPlan, outputs forgeOutputs,
 		return fmt.Errorf("%s did not produce %s in %s (does its Makefile honor GROVE_BUILD_OUT?): %w", forgeSyncdRepo, forgeSyncdBinary, binDir, err)
 	}
 
-	addr := outputs.ExternalIP + ":22"
-	fmt.Fprintf(w, "Pinning the host key of %s...\n", addr)
-	hostKey, err := sshKeyscanHostKey(addr)
-	if err != nil {
-		return fmt.Errorf("scan forge host key: %w", err)
-	}
-
-	tmpDir, err := os.MkdirTemp("", "grove-forge-ssh-")
+	ssh, cleanup, err := forgeSSH(outputs, forgeCfg)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = os.RemoveAll(tmpDir) }()
-
-	ssh, err := newSatelliteSSH(satelliteConfigEntry{
-		SSHAddr:      addr,
-		User:         strings.TrimSpace(forgeCfg.Infra.SSHUser),
-		HostKey:      hostKey,
-		IdentityFile: strings.TrimSpace(forgeCfg.Infra.IdentityFile),
-	}, tmpDir)
-	if err != nil {
-		return fmt.Errorf("build pinned SSH transport: %w", err)
-	}
+	defer cleanup()
+	fmt.Fprintf(w, "Pinned forge SSH at %s:%s.\n", ssh.host, ssh.port)
 
 	fmt.Fprintf(w, "Shipping %s to %s...\n", forgeSyncdBinary, forgeSyncdInstall)
 	if err := ssh.runCommand("mkdir -p " + forgeSyncdStageDir); err != nil {

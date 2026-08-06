@@ -55,11 +55,9 @@ output "service_account_email" {
 output "firewall_rules" {
   description = "Every ingress rule this module owns, so an audit can see the whole exposed surface in one place"
   value = concat(
-    [
-      "${google_compute_firewall.ssh.name}: tcp/22 from ${join(",", local.ssh_source_ranges)}",
-      "${google_compute_firewall.forgejo.name}: tcp/${var.forgejo_http_port} from ${join(",", local.forgejo_source_ranges)}",
-    ],
-    var.syncd_enabled ? ["${var.vm_name}-allow-syncd: tcp/${var.syncd_port} from ${join(",", local.syncd_source_ranges)}"] : [],
+    ["${google_compute_firewall.ssh.name}: tcp/22 from ${join(",", local.ssh_source_ranges)}"],
+    var.forgejo_ingress_enabled ? ["${one(google_compute_firewall.forgejo[*].name)}: tcp/${var.forgejo_http_port} from ${join(",", local.forgejo_source_ranges)}"] : [],
+    var.syncd_enabled && var.syncd_ingress_enabled ? ["${one(google_compute_firewall.syncd[*].name)}: tcp/${var.syncd_port} from ${join(",", local.syncd_source_ranges)}"] : [],
   )
 }
 

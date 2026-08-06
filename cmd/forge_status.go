@@ -49,11 +49,12 @@ type forgeStatusReport struct {
 	// presented, colon-separated hex. Empty when not probed or unreachable.
 	TLSFingerprint string `json:"tls_fingerprint,omitempty"`
 	// ProbeError explains an empty fingerprint.
-	ProbeError   string `json:"probe_error,omitempty"`
-	MeshAddress  string `json:"mesh_address"`
-	MeshEndpoint string `json:"-"`
-	MeshPubkey   string `json:"mesh_pubkey"`
-	ProbeTarget  string `json:"probe_target"`
+	ProbeError       string `json:"probe_error,omitempty"`
+	MeshAddress      string `json:"mesh_address"`
+	MeshEndpoint     string `json:"-"`
+	MeshPubkey       string `json:"mesh_pubkey"`
+	ProbeTarget      string `json:"probe_target"`
+	IAPSSHBreakGlass string `json:"iap_ssh_break_glass,omitempty"`
 }
 
 func newForgeStatusCmd() *cobra.Command {
@@ -91,6 +92,9 @@ Everything else is read from local state and works offline.`
 		}
 		report.Provisioned = ok
 		report.Outputs = outputs
+		if forgeCfg != nil && forgeCfg.Infra != nil && forgeCfg.Infra.EffectiveSSHIngress() == config.ForgeSSHIngressIAP {
+			report.IAPSSHBreakGlass = forgeIAPSSHCommand(forgeCfg, outputs)
+		}
 
 		report.ProbeTarget = outputs.SyncdAddr
 		if forgeCfg != nil && forgeCfg.Wireguard.IsEnabled() {
@@ -135,6 +139,9 @@ func renderForgeStatus(w io.Writer, report forgeStatusReport) {
 
 	fmt.Fprintf(w, "Forge %s (%s)\n", report.Outputs.VMName, report.Outputs.Zone)
 	renderForgeOutputs(w, report.Outputs)
+	if report.IAPSSHBreakGlass != "" {
+		fmt.Fprintf(w, "  break-glass SSH (IAP): %s\n", report.IAPSSHBreakGlass)
+	}
 	if report.MeshAddress != "" {
 		pubkey := report.MeshPubkey
 		if pubkey == "" {
