@@ -38,6 +38,12 @@ variable "user" {
   default     = "git"
 }
 
+variable "tls_group" {
+  description = "Group that may read the shared TLS private key (matches the syncd module's tls_group). Only used when tls_mode = acme, where Forgejo terminates TLS itself."
+  type        = string
+  default     = "grove-tls"
+}
+
 variable "download_base" {
   description = "Release download base. Overridable so an air-gapped install can point at a mirror; the checksum is verified either way."
   type        = string

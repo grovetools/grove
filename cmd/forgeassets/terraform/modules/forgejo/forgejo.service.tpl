@@ -30,7 +30,17 @@ RestrictSUIDSGID=true
 # /var/lib/forgejo/log (see app.ini ROOT_PATH), which this covers; there is no
 # /var/log/forgejo.
 ReadWritePaths=/var/lib/forgejo
+%{ if tls_mode == "acme" ~}
+# ACME mode: Forgejo terminates TLS on :443 with the shared certificate. The
+# private key is root:${tls_group} 0640 (the same discipline grove-syncd uses),
+# and binding a port below 1024 as ${user} needs exactly one capability.
+SupplementaryGroups=${tls_group}
+ReadOnlyPaths=/etc/grove-forge/tls
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+%{ else ~}
 CapabilityBoundingSet=
+%{ endif ~}
 
 [Install]
 WantedBy=multi-user.target

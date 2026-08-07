@@ -26,21 +26,40 @@ if ! command -v lego >/dev/null 2>&1; then
 fi
 if [ ! -f /etc/grove-forge/acme.env ]; then
   echo "grove forge: tls_mode=acme but /etc/grove-forge/acme.env is missing" >&2
-  echo "grove forge: install the DNS provider credentials, then: systemctl start grove-forge-acme" >&2
+  echo "grove forge: install the DNS provider credentials (grove forge acme install-credentials <sa-key.json>), then: systemctl start grove-forge-acme" >&2
 fi
 cat > /usr/local/sbin/grove-forge-acme <<'ACME_RENEW'
 #!/bin/sh
 set -eu
+# acme.defaults (email/provider/domain) is rendered configuration; acme.env is
+# the operator-installed DNS provider credential file and may override any
+# default. Sourced in that order, on purpose.
+. /etc/grove-forge/acme.defaults
+if [ ! -f /etc/grove-forge/acme.env ]; then
+  echo "grove-forge-acme: /etc/grove-forge/acme.env is missing — install the DNS-01 credentials with 'grove forge acme install-credentials <sa-key.json>'" >&2
+  exit 1
+fi
 . /etc/grove-forge/acme.env
-lego --accept-tos --email "$ACME_EMAIL" --dns "$ACME_DNS_PROVIDER" \
-  --domains "$ACME_DOMAIN" --path /var/lib/grove-forge/acme run || \
-lego --accept-tos --email "$ACME_EMAIL" --dns "$ACME_DNS_PROVIDER" \
-  --domains "$ACME_DOMAIN" --path /var/lib/grove-forge/acme renew
-install -m 0644 -o root -g root \
-  "/var/lib/grove-forge/acme/certificates/$ACME_DOMAIN.crt" /etc/grove-forge/tls/cert.pem
+ACME_CERT="/var/lib/grove-forge/acme/certificates/$ACME_DOMAIN.crt"
+if [ -f "$ACME_CERT" ]; then
+  lego --accept-tos --email "$ACME_EMAIL" --dns "$ACME_DNS_PROVIDER" \
+    --domains "$ACME_DOMAIN" --path /var/lib/grove-forge/acme renew
+else
+  lego --accept-tos --email "$ACME_EMAIL" --dns "$ACME_DNS_PROVIDER" \
+    --domains "$ACME_DOMAIN" --path /var/lib/grove-forge/acme run
+fi
+install -m 0644 -o root -g root "$ACME_CERT" /etc/grove-forge/tls/cert.pem
 install -m 0640 -o root -g ${tls_group} \
   "/var/lib/grove-forge/acme/certificates/$ACME_DOMAIN.key" /etc/grove-forge/tls/key.pem
+# Keep the on-VM record `grove forge status` compares fingerprints against.
+openssl x509 -in /etc/grove-forge/tls/cert.pem -noout -fingerprint -sha256 \
+  | sed 's/^.*=//' > /var/lib/grove-forge/tls-fingerprint.txt
+# ONE certificate, TWO services: both must pick a renewal up, or the classic
+# silent failure is a renewed syncd next to a Forgejo serving the expired cert.
+# reload-or-restart also STARTS a stopped unit, which is what first brings
+# Forgejo up on a fresh ACME provision.
 systemctl reload-or-restart grove-syncd.service || true
+systemctl reload-or-restart forgejo.service || true
 ACME_RENEW
 chmod 0700 /usr/local/sbin/grove-forge-acme
 

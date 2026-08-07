@@ -68,6 +68,7 @@ no infrastructure flags, so what terraform sees is always what the config says:
 	cmd.AddCommand(newForgeUpCmd())
 	cmd.AddCommand(newForgeStatusCmd())
 	cmd.AddCommand(newForgeWGCmd())
+	cmd.AddCommand(newForgeACMECmd())
 	cmd.AddCommand(newForgeDownCmd())
 	cmd.AddCommand(newForgeBackupCmd())
 	cmd.AddCommand(newForgeRestoreCmd())
@@ -280,6 +281,12 @@ release download, and grove-syncd's systemd unit waits for the binary.`
 		// Join the mesh before TLS reconciliation: an enabled mesh address is a
 		// required SAN, so this ordering widens the certificate exactly once.
 		if err := reconcileForgeWireGuard(out, outputs, forgeCfg); err != nil {
+			return err
+		}
+		// An acme config obtains the real certificate and flips Forgejo to
+		// https before the ROOT_URL reconcile reads the target; a no-op for
+		// self-signed deployments.
+		if err := reconcileForgeACME(out, outputs, forgeCfg); err != nil {
 			return err
 		}
 		// Forgejo must advertise the route clients actually use before public

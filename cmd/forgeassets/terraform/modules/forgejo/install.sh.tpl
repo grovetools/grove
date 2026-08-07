@@ -11,6 +11,13 @@ echo "--- forgejo ${binary_name} ---"
 id -u ${user} >/dev/null 2>&1 || adduser --system --shell /bin/bash --gecos 'Forgejo' \
   --group --disabled-password --home /var/lib/forgejo ${user}
 
+%{ if tls_mode == "acme" ~}
+# ACME mode: the unit joins ${tls_group} to read the shared TLS key. The group
+# is normally created by the syncd fragment, but that runs AFTER this one, and
+# a unit naming a group that does not exist yet fails to start.
+getent group ${tls_group} >/dev/null || groupadd --system ${tls_group}
+%{ endif ~}
+
 install -d -m 0750 -o ${user} -g ${user} /var/lib/forgejo
 install -d -m 0750 -o ${user} -g ${user} /var/lib/forgejo/data
 install -d -m 0750 -o ${user} -g ${user} /var/lib/forgejo/log
@@ -87,4 +94,18 @@ ${unit}
 FORGEJO_UNIT
 
 systemctl daemon-reload
+%{ if tls_mode == "acme" ~}
+# In ACME mode Forgejo serves https with the lego-managed certificate. On a
+# fresh provision the certificate does not exist until the operator installs
+# /etc/grove-forge/acme.env and grove-forge-acme runs — starting before then
+# would crash-loop on the missing CERT_FILE, so the unit waits enabled. The
+# renew script's deploy step (reload-or-restart) is what first starts it.
+if [ -f /etc/grove-forge/tls/cert.pem ]; then
+  systemctl enable --now forgejo.service
+else
+  systemctl enable forgejo.service
+  echo "forgejo: enabled, waiting for the first ACME certificate (grove-forge-acme deploys it and starts the service)"
+fi
+%{ else ~}
 systemctl enable --now forgejo.service
+%{ endif ~}

@@ -109,7 +109,15 @@ func scanForgeSelectedHostKey(addr, source string, outputs forgeOutputs) (string
 }
 
 func forgeMeshRootURL(cfg *config.ForgeConfig) string {
-	if cfg == nil || !cfg.Wireguard.IsEnabled() || cfg.Services == nil || cfg.Services.Forgejo == nil {
+	if cfg == nil || cfg.Services == nil {
+		return ""
+	}
+	// With a real certificate the domain IS the origin: clone URLs, redirects
+	// and browsers all use https://<domain>/, whatever address it resolves to.
+	if forgeACMEEnabled(cfg) {
+		return forgeDomainRootURL(cfg)
+	}
+	if !cfg.Wireguard.IsEnabled() || cfg.Services.Forgejo == nil {
 		return ""
 	}
 	ip := forgeMeshIP(cfg)

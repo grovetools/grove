@@ -28,10 +28,13 @@ locals {
     user      = var.user
     domain    = var.domain
     root_url  = local.root_url
+    tls_mode  = var.tls_mode
   })
 
   unit = templatefile("${path.module}/forgejo.service.tpl", {
-    user = var.user
+    user      = var.user
+    tls_mode  = var.tls_mode
+    tls_group = var.tls_group
   })
 
   setup_script = templatefile("${path.module}/install.sh.tpl", {
@@ -43,5 +46,7 @@ locals {
     app_ini      = local.app_ini
     unit         = local.unit
     root_url     = local.root_url
+    tls_mode     = var.tls_mode
+    tls_group    = var.tls_group
   })
 }

@@ -9,10 +9,23 @@ RUN_MODE = prod
 WORK_PATH = /var/lib/forgejo
 
 [server]
+%{ if tls_mode == "acme" && domain != "" ~}
+; ACME mode: Forgejo terminates TLS itself with the shared certificate lego
+; renews for both services, and serves the default https port so ROOT_URL can
+; be a bare https://domain/. The unit grants CAP_NET_BIND_SERVICE for :443 and
+; joins the tls_group that may read the private key.
+PROTOCOL = https
+CERT_FILE = /etc/grove-forge/tls/cert.pem
+KEY_FILE = /etc/grove-forge/tls/key.pem
+DOMAIN = ${domain}
+HTTP_ADDR = 0.0.0.0
+HTTP_PORT = 443
+%{ else ~}
 PROTOCOL = http
 DOMAIN = ${domain}
 HTTP_ADDR = 0.0.0.0
 HTTP_PORT = ${http_port}
+%{ endif ~}
 %{ if root_url != "" ~}
 ROOT_URL = ${root_url}
 %{ endif ~}

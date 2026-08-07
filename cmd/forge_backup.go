@@ -487,6 +487,14 @@ func reconcileForgeTLS(w io.Writer, outputs forgeOutputs, forgeCfg *config.Forge
 	if outputs.TLSMode != "self-signed" || outputs.ExternalIP == "" {
 		return nil
 	}
+	// The ACME path owns /etc/grove-forge/tls once configured. The cached
+	// outputs may still say self-signed on a pet converged terraform-free, and
+	// a Let's Encrypt certificate never carries the IP SANs this reconcile
+	// checks for — regenerating a self-signed one over it would break every
+	// default-trust client the acme cutover just enabled.
+	if forgeACMEEnabled(forgeCfg) {
+		return nil
+	}
 	ssh, cleanup, err := forgeSSH(outputs, forgeCfg)
 	if err != nil {
 		return err

@@ -48,6 +48,20 @@ type forgeStatusReport struct {
 	// TLSFingerprint is the SHA-256 of the leaf certificate the syncd endpoint
 	// presented, colon-separated hex. Empty when not probed or unreachable.
 	TLSFingerprint string `json:"tls_fingerprint,omitempty"`
+	// TLSModeConfigured is [forge.services]' EFFECTIVE tls_mode. Reported next
+	// to the recorded outputs' mode because the pet converges terraform-free:
+	// the cached outputs can say self-signed long after an acme cutover.
+	TLSModeConfigured string `json:"tls_mode_configured,omitempty"`
+	// Leaf-certificate posture from the probe: what it names, when it dies,
+	// and whether it is self-issued (issuer == subject).
+	TLSSANs       []string `json:"tls_sans,omitempty"`
+	TLSNotAfter   string   `json:"tls_not_after,omitempty"`
+	TLSDaysLeft   int      `json:"tls_days_left,omitempty"`
+	TLSSelfSigned bool     `json:"tls_self_signed,omitempty"`
+	// ACMETimer is the renewal timer's health, read over pinned SSH in acme
+	// mode. Silent renewal death is the classic failure mode of these setups,
+	// so an unreadable or failing timer is rendered loudly.
+	ACMETimer *forgeACMETimerStatus `json:"acme_timer,omitempty"`
 	// ProbeError explains an empty fingerprint.
 	ProbeError       string `json:"probe_error,omitempty"`
 	MeshAddress      string `json:"mesh_address"`
@@ -55,6 +69,16 @@ type forgeStatusReport struct {
 	MeshPubkey       string `json:"mesh_pubkey"`
 	ProbeTarget      string `json:"probe_target"`
 	IAPSSHBreakGlass string `json:"iap_ssh_break_glass,omitempty"`
+}
+
+// forgeACMETimerStatus is the renewal timer's health as systemd reports it.
+type forgeACMETimerStatus struct {
+	Enabled    bool   `json:"enabled"`
+	Active     bool   `json:"active"`
+	LastResult string `json:"last_result,omitempty"`
+	LastRun    string `json:"last_run,omitempty"`
+	NextRun    string `json:"next_run,omitempty"`
+	Err        string `json:"error,omitempty"`
 }
 
 func newForgeStatusCmd() *cobra.Command {
@@ -97,19 +121,37 @@ Everything else is read from local state and works offline.`
 		}
 
 		report.ProbeTarget = outputs.SyncdAddr
+		serverName := ""
 		if forgeCfg != nil && forgeCfg.Wireguard.IsEnabled() {
 			_, port, splitErr := net.SplitHostPort(outputs.SyncdAddr)
 			if splitErr == nil && forgeMeshIP(forgeCfg) != "" {
 				report.ProbeTarget = net.JoinHostPort(forgeMeshIP(forgeCfg), port)
 			}
 		}
+		if forgeCfg != nil {
+			report.TLSModeConfigured = forgeCfg.Services.EffectiveTLSMode()
+			if forgeACMEEnabled(forgeCfg) {
+				// Probe by NAME in acme mode: it exercises the exact
+				// DNS + SNI + chain a default client uses.
+				serverName = forgeCfg.Services.EffectiveDomain()
+				report.ProbeTarget = net.JoinHostPort(serverName,
+					fmt.Sprint(forgeCfg.Services.EffectiveSyncdPort()))
+			}
+		}
 		if ok && !noProbe && report.ProbeTarget != "" {
-			fp, perr := probeTLSFingerprint(report.ProbeTarget)
+			leaf, perr := probeTLSLeaf(report.ProbeTarget, serverName)
 			if perr != nil {
 				report.ProbeError = perr.Error()
 			} else {
-				report.TLSFingerprint = fp
+				report.TLSFingerprint = leaf.Fingerprint
+				report.TLSSANs = leaf.SANs
+				report.TLSNotAfter = leaf.NotAfter.Format("2006-01-02")
+				report.TLSDaysLeft = forgeCertDaysLeft(leaf.NotAfter, time.Now())
+				report.TLSSelfSigned = leaf.SelfSigned
 			}
+		}
+		if ok && !noProbe && forgeCfg != nil && forgeACMEEnabled(forgeCfg) {
+			report.ACMETimer = readForgeACMETimerStatus(outputs, forgeCfg)
 		}
 
 		out := cmd.OutOrStdout()
@@ -158,8 +200,25 @@ func renderForgeStatus(w io.Writer, report forgeStatusReport) {
 
 	switch {
 	case report.TLSFingerprint != "":
-		fmt.Fprintf(w, "\nTLS leaf fingerprint (SHA-256):\n  %s\n", report.TLSFingerprint)
-		if report.Outputs.TLSMode == config.ForgeTLSSelfSigned {
+		acme := report.TLSModeConfigured == config.ForgeTLSACME
+		if report.TLSModeConfigured != "" {
+			fmt.Fprintf(w, "\nTLS: %s", report.TLSModeConfigured)
+			if report.TLSNotAfter != "" {
+				fmt.Fprintf(w, ", expires %s (%d days)", report.TLSNotAfter, report.TLSDaysLeft)
+			}
+			fmt.Fprintln(w)
+			if len(report.TLSSANs) > 0 {
+				fmt.Fprintf(w, "  SANs: %s\n", strings.Join(report.TLSSANs, ", "))
+			}
+			switch {
+			case acme && report.TLSSelfSigned:
+				fmt.Fprintln(w, "  !! acme is configured but the served certificate is SELF-ISSUED — run `grove forge wg up` to converge")
+			case acme && report.TLSDaysLeft < 21:
+				fmt.Fprintf(w, "  !! %d days to expiry and lego renews at <30 — the renewal timer is NOT keeping up; check it now\n", report.TLSDaysLeft)
+			}
+		}
+		fmt.Fprintf(w, "  leaf fingerprint (SHA-256): %s\n", report.TLSFingerprint)
+		if report.Outputs.TLSMode == config.ForgeTLSSelfSigned && !acme {
 			fmt.Fprintln(w, "  Self-signed: pin this value on clients. It changes only if the VM is rebuilt.")
 		}
 	case report.ProbeError != "":
@@ -168,6 +227,30 @@ func renderForgeStatus(w io.Writer, report forgeStatusReport) {
 			fmt.Fprintln(w, "  The mesh or syncd/TLS may be unhealthy; run `grove forge wg status` to distinguish enrollment/hub reachability from service health.")
 		}
 	}
+
+	if t := report.ACMETimer; t != nil {
+		switch {
+		case t.Err != "":
+			fmt.Fprintf(w, "  !! renewal timer unreadable over SSH — silent renewal death is the classic failure mode; check it by hand: %s\n", t.Err)
+		case !t.Enabled || !t.Active:
+			fmt.Fprintf(w, "  !! renewal timer grove-forge-acme.timer is NOT running (enabled=%t active=%t) — certificates will silently expire\n", t.Enabled, t.Active)
+		case t.LastResult != "" && t.LastResult != "success":
+			fmt.Fprintf(w, "  !! last renewal run FAILED (Result=%s) — inspect `journalctl -u grove-forge-acme` on the VM\n", t.LastResult)
+		default:
+			next := t.NextRun
+			if next == "" {
+				next = "unknown"
+			}
+			fmt.Fprintf(w, "  renewal timer: active, last result %q, next run %s\n", orDash(t.LastResult), next)
+		}
+	}
+}
+
+func orDash(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "-"
+	}
+	return s
 }
 
 // renderForgeOutputs prints the recorded terraform outputs, including the whole
@@ -210,22 +293,100 @@ func renderForgeOutputs(w io.Writer, out forgeOutputs) {
 // how it becomes pinnable. Nothing is sent over this connection and nothing is
 // trusted because of it.
 func probeTLSFingerprint(addr string) (string, error) {
-	if _, _, err := net.SplitHostPort(addr); err != nil {
-		return "", fmt.Errorf("%q is not a host:port address", addr)
-	}
-	dialer := &net.Dialer{Timeout: forgeProbeTimeout}
-	conn, err := tls.DialWithDialer(dialer, "tcp", addr, forgeTLSProbeConfig())
+	leaf, err := probeTLSLeaf(addr, "")
 	if err != nil {
 		return "", err
+	}
+	return leaf.Fingerprint, nil
+}
+
+// forgeTLSLeafDetails is what one probe handshake learns about the leaf.
+type forgeTLSLeafDetails struct {
+	Fingerprint string
+	NotAfter    time.Time
+	SANs        []string
+	SelfSigned  bool
+}
+
+// probeTLSLeaf opens one TLS connection and reads the leaf certificate's
+// pinning fingerprint plus the posture `status` renders: SANs, expiry, and
+// whether it is self-issued. serverName sets SNI (acme mode probes by name);
+// empty means no SNI, matching the pre-acme probe.
+func probeTLSLeaf(addr, serverName string) (*forgeTLSLeafDetails, error) {
+	if _, _, err := net.SplitHostPort(addr); err != nil {
+		return nil, fmt.Errorf("%q is not a host:port address", addr)
+	}
+	cfg := forgeTLSProbeConfig()
+	cfg.ServerName = serverName
+	dialer := &net.Dialer{Timeout: forgeProbeTimeout}
+	conn, err := tls.DialWithDialer(dialer, "tcp", addr, cfg)
+	if err != nil {
+		return nil, err
 	}
 	defer func() { _ = conn.Close() }()
 
 	certs := conn.ConnectionState().PeerCertificates
 	if len(certs) == 0 {
-		return "", fmt.Errorf("the endpoint presented no certificate")
+		return nil, fmt.Errorf("the endpoint presented no certificate")
 	}
-	sum := sha256.Sum256(certs[0].Raw)
-	return formatFingerprint(sum[:]), nil
+	leaf := certs[0]
+	sum := sha256.Sum256(leaf.Raw)
+	details := &forgeTLSLeafDetails{
+		Fingerprint: formatFingerprint(sum[:]),
+		NotAfter:    leaf.NotAfter,
+		SelfSigned:  leaf.Issuer.String() == leaf.Subject.String(),
+	}
+	for _, name := range leaf.DNSNames {
+		details.SANs = append(details.SANs, "DNS:"+name)
+	}
+	for _, ip := range leaf.IPAddresses {
+		details.SANs = append(details.SANs, "IP:"+ip.String())
+	}
+	return details, nil
+}
+
+// readForgeACMETimerStatus reads the renewal timer's health over pinned SSH.
+// Failure to read is a REPORT, not an error: status must render what it can,
+// and "could not read the timer" is itself the loud signal.
+func readForgeACMETimerStatus(outputs forgeOutputs, forgeCfg *config.ForgeConfig) *forgeACMETimerStatus {
+	ssh, cleanup, err := forgeSSH(outputs, forgeCfg)
+	if err != nil {
+		return &forgeACMETimerStatus{Err: err.Error()}
+	}
+	defer cleanup()
+	out, err := ssh.outputScript(forgeACMETimerStatusScript())
+	if err != nil {
+		return &forgeACMETimerStatus{Err: err.Error()}
+	}
+	values := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if key, value, ok := strings.Cut(line, "="); ok {
+			values[key] = strings.TrimSpace(value)
+		}
+	}
+	return &forgeACMETimerStatus{
+		Enabled:    values["TIMER_ENABLED"] == "1",
+		Active:     values["TIMER_ACTIVE"] == "1",
+		LastResult: values["LAST_RESULT"],
+		LastRun:    values["LAST_RUN"],
+		NextRun:    values["NEXT_RUN"],
+	}
+}
+
+func forgeACMETimerStatusScript() string {
+	return strings.Join([]string{
+		"set -u",
+		"TIMER_ENABLED=0; sudo systemctl is-enabled --quiet grove-forge-acme.timer 2>/dev/null && TIMER_ENABLED=1",
+		"TIMER_ACTIVE=0; sudo systemctl is-active --quiet grove-forge-acme.timer 2>/dev/null && TIMER_ACTIVE=1",
+		"LAST_RESULT=$(sudo systemctl show grove-forge-acme.service -p Result --value 2>/dev/null || true)",
+		"LAST_RUN=$(sudo systemctl show grove-forge-acme.timer -p LastTriggerUSec --value 2>/dev/null || true)",
+		"NEXT_RUN=$(sudo systemctl show grove-forge-acme.timer -p NextElapseUSecRealtime --value 2>/dev/null || true)",
+		"printf 'TIMER_ENABLED=%s\\n' \"$TIMER_ENABLED\"",
+		"printf 'TIMER_ACTIVE=%s\\n' \"$TIMER_ACTIVE\"",
+		"printf 'LAST_RESULT=%s\\n' \"$LAST_RESULT\"",
+		"printf 'LAST_RUN=%s\\n' \"$LAST_RUN\"",
+		"printf 'NEXT_RUN=%s\\n' \"$NEXT_RUN\"",
+	}, "\n") + "\n"
 }
 
 // forgeTLSProbeConfig pins compact, classical key shares for this bounded

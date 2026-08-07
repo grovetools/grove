@@ -137,6 +137,10 @@ func TestForgeWGUpUsesOnlyConvergeSeamsInSafeOrder(t *testing.T) {
 			calls = append(calls, "wireguard")
 			return nil
 		},
+		reconcileACME: func(_ io.Writer, _ forgeOutputs, _ *config.ForgeConfig) error {
+			calls = append(calls, "acme")
+			return nil
+		},
 		reconcileRootURL: func(_ io.Writer, _ forgeOutputs, _ *config.ForgeConfig) error {
 			calls = append(calls, "rooturl")
 			return nil
@@ -150,7 +154,10 @@ func TestForgeWGUpUsesOnlyConvergeSeamsInSafeOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := strings.Join(calls, ","), "config,outputs:/existing/state,wireguard,rooturl,tls"; got != want {
+	// ACME before rooturl: the flip decides what ROOT_URL should be. ACME
+	// before the self-signed reconcile: the latter must see (and skip) an
+	// acme-owned certificate, never regenerate over it.
+	if got, want := strings.Join(calls, ","), "config,outputs:/existing/state,wireguard,acme,rooturl,tls"; got != want {
 		t.Fatalf("call order = %q, want %q", got, want)
 	}
 	for _, want := range []string{"existing forge", "infrastructure was not changed", "Terraform and gcloud were not run"} {
@@ -188,6 +195,7 @@ func TestForgeWGUpRequiresEnabledValidConfig(t *testing.T) {
 					return forgeOutputs{}, nil
 				},
 				reconcileWireGuard: func(io.Writer, forgeOutputs, *config.ForgeConfig) error { return nil },
+				reconcileACME:      func(io.Writer, forgeOutputs, *config.ForgeConfig) error { return nil },
 				reconcileRootURL:   func(io.Writer, forgeOutputs, *config.ForgeConfig) error { return nil },
 				reconcileTLS:       func(io.Writer, forgeOutputs, *config.ForgeConfig) error { return nil },
 			}

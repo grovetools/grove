@@ -120,6 +120,7 @@ type forgeWGUpDeps struct {
 	loadConfig         func() (*config.ForgeConfig, error)
 	loadOutputs        func(string) (forgeOutputs, error)
 	reconcileWireGuard func(io.Writer, forgeOutputs, *config.ForgeConfig) error
+	reconcileACME      func(io.Writer, forgeOutputs, *config.ForgeConfig) error
 	reconcileRootURL   func(io.Writer, forgeOutputs, *config.ForgeConfig) error
 	reconcileTLS       func(io.Writer, forgeOutputs, *config.ForgeConfig) error
 }
@@ -129,6 +130,7 @@ func newForgeWGUpCmd() *cobra.Command {
 		loadConfig:         loadForgeConfig,
 		loadOutputs:        loadForgeWGUpOutputs,
 		reconcileWireGuard: reconcileForgeWireGuard,
+		reconcileACME:      reconcileForgeACME,
 		reconcileRootURL:   reconcileForgeRootURL,
 		reconcileTLS:       reconcileForgeTLS,
 	})
@@ -136,9 +138,12 @@ func newForgeWGUpCmd() *cobra.Command {
 
 func newForgeWGUpCmdWithDeps(deps forgeWGUpDeps) *cobra.Command {
 	var tfDir string
-	cmd := cli.NewStandardCommand("up", "Converge WireGuard and its TLS SAN on an existing forge (no Terraform)")
-	cmd.Long = `Converge an enabled [forge.wireguard] on an EXISTING forge, then ensure the
-self-signed certificate covers the mesh address.
+	cmd := cli.NewStandardCommand("up", "Converge WireGuard and TLS posture on an existing forge (no Terraform)")
+	cmd.Long = `Converge an enabled [forge.wireguard] on an EXISTING forge, then its TLS
+posture: with [forge.services] tls_mode = "acme" this obtains/renews the real
+certificate over a DNS-01 challenge and serves BOTH services with it (Forgejo
+flips to https on :443); otherwise it ensures the self-signed certificate
+covers the mesh address.
 
 This command only uses cached outputs (or an existing terraform.tfstate selected
 by --tf-dir) to locate the VM, then connects through the forge's pinned SSH path.
@@ -175,9 +180,14 @@ new forge or intentionally converge infrastructure.`
 		if err := deps.reconcileWireGuard(out, outputs, forgeCfg); err != nil {
 			return err
 		}
-		// Keep the same safe order as forge up: mesh first, then point Forgejo's
-		// ROOT_URL at the route clients actually use, then widen the certificate
+		// Keep the same safe order as forge up: mesh first, then TLS posture
+		// (an acme config issues the real certificate and flips Forgejo to
+		// https — a no-op otherwise), then point Forgejo's ROOT_URL at the
+		// route clients actually use, then widen the self-signed certificate
 		// once to cover the newly converged address.
+		if err := deps.reconcileACME(out, outputs, forgeCfg); err != nil {
+			return err
+		}
 		if err := deps.reconcileRootURL(out, outputs, forgeCfg); err != nil {
 			return err
 		}
