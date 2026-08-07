@@ -38,6 +38,8 @@ claims), and nothing recompiles to add one.
 
   grove plugin install github.com/user/grove-panel-foo@v1.2.0
   grove plugin list
+  grove plugin outdated
+  grove plugin set foo work_minutes=30
   grove plugin update foo
   grove plugin remove foo
 
@@ -49,10 +51,17 @@ Installing asks first. Before anything is built or written, grove shows the
 build command, the command treemux will run at every start, the environment,
 and the hotkeys the panel intends to claim — and records your approval against
 that exact pin in the same trust store 'grove config trust' uses. Approving one
-version is not approving the next one; 'update' shows a diff and asks again.`,
+version is not approving the next one; 'update' shows a diff and asks again.
+
+'outdated' asks the same question without answering it destructively: it reads
+the remote and touches nothing. 'set' is how an installed panel's own settings
+are changed — grove owns the file they live in, so grove makes the edit and
+re-records the approval against it.`,
 	}
 	cmd.AddCommand(newPluginInstallCmd())
 	cmd.AddCommand(newPluginListCmd())
+	cmd.AddCommand(newPluginOutdatedCmd())
+	cmd.AddCommand(newPluginSetCmd())
 	cmd.AddCommand(newPluginUpdateCmd())
 	cmd.AddCommand(newPluginRemoveCmd())
 	return cmd
@@ -106,6 +115,69 @@ func newPluginListCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE:  runPluginList,
 	}
+	cmd.Flags().Bool("json", false, "Output as JSON")
+	return cmd
+}
+
+func newPluginOutdatedCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "outdated [name...]",
+		Short: "Check whether a panel's pinned ref has moved",
+		Long: `Ask each panel's remote whether the ref it is pinned to names a different
+commit now.
+
+Read-only, and read-only in the way that matters: it asks with ` + "`git ls-remote`" + `
+and touches no checkout, no binary and no pin. Nothing is fetched, nothing is
+built, and nothing moves — ` + "`grove plugin update <name>`" + ` is what moves a pin,
+and it asks first. So this is safe to run while the panels are running.
+
+  NAME  PINNED        LATEST        STATE
+  hn    274ca8258f11  9f0c1a2b3d4e  outdated
+
+  current      the ref still names the pinned commit
+  outdated     the ref names something else now
+  unreachable  the remote could not be asked — offline, private, renamed
+  dev          a development install: built from a working tree, nothing pinned
+
+A remote that cannot be reached is reported, not raised. One unreachable plugin
+must not fail the check for the rest, so the exit status is zero unless the
+command itself was used wrongly.`,
+		RunE: runPluginOutdated,
+	}
+	cmd.Flags().Bool("json", false, "Output as JSON")
+	return cmd
+}
+
+func newPluginSetCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "set <name> <key=value>...",
+		Short: "Change an installed panel's settings",
+		Long: `Change the settings of a panel installed by ` + "`grove plugin`" + `.
+
+  grove plugin set breaktimer work_minutes=30
+  grove plugin set hn feed.limit=50 feed.refresh=10m
+
+Settings are the panel's own options — the [panel.settings] table its manifest
+declares, handed to it over the control plane and re-delivered live when the
+config reloads. Name them with the dotted paths the install screen showed.
+
+Why a command rather than a line in your own config: [tui.plugins] merges one
+ENTRY at a time, so a later layer setting one option replaces the whole panel
+entry, ` + "`command`" + ` and all, instead of adding to it. The installed fragment is
+the only place these can live, and it is a file grove owns — the values in it
+are part of what your install approval is bound to. So grove makes the edit and
+re-records the approval against what it wrote.
+
+Values are read as the type the panel declared: 25 stays a number, true stays a
+boolean, "2s" is checked as a duration. A name the panel does not declare is
+refused unless --new says to add it anyway.
+
+Nothing is prompted — these are your settings, in a layer you own — but the
+change is printed as the same diff an update would show.`,
+		Args: cobra.MinimumNArgs(2),
+		RunE: runPluginSet,
+	}
+	cmd.Flags().Bool("new", false, "Add a setting the panel's manifest does not declare")
 	cmd.Flags().Bool("json", false, "Output as JSON")
 	return cmd
 }
@@ -211,6 +283,109 @@ func runPluginUpdate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runPluginOutdated(cmd *cobra.Command, args []string) error {
+	jsonOutput, _ := cmd.Flags().GetBool("json")
+	reports, err := plugin.Outdated(cmd.Context(), args)
+	if err != nil {
+		return err
+	}
+
+	if jsonOutput {
+		out := make([]map[string]any, 0, len(reports))
+		for _, r := range reports {
+			row := map[string]any{
+				"name":   r.Name,
+				"state":  string(r.State),
+				"url":    r.Pin.URL,
+				"ref":    r.Pin.Ref,
+				"dev":    r.Pin.Dev,
+				"pinned": r.Pin.Commit,
+				"latest": r.Latest,
+			}
+			if r.Reason != "" {
+				row["reason"] = r.Reason
+			}
+			out = append(out, row)
+		}
+		return printJSON(out)
+	}
+
+	if len(reports) == 0 {
+		fmt.Println("No plugins installed.")
+		return nil
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "NAME\tPINNED\tLATEST\tSTATE")
+	for _, r := range reports {
+		// A dev entry's recorded commit is the HEAD its working tree happened to
+		// be on at install time. Printing it under PINNED would read as a pin,
+		// and there is nothing here for a remote to be ahead of.
+		pinned := shortCommit(r.Pin.Commit)
+		if r.Pin.Dev {
+			pinned = "—"
+		}
+		latest := shortCommit(r.Latest)
+		if latest == "" {
+			latest = "—"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", r.Name, pinned, latest, r.State)
+	}
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	for _, r := range reports {
+		switch r.State {
+		case plugin.StateOutdated:
+			fmt.Println()
+			fmt.Printf("%s: %s names %s now. Review what changed and move the pin with\n    grove plugin update %s\n",
+				r.Name, refLabel(r.Pin.Ref), shortCommit(r.Latest), r.Name)
+		case plugin.StateUnreachable:
+			fmt.Println()
+			fmt.Printf("%s: %s\n    The pin is untouched; this check could not reach the remote to compare it.\n", r.Name, r.Reason)
+		}
+	}
+	return nil
+}
+
+func runPluginSet(cmd *cobra.Command, args []string) error {
+	jsonOutput, _ := cmd.Flags().GetBool("json")
+	allowNew, _ := cmd.Flags().GetBool("new")
+
+	in := &plugin.Installer{Out: os.Stdout}
+	res, err := in.Set(args[0], args[1:], allowNew)
+	if err != nil {
+		return err
+	}
+
+	if jsonOutput {
+		changes := make([]map[string]string, 0, len(res.Changes))
+		for _, c := range res.Changes {
+			changes = append(changes, map[string]string{"field": c.Field, "old": c.Old, "new": c.New})
+		}
+		return printJSON(map[string]any{
+			"name":           res.Name,
+			"fragment":       res.Pin.Fragment,
+			"consent_digest": res.Pin.ConsentDigest,
+			"settings":       res.Pin.Consent.Settings,
+			"changes":        changes,
+		})
+	}
+
+	if len(res.Changes) == 0 {
+		fmt.Printf("%s already had those values; nothing changed.\n", res.Name)
+		return nil
+	}
+	fmt.Println()
+	for _, c := range res.Changes {
+		fmt.Printf("  %-28s - %s\n", c.Field, valueOrNone(c.Old))
+		fmt.Printf("  %-28s + %s\n", "", valueOrNone(c.New))
+	}
+	fmt.Println()
+	fmt.Printf("Wrote %s and re-recorded the install approval against it.\n", res.Pin.Fragment)
+	fmt.Println("treemux delivers the new settings on its next config reload.")
+	return nil
+}
+
 func runPluginList(cmd *cobra.Command, _ []string) error {
 	jsonOutput, _ := cmd.Flags().GetBool("json")
 	statuses, err := coreplugin.List()
@@ -218,22 +393,7 @@ func runPluginList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if jsonOutput {
-		out := make([]map[string]any, 0, len(statuses))
-		for _, st := range statuses {
-			out = append(out, map[string]any{
-				"name":     st.Name,
-				"source":   st.Pin.Consent.Source,
-				"ref":      st.Pin.Ref,
-				"commit":   st.Pin.Commit,
-				"binary":   st.Pin.Binary,
-				"fragment": st.Pin.Fragment,
-				"protocol": st.Pin.Consent.Protocol,
-				"dev":      st.Pin.Dev,
-				"approved": st.Approved,
-				"intact":   st.FragmentPresent && st.BinaryPresent,
-			})
-		}
-		return printJSON(out)
+		return printJSON(pluginListRows(statuses))
 	}
 
 	if len(statuses) == 0 {
@@ -316,6 +476,51 @@ func runPluginRemove(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	fmt.Println("treemux drops the rail item on its next config reload.")
 	return nil
+}
+
+// pluginListRows renders `list --json`.
+//
+// It carries everything the lockfile holds rather than a summary of it, because
+// the reader is as often a program as a person: the Plugins panel answers "when
+// was this installed, where is its source, what did it declare, is the approval
+// still the one that covers it" from this document, and a panel that had to
+// parse the lockfile itself to fill in the gaps would be reading grove's private
+// state behind its back.
+//
+// The keys the first version shipped keep their names and their meanings.
+// Everything below them is additive.
+func pluginListRows(statuses []coreplugin.Status) []map[string]any {
+	out := make([]map[string]any, 0, len(statuses))
+	for _, st := range statuses {
+		out = append(out, map[string]any{
+			"name":     st.Name,
+			"source":   st.Pin.Consent.Source,
+			"ref":      st.Pin.Ref,
+			"commit":   st.Pin.Commit,
+			"binary":   st.Pin.Binary,
+			"fragment": st.Pin.Fragment,
+			"protocol": st.Pin.Consent.Protocol,
+			"dev":      st.Pin.Dev,
+			"approved": st.Approved,
+			"intact":   st.FragmentPresent && st.BinaryPresent,
+
+			"installed_at":    st.Pin.InstalledAt,
+			"source_dir":      st.Pin.SourceDir,
+			"version_binary":  st.Pin.VersionBinary,
+			"manifest_digest": st.Pin.ManifestDigest,
+			"consent_digest":  st.Pin.ConsentDigest,
+			// The whole approval snapshot: what the user was shown and what the
+			// digest above is over. A reader comparing declared against observed
+			// — the keys a panel claimed versus the keys it claims at runtime —
+			// needs the declaration, and this is where it is recorded.
+			"consent": st.Pin.Consent,
+			// What the installed binary was actually BUILT from, which the pin
+			// cannot say. Empty when the bin dir entry is missing or is not one
+			// of grove's version links.
+			"built_commit": st.Pin.BuiltCommit(),
+		})
+	}
+	return out
 }
 
 // newInstaller wires the consent gate. yes approves without prompting, which
@@ -513,6 +718,15 @@ func valueOrNone(v string) string {
 		return "(none)"
 	}
 	return v
+}
+
+// refLabel names the ref a pin follows, so a message about a pin that follows
+// the remote's default branch does not read as a message about an empty string.
+func refLabel(ref string) string {
+	if ref == "" {
+		return "the default branch"
+	}
+	return ref
 }
 
 // shortCommit abbreviates a commit for the list table.

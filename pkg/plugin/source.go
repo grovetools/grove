@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -259,6 +260,59 @@ func Resolve(dir, ref string) (string, error) {
 	return "", fmt.Errorf("%q does not name a tag, branch or commit in this repository", ref)
 }
 
+// LsRemote asks a remote which commit a ref names, without touching anything
+// local. It is the read-only counterpart of Fetch plus Resolve: one round trip
+// to the remote, no clone, no fetch, no working tree — which is what makes it
+// safe to call while the panel built from that checkout is running.
+//
+// An empty ref asks for HEAD: that is what an empty pin ref resolved to when the
+// plugin was installed (Resolve's origin/HEAD candidate).
+//
+// A remote that answers and has no such ref is "" with a nil error, not a
+// failure. Being told a tag is gone is an answer; not being able to ask is the
+// error.
+func LsRemote(ctx context.Context, url, ref string) (string, error) {
+	args := []string{"ls-remote", url}
+	if ref == "" {
+		args = append(args, "HEAD")
+	} else {
+		// Four patterns rather than one, because ls-remote MATCHES where
+		// Resolve resolves: a branch and a tag may share a name, and an
+		// annotated tag's own object is not the commit it points at. The peeled
+		// `^{}` entry is the one that compares against a pin, and git only emits
+		// it when a pattern asks for it.
+		args = append(args, ref, "refs/heads/"+ref, "refs/tags/"+ref, "refs/tags/"+ref+"^{}")
+	}
+	out, err := gitContext(ctx, "", args...)
+	if err != nil {
+		return "", err
+	}
+	return pickRemoteRef(out, ref), nil
+}
+
+// pickRemoteRef reads ls-remote's output in the order Resolve reads its local
+// candidates: the peeled tag first — it is the commit an annotated tag names —
+// then the tag, then the branch, then whatever matched the pattern verbatim.
+func pickRemoteRef(out, ref string) string {
+	found := make(map[string]string)
+	for _, line := range strings.Split(out, "\n") {
+		commit, name, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		if ok && commit != "" {
+			found[name] = commit
+		}
+	}
+	candidates := []string{"HEAD"}
+	if ref != "" {
+		candidates = []string{"refs/tags/" + ref + "^{}", "refs/tags/" + ref, "refs/heads/" + ref, ref}
+	}
+	for _, c := range candidates {
+		if commit := found[c]; commit != "" {
+			return commit
+		}
+	}
+	return ""
+}
+
 // Checkout puts the working tree at exactly commit, detached, and removes
 // anything the previous build left behind so a build never picks up a stale
 // artifact from another version.
@@ -286,7 +340,13 @@ func shortCommit(c string) string {
 // git runs one git command, returning stdout. Errors carry git's own stderr,
 // which is the only useful thing to show when a clone or a ref lookup fails.
 func git(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...) //nolint:gosec // G204: args are grove's own, not user shell input
+	return gitContext(context.Background(), dir, args...)
+}
+
+// gitContext is git with a cancellable context, for the calls that go over the
+// network on someone's keystroke rather than as part of an install.
+func gitContext(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // G204: args are grove's own, not user shell input
 	if dir != "" {
 		cmd.Dir = dir
 	}
