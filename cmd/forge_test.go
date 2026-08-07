@@ -510,7 +510,7 @@ func TestForgeRootURLReconcileShapeAndTrailer(t *testing.T) {
 		t.Fatalf("mesh ROOT_URL = %q", got)
 	}
 	script := forgeRootURLReconcileScript(forgeMeshRootURL(cfg))
-	for _, want := range []string{"/etc/forgejo/app.ini", "ROOT_URL = ", "systemctl restart forgejo.service", "CHANGED=1"} {
+	for _, want := range []string{"/etc/forgejo/app.ini", "ROOT_URL = ", "systemctl restart forgejo.service", "CHANGED=1", `install -o "$OWNER" -g "$GROUP" -m "$MODE"`} {
 		if !strings.Contains(script, want) {
 			t.Errorf("reconcile script missing %q", want)
 		}

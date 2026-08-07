@@ -137,6 +137,10 @@ func TestForgeWGUpUsesOnlyConvergeSeamsInSafeOrder(t *testing.T) {
 			calls = append(calls, "wireguard")
 			return nil
 		},
+		reconcileRootURL: func(_ io.Writer, _ forgeOutputs, _ *config.ForgeConfig) error {
+			calls = append(calls, "rooturl")
+			return nil
+		},
 		reconcileTLS: func(_ io.Writer, _ forgeOutputs, _ *config.ForgeConfig) error {
 			calls = append(calls, "tls")
 			return nil
@@ -146,7 +150,7 @@ func TestForgeWGUpUsesOnlyConvergeSeamsInSafeOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := strings.Join(calls, ","), "config,outputs:/existing/state,wireguard,tls"; got != want {
+	if got, want := strings.Join(calls, ","), "config,outputs:/existing/state,wireguard,rooturl,tls"; got != want {
 		t.Fatalf("call order = %q, want %q", got, want)
 	}
 	for _, want := range []string{"existing forge", "infrastructure was not changed", "Terraform and gcloud were not run"} {
@@ -184,6 +188,7 @@ func TestForgeWGUpRequiresEnabledValidConfig(t *testing.T) {
 					return forgeOutputs{}, nil
 				},
 				reconcileWireGuard: func(io.Writer, forgeOutputs, *config.ForgeConfig) error { return nil },
+				reconcileRootURL:   func(io.Writer, forgeOutputs, *config.ForgeConfig) error { return nil },
 				reconcileTLS:       func(io.Writer, forgeOutputs, *config.ForgeConfig) error { return nil },
 			}
 			_, err := executeForgeWGUpForTest(t, deps)

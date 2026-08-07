@@ -160,7 +160,12 @@ sudo awk -v target="$TARGET" '
   { print }
   END { if (!found) print "\n[server]\nROOT_URL = " target }
 ' "$APP" > "$TMP"
-sudo install -o root -g forgejo -m 0640 "$TMP" "$APP"
+# The service user is a module variable (default "git"), so ownership is
+# whatever the installer chose: preserve it rather than guess a group name.
+OWNER=$(sudo stat -c '%U' "$APP")
+GROUP=$(sudo stat -c '%G' "$APP")
+MODE=$(sudo stat -c '%a' "$APP")
+sudo install -o "$OWNER" -g "$GROUP" -m "$MODE" "$TMP" "$APP"
 rm -f "$TMP"
 sudo systemctl restart forgejo.service
 printf 'CHANGED=1\nOLD=%s\nNEW=%s\n' "${OLD:-<unset>}" "$TARGET"

@@ -120,6 +120,7 @@ type forgeWGUpDeps struct {
 	loadConfig         func() (*config.ForgeConfig, error)
 	loadOutputs        func(string) (forgeOutputs, error)
 	reconcileWireGuard func(io.Writer, forgeOutputs, *config.ForgeConfig) error
+	reconcileRootURL   func(io.Writer, forgeOutputs, *config.ForgeConfig) error
 	reconcileTLS       func(io.Writer, forgeOutputs, *config.ForgeConfig) error
 }
 
@@ -128,6 +129,7 @@ func newForgeWGUpCmd() *cobra.Command {
 		loadConfig:         loadForgeConfig,
 		loadOutputs:        loadForgeWGUpOutputs,
 		reconcileWireGuard: reconcileForgeWireGuard,
+		reconcileRootURL:   reconcileForgeRootURL,
 		reconcileTLS:       reconcileForgeTLS,
 	})
 }
@@ -173,8 +175,12 @@ new forge or intentionally converge infrastructure.`
 		if err := deps.reconcileWireGuard(out, outputs, forgeCfg); err != nil {
 			return err
 		}
-		// Keep the same safe order as forge up: mesh first, then widen the
-		// certificate once to cover the newly converged address.
+		// Keep the same safe order as forge up: mesh first, then point Forgejo's
+		// ROOT_URL at the route clients actually use, then widen the certificate
+		// once to cover the newly converged address.
+		if err := deps.reconcileRootURL(out, outputs, forgeCfg); err != nil {
+			return err
+		}
 		if err := deps.reconcileTLS(out, outputs, forgeCfg); err != nil {
 			return err
 		}
