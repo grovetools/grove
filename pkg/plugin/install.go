@@ -358,41 +358,6 @@ func (in *Installer) Remove(name string, keepSource bool) ([]string, error) {
 	return removed, nil
 }
 
-// Status is one row of `grove plugin list`.
-type Status struct {
-	Name string
-	Pin  *Pin
-	// FragmentPresent and BinaryPresent report whether what the pin claims is
-	// actually on disk.
-	FragmentPresent bool
-	BinaryPresent   bool
-	// Approved reports whether the exec-trust store still holds the approval
-	// for this exact pin. False means the fragment or the lock entry was
-	// edited outside `grove plugin`.
-	Approved bool
-}
-
-// List reports every installed plugin and whether it is intact.
-func List() ([]Status, error) {
-	lock, err := LoadLock()
-	if err != nil {
-		return nil, err
-	}
-	out := make([]Status, 0, len(lock.Plugins))
-	for _, name := range lock.Names() {
-		pin := lock.Plugins[name]
-		st := Status{Name: name, Pin: pin, Approved: IsApproved(pin.Fragment, pin.ConsentDigest)}
-		if _, err := os.Stat(pin.Fragment); err == nil {
-			st.FragmentPresent = true
-		}
-		if _, err := os.Stat(pin.Binary); err == nil {
-			st.BinaryPresent = true
-		}
-		out = append(out, st)
-	}
-	return out, nil
-}
-
 // installed reports whether a pin's artifacts are both still on disk.
 func installed(pin *Pin) bool {
 	if _, err := os.Stat(pin.Fragment); err != nil {

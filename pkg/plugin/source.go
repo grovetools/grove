@@ -272,6 +272,17 @@ func Checkout(dir, commit string) error {
 	return nil
 }
 
+// shortCommit abbreviates a commit for display, leaving anything that is not a
+// full hash alone. core/pkg/plugin keeps its own copy for the update diff: five
+// lines of formatting are not worth an exported symbol in a package whose whole
+// point is a small read surface.
+func shortCommit(c string) string {
+	if len(c) >= 12 {
+		return c[:12]
+	}
+	return c
+}
+
 // git runs one git command, returning stdout. Errors carry git's own stderr,
 // which is the only useful thing to show when a clone or a ref lookup fails.
 func git(dir string, args ...string) (string, error) {

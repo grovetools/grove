@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	coreplugin "github.com/grovetools/core/pkg/plugin"
 	"github.com/grovetools/grove/pkg/plugin"
 )
 
@@ -19,6 +20,11 @@ import (
 // stranger's process joins your TUI.
 //
 // The consent screen below is the product. Everything else is plumbing.
+//
+// Two imports, one subject: `coreplugin` is the read side — the lockfile, the
+// manifest schema, what is installed and whether it is intact — which lives in
+// core so treemux can read it without importing grove. `plugin` is the install
+// pipeline that writes all of it, which only grove has.
 
 func newPluginCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -36,7 +42,7 @@ claims), and nothing recompiles to add one.
   grove plugin remove foo
 
 Installs pin an exact commit. A ref is resolved once, at install time, and
-recorded in ~/.config/grove/plugins/` + plugin.LockFileName + `; nothing floats,
+recorded in ~/.config/grove/plugins/` + coreplugin.LockFileName + `; nothing floats,
 and 'update' is the only thing that moves a pin.
 
 Installing asks first. Before anything is built or written, grove shows the
@@ -58,7 +64,7 @@ func newPluginInstallCmd() *cobra.Command {
 		Short: "Install a panel from a git repository",
 		Long: `Clone a plugin repository at a pinned ref, build it, and declare its panel.
 
-The source is a git repository containing a ` + plugin.ManifestFile + ` at its
+The source is a git repository containing a ` + coreplugin.ManifestFile + ` at its
 root:
 
   grove plugin install github.com/user/grove-panel-foo@v1.2.0
@@ -160,7 +166,7 @@ func runPluginUpdate(cmd *cobra.Command, args []string) error {
 
 	names := args
 	if len(names) == 0 {
-		statuses, err := plugin.List()
+		statuses, err := coreplugin.List()
 		if err != nil {
 			return err
 		}
@@ -207,7 +213,7 @@ func runPluginUpdate(cmd *cobra.Command, args []string) error {
 
 func runPluginList(cmd *cobra.Command, _ []string) error {
 	jsonOutput, _ := cmd.Flags().GetBool("json")
-	statuses, err := plugin.List()
+	statuses, err := coreplugin.List()
 	if err != nil {
 		return err
 	}
@@ -239,7 +245,7 @@ func runPluginList(cmd *cobra.Command, _ []string) error {
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tSOURCE\tPINNED\tPROTOCOL\tSTATE")
-	var broken []plugin.Status
+	var broken []coreplugin.Status
 	for _, st := range statuses {
 		protocol := st.Pin.Consent.Protocol
 		if protocol == "" {
