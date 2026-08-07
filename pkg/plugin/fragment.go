@@ -90,6 +90,15 @@ func RenderFragment(m *Manifest, runBinary string, pin *Pin) ([]byte, error) {
 			"description": m.Panel.Notebook.Description,
 		}
 	}
+	// The digest declaration travels for the reason the notebook one does, plus
+	// one of its own: this is the file a user edits to point a drawer pane at the
+	// panel (`backend = "digest"`), and the sentence they need in order to decide
+	// whether that pane is worth a column is the author's, written right here.
+	// Nothing reads it — a host draws the LIVE frame — so writing it is the whole
+	// of what it does.
+	if m.Panel.Digest != nil {
+		panel["digest"] = map[string]any{"description": m.Panel.Digest.Description}
+	}
 	// Settings are the panel's defaults, written out so the file the user edits
 	// to retune the panel already shows every knob it has. Editing this table
 	// is the supported way to configure an installed panel; the host delivers

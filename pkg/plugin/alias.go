@@ -47,6 +47,7 @@ type (
 	View     = coreplugin.View
 	Key      = coreplugin.Key
 	Notebook = coreplugin.Notebook
+	Digest   = coreplugin.Digest
 
 	Lock = coreplugin.Lock
 	Pin  = coreplugin.Pin

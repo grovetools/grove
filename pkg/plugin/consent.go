@@ -52,5 +52,8 @@ func NewConsentFacts(m *Manifest, src ResolvedSource, manifestBytes []byte, runB
 		facts.NotebookSubtree = m.Panel.Notebook.Subtree
 		facts.NotebookDescription = m.Panel.Notebook.Description
 	}
+	if m.Panel.Digest != nil {
+		facts.DigestDescription = m.Panel.Digest.Description
+	}
 	return facts
 }

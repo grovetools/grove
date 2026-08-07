@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/grovetools/core/config"
@@ -198,5 +199,77 @@ func TestFragmentCarriesTheNotebookDeclarationToTheHost(t *testing.T) {
 	}
 	if entry.Notebook.Subtree != "hn/clippings" || entry.Notebook.Description != "stories you clip from the feed" {
 		t.Errorf("notebook = %+v, want the manifest's", entry.Notebook)
+	}
+}
+
+// digestFragmentManifest is the documented shape: a panel that publishes a
+// projection of itself and says what it shows.
+const digestFragmentManifest = `
+schema_version = 1
+
+[plugin]
+name        = "breaktimer"
+description = "A work/break interval timer"
+
+[build]
+command = ["go", "build", "-o", "bin/grove-panel-breaktimer", "."]
+binary  = "bin/grove-panel-breaktimer"
+
+[panel]
+protocol = "embed/v1"
+
+[panel.digest]
+description = "the timer's state and how long is left of it"
+`
+
+// The declaration has to arrive as something core/config decodes, correctly
+// nested — [tui.plugins.breaktimer.digest], not a [digest] stranded beside
+// [tui]. That is the failure the whole-document marshal in RenderFragment
+// exists to prevent, and every sub-table added since owes it a test.
+func TestFragmentCarriesTheDigestDeclarationToTheHost(t *testing.T) {
+	m, err := ParseManifest([]byte(digestFragmentManifest))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	data, err := RenderFragment(m, "/opt/grove/bin/grove-panel-breaktimer", &Pin{Spec: "x", Commit: "abc"})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+
+	var frag struct {
+		TUI struct {
+			Plugins map[string]*config.PluginConfig `toml:"plugins"`
+		} `toml:"tui"`
+	}
+	if err := toml.Unmarshal(data, &frag); err != nil {
+		t.Fatalf("the fragment does not decode into core's own config type: %v\n%s", err, data)
+	}
+	entry := frag.TUI.Plugins["breaktimer"]
+	if entry == nil {
+		t.Fatalf("no [tui.plugins.breaktimer]:\n%s", data)
+	}
+	if entry.Digest == nil {
+		t.Fatalf("the digest declaration did not survive the fragment:\n%s", data)
+	}
+	if entry.Digest.Description != "the timer's state and how long is left of it" {
+		t.Errorf("digest = %+v, want the manifest's", entry.Digest)
+	}
+}
+
+// A manifest that declares no digest writes no sub-table. Absence has to stay
+// absent rather than become an empty `[digest]`: the field's whole contract is
+// that it is read in the affirmative only, and a table with a blank description
+// would be a declaration nobody made.
+func TestFragmentOmitsTheDigestTableWhenTheManifestDeclaresNone(t *testing.T) {
+	m, err := ParseManifest([]byte(notebookManifest))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	data, err := RenderFragment(m, "/opt/grove/bin/grove-panel-hn", &Pin{Spec: "x", Commit: "abc"})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if strings.Contains(string(data), "digest") {
+		t.Errorf("a manifest declaring no digest still wrote one:\n%s", data)
 	}
 }

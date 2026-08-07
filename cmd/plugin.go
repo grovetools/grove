@@ -623,7 +623,7 @@ func printConsent(req *plugin.ConsentRequest, out io.Writer) {
 		fmt.Fprintf(out, "      with %s\n", e)
 	}
 
-	if f.Protocol != "" || len(f.Keys) > 0 || len(f.Views) > 0 || f.NotebookSubtree != "" {
+	if f.Protocol != "" || len(f.Keys) > 0 || len(f.Views) > 0 || f.DigestDescription != "" || f.NotebookSubtree != "" {
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "  The panel declares:")
 		if f.Protocol != "" {
@@ -639,6 +639,14 @@ func printConsent(req *plugin.ConsentRequest, out io.Writer) {
 		// list, they choose one entry from it when they mount the panel.
 		for _, v := range f.Views {
 			fmt.Fprintf(out, "      view      %s\n", v)
+		}
+		// Beside the views, because it is the third answer to "what does this
+		// panel draw, and where" — and the only one whose answer is somewhere
+		// the panel is not running. Worth its own sentence rather than a marker
+		// on the view lines: a digest is drawn in slots the user never mounted
+		// this panel in, which is the part they are actually approving.
+		if f.DigestDescription != "" {
+			fmt.Fprintf(out, "      digest    publishes a one-line summary other panes can show — %s\n", f.DigestDescription)
 		}
 		// The notebook line is a disclosure, not a mount: the host neither
 		// creates nor guards the subtree, it only makes sure the user has read
