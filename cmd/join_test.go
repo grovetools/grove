@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/syncproto"
@@ -290,4 +291,293 @@ func TestJoinRejectsNonHTTPServer(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "http://") {
 		t.Fatalf("a non-URL server was accepted: %v", err)
 	}
+}
+
+// THE JOB 52 REGRESSION, at the command level.
+//
+// Job 22 deliberately left this laptop a sync.toml with every key commented
+// out — supported staging, not misuse. Joining against it wrote the
+// subscription, declared no server, warned about nothing, and printed "the
+// configuration above is complete". The daemon then had a workspace it could
+// never replicate, and every status surface looked healthy.
+func TestJoinConvergesAFullyCommentedSyncConfig(t *testing.T) {
+	_, configDir, _ := sandboxAdoption(t)
+	syncPath := filepath.Join(configDir, syncConfigFileName)
+	staged := `# Notebook sync client config — staged, nothing enabled.
+# server = "https://sync.example.com"
+# token_command = "security find-generic-password -s grove-sync -w"
+`
+	if err := os.WriteFile(syncPath, []byte(staged), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := capabilitiesServer(t, func(string) int { return http.StatusOK })
+
+	var out bytes.Buffer
+	if err := runJoin(context.Background(), strings.NewReader(""), &out, joinOpts(srv.URL, configDir)); err != nil {
+		t.Fatalf("join: %v\n%s", err, out.String())
+	}
+
+	// The post-condition is what the DAEMON reads back, not what join says.
+	cfg, err := config.LoadSyncConfigFrom(syncPath)
+	if err != nil || cfg == nil {
+		t.Fatalf("sync.toml not usable: %v (%v)", cfg, err)
+	}
+	if cfg.Server != srv.URL {
+		t.Errorf("server = %q, want the joined server — the merge path did not fill it", cfg.Server)
+	}
+	if strings.TrimSpace(cfg.TokenCommand) == "" && strings.TrimSpace(cfg.Token) == "" {
+		t.Error("the converged config declares no credential")
+	}
+	if len(cfg.Workspaces) != 1 || cfg.Workspaces[0].Role != config.SyncRoleRegistry {
+		t.Errorf("workspaces = %+v, want one registry entry", cfg.Workspaces)
+	}
+	if !strings.HasPrefix(readFileString(t, syncPath), staged) {
+		t.Errorf("the staged comments were not preserved verbatim:\n%s", readFileString(t, syncPath))
+	}
+
+	// And it must never have claimed completeness in the old, unearned way.
+	if strings.Contains(out.String(), "The configuration above is complete") {
+		t.Errorf("join still prints an unearned completeness claim:\n%s", out.String())
+	}
+}
+
+// A config join CANNOT complete must fail loudly and exit nonzero, rather than
+// reporting the subscription it did manage to write.
+func TestJoinFailsWhenTheConfigCannotBeCompleted(t *testing.T) {
+	_, configDir, _ := sandboxAdoption(t)
+	syncPath := filepath.Join(configDir, syncConfigFileName)
+	// A declared-but-empty server: parses as absent, but IS declared, so
+	// convergence refuses to add a second one.
+	if err := os.WriteFile(syncPath, []byte("server = \"\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := capabilitiesServer(t, func(string) int { return http.StatusOK })
+
+	var out bytes.Buffer
+	err := runJoin(context.Background(), strings.NewReader(""), &out, joinOpts(srv.URL, configDir))
+	if err == nil {
+		t.Fatalf("join reported success for a config with no server:\n%s", out.String())
+	}
+	text := out.String()
+	if !strings.Contains(text, "incomplete: no server") {
+		t.Errorf("the failing step does not name the missing key:\n%s", text)
+	}
+	if !strings.Contains(text, "grove join --repair") {
+		t.Errorf("the failure does not name the remedy:\n%s", text)
+	}
+	if !strings.Contains(text, "enrollment incomplete") {
+		t.Errorf("the closing line still claims something:\n%s", text)
+	}
+}
+
+// --repair converges without touching credentials — and refuses when there is
+// no credential to converge around, rather than inventing or prompting for one.
+func TestJoinRepairUsesTheExistingCredential(t *testing.T) {
+	_, configDir, _ := sandboxAdoption(t)
+	syncPath := filepath.Join(configDir, syncConfigFileName)
+	tokenPath := filepath.Join(configDir, syncTokenFileName)
+
+	// Nothing to repair yet.
+	opts := joinOpts("", configDir)
+	opts.token = ""
+	opts.repair = true
+	opts.deriveServerFn = func() (string, string, error) { return "http://127.0.0.1:1", "derived", nil }
+	var out bytes.Buffer
+	if err := runJoin(context.Background(), strings.NewReader(""), &out, opts); err == nil {
+		t.Fatalf("--repair invented a credential:\n%s", out.String())
+	}
+
+	// Now give the machine a credential the way join itself would, plus a
+	// sync.toml that declares only the subscription.
+	if err := os.WriteFile(tokenPath, []byte("good-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(syncPath, []byte("[[workspaces]]\nname = \"registry\"\nrole = \"registry\"\npull = true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := capabilitiesServer(t, func(token string) int {
+		if token != "good-token" {
+			return http.StatusUnauthorized
+		}
+		return http.StatusOK
+	})
+	opts.deriveServerFn = func() (string, string, error) { return srv.URL, "derived: forge.services domain + syncd.port", nil }
+	out.Reset()
+	if err := runJoin(context.Background(), strings.NewReader(""), &out, opts); err != nil {
+		t.Fatalf("--repair: %v\n%s", err, out.String())
+	}
+	cfg, err := config.LoadSyncConfigFrom(syncPath)
+	if err != nil || cfg == nil {
+		t.Fatalf("sync.toml not usable: %v (%v)", cfg, err)
+	}
+	if cfg.Server != srv.URL {
+		t.Errorf("--repair did not fill the absent server: %q", cfg.Server)
+	}
+	if cfg.TokenCommand != "cat "+tokenPath {
+		t.Errorf("--repair did not record the existing credential: %q", cfg.TokenCommand)
+	}
+	if !strings.Contains(out.String(), "minted nothing") {
+		t.Errorf("--repair did not say it minted nothing:\n%s", out.String())
+	}
+}
+
+// The server is DERIVED when none is typed: the operator who ran `grove forge
+// up` already told grove where the forge is.
+func TestJoinDerivesTheServerWhenNoneIsGiven(t *testing.T) {
+	_, configDir, _ := sandboxAdoption(t)
+	srv := capabilitiesServer(t, func(string) int { return http.StatusOK })
+
+	opts := joinOpts("", configDir)
+	opts.deriveServerFn = func() (string, string, error) {
+		return srv.URL, "derived: forge.services domain + syncd.port", nil
+	}
+	var out bytes.Buffer
+	if err := runJoin(context.Background(), strings.NewReader(""), &out, opts); err != nil {
+		t.Fatalf("join: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "derived: forge.services") {
+		t.Errorf("join did not say where the server came from:\n%s", out.String())
+	}
+	cfg, _ := config.LoadSyncConfigFrom(filepath.Join(configDir, syncConfigFileName))
+	if cfg == nil || cfg.Server != srv.URL {
+		t.Errorf("the derived server was not written: %+v", cfg)
+	}
+}
+
+// With no forge and no argument there is nothing to derive from, and the error
+// must name the remedy rather than the missing internal.
+func TestJoinWithoutAServerOrAForgeNamesTheRemedy(t *testing.T) {
+	_, configDir, _ := sandboxAdoption(t)
+	opts := joinOpts("", configDir)
+	opts.deriveServerFn = func() (string, string, error) { return "", "", errNoForgeToDeriveFrom }
+	var out bytes.Buffer
+	err := runJoin(context.Background(), strings.NewReader(""), &out, opts)
+	if err == nil || !strings.Contains(err.Error(), "grove join https://") {
+		t.Fatalf("error does not name the remedy: %v", err)
+	}
+}
+
+// --mint composes the forge recipe. grove never holds the secret at rest: the
+// recipe returns a RECEIPT, and grove reads the credential back through the
+// token_command the way the daemon later will.
+func TestJoinMintWritesTheAccountPinnedTokenCommand(t *testing.T) {
+	_, configDir, _ := sandboxAdoption(t)
+	srv := capabilitiesServer(t, func(token string) int {
+		if token != "minted-token" {
+			return http.StatusUnauthorized
+		}
+		return http.StatusOK
+	})
+
+	opts := joinOpts(srv.URL, configDir)
+	opts.token = ""
+	opts.mint = true
+	minted := ""
+	opts.mintFn = func(_ context.Context, machineName string) (mintReceipt, error) {
+		minted = machineName
+		return mintReceipt{
+			Stored:       "keychain",
+			Service:      "grove-sync",
+			Account:      machineName,
+			Description:  machineName,
+			HashPrefix:   "a1b2c3d4e5f6",
+			TokenCommand: "printf minted-token",
+		}, nil
+	}
+	var out bytes.Buffer
+	if err := runJoin(context.Background(), strings.NewReader(""), &out, opts); err != nil {
+		t.Fatalf("join --mint: %v\n%s", err, out.String())
+	}
+	if minted == "" {
+		t.Fatal("--mint did not pass this machine's name to the recipe")
+	}
+
+	cfg, err := config.LoadSyncConfigFrom(filepath.Join(configDir, syncConfigFileName))
+	if err != nil || cfg == nil {
+		t.Fatalf("sync.toml not usable: %v (%v)", cfg, err)
+	}
+	if cfg.TokenCommand != "printf minted-token" {
+		t.Errorf("token_command = %q, want the recipe's read-back command", cfg.TokenCommand)
+	}
+	// The token file path is NOT used when a token_command is recorded.
+	if _, statErr := os.Stat(filepath.Join(configDir, syncTokenFileName)); !os.IsNotExist(statErr) {
+		t.Errorf("--mint wrote a token file beside the keychain item (%v)", statErr)
+	}
+	// The secret must not appear anywhere in what the user saw.
+	if strings.Contains(out.String(), "minted-token") {
+		t.Errorf("the minted token reached the terminal:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "a1b2c3d4e5f6") {
+		t.Errorf("join did not report the server-side hash prefix:\n%s", out.String())
+	}
+}
+
+// A mint whose stored value cannot be read back must fail loudly. This is the
+// job 52 keychain bug's shape: the item exists, the command succeeds, the value
+// is the empty string.
+func TestJoinMintFailsWhenTheStoredValueIsUnreadable(t *testing.T) {
+	_, configDir, _ := sandboxAdoption(t)
+	srv := capabilitiesServer(t, func(string) int { return http.StatusOK })
+
+	opts := joinOpts(srv.URL, configDir)
+	opts.token = ""
+	opts.mint = true
+	opts.mintFn = func(_ context.Context, machineName string) (mintReceipt, error) {
+		return mintReceipt{
+			Stored:       "keychain",
+			Service:      "grove-sync",
+			Account:      machineName,
+			TokenCommand: "printf ''", // succeeds, prints nothing
+		}, nil
+	}
+	var out bytes.Buffer
+	err := runJoin(context.Background(), strings.NewReader(""), &out, opts)
+	if err == nil {
+		t.Fatalf("join accepted a credential that reads back empty:\n%s", out.String())
+	}
+	if !strings.Contains(err.Error(), "keychain") {
+		t.Errorf("the error does not name the store: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(configDir, syncConfigFileName)); !os.IsNotExist(statErr) {
+		t.Errorf("config was written despite an unreadable credential (%v)", statErr)
+	}
+}
+
+// Enrollment without replication is INCOMPLETE. Reporting the config write and
+// exiting 0 with no daemon running is the exact claim job 52 was given.
+func TestJoinWithoutADaemonIsIncomplete(t *testing.T) {
+	home, configDir, _ := sandboxAdoption(t)
+	// Point the daemon client at a socket that does not exist, so the wait
+	// resolves quickly to "no daemon answered" rather than talking to the
+	// developer's real groved.
+	t.Setenv("GROVE_DAEMON_SOCKET", filepath.Join(home, "no-such-daemon.sock"))
+	srv := capabilitiesServer(t, func(string) int { return http.StatusOK })
+
+	opts := joinOpts(srv.URL, configDir)
+	opts.waitFor = 10 * time.Millisecond
+	var out bytes.Buffer
+	err := runJoin(context.Background(), strings.NewReader(""), &out, opts)
+	if err == nil {
+		t.Fatalf("join exited 0 with nothing replicating:\n%s", out.String())
+	}
+	text := out.String()
+	if !strings.Contains(text, "no running daemon answered") {
+		t.Errorf("join did not say the daemon is missing:\n%s", text)
+	}
+	if strings.Contains(text, "enrolled and replicating") {
+		t.Errorf("join claimed replication it never observed:\n%s", text)
+	}
+	// The config IS written — the failure is about replication, not the write.
+	if cfg, cerr := config.LoadSyncConfigFrom(filepath.Join(configDir, syncConfigFileName)); cerr != nil || cfg == nil || cfg.Server == "" {
+		t.Errorf("the config write was rolled back by a daemon failure: %+v (%v)", cfg, cerr)
+	}
+}
+
+func readFileString(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(data)
 }

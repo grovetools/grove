@@ -360,16 +360,25 @@ func laptopSyncEdit(port int, tokenPath string, workspaces []string) config.Sync
 }
 
 // reportSyncEdit prints what the editor actually did, warnings included.
+//
+// The Filled line is not decoration. The editor converges ABSENT top-level
+// scalars as well as workspaces, so a run that appended no entries may still
+// have written the server or the token_command — and "left untouched" would be
+// a false report of a file that changed.
 func reportSyncEdit(out io.Writer, res config.SyncEditResult, requested []string) {
 	for _, w := range res.Warnings {
 		fmt.Fprintf(out, "warning: %s\n", w)
+	}
+	if len(res.Filled) > 0 && !res.Created {
+		fmt.Fprintf(out, "Filled absent key(s) in %s: %s (values you had declared were left alone).\n",
+			res.Path, strings.Join(res.Filled, ", "))
 	}
 	switch {
 	case res.Created:
 		fmt.Fprintf(out, "Wrote laptop sync config %s (push-only, %d workspace(s): %s).\n",
 			res.Path, len(requested), strings.Join(requested, ", "))
 	case len(res.Added) == 0:
-		fmt.Fprintf(out, "Laptop sync config %s already lists all configured workspaces — left untouched.\n", res.Path)
+		fmt.Fprintf(out, "Laptop sync config %s already lists all configured workspaces.\n", res.Path)
 	default:
 		fmt.Fprintf(out, "Appended %d push-only workspace entr%s to %s: %s\n",
 			len(res.Added), map[bool]string{true: "y", false: "ies"}[len(res.Added) == 1],

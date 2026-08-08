@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -39,77 +40,92 @@ type joinOptions struct {
 	tokenFile         string
 	tokenCommand      string
 	registryWorkspace string
-	force             bool
-	waitFor           time.Duration
-	httpClient        *http.Client
+	// machineName pins this machine's one spelling. Empty means "whatever
+	// config.ResolveMachineName resolves"; either way the resolved value is
+	// used for the identity line, the token description and the keychain
+	// account, and is written into machine.toml so the three cannot drift.
+	machineName string
+	// mint delegates token creation to `grove forge token create`.
+	mint bool
+	// repair converges an existing config without touching credentials.
+	repair     bool
+	force      bool
+	waitFor    time.Duration
+	httpClient *http.Client
 	// configDir overrides the resolved grove config directory. Tests set it;
 	// nothing on the command line does, because a user who wants a different
 	// config directory sets XDG_CONFIG_HOME.
 	configDir string
+	// Test seams for the two things that reach outside this process.
+	mintFn         func(ctx context.Context, machineName string) (mintReceipt, error)
+	deriveServerFn func() (server, provenance string, err error)
 }
 
 func newJoinCmd() *cobra.Command {
 	opts := joinOptions{registryWorkspace: defaultRegistryWorkspace, waitFor: 30 * time.Second}
 	cmd := &cobra.Command{
-		Use:   "join <server-url>",
-		Short: "Join this machine to a grove-syncd server",
-		Long: `Point this machine at a grove-syncd server and subscribe to the machine
-registry.
+		Use:   "join [server-url]",
+		Short: "Enroll this machine with a grove-syncd server and start replicating",
+		Long: `Enroll this machine: point it at a grove-syncd server, give it a credential,
+subscribe it to the machine registry, and confirm it is actually replicating.
 
-What it does, in order:
+With a forge configured, the server URL is DERIVED (from [forge.services]
+domain and [forge.services.syncd] port) and the token can be MINTED (--mint,
+which delegates to 'grove forge token create'). An explicit URL argument stays
+supported for any other grove-syncd.
 
-  1. mints this machine's identity if it has none (a ULID in XDG state);
-  2. reads the bearer token (--token, --token-file, GROVE_SYNC_TOKEN, or a
-     prompt) and writes it to <config>/sync.token with mode 0600;
-  3. VERIFIES the token live against POST <server>/sync/capabilities;
-  4. only then writes sync.toml — server, token_command, and a
-     role = "registry" workspace entry;
-  5. creates the registry workspace directory so the daemon can replicate into
-     it, and reports the ecosystems other machines have published.
+Every line this command prints is a POST-CONDITION read back from the artifact
+it names — the config re-parsed after writing, the credential resolved the way
+the daemon will resolve it, the daemon queried, the registry counted. The
+closing claim is the conjunction of those facts, and a false conjunct exits
+NONZERO. A command that reports what it attempted rather than what it achieved
+is how a machine ends up configured, silent, and believed to be working.
 
-Step 3 is the point of the command. A token that is not accepted never reaches
-your config, because a rejected token in sync.toml leaves the daemon retrying a
-401 forever while every status surface still looks healthy.
+The four shapes this takes:
 
-Restoring your dotfiles onto a new host is the SUPPORTED FAST PATH, not an edge
-case: machine.toml arrives with your subscriptions already declared, this
-command mints a fresh identity for the new host, and it finishes by listing
-what you have declared but not yet materialized.
+  · 'grove join' — derive the server, use the credential this machine already has;
+  · 'grove join --mint' — also mint this machine's token, into the keychain;
+  · 'grove join --repair' — fill in whatever the config is missing; mint nothing,
+    prompt for nothing;
+  · 'grove join https://host:8788' — a grove-syncd that is not a grove forge.
 
-Nothing here is destructive. sync.toml is append-merged (existing content stays
-byte-for-byte), and an existing sync.token with different content is refused
-rather than overwritten unless you pass --force.`,
-		Args: cobra.ExactArgs(1),
+Nothing here is destructive. sync.toml is converged, never rewritten: absent
+keys are filled, declared keys are left exactly as you wrote them, and an
+existing sync.token whose contents differ is refused rather than replaced
+unless you pass --force.`,
+		Args:         cobra.MaximumNArgs(1),
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			opts.server = args[0]
+			if len(args) == 1 {
+				opts.server = args[0]
+			}
 			return runJoin(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), opts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.token, "token", "", "Bearer token for the sync server (else $GROVE_SYNC_TOKEN, else prompt)")
 	cmd.Flags().StringVar(&opts.tokenFile, "token-file", "", "Read the bearer token from this file instead of prompting")
 	cmd.Flags().StringVar(&opts.tokenCommand, "token-command", "", "Shell command that prints the token; written to sync.toml verbatim instead of a token file")
+	cmd.Flags().BoolVar(&opts.mint, "mint", false, "Mint this machine's token via `grove forge token create` and store it in the keychain")
+	cmd.Flags().BoolVar(&opts.repair, "repair", false, "Converge an existing config (fill absent keys) using the credential it already declares; mint and prompt for nothing")
+	cmd.Flags().StringVar(&opts.machineName, "machine-name", "", "This machine's name — used for the registry, the token description and the keychain account (default: [machine] name, else hostname)")
 	cmd.Flags().StringVar(&opts.registryWorkspace, "registry-workspace", defaultRegistryWorkspace, "Name of the reserved registry workspace")
 	cmd.Flags().BoolVar(&opts.force, "force", false, "Overwrite an existing sync.token whose contents differ")
-	cmd.Flags().DurationVar(&opts.waitFor, "wait", 30*time.Second, "How long to wait for the daemon to pick up the new subscription (0 = do not wait)")
+	cmd.Flags().DurationVar(&opts.waitFor, "wait", 30*time.Second, "How long to wait for the daemon to pick up the new subscription (0 = do not wait, and do not claim replication)")
 	return cmd
 }
+
+// errEnrollmentIncomplete is the nonzero exit for a run whose steps did not all
+// hold. The per-step lines carry the diagnosis; this only has to be an error.
+var errEnrollmentIncomplete = errors.New("enrollment incomplete — this machine is not replicating")
 
 func runJoin(ctx context.Context, in io.Reader, out io.Writer, opts joinOptions) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	server := strings.TrimRight(strings.TrimSpace(opts.server), "/")
-	if server == "" {
-		return fmt.Errorf("a sync server URL is required")
-	}
-	if !strings.HasPrefix(server, "http://") && !strings.HasPrefix(server, "https://") {
-		return fmt.Errorf("sync server URL %q must start with http:// or https://", opts.server)
-	}
 	workspaceName := strings.TrimSpace(opts.registryWorkspace)
 	if workspaceName == "" {
 		workspaceName = defaultRegistryWorkspace
 	}
-
 	configDir := opts.configDir
 	if configDir == "" {
 		configDir = paths.ConfigDir()
@@ -117,23 +133,41 @@ func runJoin(ctx context.Context, in io.Reader, out io.Writer, opts joinOptions)
 	if configDir == "" {
 		return fmt.Errorf("cannot resolve the grove config directory")
 	}
+	syncPath := filepath.Join(configDir, syncConfigFileName)
+	rep := &joinReporter{out: out}
 
-	// 1. Identity. A machine writes its own registry note and stamps its
-	// DeviceID onto every handshake, so joining without an id would produce a
-	// machine that syncs but never appears in the fleet.
+	// 1. Identity, in ONE spelling. A machine writes its own registry note and
+	// stamps its DeviceID onto every handshake, so joining without an id would
+	// produce a machine that syncs but never appears in the fleet. The NAME is
+	// resolved once here and then threaded through the registry note, the token
+	// description and the keychain account — three surfaces that, left to
+	// derive it separately, showed three different names for one laptop.
 	id, err := machine.EnsureIdentity()
 	if err != nil {
 		return fmt.Errorf("failed to mint machine identity: %w", err)
 	}
-	name := config.ResolveMachineName()
-	fmt.Fprintf(out, "Joining as %s\n", machine.Describe(name, id.ID))
-
-	// 2. Token.
-	token, tokenCommand, err := resolveJoinToken(in, out, opts)
+	name, pinned, err := pinMachineName(opts.machineName)
 	if err != nil {
 		return err
 	}
+	fmt.Fprintf(out, "Joining as %s\n", machine.Describe(name, id.ID))
+	if pinned {
+		fmt.Fprintf(out, "  %-*s [machine] name = %q — pinned so the registry, the token description\n", joinLabelWidth, "name", name)
+		fmt.Fprintf(out, "  %-*s and the keychain account cannot drift apart\n", joinLabelWidth, "")
+	}
 
+	// 2. Server: the argument if given, otherwise derived from the forge.
+	server, provenance, err := resolveJoinServer(opts)
+	if err != nil {
+		return err
+	}
+	rep.info("server", server, provenance)
+
+	// 3. Credential. Nothing is persisted before it has been verified.
+	token, tokenCommand, err := resolveJoinToken(ctx, in, rep, opts, syncPath, name)
+	if err != nil {
+		return err
+	}
 	tokenPath := filepath.Join(configDir, syncTokenFileName)
 	wroteToken := false
 	if tokenCommand == "" {
@@ -142,27 +176,353 @@ func runJoin(ctx context.Context, in io.Reader, out io.Writer, opts joinOptions)
 			return err
 		}
 		tokenCommand = "cat " + tokenPath
+		if wroteToken {
+			rep.ok("token", "written to "+tokenPath, "0600")
+		} else {
+			rep.ok("token", tokenPath, "already held this token")
+		}
 	}
 
-	// 3. Verify BEFORE persisting config. On rejection, a token file this run
+	// 4. Verify BEFORE persisting config. On rejection, a token file this run
 	// created is removed again — leaving a rejected credential behind would be
 	// the same trap one step earlier.
-	fmt.Fprintf(out, "Verifying the token against %s/sync/capabilities…\n", server)
 	if verr := verifySyncTokenOverHTTP(ctx, opts.httpClient, server, token, id.ID); verr != nil {
 		if wroteToken {
 			_ = os.Remove(tokenPath)
 		}
+		rep.fail("verify", "POST "+server+"/sync/capabilities", "not accepted")
 		return verr
 	}
-	fmt.Fprintf(out, "✓ token accepted by %s\n", server)
-	if wroteToken {
-		fmt.Fprintf(out, "✓ token written to %s (0600)\n", tokenPath)
+	rep.ok("verify", "POST "+server+"/sync/capabilities", "accepted")
+
+	// 5. Config. The editor is additive: absent keys are filled, declared keys
+	// keep the values the user wrote, and existing entries survive verbatim.
+	if cerr := applyAndVerifyJoinConfig(rep, syncPath, server, tokenCommand, workspaceName); cerr != nil {
+		if errors.Is(cerr, errEnrollmentIncomplete) {
+			// The step line above carries the diagnosis and the remedy. Fall
+			// through to the closing claim rather than returning bare, so the
+			// run always ends with an explicit verdict.
+			return rep.conclude(false, opts.waitFor > 0)
+		}
+		return cerr
+	}
+	config.ResetLoadCache()
+
+	// 6. Local registry root. The daemon's syntheticNodeFor prefers a workspace
+	// root that already EXISTS, so creating the directory now is what pins this
+	// subscription to the notebook chosen here rather than to whatever a later
+	// rule picks.
+	registryRoot := ensureRegistryRoot(rep, workspaceName)
+
+	// 7. Replication. This is what enrollment is FOR, so it is checked, not
+	// assumed — and when it is not checked, the closing claim says so instead
+	// of quietly widening.
+	replicating := false
+	switch {
+	case opts.waitFor <= 0:
+		rep.skip("daemon", "not waited for (--wait 0)")
+	default:
+		replicating = reportDaemonPickup(ctx, rep, workspaceName, opts.waitFor)
+	}
+	if replicating {
+		reportRegistryReplication(rep, registryRoot)
 	}
 
-	// 4. Config. The role-aware editor is append-only: an existing sync.toml
-	// keeps every byte it had, and a workspace it already declares is left
-	// exactly as the user wrote it.
-	syncPath := filepath.Join(configDir, syncConfigFileName)
+	reportJoinNextSteps(out, registryRoot)
+	return rep.conclude(replicating, opts.waitFor > 0)
+}
+
+// ---- step reporting ---------------------------------------------------------
+
+// joinReporter renders one line per step and remembers whether every one of
+// them held.
+//
+// The format is deliberately uniform — `label  subject … ✓ outcome` — because
+// the outcome half is the part that must be read back from the artifact. A
+// step that cannot say what it achieved gets `skip`, which is neither a pass
+// nor a failure but does forbid the closing "and replicating".
+type joinReporter struct {
+	out     io.Writer
+	failed  bool
+	skipped bool
+}
+
+const joinLabelWidth = 9
+
+func (r *joinReporter) info(label, subject, annotation string) {
+	if annotation == "" {
+		fmt.Fprintf(r.out, "  %-*s %s\n", joinLabelWidth, label, subject)
+		return
+	}
+	fmt.Fprintf(r.out, "  %-*s %-38s [%s]\n", joinLabelWidth, label, subject, annotation)
+}
+
+func (r *joinReporter) ok(label, subject, outcome string) {
+	fmt.Fprintf(r.out, "  %-*s %s … ✓ %s\n", joinLabelWidth, label, subject, outcome)
+}
+
+func (r *joinReporter) skip(label, reason string) {
+	r.skipped = true
+	fmt.Fprintf(r.out, "  %-*s %s\n", joinLabelWidth, label, reason)
+}
+
+func (r *joinReporter) fail(label, subject, outcome string, remedy ...string) {
+	r.failed = true
+	fmt.Fprintf(r.out, "  %-*s %s … ✗ %s\n", joinLabelWidth, label, subject, outcome)
+	for _, line := range remedy {
+		fmt.Fprintf(r.out, "  %-*s %s\n", joinLabelWidth, "", line)
+	}
+}
+
+func (r *joinReporter) warn(text string) {
+	fmt.Fprintf(r.out, "  %-*s ! %s\n", joinLabelWidth, "", text)
+}
+
+// conclude prints the closing claim and decides the exit status. The claim is
+// a CONJUNCTION of the facts above it: "enrolled and replicating" requires
+// every step to have held AND replication to have been observed, not merely
+// configured.
+func (r *joinReporter) conclude(replicating, waited bool) error {
+	switch {
+	case r.failed:
+		fmt.Fprintf(r.out, "\n✗ %v\n", errEnrollmentIncomplete)
+		return errEnrollmentIncomplete
+	case replicating:
+		fmt.Fprintf(r.out, "\n✓ enrolled and replicating.\n")
+		return nil
+	case !waited:
+		// Not a failure: the caller asked not to wait, so nothing here has any
+		// evidence about replication and the line must not imply otherwise.
+		fmt.Fprintf(r.out, "\n✓ enrolled. Replication was not checked (--wait 0).\n")
+		return nil
+	default:
+		fmt.Fprintf(r.out, "\n✗ %v\n", errEnrollmentIncomplete)
+		return errEnrollmentIncomplete
+	}
+}
+
+// ---- server ----------------------------------------------------------------
+
+// resolveJoinServer returns the syncd base URL and where it came from.
+func resolveJoinServer(opts joinOptions) (server, provenance string, err error) {
+	if raw := strings.TrimSpace(opts.server); raw != "" {
+		server = strings.TrimRight(raw, "/")
+		if !strings.HasPrefix(server, "http://") && !strings.HasPrefix(server, "https://") {
+			return "", "", fmt.Errorf("sync server URL %q must start with http:// or https://", opts.server)
+		}
+		return server, "given", nil
+	}
+	derive := opts.deriveServerFn
+	if derive == nil {
+		derive = deriveForgeSyncServer
+	}
+	server, provenance, err = derive()
+	if err != nil {
+		if errors.Is(err, errNoForgeToDeriveFrom) {
+			return "", "", fmt.Errorf("no server to join: this machine configures no [forge], so there is nothing to derive from — pass the grove-syncd URL as an argument (`grove join https://host:8788`)")
+		}
+		return "", "", err
+	}
+	return strings.TrimRight(server, "/"), provenance, nil
+}
+
+// ---- identity ---------------------------------------------------------------
+
+// pinMachineName resolves this machine's one name and writes it into
+// machine.toml when the file declares none.
+//
+// PINNING is the point. With no [machine] name declared, every surface falls
+// back to the hostname independently, so the registry showed
+// "Matthews-MacBook-Air.local" while the token was described "solair" and the
+// keychain account was "solair" — three spellings of one machine, and the
+// distinction is load-bearing for revocation. Writing it down once makes them
+// the same string by construction.
+func pinMachineName(requested string) (name string, pinned bool, err error) {
+	name = strings.TrimSpace(requested)
+	if name == "" {
+		name = config.ResolveMachineName()
+	}
+	if name == "" {
+		return "", false, fmt.Errorf("cannot resolve a name for this machine — pass --machine-name")
+	}
+	path := config.MachineConfigPath()
+	if path == "" {
+		return name, false, nil
+	}
+	if cfg, lerr := config.LoadMachineConfig(); lerr == nil && cfg != nil &&
+		strings.TrimSpace(cfg.Machine.Name) != "" && requested == "" {
+		// Already pinned and the caller did not ask for a different one.
+		return name, false, nil
+	}
+	changed, werr := config.WriteMachineName(path, name)
+	if werr != nil {
+		// Not fatal. A machine that cannot record its name still enrolls; it
+		// just keeps re-deriving one, which is the drift this prevents rather
+		// than a precondition for anything below.
+		return name, false, nil
+	}
+	if changed {
+		config.ResetLoadCache()
+	}
+	return name, changed, nil
+}
+
+// ---- credential -------------------------------------------------------------
+
+// resolveJoinToken determines the bearer token and the token_command to record.
+//
+// The modes, in precedence order: --repair (whatever the config already
+// declares), --mint (delegate to the forge recipe), --token-command, --token,
+// --token-file, $GROVE_SYNC_TOKEN, prompt.
+//
+// A --token-command is the mode where grove never holds the secret at rest:
+// the command is written into sync.toml and run by the daemon. It still has to
+// be run ONCE here, because a token_command that does not yield a working token
+// is the same silent-401 trap as a stale token file. --mint is that same mode
+// with the command's other end created for you.
+func resolveJoinToken(ctx context.Context, in io.Reader, rep *joinReporter, opts joinOptions, syncPath, machineName string) (token, tokenCommand string, err error) {
+	switch {
+	case opts.repair:
+		return resolveRepairToken(rep, opts, syncPath)
+
+	case opts.mint:
+		mint := opts.mintFn
+		if mint == nil {
+			mint = mintForgeToken
+		}
+		receipt, merr := mint(ctx, machineName)
+		if merr != nil {
+			rep.fail("token", "minting for "+machineName, "not minted")
+			return "", "", merr
+		}
+		value, rerr := runSyncTokenCommand(receipt.TokenCommand)
+		if rerr != nil {
+			// The token exists on the server but this machine cannot read it
+			// back, which is the failure the keychain write-then-verify guard
+			// exists to catch. Say which store, never the value.
+			rep.fail("token", "reading back from "+receipt.Stored, "stored value is not readable")
+			return "", "", fmt.Errorf("`forge token create` reported the token stored in %s (%s/%s), but reading it back produced nothing usable — the credential is minted; re-run `grove join --repair` once the store is fixed: %w",
+				receipt.Stored, receipt.Service, receipt.Account, rerr)
+		}
+		rep.ok("token", "minted for "+machineName,
+			fmt.Sprintf("stored (%s %s/%s), server hash %s", receipt.Stored, receipt.Service, receipt.Account, receipt.HashPrefix))
+		return value, strings.TrimSpace(receipt.TokenCommand), nil
+
+	case strings.TrimSpace(opts.tokenCommand) != "":
+		value, rerr := runSyncTokenCommand(opts.tokenCommand)
+		if rerr != nil {
+			return "", "", fmt.Errorf("--token-command failed; it must print the token on stdout: %w", rerr)
+		}
+		rep.ok("token", "--token-command", "resolved")
+		return value, strings.TrimSpace(opts.tokenCommand), nil
+
+	case strings.TrimSpace(opts.token) != "":
+		return strings.TrimSpace(opts.token), "", nil
+
+	case strings.TrimSpace(opts.tokenFile) != "":
+		data, rerr := os.ReadFile(expandUserPath(strings.TrimSpace(opts.tokenFile)))
+		if rerr != nil {
+			return "", "", fmt.Errorf("failed to read --token-file: %w", rerr)
+		}
+		if strings.TrimSpace(string(data)) == "" {
+			return "", "", fmt.Errorf("--token-file %s is empty", opts.tokenFile)
+		}
+		return strings.TrimSpace(string(data)), "", nil
+
+	case strings.TrimSpace(os.Getenv("GROVE_SYNC_TOKEN")) != "":
+		return strings.TrimSpace(os.Getenv("GROVE_SYNC_TOKEN")), "", nil
+	}
+
+	// Nothing was supplied. Before prompting, see whether the machine is
+	// already holding a credential: re-running `grove join` on an enrolled
+	// machine must be a no-op that still verifies, not a password prompt.
+	if value, command, ok := existingJoinCredential(syncPath); ok {
+		rep.ok("token", describeTokenSource(command), "resolved from the existing config")
+		return value, command, nil
+	}
+
+	if !stdinIsTTY() {
+		return "", "", fmt.Errorf("no sync token supplied: pass --mint, --token, --token-file, --token-command, or set GROVE_SYNC_TOKEN (there is no terminal to prompt on)")
+	}
+	fmt.Fprintf(rep.out, "Sync token for the server (input hidden): ")
+	value, rerr := readSecret(in)
+	fmt.Fprintln(rep.out)
+	if rerr != nil {
+		return "", "", rerr
+	}
+	if strings.TrimSpace(value) == "" {
+		return "", "", fmt.Errorf("no sync token entered")
+	}
+	return strings.TrimSpace(value), "", nil
+}
+
+// resolveRepairToken is --repair's whole credential story: use what the config
+// already declares, and refuse rather than invent one.
+//
+// This is why --repair needed no separate write path. Convergence fills absent
+// keys; repair is convergence with the credential fixed, so the only thing it
+// adds is a mode that will not prompt, will not mint, and will not write a new
+// token file.
+func resolveRepairToken(rep *joinReporter, opts joinOptions, syncPath string) (token, tokenCommand string, err error) {
+	if value, command, ok := existingJoinCredential(syncPath); ok {
+		rep.ok("token", describeTokenSource(command), "resolved (--repair minted nothing)")
+		return value, command, nil
+	}
+	rep.fail("token", "--repair", "this machine declares no usable credential")
+	return "", "", fmt.Errorf("--repair converges a configuration that already has a credential, and this one has none: %s declares no token_command and %s does not exist — run `grove join --mint` (or pass --token-command) to establish one",
+		syncPath, filepath.Join(filepath.Dir(syncPath), syncTokenFileName))
+}
+
+// existingJoinCredential resolves the credential this machine already holds,
+// the way the daemon would: the config's token_command, then its literal
+// token, then the sync.token file join itself writes.
+func existingJoinCredential(syncPath string) (token, tokenCommand string, ok bool) {
+	if cfg, err := config.LoadSyncConfigFrom(syncPath); err == nil && cfg != nil {
+		if command := strings.TrimSpace(cfg.TokenCommand); command != "" {
+			if value, rerr := runSyncTokenCommand(command); rerr == nil {
+				return value, command, true
+			}
+			return "", "", false
+		}
+		if literal := strings.TrimSpace(cfg.Token); literal != "" {
+			// A declared literal is left declared: returning an empty
+			// token_command keeps the editor from adding a second source.
+			return literal, "", true
+		}
+	}
+	tokenPath := filepath.Join(filepath.Dir(syncPath), syncTokenFileName)
+	if data, err := os.ReadFile(tokenPath); err == nil && strings.TrimSpace(string(data)) != "" {
+		return strings.TrimSpace(string(data)), "cat " + tokenPath, true
+	}
+	return "", "", false
+}
+
+// describeTokenSource labels a token_command without repeating a command that
+// may itself carry a secret in its text (`echo hunter2`). Only the shapes grove
+// writes are named; anything else is described by its config key.
+func describeTokenSource(command string) string {
+	switch {
+	case command == "":
+		return "the token declared in sync.toml"
+	case strings.HasPrefix(command, "security find-generic-password"):
+		return "the keychain item named by token_command"
+	case strings.HasPrefix(command, "cat "):
+		return strings.TrimSpace(strings.TrimPrefix(command, "cat "))
+	default:
+		return "sync.toml token_command"
+	}
+}
+
+// ---- config -----------------------------------------------------------------
+
+// applyAndVerifyJoinConfig writes the sync config and then READS IT BACK,
+// resolving it the way the daemon will.
+//
+// The read-back is the entire discipline this command exists to demonstrate.
+// `grove join` used to print "the configuration above is complete" from the
+// fact that the write returned no error — which stayed true for a config with
+// a subscription and no server, because the merge path never wrote one.
+func applyAndVerifyJoinConfig(rep *joinReporter, syncPath, server, tokenCommand, workspaceName string) error {
 	res, err := config.ApplySyncEdit(syncPath, config.SyncEdit{
 		Server:       server,
 		TokenCommand: tokenCommand,
@@ -179,132 +539,190 @@ func runJoin(ctx context.Context, in io.Reader, out io.Writer, opts joinOptions)
 		Note: "Added by `grove join` (registry-role entry).",
 	})
 	if err != nil {
+		rep.fail("config", syncPath, "not written")
 		return err
 	}
 	for _, w := range res.Warnings {
-		fmt.Fprintf(out, "warning: %s\n", w)
+		rep.warn(w)
 	}
-	switch {
-	case res.Created:
-		fmt.Fprintf(out, "✓ wrote %s (server + registry subscription %q)\n", res.Path, workspaceName)
-	case len(res.Added) > 0:
-		fmt.Fprintf(out, "✓ appended registry subscription %q to %s\n", workspaceName, res.Path)
-	default:
-		fmt.Fprintf(out, "· %s already subscribes to %q — left untouched\n", res.Path, workspaceName)
-	}
-	config.ResetLoadCache()
 
-	// 5. Local registry root. The daemon's syntheticNodeFor prefers a workspace
-	// root that already EXISTS, so creating the directory now is what pins this
-	// subscription to the notebook chosen here rather than to whatever a later
-	// rule picks. PlannedRoot — not WorkspaceRoot — because only it names a
-	// notebook explicitly instead of falling through to the locator's
-	// home-anchored default, which would put the registry somewhere nothing
-	// else reads.
-	if err := ensureRegistryRoot(out, workspaceName); err != nil {
+	// Post-condition: what the DAEMON will read, not what we believe we wrote.
+	written, err := config.LoadSyncConfigFrom(syncPath)
+	if err != nil {
+		rep.fail("config", syncPath, "written but not re-readable")
 		return err
 	}
-
-	// 6. Let the daemon pick it up, then read what replicated.
-	if opts.waitFor > 0 {
-		status, picked := waitForWorkspacePickup(ctx, out, workspaceName, opts.waitFor)
-		reportSyncAuthFailure(out, status)
-		switch {
-		case picked:
-			fmt.Fprintf(out, "✓ the daemon is syncing %q\n", workspaceName)
-		case status == nil:
-			fmt.Fprintf(out, "\n! no running daemon answered — start one with `groved` (or `grove daemon start`)\n")
-			fmt.Fprintf(out, "  to begin replicating. The configuration above is complete.\n")
-		default:
-			fmt.Fprintf(out, "\n! the daemon has not picked up %q yet; it reloads on config change and at startup.\n", workspaceName)
-		}
+	if written == nil {
+		rep.fail("config", syncPath, "does not exist after the write")
+		return errEnrollmentIncomplete
 	}
 
-	reportJoinNextSteps(out)
+	var missing []string
+	if strings.TrimSpace(written.Server) == "" {
+		missing = append(missing, "server")
+	}
+	if strings.TrimSpace(written.TokenCommand) == "" && strings.TrimSpace(written.Token) == "" {
+		missing = append(missing, "a credential (token_command or token)")
+	}
+	if !declaresWorkspace(written, workspaceName) {
+		missing = append(missing, "the "+workspaceName+" subscription")
+	}
+	if len(missing) > 0 {
+		rep.fail("config", syncPath, "incomplete: no "+strings.Join(missing, ", "),
+			"the existing file declares these keys, or declares them empty, and",
+			"convergence never overwrites what you wrote — edit them by hand,",
+			"then re-run: grove join --repair")
+		return errEnrollmentIncomplete
+	}
+
+	var did []string
+	if res.Created {
+		did = append(did, "created")
+	}
+	if len(res.Filled) > 0 {
+		did = append(did, "filled "+strings.Join(res.Filled, ", "))
+	}
+	if len(res.Added) > 0 {
+		did = append(did, "added subscription "+strings.Join(res.Added, ", "))
+	}
+	if len(res.Present) > 0 && len(res.Added) == 0 {
+		did = append(did, "already subscribes to "+strings.Join(res.Present, ", "))
+	}
+	if len(did) == 0 {
+		did = append(did, "already complete")
+	}
+	rep.ok("config", syncPath, strings.Join(did, "; ")+" — reads back with server, credential and subscription")
 	return nil
 }
 
-// resolveJoinToken determines the bearer token and the token_command to record.
-//
-// A --token-command is the one mode where grove never sees the secret: the
-// command is written into sync.toml and run by the daemon. It still has to be
-// run ONCE here, because a token_command that does not yield a working token
-// is the same silent-401 trap as a stale token file.
-func resolveJoinToken(in io.Reader, out io.Writer, opts joinOptions) (token, tokenCommand string, err error) {
-	switch {
-	case strings.TrimSpace(opts.tokenCommand) != "":
-		value, rerr := runSyncTokenCommand(opts.tokenCommand)
-		if rerr != nil {
-			return "", "", fmt.Errorf("--token-command failed; it must print the token on stdout: %w", rerr)
+func declaresWorkspace(cfg *config.SyncConfig, name string) bool {
+	for _, ws := range cfg.Workspaces {
+		if ws.Name == name {
+			return true
 		}
-		return value, strings.TrimSpace(opts.tokenCommand), nil
-	case strings.TrimSpace(opts.token) != "":
-		return strings.TrimSpace(opts.token), "", nil
-	case strings.TrimSpace(opts.tokenFile) != "":
-		data, rerr := os.ReadFile(expandUserPath(strings.TrimSpace(opts.tokenFile)))
-		if rerr != nil {
-			return "", "", fmt.Errorf("failed to read --token-file: %w", rerr)
-		}
-		if strings.TrimSpace(string(data)) == "" {
-			return "", "", fmt.Errorf("--token-file %s is empty", opts.tokenFile)
-		}
-		return strings.TrimSpace(string(data)), "", nil
-	case strings.TrimSpace(os.Getenv("GROVE_SYNC_TOKEN")) != "":
-		return strings.TrimSpace(os.Getenv("GROVE_SYNC_TOKEN")), "", nil
 	}
-
-	if !stdinIsTTY() {
-		return "", "", fmt.Errorf("no sync token supplied: pass --token, --token-file, --token-command, or set GROVE_SYNC_TOKEN (there is no terminal to prompt on)")
-	}
-	fmt.Fprintf(out, "Sync token for the server (input hidden): ")
-	value, rerr := readSecret(in)
-	fmt.Fprintln(out)
-	if rerr != nil {
-		return "", "", rerr
-	}
-	if strings.TrimSpace(value) == "" {
-		return "", "", fmt.Errorf("no sync token entered")
-	}
-	return strings.TrimSpace(value), "", nil
+	return false
 }
 
+// ---- registry root ----------------------------------------------------------
+
 // ensureRegistryRoot creates the registry workspace directory so the daemon
-// and every read surface resolve it to the same place.
+// and every read surface resolve it to the same place, and returns the root it
+// settled on ("" when there is none).
 //
 // It REFUSES when this machine declares no notebooks, rather than accepting the
 // locator's `~/.grove/notebooks/nb` fallback. Creating a notebook tree at a
 // path the user never configured is not a helpful default: the registry would
-// replicate into a directory no other grove surface reads, and on a machine
-// whose real notebooks live elsewhere it would look like the feature silently
-// did nothing.
-func ensureRegistryRoot(out io.Writer, workspaceName string) error {
+// replicate into a directory no other grove surface reads.
+func ensureRegistryRoot(rep *joinReporter, workspaceName string) string {
 	cfg, err := config.LoadDefault()
 	if err != nil {
-		return fmt.Errorf("failed to load grove config: %w", err)
+		rep.fail("registry", "grove config", "unreadable: "+err.Error())
+		return ""
 	}
 	root := registry.PlannedRoot(cfg, workspaceName)
 	if root == "" {
-		fmt.Fprintf(out, "\n! this machine declares no notebooks, so there is nowhere to put the registry.\n")
-		fmt.Fprintf(out, "  The sync configuration above is written and valid. Declare a notebook —\n")
-		fmt.Fprintf(out, "    [notebooks.definitions.<name>]\n    root_dir = \"~/notebooks/<name>\"\n")
-		fmt.Fprintf(out, "  — then re-run `grove join %s` to create the registry workspace.\n", strings.TrimRight(cfgServerHint(), "/"))
-		return nil
+		rep.fail("registry", "workspace "+workspaceName, "this machine declares no notebooks",
+			"declare one, then re-run `grove join --repair`:",
+			"  [notebooks.definitions.<name>]",
+			"  root_dir = \"~/notebooks/<name>\"")
+		return ""
 	}
 	if mkErr := os.MkdirAll(filepath.Join(root, "machines"), 0o755); mkErr != nil {
-		return fmt.Errorf("failed to create the registry workspace at %s: %w", root, mkErr)
+		rep.fail("registry", root, "could not be created: "+mkErr.Error())
+		return ""
 	}
-	fmt.Fprintf(out, "✓ registry workspace %q ready at %s\n", workspaceName, root)
-	return nil
+	// Read back: the directory must exist as a directory, because that is what
+	// syntheticNodeFor will look for.
+	if info, statErr := os.Stat(filepath.Join(root, "machines")); statErr != nil || !info.IsDir() {
+		rep.fail("registry", root, "not a directory after creation")
+		return ""
+	}
+	rep.ok("registry", root, "ready")
+	return root
 }
 
-// cfgServerHint reads back the server just persisted, so the remediation above
-// can quote the exact command to re-run.
-func cfgServerHint() string {
-	if syncCfg, err := config.LoadSyncConfig(); err == nil && syncCfg != nil {
-		return syncCfg.Server
+// ---- replication ------------------------------------------------------------
+
+// reportDaemonPickup waits for the running daemon to adopt the subscription and
+// reports what it saw. A missing daemon is a FAILURE of enrollment, not a
+// footnote to a success: a machine that is configured but not replicating is
+// the exact state job 52 was told was complete.
+func reportDaemonPickup(ctx context.Context, rep *joinReporter, workspaceName string, wait time.Duration) bool {
+	started := time.Now()
+	status, picked := waitForWorkspacePickup(ctx, io.Discard, workspaceName, wait)
+	reportSyncAuthFailure(rep.out, status)
+	switch {
+	case picked:
+		rep.ok("daemon", "subscription "+workspaceName,
+			fmt.Sprintf("picked up in %.1fs", time.Since(started).Seconds()))
+		return true
+	case status == nil:
+		rep.fail("daemon", "no running daemon answered", "nothing is replicating",
+			"start one and this machine converges on its own:",
+			"  grove daemon start   (or run `groved`)")
+		return false
+	default:
+		rep.fail("daemon", "subscription "+workspaceName,
+			fmt.Sprintf("not picked up within %s", wait),
+			"the daemon reloads on config change and at startup; restart it, then",
+			"re-run `grove join --repair` to re-check")
+		return false
 	}
-	return "<server-url>"
 }
+
+// reportRegistryReplication counts what actually landed in the registry, and
+// distinguishes it from what this machine merely declares.
+//
+// Job 52's join printed "Ecosystems published in the registry: random, solab"
+// with no daemon running and nothing replicated — those were this machine's own
+// note, read back from its own disk. Counting other machines' notes separately
+// is what makes the line evidence of replication rather than an echo.
+func reportRegistryReplication(rep *joinReporter, root string) {
+	if root == "" {
+		return
+	}
+	peers, self, err := registryPeerCounts(root)
+	if err != nil {
+		rep.skip("replica", "registry not readable yet: "+err.Error())
+		return
+	}
+	if peers == 0 {
+		rep.skip("replica", fmt.Sprintf("no other machine's note has replicated here yet (%d note%s from this machine)", self, plural(self)))
+		return
+	}
+	rep.ok("replica", "registry", fmt.Sprintf("%d machine%s replicated here", peers, plural(peers)))
+}
+
+// registryPeerCounts splits the registry's notes into those written by other
+// machines and this machine's own.
+func registryPeerCounts(root string) (peers, self int, err error) {
+	selfID := ""
+	if id, lerr := machine.Load(); lerr == nil && id != nil {
+		selfID = id.ID
+	}
+	machines, err := registry.ReadMachines(root, selfID)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, m := range machines {
+		if m.Self {
+			self++
+			continue
+		}
+		peers++
+	}
+	return peers, self, nil
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+// ---- shared helpers ---------------------------------------------------------
 
 // runSyncTokenCommand executes a sync token_command exactly the way the daemon
 // will, so what join verifies is what groved will later present.
@@ -316,13 +734,15 @@ func cfgServerHint() string {
 // happens to be exported in this shell says nothing about whether the command
 // works — and the command, not the variable, is what gets persisted.
 func runSyncTokenCommand(command string) (string, error) {
-	out, err := exec.Command("sh", "-c", command).Output() //nolint:gosec // G204: the command is the operator's own --token-command
+	out, err := exec.Command("sh", "-c", command).Output() //nolint:gosec // G204: the command is the operator's own token_command
 	if err != nil {
-		return "", err
+		// No %w on a command whose text may itself be the secret, and no
+		// stderr: the daemon-side custody rule, same direction.
+		return "", fmt.Errorf("the token_command did not produce a token (%s)", exitStatusOf(err))
 	}
 	token := strings.TrimSpace(string(out))
 	if token == "" {
-		return "", fmt.Errorf("command produced no output")
+		return "", fmt.Errorf("the token_command produced no output")
 	}
 	return token, nil
 }
@@ -375,7 +795,13 @@ func writeSyncTokenFile(path, token string, force bool) (bool, error) {
 // reportJoinNextSteps closes the run with what this machine can now do: the
 // ecosystems the registry advertises, and — the dotfiles-restore fast path —
 // what it already declared but does not have.
-func reportJoinNextSteps(out io.Writer) {
+//
+// The two lists are kept APART on purpose. An ecosystem this machine declares
+// in machine.toml and an ecosystem another machine published to the registry
+// are different facts, and printing the first under the second's heading is how
+// a join with nothing replicated reported two ecosystems "published in the
+// registry".
+func reportJoinNextSteps(out io.Writer, registryRoot string) {
 	missing, err := declaredMissingEcosystems()
 	if err != nil {
 		fmt.Fprintf(out, "\n! machine config is unreadable: %v\n", err)
@@ -396,7 +822,7 @@ func reportJoinNextSteps(out io.Writer) {
 		return
 	}
 
-	offers, _, err := registryOffers()
+	offers, mine, err := peerRegistryOffers(registryRoot)
 	if err != nil {
 		if !errors.Is(err, registry.ErrNoRegistry) {
 			fmt.Fprintf(out, "\n· registry not readable yet: %v\n", err)
@@ -404,10 +830,15 @@ func reportJoinNextSteps(out io.Writer) {
 		return
 	}
 	if len(offers) == 0 {
-		fmt.Fprintf(out, "\nNo ecosystems are published in the registry yet. They appear as soon as\nanother machine's presence note replicates here (or as soon as this machine\nwrites its own).\n")
+		fmt.Fprintf(out, "\nNo ecosystem has been published to the registry by another machine yet.\n")
+		if len(mine) > 0 {
+			sort.Strings(mine)
+			fmt.Fprintf(out, "This machine publishes %s — that is its OWN note, read back from local disk,\nnot something that replicated here.\n", strings.Join(mine, ", "))
+		}
+		fmt.Fprintf(out, "Other machines appear as soon as their presence notes replicate.\n")
 		return
 	}
-	fmt.Fprintf(out, "\nEcosystems published in the registry:\n")
+	fmt.Fprintf(out, "\nEcosystems published by OTHER machines in the registry:\n")
 	for _, offer := range offers {
 		remote := ""
 		if r, ok := offer.PrimaryRemote(); ok {
@@ -420,4 +851,36 @@ func reportJoinNextSteps(out io.Writer) {
 		fmt.Fprintf(out, "  %-20s %-10s %s%s\n", offer.Name, offer.Card.Layout, remote, flag)
 	}
 	fmt.Fprintf(out, "\nMaterialize one with:\n  grove ecosystem materialize <name>\n")
+}
+
+// peerRegistryOffers returns the offers other machines published, and the
+// names this machine publishes itself — the second list exists only so the
+// caller can say which is which.
+func peerRegistryOffers(root string) (offers []registry.Offer, mine []string, err error) {
+	if root == "" {
+		_, root, err = registry.Locate()
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	selfID := ""
+	if id, lerr := machine.Load(); lerr == nil && id != nil {
+		selfID = id.ID
+	}
+	machines, err := registry.ReadMachines(root, selfID)
+	if err != nil {
+		return nil, nil, err
+	}
+	var peers, own []registry.Machine
+	for _, m := range machines {
+		if m.Self {
+			own = append(own, m)
+			continue
+		}
+		peers = append(peers, m)
+	}
+	for _, o := range registry.Offers(own) {
+		mine = append(mine, o.Name)
+	}
+	return registry.Offers(peers), mine, nil
 }
