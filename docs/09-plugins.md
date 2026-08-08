@@ -9,14 +9,23 @@
 > section pointing at it.
 >
 > The design source is the notebook concept `grovetools:grove-extensibility-docs`
-> (`grove--09-plugins.md`). The plugin-author view is the "Ship it:
+> (`grove--09-plugins.md`). The panel-author view is the "Ship it:
 > `grove-plugin.toml`" section of treemux's `docs/writing-a-panel.md`; the
-> protocol a panel speaks is `docs/panel-protocol-v1.md` in the same repo. Both
-> are cited **by name**, because section numbers there have moved once already
+> protocol a panel speaks is `docs/panel-protocol-v1.md` in the same repo; the
+> tool-author view is `writing-a-tool.md` beside this file. All are cited
+> **by name**, because section numbers there have moved once already
 > and a stale `§10` is a reference that looks fine and points at nothing.
 
-`grove plugin install` is how a treemux sidecar panel gets from a git repository
-onto a machine. The target UX is one line:
+`grove plugin install` is how a plugin gets from a git repository onto a
+machine. A plugin is one of **two kinds**: a treemux sidecar **panel**, or a
+CLI **tool** dispatched as a grove subcommand. The panel was the first kind
+and is the running example throughout this file; a tool travels the same
+pipeline end to end — clone, pin, consent, build, managed binary, lockfile,
+trust record — and differs only at the two ends: its manifest declares
+`[tool]` instead of `[panel]`, and what appears is not a rail item but a
+`grove <verb>` subcommand. The differences are collected in "Tools: the same
+pipeline, minus the panel wiring" below; the tool author's guide is
+`writing-a-tool.md` beside this file. The target UX is one line:
 
 ```console
 $ grove plugin install github.com/user/grove-panel-foo@v1.2.0
@@ -70,10 +79,41 @@ lockfile. The one thing it writes is the exec-trust record, which is the same
 MAC'd store `grove config trust` uses rather than a second trust store of its
 own.
 
+### Tools: the same pipeline, minus the panel wiring
+
+Every stage above runs for a tool install except the panel half of the last
+two. The per-plugin file under `~/.config/grove/plugins/` is still written —
+it is the trust anchor the approval is keyed by, the unit `remove` deletes,
+and the file a user can move aside to disable the plugin by hand — but it
+carries **no `[tui.plugins]` pane entry**, and the "Appear" stage does not
+happen: nothing shows up in treemux, because there is nothing to show.
+
+What a tool gets instead is **dispatch**: `grove <verb> …` resolves,
+git-subcommand-style, through the lockfile pin to the installed binary, and
+hands it the remaining arguments. The verb namespace is guarded at install
+time — a verb already claimed by another installed tool, by a grove built-in
+command, or by a registered ecosystem tool refuses the install loudly rather
+than resolving ambiguously later. A verb whose binary has gone missing
+produces a friendly error naming the plugin that provides it and the
+`grove plugin update <name> --force` that repairs it.
+
+The consent screen is also where the kinds part company hardest: a panel
+claims a hotkey and draws in a rectangle; a tool runs with the user's real
+credentials against whatever they reach, so its consent copy is franker —
+what it runs, what it can reach. Both the dispatch rules and the consent
+framing are the tool author's business, and both are covered in
+`writing-a-tool.md`.
+
 ## `grove-plugin.toml`
 
 The manifest lives at the root of the plugin repository. It is the only thing
 the installer reads out of the repo before the user has approved anything.
+
+A manifest declares **exactly one** of `[panel]` or `[tool]`, and the section
+present is what decides the kind — there is no `kind` field and no schema
+bump, because a manifest that says what it is by carrying the tables for it
+needs no second declaration to disagree with the first. The example below is
+a panel; the `[tool]` counterpart is the "`[tool]`" subsection further down.
 
 ```toml
 schema_version = 1
@@ -179,6 +219,36 @@ of them:
 `[panel.digest]`'s absence means "declares none", **never** "publishes none":
 every fragment written before the field existed lacks it, as does every
 hand-written `[tui.plugins]` entry. Read it in the affirmative only.
+
+### `[tool]`
+
+A tool manifest replaces `[panel]` with `[tool]` and carries none of the
+panel tables — no settings, keys, views, digest or notebook, because there is
+no host to declare them to:
+
+```toml
+[tool]
+binary   = "forge"           # installed command name; optional — defaults to
+                             # the basename of build.binary
+provides = [                 # required: the CLI phrases the tool answers to
+  "forge up",
+  "forge status",
+  "forge down",
+]
+```
+
+`binary` is a bare name, never a path — where the binary lands is the
+installer's decision. `provides` is required, and it is written as *phrases*
+because they are read by a human on the consent screen: "forge up" tells that
+reader what they are approving where a bare token would not. The **first
+token of each phrase is the dispatch verb**, checked for collisions at
+install time ("Tools: the same pipeline, minus the panel wiring" above).
+
+The unknown-key policy has a consequence here worth naming: a grove that
+predates tools sees `tool.*` as unknown keys — warned about, not refused —
+and would install such a manifest as a panel. The warning on the consent
+screen is the tell, and declining there is the right move; `writing-a-tool.md`
+tells authors to say so in their README.
 
 ## The lockfile
 
