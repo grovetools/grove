@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/devicekey"
 	"github.com/grovetools/core/pkg/doctor"
+	"github.com/grovetools/core/pkg/machine"
 )
 
 func runSyncConfigCheck(t *testing.T) doctor.CheckResult {
@@ -97,6 +99,24 @@ func TestSyncConfigComplete_CompleteConfigPasses(t *testing.T) {
 	res := runSyncConfigCheck(t)
 	if res.Status != doctor.StatusOK {
 		t.Fatalf("status = %s (%s / %s), want ok", res.Status, res.Message, res.Error)
+	}
+}
+
+func TestSyncConfigComplete_DeviceOnlyConfigPasses(t *testing.T) {
+	groveDir := setupScratchConfig(t)
+	scratch := filepath.Dir(filepath.Dir(groveDir))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(scratch, "state"))
+	if _, err := machine.EnsureIdentity(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := devicekey.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(groveDir, "sync.toml"),
+		"server = \"https://sync.example.com\"\n\n[[workspaces]]\nname = \"registry\"\nrole = \"registry\"\npull = true\n")
+	res := runSyncConfigCheck(t)
+	if res.Status != doctor.StatusOK || !strings.Contains(res.Message, "device key") {
+		t.Fatalf("device-only result = %+v", res)
 	}
 }
 

@@ -18,9 +18,11 @@ import (
 	"golang.org/x/term"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/devicekey"
 	"github.com/grovetools/core/pkg/machine"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/registry"
+	"github.com/grovetools/core/pkg/syncproto"
 )
 
 func init() {
@@ -39,6 +41,7 @@ type joinOptions struct {
 	token             string
 	tokenFile         string
 	tokenCommand      string
+	enrollCode        string
 	registryWorkspace string
 	// machineName pins this machine's one spelling. Empty means "whatever
 	// config.ResolveMachineName resolves"; either way the resolved value is
@@ -66,12 +69,18 @@ func newJoinCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "join [server-url]",
 		Short: "Enroll this machine with a grove-syncd server and start replicating",
-		Long: `Enroll this machine: point it at a grove-syncd server, give it a credential,
-subscribe it to the machine registry, and confirm it is actually replicating.
+		Long: `Enroll this machine: point it at a grove-syncd server, approve its device
+fingerprint, subscribe it to the machine registry, and confirm it is actually
+replicating.
+
+New servers use the locally-held device key to mint a short-lived session; no
+static token is required. Join prints the full fingerprint and waits for peer
+approval. --code can carry a short-lived single-use enrollment voucher. The
+legacy --token, --token-file, --token-command, and --mint paths remain explicit
+fallbacks for old servers and service credentials.
 
 With a forge configured, the server URL is DERIVED (from [forge.services]
-domain and [forge.services.syncd] port) and the token can be MINTED (--mint,
-which delegates to 'grove forge token create'). An explicit URL argument stays
+domain and [forge.services.syncd] port). An explicit URL argument stays
 supported for any other grove-syncd.
 
 Every line this command prints is a POST-CONDITION read back from the artifact
@@ -81,13 +90,13 @@ closing claim is the conjunction of those facts, and a false conjunct exits
 NONZERO. A command that reports what it attempted rather than what it achieved
 is how a machine ends up configured, silent, and believed to be working.
 
-The four shapes this takes:
+Common shapes:
 
-  · 'grove join' — derive the server, use the credential this machine already has;
-  · 'grove join --mint' — also mint this machine's token, into the keychain;
-  · 'grove join --repair' — fill in whatever the config is missing; mint nothing,
-    prompt for nothing;
-  · 'grove join https://host:8788' — a grove-syncd that is not a grove forge.
+  · 'grove join' — derive the server, enroll this device, and await approval;
+  · 'grove join --code <code>' — consume a bounded voucher for immediate approval;
+  · 'grove join --token-file <path>' — explicitly use legacy token fallback;
+  · 'grove join --repair' — converge an existing configuration without minting;
+  · 'grove join https://host:8788' — use a grove-syncd that is not a grove forge.
 
 Nothing here is destructive. sync.toml is converged, never rewritten: absent
 keys are filled, declared keys are left exactly as you wrote them, and an
@@ -102,9 +111,10 @@ unless you pass --force.`,
 			return runJoin(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), opts)
 		},
 	}
-	cmd.Flags().StringVar(&opts.token, "token", "", "Bearer token for the sync server (else $GROVE_SYNC_TOKEN, else prompt)")
+	cmd.Flags().StringVar(&opts.token, "token", "", "Explicit legacy bearer token fallback for the sync server")
 	cmd.Flags().StringVar(&opts.tokenFile, "token-file", "", "Read the bearer token from this file instead of prompting")
-	cmd.Flags().StringVar(&opts.tokenCommand, "token-command", "", "Shell command that prints the token; written to sync.toml verbatim instead of a token file")
+	cmd.Flags().StringVar(&opts.tokenCommand, "token-command", "", "Shell command that prints a legacy token; written to sync.toml verbatim")
+	cmd.Flags().StringVar(&opts.enrollCode, "code", "", "Single-use device enrollment code minted by `grove machines enroll-code`")
 	cmd.Flags().BoolVar(&opts.mint, "mint", false, "Mint this machine's token via `grove forge token create` and store it in the keychain")
 	cmd.Flags().BoolVar(&opts.repair, "repair", false, "Converge an existing config (fill absent keys) using the credential it already declares; mint and prompt for nothing")
 	cmd.Flags().StringVar(&opts.machineName, "machine-name", "", "This machine's name — used for the registry, the token description and the keychain account (default: [machine] name, else hostname)")
@@ -155,6 +165,10 @@ func runJoin(ctx context.Context, in io.Reader, out io.Writer, opts joinOptions)
 		fmt.Fprintf(out, "  %-*s [machine] name = %q — pinned so the registry, the token description\n", joinLabelWidth, "name", name)
 		fmt.Fprintf(out, "  %-*s and the keychain account cannot drift apart\n", joinLabelWidth, "")
 	}
+	deviceKey, err := devicekey.Ensure()
+	if err != nil {
+		return fmt.Errorf("failed to ensure device signing key: %w", err)
+	}
 
 	// 2. Server: the argument if given, otherwise derived from the forge.
 	server, provenance, err := resolveJoinServer(opts)
@@ -163,41 +177,61 @@ func runJoin(ctx context.Context, in io.Reader, out io.Writer, opts joinOptions)
 	}
 	rep.info("server", server, provenance)
 
-	// 3. Credential. Nothing is persisted before it has been verified.
-	token, tokenCommand, err := resolveJoinToken(ctx, in, rep, opts, syncPath, name)
-	if err != nil {
-		return err
+	// 3. Device first. A v2 server needs no couriered bearer: enroll this
+	// machine, wait for an owner to approve the displayed fingerprint, and
+	// prove the approved key can mint a session before writing configuration.
+	deviceOnly, deviceErr := completeDeviceJoin(ctx, opts.httpClient, server, name, opts.enrollCode, deviceKey, opts.waitFor, rep)
+	if deviceErr != nil && !legacyJoinRequested(opts, syncPath) {
+		return deviceErr
 	}
-	tokenPath := filepath.Join(configDir, syncTokenFileName)
-	wroteToken := false
-	if tokenCommand == "" {
-		wroteToken, err = writeSyncTokenFile(tokenPath, token, opts.force)
+
+	// Explicit legacy inputs remain a migration/service fallback. They are
+	// resolved only when the device path was unavailable or rejected; a
+	// successful device join never prompts for or persists a static token.
+	tokenCommand := ""
+	if !deviceOnly {
+		rep.info("device", "device-session join unavailable", "using explicit legacy credential fallback")
+		token, resolvedCommand, err := resolveJoinToken(ctx, in, rep, opts, syncPath, name)
 		if err != nil {
 			return err
 		}
-		tokenCommand = "cat " + tokenPath
-		if wroteToken {
-			rep.ok("token", "written to "+tokenPath, "0600")
-		} else {
-			rep.ok("token", tokenPath, "already held this token")
+		tokenCommand = resolvedCommand
+		tokenPath := filepath.Join(configDir, syncTokenFileName)
+		wroteToken := false
+		if tokenCommand == "" {
+			wroteToken, err = writeSyncTokenFile(tokenPath, token, opts.force)
+			if err != nil {
+				return err
+			}
+			tokenCommand = "cat " + tokenPath
+			if wroteToken {
+				rep.ok("token", "written to "+tokenPath, "0600")
+			} else {
+				rep.ok("token", tokenPath, "already held this token")
+			}
+		}
+		var capabilities syncproto.CapabilitiesResponse
+		if verr := verifySyncTokenOverHTTP(ctx, opts.httpClient, server, token, id.ID, &capabilities); verr != nil {
+			if wroteToken {
+				_ = os.Remove(tokenPath)
+			}
+			rep.fail("verify", "POST "+server+"/sync/capabilities", "not accepted")
+			return verr
+		}
+		rep.ok("verify", "POST "+server+"/sync/capabilities", "accepted (legacy token)")
+		if capabilities.Capabilities.DeviceEnrollment {
+			enrolled, enrollErr := enrollDeviceWithCodeOverHTTP(ctx, opts.httpClient, server, name, opts.enrollCode, deviceKey)
+			if enrollErr != nil {
+				rep.fail("device", machine.Describe(name, id.ID), "not enrolled")
+				return enrollErr
+			}
+			rep.ok("device", machine.Describe(name, id.ID), enrolled.Status+" — fingerprint "+enrolled.Fingerprint)
 		}
 	}
 
-	// 4. Verify BEFORE persisting config. On rejection, a token file this run
-	// created is removed again — leaving a rejected credential behind would be
-	// the same trap one step earlier.
-	if verr := verifySyncTokenOverHTTP(ctx, opts.httpClient, server, token, id.ID); verr != nil {
-		if wroteToken {
-			_ = os.Remove(tokenPath)
-		}
-		rep.fail("verify", "POST "+server+"/sync/capabilities", "not accepted")
-		return verr
-	}
-	rep.ok("verify", "POST "+server+"/sync/capabilities", "accepted")
-
-	// 5. Config. The editor is additive: absent keys are filled, declared keys
+	// 4. Config. The editor is additive: absent keys are filled, declared keys
 	// keep the values the user wrote, and existing entries survive verbatim.
-	if cerr := applyAndVerifyJoinConfig(rep, syncPath, server, tokenCommand, workspaceName); cerr != nil {
+	if cerr := applyAndVerifyJoinConfig(rep, syncPath, server, tokenCommand, workspaceName, deviceOnly); cerr != nil {
 		if errors.Is(cerr, errEnrollmentIncomplete) {
 			// The step line above carries the diagnosis and the remedy. Fall
 			// through to the closing claim rather than returning bare, so the
@@ -367,6 +401,57 @@ func pinMachineName(requested string) (name string, pinned bool, err error) {
 	return name, changed, nil
 }
 
+func completeDeviceJoin(ctx context.Context, client *http.Client, server, name, code string, key *devicekey.Key, wait time.Duration, rep *joinReporter) (bool, error) {
+	if _, err := discoverSyncIdentity(ctx, client, server); err != nil {
+		return false, err
+	}
+	enrolled, err := enrollDeviceWithCodeOverHTTP(ctx, client, server, name, code, key)
+	if err != nil {
+		rep.info("device", machine.Describe(name, key.DeviceID()), "device enrollment unavailable")
+		return false, err
+	}
+	rep.info("device", machine.Describe(name, key.DeviceID()), enrolled.Status+" — fingerprint "+enrolled.Fingerprint)
+	deadline := time.Now().Add(wait)
+	for enrolled.Status == syncproto.DeviceStatusPending && wait > 0 && time.Now().Before(deadline) {
+		delay := 250 * time.Millisecond
+		if remaining := time.Until(deadline); remaining < delay {
+			delay = remaining
+		}
+		if delay > 0 {
+			select {
+			case <-ctx.Done():
+				return false, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+		enrolled, err = enrollDeviceWithCodeOverHTTP(ctx, client, server, name, code, key)
+		if err != nil {
+			return false, err
+		}
+	}
+	if enrolled.Status != syncproto.DeviceStatusApproved {
+		rep.info("approval", machine.Describe(name, key.DeviceID()), "still "+enrolled.Status+"; compare fingerprint "+enrolled.Fingerprint)
+		fmt.Fprintf(rep.out, "  %-*s run `grove machines approve %s` on an enrolled owner machine\n", joinLabelWidth, "", key.DeviceID())
+		return false, fmt.Errorf("device enrollment is %s; approval is required before this machine can join", enrolled.Status)
+	}
+	rep.ok("approval", machine.Describe(name, key.DeviceID()), "approved")
+	session, err := establishDeviceSession(ctx, client, server, key)
+	if err != nil {
+		rep.info("verify", "signed device handshake", "not accepted")
+		return false, err
+	}
+	rep.ok("verify", "signed device handshake", "session expires "+session.SessionExpiresAt)
+	return true, nil
+}
+
+func legacyJoinRequested(opts joinOptions, syncPath string) bool {
+	if opts.repair || opts.mint || strings.TrimSpace(opts.token) != "" || strings.TrimSpace(opts.tokenFile) != "" || strings.TrimSpace(opts.tokenCommand) != "" || strings.TrimSpace(os.Getenv(config.SyncTokenEnvVar)) != "" {
+		return true
+	}
+	_, _, ok := existingJoinCredential(syncPath)
+	return ok
+}
+
 // ---- credential -------------------------------------------------------------
 
 // resolveJoinToken determines the bearer token and the token_command to record.
@@ -522,7 +607,7 @@ func describeTokenSource(command string) string {
 // `grove join` used to print "the configuration above is complete" from the
 // fact that the write returned no error — which stayed true for a config with
 // a subscription and no server, because the merge path never wrote one.
-func applyAndVerifyJoinConfig(rep *joinReporter, syncPath, server, tokenCommand, workspaceName string) error {
+func applyAndVerifyJoinConfig(rep *joinReporter, syncPath, server, tokenCommand, workspaceName string, deviceOnly ...bool) error {
 	res, err := config.ApplySyncEdit(syncPath, config.SyncEdit{
 		Server:       server,
 		TokenCommand: tokenCommand,
@@ -561,7 +646,8 @@ func applyAndVerifyJoinConfig(rep *joinReporter, syncPath, server, tokenCommand,
 	if strings.TrimSpace(written.Server) == "" {
 		missing = append(missing, "server")
 	}
-	if strings.TrimSpace(written.TokenCommand) == "" && strings.TrimSpace(written.Token) == "" {
+	usesDeviceSession := len(deviceOnly) > 0 && deviceOnly[0]
+	if !usesDeviceSession && strings.TrimSpace(written.TokenCommand) == "" && strings.TrimSpace(written.Token) == "" {
 		missing = append(missing, "a credential (token_command or token)")
 	}
 	if !declaresWorkspace(written, workspaceName) {

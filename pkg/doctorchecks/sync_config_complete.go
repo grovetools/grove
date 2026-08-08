@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/devicekey"
 	"github.com/grovetools/core/pkg/doctor"
 )
 
@@ -78,9 +79,17 @@ func (c *syncConfigCompleteCheck) Run(ctx context.Context, opts doctor.RunOption
 
 	hasCommand := strings.TrimSpace(cfg.TokenCommand) != ""
 	hasLiteral := strings.TrimSpace(cfg.Token) != ""
+	hasDeviceKey := false
+	if !hasCommand && !hasLiteral {
+		if key, keyErr := devicekey.Load(); keyErr != nil {
+			problems = append(problems, "device identity/key is missing or corrupt")
+		} else {
+			hasDeviceKey = key != nil
+		}
+	}
 	switch {
-	case !hasCommand && !hasLiteral:
-		problems = append(problems, "no `token_command` and no `token` — every request will be rejected")
+	case !hasCommand && !hasLiteral && !hasDeviceKey:
+		problems = append(problems, "no enrolled-device key and no legacy service credential — every request will be rejected")
 	case hasCommand:
 		// Resolve it the way the daemon will. Neither the command text nor its
 		// output appears in the message: a command like `echo hunter2` carries
@@ -99,7 +108,11 @@ func (c *syncConfigCompleteCheck) Run(ctx context.Context, opts doctor.RunOption
 	}
 
 	res.Status = doctor.StatusOK
-	res.Message = fmt.Sprintf("%d subscription(s), a server, and a credential that resolves", len(cfg.Workspaces))
+	credential := "a device key"
+	if hasCommand || hasLiteral {
+		credential = "a legacy service credential that resolves"
+	}
+	res.Message = fmt.Sprintf("%d subscription(s), a server, and %s", len(cfg.Workspaces), credential)
 	return res
 }
 

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/devicekey"
 	"github.com/grovetools/core/pkg/syncproto"
 )
 
@@ -83,6 +84,135 @@ func joinOpts(server, configDir string) joinOptions {
 		registryWorkspace: defaultRegistryWorkspace,
 		configDir:         configDir,
 		waitFor:           0, // no daemon in a unit test; the wait is not what is under test
+	}
+}
+
+func TestJoinDeviceOnlyApprovedWritesNoLegacyCredential(t *testing.T) {
+	_, configDir, _ := sandboxAdoption(t)
+	var publicKey string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/sync/identity":
+			_ = json.NewEncoder(w).Encode(syncproto.IdentityResponse{ServerEpoch: "epoch-device-only", ProtocolVersions: []int{syncproto.ProtocolVersionDeviceSession}})
+		case "/sync/enroll":
+			var req syncproto.EnrollRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatal(err)
+			}
+			if req.Code != "one-use-code" {
+				t.Errorf("enrollment code = %q", req.Code)
+			}
+			if err := syncproto.VerifyEnrollment(req); err != nil {
+				t.Errorf("enrollment proof: %v", err)
+			}
+			publicKey = req.PublicKey
+			fingerprint, _ := syncproto.DeviceFingerprint(publicKey)
+			_ = json.NewEncoder(w).Encode(syncproto.EnrollResponse{DeviceID: req.DeviceID, Status: syncproto.DeviceStatusApproved, Fingerprint: fingerprint})
+		case "/sync/capabilities":
+			if got := r.Header.Get("Authorization"); got != "" {
+				t.Errorf("device handshake carried authorization %q", got)
+			}
+			var req syncproto.CapabilitiesRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatal(err)
+			}
+			pub, err := syncproto.DecodeDevicePublicKey(publicKey)
+			if err != nil || syncproto.VerifyCapabilities(req, pub) != nil {
+				t.Errorf("invalid signed capabilities request: decode=%v verify=%v", err, syncproto.VerifyCapabilities(req, pub))
+			}
+			_ = json.NewEncoder(w).Encode(syncproto.CapabilitiesResponse{ProtocolVersion: syncproto.ProtocolVersionDeviceSession, SessionToken: "session-only", SessionExpiresAt: "tomorrow"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	opts := joinOptions{server: srv.URL, enrollCode: "one-use-code", registryWorkspace: defaultRegistryWorkspace, configDir: configDir, waitFor: 0}
+	var out bytes.Buffer
+	if err := runJoin(context.Background(), strings.NewReader(""), &out, opts); err != nil {
+		t.Fatalf("device-only join: %v\n%s", err, out.String())
+	}
+	cfg, err := config.LoadSyncConfigFrom(filepath.Join(configDir, syncConfigFileName))
+	if err != nil || cfg == nil {
+		t.Fatalf("load sync config: %v", err)
+	}
+	if cfg.Token != "" || cfg.TokenCommand != "" {
+		t.Errorf("device-only config persisted legacy credential: %+v", cfg)
+	}
+	if _, err := os.Stat(filepath.Join(configDir, syncTokenFileName)); !os.IsNotExist(err) {
+		t.Errorf("device-only join created token file: %v", err)
+	}
+	if !strings.Contains(out.String(), "signed device handshake") {
+		t.Errorf("missing device verification report:\n%s", out.String())
+	}
+}
+
+func TestJoinEnrollsDeviceOnlyWhenAdvertised(t *testing.T) {
+	_, configDir, _ := sandboxAdoption(t)
+	var enrollments []syncproto.EnrollRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/sync/capabilities":
+			if r.Header.Get("Authorization") != "Bearer good-token" {
+				http.Error(w, "denied", http.StatusUnauthorized)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(syncproto.CapabilitiesResponse{
+				ServerName:      "grove-syncd",
+				ProtocolVersion: syncproto.ProtocolVersion,
+				Capabilities: syncproto.Capabilities{
+					ProtocolVersions: []int{syncproto.ProtocolVersion},
+					DeviceEnrollment: true,
+				},
+			})
+		case "/sync/enroll":
+			if got := r.Header.Get("Authorization"); got != "" {
+				t.Errorf("enrollment carried bearer authorization %q", got)
+			}
+			var req syncproto.EnrollRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Errorf("decode enrollment: %v", err)
+				http.Error(w, "bad request", http.StatusBadRequest)
+				return
+			}
+			if err := syncproto.VerifyEnrollment(req); err != nil {
+				t.Errorf("invalid enrollment proof: %v", err)
+				http.Error(w, "bad proof", http.StatusBadRequest)
+				return
+			}
+			if req.RequestedUser != "" {
+				t.Errorf("join requested unauthenticated authority %q", req.RequestedUser)
+			}
+			enrollments = append(enrollments, req)
+			fingerprint, _ := syncproto.DeviceFingerprint(req.PublicKey)
+			_ = json.NewEncoder(w).Encode(syncproto.EnrollResponse{
+				DeviceID: req.DeviceID, Status: syncproto.DeviceStatusPending, Fingerprint: fingerprint,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	for i := 0; i < 2; i++ {
+		var out bytes.Buffer
+		if err := runJoin(context.Background(), strings.NewReader(""), &out, joinOpts(srv.URL, configDir)); err != nil {
+			t.Fatalf("join run %d: %v\n%s", i+1, err, out.String())
+		}
+		if !strings.Contains(out.String(), "pending — fingerprint") {
+			t.Errorf("join run %d did not truthfully report pending enrollment:\n%s", i+1, out.String())
+		}
+	}
+	if len(enrollments) != 2 {
+		t.Fatalf("enrollment count = %d, want 2", len(enrollments))
+	}
+	if enrollments[0].DeviceID != enrollments[1].DeviceID || enrollments[0].PublicKey != enrollments[1].PublicKey {
+		t.Errorf("re-join changed device identity or key")
+	}
+	if info, err := os.Stat(devicekey.Path()); err != nil {
+		t.Fatalf("device key missing: %v", err)
+	} else if info.Mode().Perm() != 0o600 {
+		t.Errorf("device key mode = %04o, want 0600", info.Mode().Perm())
 	}
 }
 

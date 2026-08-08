@@ -75,7 +75,7 @@ const syncCapabilitiesTimeout = 10 * time.Second
 // deviceID rides along in the handshake (the server may ignore it — rendezvous
 // stays dumb) so a server that DOES record device identity sees the real one
 // from the first contact.
-func verifySyncTokenOverHTTP(ctx context.Context, client *http.Client, serverURL, token, deviceID string) error {
+func verifySyncTokenOverHTTP(ctx context.Context, client *http.Client, serverURL, token, deviceID string, capsOut ...*syncproto.CapabilitiesResponse) error {
 	base := strings.TrimRight(strings.TrimSpace(serverURL), "/")
 	if base == "" {
 		return fmt.Errorf("sync server URL is empty")
@@ -130,6 +130,9 @@ func verifySyncTokenOverHTTP(ctx context.Context, client *http.Client, serverURL
 		if caps.ProtocolVersion != syncproto.ProtocolVersion {
 			return fmt.Errorf("the sync server at %s negotiated protocol version %d, but this grove speaks %d — upgrade whichever is older",
 				base, caps.ProtocolVersion, syncproto.ProtocolVersion)
+		}
+		if len(capsOut) > 0 && capsOut[0] != nil {
+			*capsOut[0] = caps
 		}
 		return nil
 	case syncTokenRejected:

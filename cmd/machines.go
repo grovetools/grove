@@ -41,16 +41,17 @@ machine's clock; a peer that is simply powered off looks stale, and a peer with
 a skewed clock looks wrong. It is a hint about who to go look at, not a health
 check.
 
-Trust: until device principals land, any token issued by the sync server can
-write any machine's note. Rows are therefore checked, not trusted — a note
-whose machine_id disagrees with its path, or whose revision counter went
-backwards, is flagged rather than believed.`,
+The list reads replicated notes. Device approval, revocation, and enrollment
+codes are server operations authenticated by this machine's short-lived device
+session; use the corresponding subcommands below. Rows remain checked rather
+than blindly trusted until server-side registry write enforcement lands.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runMachines(cmd, all)
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "Include this machine's own note in the listing")
+	cmd.AddCommand(newMachinesApproveCmd(), newMachinesRevokeCmd(), newMachinesEnrollCodeCmd())
 	return cmd
 }
 
