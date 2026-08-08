@@ -141,6 +141,21 @@ func (in *Installer) Install(ctx context.Context, spec string, opts Options) (*R
 	if existing != nil && existing.URL != src.URL {
 		return nil, fmt.Errorf("plugin %q is already installed from %s — remove it before installing it from %s", name, existing.URL, src.URL)
 	}
+	// The installed fragment is also the user's settings store. An update must
+	// refresh the manifest-owned declaration without resetting values changed
+	// through `grove plugin set` (or the Plugins panel). Overlay the current
+	// values onto the new defaults: new settings appear, while every value the
+	// user already had remains theirs. Do this before consent facts are built so
+	// the prompt, trust digest, fragment and lockfile all describe one state.
+	if existing != nil && manifest.Kind() != "tool" {
+		current, ok, err := readFragmentSettings(existing.Fragment, name)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			manifest.Panel.Settings = overlaySettings(manifest.Panel.Settings, current)
+		}
+	}
 	// A tool's verbs must be unowned BEFORE the user is asked anything: a
 	// consent screen for an install that cannot proceed is a question with no
 	// right answer. The plugin's own lock entry is skipped inside, so an

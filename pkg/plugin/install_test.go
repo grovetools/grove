@@ -350,6 +350,53 @@ func TestUpdateToANewRefRepromptsWithADiff(t *testing.T) {
 	}
 }
 
+func TestUpdatePreservesUserSettingsAndAddsNewDefaults(t *testing.T) {
+	isolate(t)
+	v1 := settingsManifest("demo")
+	repo := newFixtureRepo(t, v1)
+
+	var seen []*ConsentRequest
+	in := approving(t, &seen)
+	if _, err := in.Install(context.Background(), repo+"@v1.0.0", Options{}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if _, err := in.Set("demo", []string{"work_minutes=40", "feed.limit=50"}, false); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	// The release changes both defaults and adds a nested setting. Existing
+	// values are user configuration now; only the new key should come from v2.
+	v2 := strings.Replace(v1, "work_minutes = 25", "work_minutes = 15\nnew_default  = true", 1)
+	v2 = strings.Replace(v2, "limit = 30", "limit = 10\nlayout = \"wide\"", 1)
+	write(t, filepath.Join(repo, ManifestFile), v2)
+	runGit(t, repo, "commit", "--quiet", "-am", "settings v2")
+	runGit(t, repo, "tag", "v2.0.0")
+
+	if _, err := in.Update(context.Background(), "demo", Options{Ref: "v2.0.0"}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	settings := fragmentSettings(t, mustPin(t, "demo").Fragment, "demo")
+	if got := settings["work_minutes"]; got != int64(40) {
+		t.Errorf("work_minutes = %#v, want preserved user value 40", got)
+	}
+	if got := settings["new_default"]; got != true {
+		t.Errorf("new_default = %#v, want new manifest default true", got)
+	}
+	feed := settings["feed"].(map[string]any)
+	if got := feed["limit"]; got != int64(50) {
+		t.Errorf("feed.limit = %#v, want preserved user value 50", got)
+	}
+	if got := feed["layout"]; got != "wide" {
+		t.Errorf("feed.layout = %#v, want new nested default wide", got)
+	}
+	pin := mustPin(t, "demo")
+	for _, want := range []string{"work_minutes = 40", "feed.limit = 50", "feed.layout = wide"} {
+		if !contains(pin.Consent.Settings, want) {
+			t.Errorf("consent settings %v do not include %q", pin.Consent.Settings, want)
+		}
+	}
+}
+
 func TestRemoveLeavesNothingBehind(t *testing.T) {
 	isolate(t)
 	repo := newFixtureRepo(t, fixtureManifest("demo", "D"))

@@ -145,6 +145,55 @@ type fragmentView struct {
 	Drawer      bool   `toml:"drawer"`
 }
 
+// readFragmentSettings reads only the user-owned settings subtree from an
+// installed fragment. Unlike readFragmentPanel it is intentionally tolerant of
+// other panel keys: an update re-renders those from the new manifest and only
+// needs to carry settings forward. A missing fragment is the install repair
+// case and reports ok=false; malformed TOML is refused rather than overwritten.
+func readFragmentSettings(path, name string) (map[string]any, bool, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // G304: lockfile-owned config path
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("read %s: %w", path, err)
+	}
+	var doc struct {
+		TUI struct {
+			Plugins map[string]struct {
+				Settings map[string]any `toml:"settings"`
+			} `toml:"plugins"`
+		} `toml:"tui"`
+	}
+	if err := toml.Unmarshal(data, &doc); err != nil {
+		return nil, false, fmt.Errorf("parse %s before preserving its settings: %w", path, err)
+	}
+	panel, ok := doc.TUI.Plugins[name]
+	if !ok {
+		return nil, false, nil
+	}
+	return panel.Settings, true, nil
+}
+
+// overlaySettings applies current user values over a new manifest's defaults.
+// Tables merge recursively so a release can add a nested default without
+// deleting a sibling the user configured; at leaves, the current value wins.
+func overlaySettings(defaults, current map[string]any) map[string]any {
+	if defaults == nil {
+		defaults = map[string]any{}
+	}
+	for key, value := range current {
+		currentTable, currentIsTable := value.(map[string]any)
+		defaultTable, defaultIsTable := defaults[key].(map[string]any)
+		if currentIsTable && defaultIsTable {
+			defaults[key] = overlaySettings(defaultTable, currentTable)
+			continue
+		}
+		defaults[key] = value
+	}
+	return defaults
+}
+
 func readFragmentPanel(path, name string) (*fragmentPanel, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // G304: the path is the lockfile's own record of grove's config dir
 	if err != nil {
