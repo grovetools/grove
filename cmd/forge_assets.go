@@ -180,6 +180,13 @@ func forgeTFVars(cfg *config.ForgeConfig) (string, error) {
 	if services.EffectiveTLSMode() == config.ForgeTLSACME {
 		fmt.Fprintf(&b, "acme_email        = %q\n", strings.TrimSpace(services.ACMEEmail))
 		fmt.Fprintf(&b, "acme_dns_provider = %q\n", strings.TrimSpace(services.ACMEDNSProvider))
+		if resolvers := services.EffectiveACMEDNSResolvers(); len(resolvers) > 0 {
+			quoted := make([]string, 0, len(resolvers))
+			for _, r := range resolvers {
+				quoted = append(quoted, fmt.Sprintf("%q", r))
+			}
+			fmt.Fprintf(&b, "acme_dns_resolvers = [%s]\n", strings.Join(quoted, ", "))
+		}
 	}
 	fmt.Fprintf(&b, "forgejo_version   = %q\n", strings.TrimSpace(services.Forgejo.Version))
 	fmt.Fprintf(&b, "forgejo_sha256    = %q\n", strings.ToLower(strings.TrimSpace(services.Forgejo.SHA256)))

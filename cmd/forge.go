@@ -270,7 +270,9 @@ release download, and grove-syncd's systemd unit waits for the binary.`
 
 		out := cmd.OutOrStdout()
 		fmt.Fprintf(out, "\nForge %s is up.\n", outputs.VMName)
-		renderForgeOutputs(out, outputs)
+		// No overlay: these outputs came out of the apply that just finished,
+		// so there is nothing fresher to prefer them to.
+		renderForgeOutputs(out, outputs, forgeOutputOverlay{})
 
 		if syncdPlan != nil {
 			if err := shipForgeSyncd(out, syncdPlan, outputs, forgeCfg); err != nil {

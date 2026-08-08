@@ -1261,6 +1261,18 @@ var SchemaFields = []FieldMeta{
 				Namespace:   "forge",
 			},
 			{
+				Path:        []string{"services", "acme_dns_resolvers"},
+				Type:        FieldArray,
+				Description: "Nameservers (host:port) lego polls for DNS-01 propagation; needed for a delegated subdomain",
+				Namespace:   "forge",
+			},
+			{
+				Path:        []string{"services", "acme_dns_zone_id"},
+				Type:        FieldString,
+				Description: "Provider hosted-zone id; lets lego skip the project-wide zone lookup so a zone-scoped credential suffices",
+				Namespace:   "forge",
+			},
+			{
 				Path:        []string{"services", "acme_email"},
 				Type:        FieldString,
 				Description: "ACME account email (tls_mode = acme)",

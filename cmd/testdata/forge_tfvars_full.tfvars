@@ -31,6 +31,7 @@ domain   = "forge.example.com"
 tls_mode = "acme"
 acme_email        = "ops@example.com"
 acme_dns_provider = "cloudflare"
+acme_dns_resolvers = ["ns-cloud-e1.googledomains.com:53", "ns-cloud-e2.googledomains.com:53"]
 forgejo_version   = "16.0.2"
 forgejo_sha256    = "9f2c1b7d4e6a8c0f3b5d7e9a1c3e5f7092b4d6f8a0c2e4f68a9b1d3f5e7a9c1b"
 forgejo_http_port = 3080

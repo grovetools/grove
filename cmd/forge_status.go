@@ -45,6 +45,16 @@ type forgeStatusReport struct {
 	// alongside the provisioned URL precisely so a mismatch is visible.
 	ConfiguredURL string       `json:"configured_url,omitempty"`
 	Outputs       forgeOutputs `json:"outputs"`
+	// EffectiveForgeURL is where THIS config says the forge answers, derived
+	// exactly as the ROOT_URL reconcile derives what it writes on the VM.
+	//
+	// Outputs.ForgeURL cannot serve that purpose: it is a terraform output
+	// cached at `up` time, and on the terraform-free pet path terraform never
+	// runs again, so it keeps describing whatever era it was written in while
+	// every converge changes the box underneath it. Reporting the record as
+	// though it were the answer produced a `!` mismatch warning against
+	// correct config after the acme cutover.
+	EffectiveForgeURL string `json:"effective_forge_url,omitempty"`
 	// TLSFingerprint is the SHA-256 of the leaf certificate the syncd endpoint
 	// presented, colon-separated hex. Empty when not probed or unreachable.
 	TLSFingerprint string `json:"tls_fingerprint,omitempty"`
@@ -129,6 +139,7 @@ Everything else is read from local state and works offline.`
 			}
 		}
 		if forgeCfg != nil {
+			report.EffectiveForgeURL = forgeMeshRootURL(forgeCfg)
 			report.TLSModeConfigured = forgeCfg.Services.EffectiveTLSMode()
 			if forgeACMEEnabled(forgeCfg) {
 				// Probe by NAME in acme mode: it exercises the exact
@@ -180,7 +191,10 @@ func renderForgeStatus(w io.Writer, report forgeStatusReport) {
 	}
 
 	fmt.Fprintf(w, "Forge %s (%s)\n", report.Outputs.VMName, report.Outputs.Zone)
-	renderForgeOutputs(w, report.Outputs)
+	renderForgeOutputs(w, report.Outputs, forgeOutputOverlay{
+		ForgeURL: report.EffectiveForgeURL,
+		TLSMode:  report.TLSModeConfigured,
+	})
 	if report.IAPSSHBreakGlass != "" {
 		fmt.Fprintf(w, "  break-glass SSH (IAP): %s\n", report.IAPSSHBreakGlass)
 	}
@@ -192,10 +206,23 @@ func renderForgeStatus(w io.Writer, report forgeStatusReport) {
 		fmt.Fprintf(w, "  mesh:     %s via %s; pubkey %s; enrolled? see `grove forge wg status`\n", report.MeshAddress, report.MeshEndpoint, pubkey)
 	}
 
-	if report.ConfiguredURL != "" && report.Outputs.ForgeURL != "" && report.ConfiguredURL != report.Outputs.ForgeURL {
-		// Worth shouting about: the daemon polls the configured URL, so a
-		// mismatch means the poller is watching something other than this box.
-		fmt.Fprintf(w, "\n  ! [forge] url is %s but this forge answers at %s\n", report.ConfiguredURL, report.Outputs.ForgeURL)
+	// Worth shouting about: the daemon polls the configured URL, so a real
+	// mismatch means the poller is watching something other than this box. But
+	// it is compared against the DERIVED answer, never the cached output — a
+	// warning that fires on correct config is worse than no warning, because it
+	// teaches the operator to ignore this surface, whose entire job is to be
+	// loud about silent renewal death.
+	//
+	// The cached output is still the fallback when nothing can be derived: a
+	// deployment with neither acme nor a mesh has no pet converge that moves
+	// the URL, so there the record has not gone stale.
+	answersAt := report.EffectiveForgeURL
+	if answersAt == "" {
+		answersAt = report.Outputs.ForgeURL
+	}
+	if answersAt != "" && report.ConfiguredURL != "" &&
+		!sameForgeOrigin(report.ConfiguredURL, answersAt) {
+		fmt.Fprintf(w, "\n  ! [forge] url is %s but this forge answers at %s\n", report.ConfiguredURL, answersAt)
 	}
 
 	switch {
@@ -246,6 +273,33 @@ func renderForgeStatus(w io.Writer, report forgeStatusReport) {
 	}
 }
 
+// sameForgeOrigin compares two forge URLs for the purpose of the mismatch
+// warning. A trailing slash is not a difference the daemon's poller can see,
+// so it must not be one the operator gets shouted at about.
+func sameForgeOrigin(a, b string) bool {
+	return strings.TrimSuffix(strings.TrimSpace(a), "/") ==
+		strings.TrimSuffix(strings.TrimSpace(b), "/")
+}
+
+// staleRecordNote renders `record: <cached>` when the value being printed
+// disagrees with what terraform recorded, and nothing when they agree. Callers
+// place it; only the disagreement is decided here.
+func staleRecordNote(shown, recorded string) string {
+	if recorded == "" || shown == recorded {
+		return ""
+	}
+	return "record: " + recorded
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func orDash(s string) string {
 	if strings.TrimSpace(s) == "" {
 		return "-"
@@ -253,21 +307,46 @@ func orDash(s string) string {
 	return s
 }
 
+// forgeOutputOverlay is what the caller knows that the cached record does not.
+// A zero overlay renders the record verbatim, which is what `forge up` wants:
+// its outputs came out of the terraform run that just finished, so there is
+// nothing fresher to prefer.
+type forgeOutputOverlay struct {
+	// ForgeURL is the URL derived from live config, if one can be derived.
+	ForgeURL string
+	// TLSMode is [forge.services]' effective mode.
+	TLSMode string
+}
+
 // renderForgeOutputs prints the recorded terraform outputs, including the whole
 // ingress surface. Listing every rule is the point: the trial's hardening
 // ledger existed because nobody could see, in one place, what was open.
-func renderForgeOutputs(w io.Writer, out forgeOutputs) {
+//
+// Where the overlay disagrees with the record, the overlay is printed and the
+// record is shown beside it as `(record: …)` rather than dropped: the
+// disagreement is itself the useful signal — it says the cached outputs have
+// gone stale under a terraform-free converge.
+func renderForgeOutputs(w io.Writer, out forgeOutputs, overlay forgeOutputOverlay) {
 	if out.ExternalIP != "" {
 		fmt.Fprintf(w, "  address:  %s\n", out.ExternalIP)
 	}
-	if out.ForgeURL != "" {
-		fmt.Fprintf(w, "  forge:    %s\n", out.ForgeURL)
+	if url := firstNonEmpty(overlay.ForgeURL, out.ForgeURL); url != "" {
+		if note := staleRecordNote(url, out.ForgeURL); note != "" {
+			fmt.Fprintf(w, "  forge:    %s  (%s)\n", url, note)
+		} else {
+			fmt.Fprintf(w, "  forge:    %s\n", url)
+		}
 	}
 	if out.ForgejoTunnelCmd != "" {
 		fmt.Fprintf(w, "  tunnel:   %s\n", out.ForgejoTunnelCmd)
 	}
 	if out.SyncdAddr != "" {
-		fmt.Fprintf(w, "  syncd:    %s (TLS: %s)\n", out.SyncdAddr, out.TLSMode)
+		mode := firstNonEmpty(overlay.TLSMode, out.TLSMode)
+		if note := staleRecordNote(mode, out.TLSMode); note != "" {
+			fmt.Fprintf(w, "  syncd:    %s (TLS: %s; %s)\n", out.SyncdAddr, mode, note)
+		} else {
+			fmt.Fprintf(w, "  syncd:    %s (TLS: %s)\n", out.SyncdAddr, mode)
+		}
 	}
 	if out.ServiceAccountEmail != "" {
 		fmt.Fprintf(w, "  identity: %s\n", out.ServiceAccountEmail)

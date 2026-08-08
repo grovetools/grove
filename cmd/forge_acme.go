@@ -125,7 +125,18 @@ certificate.`
 		if err := shipForgeRootFile(ssh, []byte(env.EnvFile), forgeACMEEnvPath); err != nil {
 			return fmt.Errorf("install %s: %w", forgeACMEEnvPath, err)
 		}
-		fmt.Fprintf(out, "  ✓ %s (GCE_PROJECT=%s)\n", forgeACMEEnvPath, env.Project)
+		if env.ZoneID != "" {
+			fmt.Fprintf(out, "  ✓ %s (GCE_PROJECT=%s, GCE_ZONE_ID=%s)\n", forgeACMEEnvPath, env.Project, env.ZoneID)
+		} else {
+			fmt.Fprintf(out, "  ✓ %s (GCE_PROJECT=%s)\n", forgeACMEEnvPath, env.Project)
+			// Said here because this is the moment the grant's shape is decided:
+			// without a zone id lego lists the project's zones to find one, so
+			// the key needs a PROJECT-level role however tightly the zone itself
+			// is bound.
+			fmt.Fprintf(out, "    ! no [forge.services] acme_dns_zone_id — lego will find the zone by listing\n")
+			fmt.Fprintf(out, "      every zone in the project, so this key needs a project-level binding.\n")
+			fmt.Fprintf(out, "      Set acme_dns_zone_id to scope the grant to the one zone.\n")
+		}
 		fmt.Fprintf(out, "\nNext: `grove forge wg up` converges the certificate and flips both services to it.\n")
 		return nil
 	}
@@ -138,6 +149,7 @@ type forgeACMEEnvRender struct {
 	EnvFile     string
 	Project     string
 	ClientEmail string
+	ZoneID      string
 }
 
 // renderForgeACMEEnv validates the service-account key and renders the
@@ -171,11 +183,20 @@ func renderForgeACMEEnv(cfg *config.ForgeConfig, keyPath string) (*forgeACMEEnvR
 	b.WriteString("# zone the forge domain lives in, and nothing else.\n")
 	fmt.Fprintf(&b, "GCE_PROJECT=%s\n", key.ProjectID)
 	fmt.Fprintf(&b, "GCE_SERVICE_ACCOUNT_FILE=%s\n", forgeACMESAKeyPath)
+	if zone := cfg.Services.EffectiveACMEDNSZoneID(); zone != "" {
+		// Naming the zone is what lets the credential be scoped TO that zone:
+		// without it lego finds the zone by listing every zone in the project,
+		// and that list call is the only thing a zone-level grant cannot serve.
+		b.WriteString("# GCE_ZONE_ID skips lego's project-wide zone lookup, so the key above\n")
+		b.WriteString("# needs no project-level binding — see [forge.services] acme_dns_zone_id.\n")
+		fmt.Fprintf(&b, "GCE_ZONE_ID=%s\n", zone)
+	}
 	return &forgeACMEEnvRender{
 		KeyJSON:     raw,
 		EnvFile:     b.String(),
 		Project:     key.ProjectID,
 		ClientEmail: key.ClientEmail,
+		ZoneID:      cfg.Services.EffectiveACMEDNSZoneID(),
 	}, nil
 }
 
@@ -424,7 +445,10 @@ fi
 . ` + forgeACMEEnvPath + `
 set +a
 # ACME_DNS_RESOLVERS (optional, space-separated host:port) overrides where lego
-# checks TXT propagation. Needed when the forge domain is a DELEGATED SUBDOMAIN:
+# checks TXT propagation. Rendered into acme.defaults from [forge.services]
+# acme_dns_resolvers, so it survives every converge — do NOT hand-add it to
+# acme.env, which install-credentials rewrites wholesale.
+# Needed when the forge domain is a DELEGATED SUBDOMAIN:
 # lego walks up to the parent zone's SOA and queries the PARENT's nameservers,
 # which correctly answer with a referral rather than the challenge record, so
 # the pre-check times out even though Let's Encrypt itself would validate fine.
@@ -465,6 +489,7 @@ func forgeACMEAssetsScript(cfg *config.ForgeConfig) string {
 		"ACME_EMAIL=" + strings.TrimSpace(cfg.Services.ACMEEmail),
 		"ACME_DNS_PROVIDER=" + strings.TrimSpace(cfg.Services.ACMEDNSProvider),
 		"ACME_DOMAIN=" + cfg.Services.EffectiveDomain(),
+		"ACME_DNS_RESOLVERS=" + strings.Join(cfg.Services.EffectiveACMEDNSResolvers(), " "),
 	}, "\n")
 	service := strings.Join([]string{
 		"[Unit]",

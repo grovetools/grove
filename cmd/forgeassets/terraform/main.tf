@@ -185,11 +185,12 @@ module "syncd" {
   source = "./modules/syncd"
   count  = var.syncd_enabled ? 1 : 0
 
-  port              = var.syncd_port
-  domain            = var.domain
-  tls_mode          = local.tls_mode
-  acme_email        = var.acme_email
-  acme_dns_provider = var.acme_dns_provider
+  port               = var.syncd_port
+  domain             = var.domain
+  tls_mode           = local.tls_mode
+  acme_email         = var.acme_email
+  acme_dns_provider  = var.acme_dns_provider
+  acme_dns_resolvers = var.acme_dns_resolvers
 }
 
 # ---- machine ---------------------------------------------------------------

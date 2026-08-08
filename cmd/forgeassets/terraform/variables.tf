@@ -168,6 +168,12 @@ variable "acme_dns_provider" {
   default     = ""
 }
 
+variable "acme_dns_resolvers" {
+  description = "Nameservers (host:port) lego polls for DNS-01 propagation. Required when the domain is a delegated subdomain: lego otherwise asks the PARENT zone's nameservers, which answer with a referral rather than the challenge record."
+  type        = list(string)
+  default     = []
+}
+
 variable "forgejo_version" {
   description = "Forgejo release to install, e.g. 16.0.2. No default: an unpinned forge is one upstream release away from a surprise."
   type        = string

@@ -210,6 +210,27 @@ func TestRenderForgeACMEEnv(t *testing.T) {
 	if !strings.Contains(env.EnvFile, "GCE_SERVICE_ACCOUNT_FILE="+forgeACMESAKeyPath) {
 		t.Errorf("env must point lego at the shipped key path:\n%s", env.EnvFile)
 	}
+	// No zone id configured: GCE_ZONE_ID is absent, which is what forces lego
+	// to find the zone by LISTING every zone in the project — the one call a
+	// zone-scoped grant cannot serve.
+	if strings.Contains(env.EnvFile, "GCE_ZONE_ID") {
+		t.Errorf("an unset acme_dns_zone_id must render no GCE_ZONE_ID:\n%s", env.EnvFile)
+	}
+
+	// With it, lego skips that lookup, which is the prerequisite for narrowing
+	// the credential from project-level dns.admin to the single zone.
+	zoned := acmeForgeConfig()
+	zoned.Services.ACMEDNSZoneID = "example-dns-zone"
+	zonedEnv, err := renderForgeACMEEnv(zoned, keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(zonedEnv.EnvFile, "GCE_ZONE_ID=example-dns-zone") {
+		t.Errorf("acme_dns_zone_id must render GCE_ZONE_ID:\n%s", zonedEnv.EnvFile)
+	}
+	if zonedEnv.ZoneID != "example-dns-zone" {
+		t.Errorf("ZoneID = %q, want the configured zone", zonedEnv.ZoneID)
+	}
 
 	// A non-service-account JSON is refused: shipping a wrong file 0600 root
 	// to the VM and failing at 3am in lego is the bad version of this error.
@@ -226,6 +247,34 @@ func TestRenderForgeACMEEnv(t *testing.T) {
 	other.Services.ACMEDNSProvider = "cloudflare"
 	if _, err := renderForgeACMEEnv(other, keyPath); err == nil || !strings.Contains(err.Error(), "gcloud") {
 		t.Errorf("a non-gcloud provider must be named in the refusal, got: %v", err)
+	}
+}
+
+// TestForgeACMEDefaultsCarryRenderedResolvers is the durability contract for
+// ACME_DNS_RESOLVERS: it must land in acme.defaults, which EVERY converge
+// rewrites from config, and never be something an operator hand-adds to
+// acme.env, which `install-credentials` rewrites wholesale and would silently
+// drop. Job 47 issued the live certificate with exactly such a hand-added line.
+func TestForgeACMEDefaultsCarryRenderedResolvers(t *testing.T) {
+	cfg := acmeForgeConfig()
+	cfg.Services.ACMEDNSResolvers = []string{"ns-cloud-e1.googledomains.com:53", " ", "ns-cloud-e2.googledomains.com:53"}
+
+	script := forgeACMEAssetsScript(cfg)
+	// Space-separated on ONE line: the renew script word-splits it into a
+	// repeated --dns.resolvers flag.
+	want := "ACME_DNS_RESOLVERS=ns-cloud-e1.googledomains.com:53 ns-cloud-e2.googledomains.com:53"
+	if !strings.Contains(script, want) {
+		t.Errorf("acme.defaults must render %q (blanks dropped), got:\n%s", want, script)
+	}
+	if strings.Contains(script, forgeACMEEnvPath+" <<") {
+		t.Error("the converge must not write acme.env — it is the operator's credential file")
+	}
+
+	// No resolvers configured: the key is still declared, so the file's shape
+	// does not depend on config and the renew script's ${…:-} default is the
+	// only thing that varies.
+	if got := forgeACMEAssetsScript(acmeForgeConfig()); !strings.Contains(got, "ACME_DNS_RESOLVERS=\n") {
+		t.Errorf("an unset resolver list must still render an empty key, got:\n%s", got)
 	}
 }
 
@@ -281,12 +330,13 @@ module "forgejo" {
 }
 
 module "syncd" {
-  source            = %q
-  port              = 8788
-  domain            = "forge.example.test"
-  tls_mode          = "acme"
-  acme_email        = "ops@example.test"
-  acme_dns_provider = "gcloud"
+  source             = %q
+  port               = 8788
+  domain             = "forge.example.test"
+  tls_mode           = "acme"
+  acme_email         = "ops@example.test"
+  acme_dns_provider  = "gcloud"
+  acme_dns_resolvers = ["ns-cloud-e1.googledomains.com:53", "ns-cloud-e2.googledomains.com:53"]
 }
 
 output "forgejo_setup" { value = module.forgejo.setup_script }
@@ -340,6 +390,10 @@ output "syncd_setup"   { value = module.syncd.setup_script }
 		"grove forge acme install-credentials",
 		"tls-fingerprint.txt",
 		"systemctl enable grove-forge-acme.timer",
+		// The delegated-subdomain resolvers reach acme.defaults space-joined,
+		// matching what the terraform-free converge writes. A fresh provision
+		// and a pet converge must not disagree about this.
+		"ACME_DNS_RESOLVERS=ns-cloud-e1.googledomains.com:53 ns-cloud-e2.googledomains.com:53",
 	} {
 		if !strings.Contains(syncdSetup, want) {
 			t.Errorf("acme syncd_setup does not contain %q", want)
@@ -350,6 +404,92 @@ output "syncd_setup"   { value = module.syncd.setup_script }
 			t.Errorf("%s is not valid shell: %v", name, err)
 		}
 	}
+}
+
+// TestRenderForgeStatusPrefersDerivedStateOverCachedOutputs pins the fix for
+// the header that lied after job 47's acme cutover.
+//
+// `grove forge status`'s header renders terraform outputs cached at `up` time.
+// On the terraform-free pet path terraform never runs again, so after a
+// converge those outputs still described the retired IAP-tunnel era: the header
+// claimed `forge: http://localhost:3000` and `syncd: … (TLS: self-signed)`
+// while the measured TLS block right below it read `acme` — and it emitted a
+// `!` mismatch warning against a `[forge] url` that was correct.
+//
+// A warning that fires on correct config is worse than no warning at all here,
+// because this surface's whole job is to be loud about silent renewal death.
+func TestRenderForgeStatusPrefersDerivedStateOverCachedOutputs(t *testing.T) {
+	// Exactly the live shape from job 47: config migrated to acme, cached
+	// outputs left behind at the pre-mesh era.
+	stale := forgeStatusReport{
+		Provisioned:   true,
+		ConfiguredURL: "https://forge.example.test/",
+		Outputs: forgeOutputs{
+			VMName: "forge-1", Zone: "us-east1-b",
+			ForgeURL: "http://localhost:3000", SyncdAddr: "203.0.113.7:8788",
+			TLSMode: config.ForgeTLSSelfSigned,
+		},
+		EffectiveForgeURL: "https://forge.example.test/",
+		TLSModeConfigured: config.ForgeTLSACME,
+	}
+
+	var buf bytes.Buffer
+	renderForgeStatus(&buf, stale)
+	out := buf.String()
+
+	if strings.Contains(out, "! [forge] url") {
+		t.Errorf("correct config must not draw a mismatch warning:\n%s", out)
+	}
+	for _, want := range []string{
+		"forge:    https://forge.example.test/",
+		"(TLS: acme;",
+		// The record is not dropped — that the two disagree IS the signal
+		// that the cached outputs went stale under a terraform-free converge.
+		"record: http://localhost:3000",
+		"record: self-signed",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("status must render %q:\n%s", want, out)
+		}
+	}
+
+	t.Run("a real mismatch is still loud", func(t *testing.T) {
+		var buf bytes.Buffer
+		report := stale
+		report.ConfiguredURL = "https://old-forge.example.test/"
+		renderForgeStatus(&buf, report)
+		if !strings.Contains(buf.String(), "! [forge] url") {
+			t.Errorf("a config pointing elsewhere must still warn:\n%s", buf.String())
+		}
+	})
+
+	t.Run("a trailing slash is not a mismatch", func(t *testing.T) {
+		var buf bytes.Buffer
+		report := stale
+		report.ConfiguredURL = "https://forge.example.test"
+		renderForgeStatus(&buf, report)
+		if strings.Contains(buf.String(), "! [forge] url") {
+			t.Errorf("a trailing slash is invisible to the poller and must not warn:\n%s", buf.String())
+		}
+	})
+
+	t.Run("no derivable URL falls back to the record", func(t *testing.T) {
+		// Neither acme nor a mesh: no converge moves the URL, so the cached
+		// output has not gone stale and remains the thing to compare against.
+		var buf bytes.Buffer
+		report := stale
+		report.EffectiveForgeURL = ""
+		report.TLSModeConfigured = ""
+		report.ConfiguredURL = "https://elsewhere.example.test/"
+		renderForgeStatus(&buf, report)
+		out := buf.String()
+		if !strings.Contains(out, "answers at http://localhost:3000") {
+			t.Errorf("with nothing derivable the record is the fallback:\n%s", out)
+		}
+		if strings.Contains(out, "record:") {
+			t.Errorf("nothing to overlay means nothing to mark stale:\n%s", out)
+		}
+	})
 }
 
 // TestRenderForgeStatusACMEPosture pins the loud failure renders: a failing or

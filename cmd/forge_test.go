@@ -104,6 +104,10 @@ func TestForgeTFVarsFullyConfiguredGolden(t *testing.T) {
 			TLSMode:         config.ForgeTLSACME,
 			ACMEEmail:       "ops@example.com",
 			ACMEDNSProvider: "cloudflare",
+			// A delegated subdomain's resolvers, so the golden pins the list
+			// rendering too — this is the knob whose absence cost job 47 a
+			// three-minute DNS-01 pre-check timeout per attempt.
+			ACMEDNSResolvers: []string{"ns-cloud-e1.googledomains.com:53", "ns-cloud-e2.googledomains.com:53"},
 			Forgejo: &config.ForgejoServiceConfig{
 				Version:  "16.0.2",
 				SHA256:   "9F2C1B7D4E6A8C0F3B5D7E9A1C3E5F7092B4D6F8A0C2E4F68A9B1D3F5E7A9C1B",

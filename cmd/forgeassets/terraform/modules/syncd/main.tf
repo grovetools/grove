@@ -36,6 +36,9 @@ locals {
     tls_group         = var.tls_group
     acme_email        = var.acme_email
     acme_dns_provider = var.acme_dns_provider
-    unit              = local.unit
+    # Space-separated: acme.defaults is a shell env file and the renew script
+    # word-splits this deliberately, one --dns.resolvers per entry.
+    acme_dns_resolvers = join(" ", var.acme_dns_resolvers)
+    unit               = local.unit
   })
 }

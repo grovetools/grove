@@ -50,7 +50,10 @@ fi
 . /etc/grove-forge/acme.env
 set +a
 # ACME_DNS_RESOLVERS (optional, space-separated host:port) overrides where lego
-# checks TXT propagation. Needed when the forge domain is a DELEGATED SUBDOMAIN:
+# checks TXT propagation. Rendered into acme.defaults from [forge.services]
+# acme_dns_resolvers, so it survives every converge — do NOT hand-add it to
+# acme.env, which install-credentials rewrites wholesale.
+# Needed when the forge domain is a DELEGATED SUBDOMAIN:
 # lego walks up to the parent zone's SOA and queries the PARENT's nameservers,
 # which correctly answer with a referral rather than the challenge record, so
 # the pre-check times out even though Let's Encrypt itself would validate fine.
@@ -87,6 +90,7 @@ cat > /etc/grove-forge/acme.defaults <<ACME_DEFAULTS
 ACME_EMAIL=${acme_email}
 ACME_DNS_PROVIDER=${acme_dns_provider}
 ACME_DOMAIN=${domain}
+ACME_DNS_RESOLVERS=${acme_dns_resolvers}
 ACME_DEFAULTS
 chmod 0644 /etc/grove-forge/acme.defaults
 
