@@ -27,6 +27,14 @@ type Installer struct {
 	Confirm func(*ConsentRequest) (bool, error)
 	// Now stamps the lockfile and the trust record. Injected for tests.
 	Now func() time.Time
+	// ReservedVerbs are the names `grove <verb>` already answers to without
+	// consulting the lockfile — built-in commands, registered ecosystem tools.
+	// A tool manifest claiming one of them is refused at install time (see
+	// refuseVerbCollisions), because grove's own name wins at dispatch and the
+	// install would produce a command that never runs. Nil is simply "no
+	// reserved names"; the CLI populates it from its command tree and the sdk
+	// registry.
+	ReservedVerbs []string
 }
 
 // ConsentRequest is everything the user needs in order to answer "should this
@@ -133,6 +141,15 @@ func (in *Installer) Install(ctx context.Context, spec string, opts Options) (*R
 	if existing != nil && existing.URL != src.URL {
 		return nil, fmt.Errorf("plugin %q is already installed from %s — remove it before installing it from %s", name, existing.URL, src.URL)
 	}
+	// A tool's verbs must be unowned BEFORE the user is asked anything: a
+	// consent screen for an install that cannot proceed is a question with no
+	// right answer. The plugin's own lock entry is skipped inside, so an
+	// update re-claims its own verbs without colliding with itself.
+	if manifest.Kind() == "tool" {
+		if err := in.refuseVerbCollisions(manifest, lock); err != nil {
+			return nil, err
+		}
+	}
 
 	fragmentPath, err := FragmentPath(name)
 	if err != nil {
@@ -227,9 +244,14 @@ func (in *Installer) Install(ctx context.Context, spec string, opts Options) (*R
 	in.progress("Installed %s", binPath)
 
 	pin := &Pin{
-		Spec:           src.Spec,
-		URL:            src.URL,
-		Ref:            src.Ref,
+		Spec: src.Spec,
+		URL:  src.URL,
+		Ref:  src.Ref,
+		// facts.Kind is "tool" for a tool and "" for a panel, which is exactly
+		// what the lockfile wants: every lockfile written before tools existed
+		// carries no kind, and spelling the default out would keep old files
+		// from round-tripping byte-identically.
+		Kind:           facts.Kind,
 		Commit:         commit,
 		Dev:            opts.Dev,
 		ManifestDigest: facts.ManifestDigest,
@@ -241,7 +263,15 @@ func (in *Installer) Install(ctx context.Context, spec string, opts Options) (*R
 		Fragment:       fragmentPath,
 	}
 
-	fragment, err := RenderFragment(manifest, binPath, pin)
+	// Both kinds write a fragment at the same path, but a tool's is
+	// comment-only: it is the trust anchor and the install record, not a
+	// [tui.plugins] declaration — treemux must never see a pane for it.
+	var fragment []byte
+	if manifest.Kind() == "tool" {
+		fragment, err = RenderToolFragment(manifest, binPath, pin)
+	} else {
+		fragment, err = RenderFragment(manifest, binPath, pin)
+	}
 	if err != nil {
 		return nil, err
 	}

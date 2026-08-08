@@ -29,12 +29,14 @@ import (
 func newPluginCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "plugin",
-		Short: "Install treemux panels from a git repository",
-		Long: `Install, update and remove treemux sidecar panels.
+		Short: "Install treemux panels and grove tools from a git repository",
+		Long: `Install, update and remove grove plugins.
 
-A plugin is a program plus a manifest. It runs in its own pane, it can speak
-the embed/v1 control plane (focus, workspace scope, theme, deep links, key
-claims), and nothing recompiles to add one.
+A plugin is a program plus a manifest, and it comes in two kinds: a PANEL
+appears as a pane in treemux, a TOOL becomes a ` + "`grove <verb>`" + ` command.
+A panel runs in its own pane and can speak the embed/v1 control plane (focus,
+workspace scope, theme, deep links, key claims); nothing recompiles to add
+either kind.
 
   grove plugin install github.com/user/grove-panel-foo@v1.2.0
   grove plugin list
@@ -70,8 +72,11 @@ re-records the approval against it.`,
 func newPluginInstallCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "install <source>[@ref]",
-		Short: "Install a panel from a git repository",
-		Long: `Clone a plugin repository at a pinned ref, build it, and declare its panel.
+		Short: "Install a panel or tool from a git repository",
+		Long: `Clone a plugin repository at a pinned ref, build it, and declare what it ships.
+
+A [panel] manifest declares a pane that appears in treemux; a [tool] manifest
+declares a binary that becomes a ` + "`grove <verb>`" + ` command.
 
 The source is a git repository containing a ` + coreplugin.ManifestFile + ` at its
 root:
@@ -404,12 +409,17 @@ func runPluginList(cmd *cobra.Command, _ []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tSOURCE\tPINNED\tPROTOCOL\tSTATE")
+	fmt.Fprintln(w, "NAME\tKIND\tSOURCE\tPINNED\tPROTOCOL\tSTATE")
 	var broken []coreplugin.Status
 	for _, st := range statuses {
 		protocol := st.Pin.Consent.Protocol
 		if protocol == "" {
 			protocol = "pty"
+		}
+		if pinKind(st.Pin) == "tool" {
+			// "pty" is a fact about panels; a tool has no pane and no protocol
+			// to fall back to.
+			protocol = "—"
 		}
 		state := "ok"
 		switch {
@@ -438,7 +448,7 @@ func runPluginList(cmd *cobra.Command, _ []string) error {
 		if st.Pin.Dev {
 			pinned = "—"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", st.Name, st.Pin.Consent.Source, pinned, protocol, state)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", st.Name, pinKind(st.Pin), st.Pin.Consent.Source, pinned, protocol, state)
 	}
 	if err := w.Flush(); err != nil {
 		return err
@@ -454,7 +464,48 @@ func runPluginList(cmd *cobra.Command, _ []string) error {
 			fmt.Printf("%s: %s no longer matches the approval recorded for this pin —\n    it was edited outside `grove plugin`. Review it, then re-approve with\n    grove plugin update %s --force\n", st.Name, st.Pin.Fragment, st.Name)
 		}
 	}
+	// A tool installed before a grove release that added a built-in (or a
+	// registered ecosystem tool) of the same name is SHADOWED: dispatch
+	// resolves grove's own name first, so the verb silently stops reaching the
+	// plugin. Install-time refusal cannot catch this — the collision arrived
+	// after the install — so the list is where it has to be said.
+	reserved := reservedToolVerbs()
+	for _, st := range statuses {
+		for _, verb := range shadowedVerbs(st.Pin, reserved) {
+			fmt.Println()
+			fmt.Printf("%s: `grove %s` is shadowed — grove now has a built-in or registered tool\n    by that name, and the built-in wins. The plugin's binary still runs\n    directly: %s\n", st.Name, verb, st.Pin.Binary)
+		}
+	}
 	return nil
+}
+
+// pinKind names a pin's kind for display. The lockfile records "" for a panel
+// (old lockfiles round-trip), but a column showing an empty cell would read as
+// missing data rather than as the default.
+func pinKind(pin *coreplugin.Pin) string {
+	if pin != nil && pin.Kind == "tool" {
+		return "tool"
+	}
+	return "panel"
+}
+
+// shadowedVerbs reports which of a tool pin's verbs a current grove name now
+// sits on top of. Empty for panels and for tools whose verbs are all clear.
+func shadowedVerbs(pin *coreplugin.Pin, reserved []string) []string {
+	if pinKind(pin) != "tool" {
+		return nil
+	}
+	taken := make(map[string]bool, len(reserved))
+	for _, r := range reserved {
+		taken[r] = true
+	}
+	var out []string
+	for _, v := range plugin.PinVerbs(pin) {
+		if taken[v] {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func runPluginRemove(cmd *cobra.Command, args []string) error {
@@ -494,6 +545,7 @@ func pluginListRows(statuses []coreplugin.Status) []map[string]any {
 	for _, st := range statuses {
 		out = append(out, map[string]any{
 			"name":     st.Name,
+			"kind":     pinKind(st.Pin),
 			"source":   st.Pin.Consent.Source,
 			"ref":      st.Pin.Ref,
 			"commit":   st.Pin.Commit,
@@ -533,6 +585,10 @@ func newInstaller(yes, jsonOutput bool) *plugin.Installer {
 	}
 	return &plugin.Installer{
 		Out: out,
+		// Every name `grove <verb>` already answers to. A tool claiming one
+		// would install a command that never runs, so the installer refuses it
+		// up front and names the collision.
+		ReservedVerbs: reservedToolVerbs(),
 		Confirm: func(req *plugin.ConsentRequest) (bool, error) {
 			printConsent(req, out)
 			if yes {
@@ -616,6 +672,56 @@ func printConsent(req *plugin.ConsentRequest, out io.Writer) {
 		fmt.Fprintln(out, "  There is no build step: the repository ships the program itself.")
 	}
 
+	if f.Kind == "tool" {
+		// A tool's screen is deliberately not the panel's screen with blocks
+		// missing. What is being approved is a COMMAND — something the user
+		// will type, that runs with everything they can reach — and the frank
+		// version of that is worth more than symmetry with the pane copy.
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "  This installs a COMMAND. Approving it makes these work in your terminal,")
+		fmt.Fprintln(out, "  dispatched through grove:")
+		for _, p := range f.Provides {
+			fmt.Fprintf(out, "      %s\n", p)
+		}
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "  Each of them runs this binary:")
+		fmt.Fprintf(out, "      %s\n", strings.Join(f.Run, " "))
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "  ⚠ IT RUNS AS YOU — with your environment, your files and your")
+		fmt.Fprintln(out, "    credentials. It is not sandboxed, and grove does not mediate what it")
+		fmt.Fprintln(out, "    reaches: a tool that manages infrastructure can read your cloud")
+		fmt.Fprintln(out, "    credentials and change your infrastructure. Approve it the way you")
+		fmt.Fprintln(out, "    would approve installing any CLI tool from this source.")
+	} else {
+		printPanelConsent(f, out)
+	}
+
+	if len(req.Unknown) > 0 {
+		fmt.Fprintln(out)
+		fmt.Fprintf(out, "  This grove does not understand these manifest keys, and ignores them:\n      %s\n", strings.Join(req.Unknown, ", "))
+	}
+
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "  It will write:")
+	fmt.Fprintf(out, "      %s\n", req.FragmentPath)
+	fmt.Fprintf(out, "      %s\n", req.BinaryPath)
+	fmt.Fprintln(out)
+	if f.Dev {
+		fmt.Fprintln(out, "  Approving covers the DIRECTORY above, not a commit — that is what makes")
+		fmt.Fprintln(out, "  this a development install. It is recorded in grove's trust store")
+		fmt.Fprintln(out, "  (`grove config trust --list`); a rebuild does not ask again.")
+	} else {
+		fmt.Fprintln(out, "  Approving covers this commit only. It is recorded in grove's trust store")
+		fmt.Fprintln(out, "  (`grove config trust --list`); an update asks again with a diff.")
+	}
+	fmt.Fprintln(out)
+}
+
+// printPanelConsent renders the panel half of the consent screen: what treemux
+// will spawn, what the panel declares, and the settings the user is expected
+// to go on to edit. A tool renders none of it — its manifest cannot declare
+// any of these sections (core refuses [panel] alongside [tool]).
+func printPanelConsent(f plugin.ConsentFacts, out io.Writer) {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "  treemux will run this every time it starts, as you:")
 	fmt.Fprintf(out, "      %s\n", strings.Join(f.Run, " "))
@@ -682,26 +788,6 @@ func printConsent(req *plugin.ConsentRequest, out io.Writer) {
 			fmt.Fprintf(out, "      %s\n", s)
 		}
 	}
-
-	if len(req.Unknown) > 0 {
-		fmt.Fprintln(out)
-		fmt.Fprintf(out, "  This grove does not understand these manifest keys, and ignores them:\n      %s\n", strings.Join(req.Unknown, ", "))
-	}
-
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "  It will write:")
-	fmt.Fprintf(out, "      %s\n", req.FragmentPath)
-	fmt.Fprintf(out, "      %s\n", req.BinaryPath)
-	fmt.Fprintln(out)
-	if f.Dev {
-		fmt.Fprintln(out, "  Approving covers the DIRECTORY above, not a commit — that is what makes")
-		fmt.Fprintln(out, "  this a development install. It is recorded in grove's trust store")
-		fmt.Fprintln(out, "  (`grove config trust --list`); a rebuild does not ask again.")
-	} else {
-		fmt.Fprintln(out, "  Approving covers this commit only. It is recorded in grove's trust store")
-		fmt.Fprintln(out, "  (`grove config trust --list`); an update asks again with a diff.")
-	}
-	fmt.Fprintln(out)
 }
 
 // reportPluginResult prints the outcome of an install.

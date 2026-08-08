@@ -44,6 +44,7 @@ type (
 	Plugin         = coreplugin.Plugin
 	Build          = coreplugin.Build
 	Panel          = coreplugin.Panel
+	Tool           = coreplugin.Tool
 	View           = coreplugin.View
 	Key            = coreplugin.Key
 	SettingOptions = coreplugin.SettingOptions
@@ -67,6 +68,7 @@ func FlattenSettings(settings map[string]any) []string { return coreplugin.Flatt
 func ViewFacts(p *Panel) []string                      { return coreplugin.ViewFacts(p) }
 func KeyFacts(p *Panel) []string                       { return coreplugin.KeyFacts(p) }
 func SettingOptionFacts(p *Panel) []string             { return coreplugin.SettingOptionFacts(p) }
+func ToolFacts(t *Tool) []string                       { return coreplugin.ToolFacts(t) }
 func Diff(old, next ConsentFacts) []FactChange         { return coreplugin.Diff(old, next) }
 
 // Install-time trust, recorded in the same store `grove config trust` writes.

@@ -26,10 +26,33 @@ import (
 // it has just resolved.
 
 // NewConsentFacts assembles the consent screen's content from a validated
-// manifest and a resolved source. runBinary is the absolute path treemux will
-// spawn — the installed binary, not the one in the checkout.
+// manifest and a resolved source. runBinary is the absolute path the host will
+// run — the installed binary, not the one in the checkout. For a panel the
+// host is treemux, spawning it at every start; for a tool it is grove itself,
+// running it when the user types one of the verbs it provides.
 func NewConsentFacts(m *Manifest, src ResolvedSource, manifestBytes []byte, runBinary string) ConsentFacts {
 	sum := sha256.Sum256(manifestBytes)
+	if m.Kind() == "tool" {
+		// A tool carries NONE of the panel facts — not as an omission but as a
+		// statement: core refuses a manifest declaring [panel] alongside
+		// [tool], so there is no protocol, icon, label, key, view, setting,
+		// notebook or digest for this document to have declared, and a fact
+		// rendered from an empty section would be an empty claim bound into
+		// the approval.
+		return ConsentFacts{
+			Name:           m.Plugin.Name,
+			Description:    m.Plugin.Description,
+			Homepage:       m.Plugin.Homepage,
+			Source:         src.Display(),
+			Commit:         src.Commit,
+			Dev:            src.Dev,
+			ManifestDigest: "sha256:" + hex.EncodeToString(sum[:]),
+			Build:          append([]string(nil), m.Build.Command...),
+			Run:            []string{runBinary},
+			Kind:           "tool",
+			Provides:       ToolFacts(m.Tool),
+		}
+	}
 	facts := ConsentFacts{
 		Name:           m.Plugin.Name,
 		Description:    m.Plugin.Description,

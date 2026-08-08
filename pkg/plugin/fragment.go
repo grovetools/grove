@@ -197,6 +197,54 @@ func stripEmptyParentHeaders(body []byte) []byte {
 	return body
 }
 
+// RenderToolFragment builds the fragment for an installed TOOL plugin: a
+// COMMENT-ONLY TOML file.
+//
+// A tool declares no pane, so there is nothing for [tui.plugins] to say about
+// it — but the file must still exist, because the fragment path is the trust
+// anchor (RecordApproval keys on it), the uninstall unit, and the one thing a
+// user can move aside to disable a plugin by hand. The config glob still
+// parses this file and finds an empty document, which is the point: treemux
+// never sees an entry, and dispatch reads the LOCKFILE, never this.
+func RenderToolFragment(m *Manifest, runBinary string, pin *Pin) ([]byte, error) {
+	var b strings.Builder
+	b.WriteString("# Managed by `grove plugin` — do not edit.\n")
+	b.WriteString("#\n")
+	fmt.Fprintf(&b, "# This file is grove's install record and trust anchor for the tool plugin\n")
+	fmt.Fprintf(&b, "# %q. It intentionally declares NO configuration: a tool is a command\n", m.Plugin.Name)
+	b.WriteString("# grove dispatches to, not a pane, so the config glob that reads this file\n")
+	b.WriteString("# finds an empty document and treemux never sees it. Removing this file\n")
+	b.WriteString("# un-declares the plugin (and orphans the approval recorded against it) —\n")
+	fmt.Fprintf(&b, "# use `grove plugin remove %s` instead.\n", m.Plugin.Name)
+	b.WriteString("#\n")
+	fmt.Fprintf(&b, "# plugin:  %s — %s\n", m.Plugin.Name, m.Plugin.Description)
+	fmt.Fprintf(&b, "# source:  %s\n", pin.Spec)
+	if pin.Dev {
+		// Same honesty the panel header keeps: "pinned" would be false, and
+		// this header is where a user looking at their config finds out why
+		// the tool keeps changing under them.
+		b.WriteString("# mode:    DEVELOPMENT — built in place from the working tree above.\n")
+		b.WriteString("#          Nothing is pinned: `grove plugin update` rebuilds whatever\n")
+		b.WriteString("#          that directory contains at the time.\n")
+		if pin.Commit != "" {
+			fmt.Fprintf(&b, "# head:    %s (at install time, for the record only)\n", pin.Commit)
+		}
+	} else {
+		fmt.Fprintf(&b, "# pinned:  %s\n", pin.Commit)
+	}
+	fmt.Fprintf(&b, "# binary:  %s\n", runBinary)
+	if m.Plugin.Homepage != "" {
+		fmt.Fprintf(&b, "# home:    %s\n", m.Plugin.Homepage)
+	}
+	b.WriteString("# provides:\n")
+	for _, phrase := range ToolFacts(m.Tool) {
+		fmt.Fprintf(&b, "#   %s\n", phrase)
+	}
+	b.WriteString("#\n")
+	fmt.Fprintf(&b, "# Change it with `grove plugin update %s`; remove it with `grove plugin remove %s`.\n", m.Plugin.Name, m.Plugin.Name)
+	return []byte(b.String()), nil
+}
+
 // WriteFragment writes the fragment for a plugin, creating the drop-in
 // directory if this is the first install.
 func WriteFragment(path string, data []byte) error {

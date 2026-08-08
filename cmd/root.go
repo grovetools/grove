@@ -16,9 +16,12 @@ import (
 	"github.com/grovetools/core/version"
 	"github.com/spf13/cobra"
 
+	coreplugin "github.com/grovetools/core/pkg/plugin"
+
 	"github.com/grovetools/grove/cmd/internal"
 	"github.com/grovetools/grove/pkg/delegation"
 	"github.com/grovetools/grove/pkg/overrides"
+	"github.com/grovetools/grove/pkg/plugin"
 	"github.com/grovetools/grove/pkg/sdk"
 	meta_workspace "github.com/grovetools/grove/pkg/workspace"
 )
@@ -235,6 +238,57 @@ func builtinClaimsArgs(name string, rest []string) bool {
 	return true
 }
 
+// reservedToolVerbs is every name `grove <verb>` already answers to without
+// consulting the plugin lockfile: the root command tree (names and aliases)
+// and the sdk tool registry (repo names and binary aliases). It is what the
+// plugin installer refuses tool verbs against, and what `grove plugin list`
+// checks installed verbs against to report shadowing — the same list on both
+// ends, so the install-time refusal and the list-time warning can never
+// disagree about which names grove owns.
+func reservedToolVerbs() []string {
+	seen := make(map[string]bool)
+	var out []string
+	add := func(name string) {
+		if name != "" && !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	for _, c := range rootCmd.Commands() {
+		add(c.Name())
+		for _, alias := range c.Aliases {
+			add(alias)
+		}
+	}
+	for repo, info := range sdk.GetToolRegistry() {
+		add(repo)
+		add(info.Alias)
+	}
+	return out
+}
+
+// toolPluginBinary resolves toolName against the verbs installed tool plugins
+// declared, reading the lockfile only on the miss path — a verb that resolved
+// to a real binary never pays for this. A resolvable verb whose binary is
+// gone is an ERROR naming the remedy, not a fall-through: the user installed
+// something that answers this command, and "unknown tool" would deny it.
+func toolPluginBinary(toolName string) (string, error) {
+	lock, err := coreplugin.LoadLock()
+	if err != nil {
+		// A corrupt lockfile must not take down delegation — `grove plugin`
+		// is where it gets reported and repaired.
+		return "", nil //nolint:nilerr // deliberate: fall through to the other resolutions
+	}
+	name, pin, ok := plugin.ResolveToolVerb(lock, toolName)
+	if !ok {
+		return "", nil
+	}
+	if _, statErr := os.Stat(pin.Binary); statErr != nil {
+		return "", fmt.Errorf("`grove %s` is provided by the %s plugin, but its binary is missing (%s) — rebuild it with 'grove plugin update %s --force'", toolName, name, pin.Binary, name)
+	}
+	return pin.Binary, nil
+}
+
 // findWorkspaceRoot uses grove-core's workspace detection to find the workspace root.
 // This properly handles all workspace types: standalone projects, ecosystem roots,
 // worktrees, and sub-projects.
@@ -345,14 +399,26 @@ func delegateToTool(toolName string, args []string) error {
 
 		// Check if the tool exists
 		if _, err := os.Stat(toolPath); os.IsNotExist(err) {
-			// PRIORITY 4: a registered ecosystem tool with no managed install
-			// may still be provided directly on PATH (dev sandboxes, handoffs
-			// like flow routing `grove git-viewer` through the delegator).
-			if fallback := pathFallbackForRegisteredTool(toolName); fallback != "" {
+			// PRIORITY 4: a verb an installed TOOL PLUGIN provides. Resolved
+			// from the lockfile (cheap JSON), and only on this miss path, so
+			// delegation to a real binary never pays for it. It runs before
+			// the PATH fallback because a verb can differ from the binary's
+			// name — `grove forge` may run a binary called something else —
+			// and only the lockfile knows the mapping.
+			if pluginBinary, err := toolPluginBinary(toolName); err != nil {
+				return err
+			} else if pluginBinary != "" {
+				toolPath = pluginBinary
+				logger.WithField("path", toolPath).Debug("Using plugin-provided tool binary")
+			} else if fallback := pathFallbackForRegisteredTool(toolName); fallback != "" {
+				// PRIORITY 5: a registered ecosystem tool with no managed
+				// install may still be provided directly on PATH (dev
+				// sandboxes, handoffs like flow routing `grove git-viewer`
+				// through the delegator).
 				toolPath = fallback
 				logger.WithField("path", toolPath).Debug("Using PATH fallback for registered tool")
 			} else {
-				return fmt.Errorf("unknown tool: %s. Run 'grove install %s' or check spelling.", toolName, toolName)
+				return fmt.Errorf("unknown tool: %s. Run 'grove install %s', see 'grove plugin list' for plugin-provided commands, or check spelling.", toolName, toolName)
 			}
 		}
 	}
