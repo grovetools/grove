@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/grovetools/core/config"
@@ -16,7 +17,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var ecosystemInitGo bool
+var (
+	ecosystemInitGo     bool
+	ecosystemInitFormat string
+)
 
 func newEcosystemInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -24,7 +28,9 @@ func newEcosystemInitCmd() *cobra.Command {
 		Short: "Create a new Grove ecosystem",
 		Long: `Create a new Grove ecosystem (monorepo).
 
-By default, creates a minimal ecosystem with grove.yml and README.
+By default, creates a minimal ecosystem with grove.toml and README.
+Use --format yaml to scaffold grove.yml instead; both dialects are read
+everywhere, and an existing ecosystem keeps whichever it already has.
 Use --go to add Go workspace support (go.work, Makefile).
 
 Examples:
@@ -34,6 +40,9 @@ Examples:
   # Create ecosystem with a name
   grove ecosystem init my-ecosystem
 
+  # Scaffold a YAML manifest instead of TOML
+  grove ecosystem init my-ecosystem --format yaml
+
   # Create Go-based ecosystem
   grove ecosystem init --go
   grove ecosystem init my-ecosystem --go`,
@@ -42,8 +51,30 @@ Examples:
 	}
 
 	cmd.Flags().BoolVar(&ecosystemInitGo, "go", false, "Add Go workspace support (go.work, Makefile)")
+	cmd.Flags().StringVar(&ecosystemInitFormat, "format", "toml", "Manifest format for the new ecosystem: toml or yaml")
 
 	return cmd
+}
+
+// ecosystemManifestScaffold returns the basename and body of the manifest a
+// fresh ecosystem gets. TOML is the default dialect — it is what the config
+// TUI, the setup wizard's default, and every ecosystem grove itself ships now
+// write — with `--format yaml` kept as the escape hatch for people whose
+// tooling still expects grove.yml.
+func ecosystemManifestScaffold(format, name string) (string, string, error) {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "", "toml":
+		return "grove.toml", fmt.Sprintf(`name = "%s"
+workspaces = ["*"]
+`, name), nil
+	case "yaml", "yml":
+		return "grove.yml", fmt.Sprintf(`name: %s
+workspaces:
+  - "*"
+`, name), nil
+	default:
+		return "", "", fmt.Errorf("unknown manifest format %q: use \"toml\" or \"yaml\"", format)
+	}
 }
 
 func runEcosystemInit(cmd *cobra.Command, args []string) error {
@@ -54,10 +85,6 @@ func runEcosystemInit(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		ecosystemName = args[0]
 		targetDir = args[0]
-		// Create the directory
-		if err := os.MkdirAll(targetDir, 0o755); err != nil {
-			return fmt.Errorf("failed to create directory: %w", err)
-		}
 	} else {
 		targetDir = "."
 		cwd, err := os.Getwd()
@@ -67,23 +94,32 @@ func runEcosystemInit(cmd *cobra.Command, args []string) error {
 		ecosystemName = filepath.Base(cwd)
 	}
 
-	// Check if grove.yml already exists
-	groveYmlPath := filepath.Join(targetDir, "grove.yml")
-	if _, err := os.Stat(groveYmlPath); err == nil {
-		return fmt.Errorf("grove.yml already exists in %s", targetDir)
+	// Resolve the manifest before anything is written, so a bad --format
+	// leaves no half-created directory behind.
+	manifestName, manifestContent, err := ecosystemManifestScaffold(ecosystemInitFormat, ecosystemName)
+	if err != nil {
+		return err
+	}
+
+	// A directory that already carries either manifest dialect is already an
+	// ecosystem; re-scaffolding it would clobber a hand-authored file.
+	if existing := config.FindEcosystemManifest(targetDir); existing != "" {
+		return fmt.Errorf("%s already exists in %s", filepath.Base(existing), targetDir)
+	}
+
+	if len(args) > 0 {
+		if err := os.MkdirAll(targetDir, 0o755); err != nil {
+			return fmt.Errorf("failed to create directory: %w", err)
+		}
 	}
 
 	fmt.Printf("Creating Grove ecosystem '%s'...\n", ecosystemName)
 
-	// Create grove.yml
-	groveYmlContent := fmt.Sprintf(`name: %s
-workspaces:
-  - "*"
-`, ecosystemName)
-	if err := os.WriteFile(groveYmlPath, []byte(groveYmlContent), 0o600); err != nil {
-		return fmt.Errorf("failed to create grove.yml: %w", err)
+	manifestPath := filepath.Join(targetDir, manifestName)
+	if err := os.WriteFile(manifestPath, []byte(manifestContent), 0o600); err != nil {
+		return fmt.Errorf("failed to create %s: %w", manifestName, err)
 	}
-	fmt.Println("  grove.yml")
+	fmt.Printf("  %s\n", manifestName)
 
 	// Create README.md
 	readmeContent := fmt.Sprintf("# %s\n\nA Grove ecosystem.\n", ecosystemName)
@@ -143,10 +179,10 @@ clean:
 	// remotes are derived from whatever git state already exists: a directory
 	// that was already a repo keeps its remotes, and a directory about to be
 	// `git init`ed simply has none yet.
-	if _, err := config.WriteEcosystemCard(groveYmlPath, deriveEcosystemCard(targetDir, nil)); err != nil {
+	if _, err := config.WriteEcosystemCard(manifestPath, deriveEcosystemCard(targetDir, nil)); err != nil {
 		return fmt.Errorf("failed to write the ecosystem card: %w", err)
 	}
-	card, err := config.LoadEcosystemCard(groveYmlPath)
+	card, err := config.LoadEcosystemCard(manifestPath)
 	if err != nil {
 		return fmt.Errorf("failed to read back the ecosystem card: %w", err)
 	}

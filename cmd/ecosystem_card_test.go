@@ -256,8 +256,9 @@ func TestRunEcosystemAdoptRejectsABadLayout(t *testing.T) {
 	}
 }
 
-// TestRunEcosystemAdoptAdoptsYAMLManifests: `grove ecosystem init` scaffolds
-// grove.yml, so the ecosystems most in need of a backfill are YAML ones.
+// TestRunEcosystemAdoptAdoptsYAMLManifests: every ecosystem scaffolded before
+// `grove ecosystem init` switched to TOML carries a grove.yml, so YAML
+// ecosystems are the ones most in need of a backfill.
 func TestRunEcosystemAdoptAdoptsYAMLManifests(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	dir := t.TempDir()

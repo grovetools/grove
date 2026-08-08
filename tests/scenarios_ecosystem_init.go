@@ -65,7 +65,7 @@ func EcosystemInitAlreadyDiscoverableScenario() *harness.Scenario {
 				ecosystemPath := filepath.Join(groveRoot, "new-eco")
 
 				return ctx.Verify(func(v *verify.Collector) {
-					v.Equal("grove.yml exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "grove.yml")))
+					v.Equal("grove.toml exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "grove.toml")))
 					v.Equal("README.md exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "README.md")))
 					v.Equal(".gitignore exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, ".gitignore")))
 				})
@@ -195,7 +195,7 @@ groves: {}
 				ecosystemPath := filepath.Join(isolatedRoot, "my-eco")
 
 				return ctx.Verify(func(v *verify.Collector) {
-					v.Equal("grove.yml exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "grove.yml")))
+					v.Equal("grove.toml exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "grove.toml")))
 					v.Equal("README.md exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "README.md")))
 				})
 			}),
@@ -290,7 +290,7 @@ func EcosystemInitDeclineAddScenario() *harness.Scenario {
 				ecosystemPath := filepath.Join(isolatedRoot, "declined-eco")
 
 				return ctx.Verify(func(v *verify.Collector) {
-					v.Equal("grove.yml exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "grove.yml")))
+					v.Equal("grove.toml exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "grove.toml")))
 					v.Equal("README.md exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "README.md")))
 				})
 			}),
@@ -361,7 +361,7 @@ func EcosystemInitNonInteractiveScenario() *harness.Scenario {
 				ecosystemPath := filepath.Join(isolatedRoot, "nonint-eco")
 
 				return ctx.Verify(func(v *verify.Collector) {
-					v.Equal("grove.yml exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "grove.yml")))
+					v.Equal("grove.toml exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "grove.toml")))
 					v.Equal("README.md exists", nil, fs.AssertExists(filepath.Join(ecosystemPath, "README.md")))
 				})
 			}),

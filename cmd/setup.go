@@ -2048,37 +2048,10 @@ func runSetupDefaults(service *setup.Service, selectedOnly map[string]bool, logg
 		// directory (e.g. ~/Code full of repos) is registered as-is, never
 		// overwritten or git-initialized.
 		if _, err := os.Stat(ecosystemPath); os.IsNotExist(err) {
-			_ = service.MkdirAll(ecosystemPath, 0o755)
-
-			groveYMLContent := fmt.Sprintf(`name: %s
-description: A Grove ecosystem
-workspaces:
-  - "*"
-`, ecosystemName)
-			_ = service.WriteFile(filepath.Join(ecosystemPath, "grove.yml"), []byte(groveYMLContent), 0o600)
-
-			gitignoreContent := `# OS files
-.DS_Store
-Thumbs.db
-
-# Editor files
-*.swp
-*.swo
-*~
-`
-			_ = service.WriteFile(filepath.Join(ecosystemPath, ".gitignore"), []byte(gitignoreContent), 0o600)
-
-			readmeContent := fmt.Sprintf(`# %s
-
-A Grove ecosystem for managing related projects.
-
-## Getting Started
-
-Add projects to this directory and they will be automatically discovered by Grove tools.
-`, ecosystemName)
-			_ = service.WriteFile(filepath.Join(ecosystemPath, "README.md"), []byte(readmeContent), 0o600)
-
-			_ = service.RunGitInit(ecosystemPath)
+			// TOML, matching `grove ecosystem init` and the config TUI: the
+			// non-interactive path should not be the one that leaves a machine
+			// with a YAML manifest.
+			_ = service.ScaffoldEcosystem(ecosystemPath, ecosystemName, setup.ManifestTOML)
 		} else {
 			pretty.InfoPretty(fmt.Sprintf("Directory %s already exists; registering it without modifying its contents", ecosystemPath))
 		}
