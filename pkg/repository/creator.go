@@ -5,9 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/sirupsen/logrus"
@@ -269,7 +271,8 @@ func (c *Creator) CreateLocal(opts CreateOptions) (string, error) {
 }
 
 // InitializeGitHub adds GitHub integration to an existing local Grove repository.
-// This should be called from within the repository directory (where grove.yml exists).
+// This should be called from within the repository directory (where the grove
+// manifest lives).
 func (c *Creator) InitializeGitHub(opts GitHubInitOptions) error {
 	// Set default visibility
 	if opts.Visibility == "" {
@@ -282,10 +285,11 @@ func (c *Creator) InitializeGitHub(opts GitHubInitOptions) error {
 		return fmt.Errorf("failed to get current directory: %w", err)
 	}
 
-	// Validate: must be a Grove repository
-	groveYmlPath := filepath.Join(cwd, "grove.yml")
-	if _, err := os.Stat(groveYmlPath); os.IsNotExist(err) {
-		return fmt.Errorf("not a Grove repository: grove.yml not found in current directory\n\nRun this command from within a Grove repository created with 'grove repo add'")
+	// Validate: must be a Grove repository. Either dialect marks one — new
+	// repos are scaffolded as grove.toml, but everything created before that
+	// switch still carries grove.yml.
+	if config.FindEcosystemManifest(cwd) == "" {
+		return fmt.Errorf("not a Grove repository: no grove.toml or grove.yml found in current directory\n\nRun this command from within a Grove repository created with 'grove repo add'")
 	}
 
 	// Get repo name from directory name
@@ -358,10 +362,11 @@ func (c *Creator) validateLocal(opts CreateOptions) error {
 		return fmt.Errorf("binary alias cannot be empty")
 	}
 
-	// Check if we're in grove-ecosystem root (only if ecosystem mode)
+	// Check if we're in grove-ecosystem root (only if ecosystem mode).
+	// Either manifest dialect marks the root.
 	if opts.Ecosystem {
-		if _, err := os.Stat("grove.yml"); err != nil {
-			return fmt.Errorf("no grove.yml found in the current directory.\n\nTo create a new Grove ecosystem, run:\n  grove ws init\n\nOr to create a standalone repository without an ecosystem:\n  grove repo add %s --alias %s (without --ecosystem flag)", opts.Name, opts.Alias)
+		if config.FindEcosystemManifest(".") == "" {
+			return fmt.Errorf("no grove.toml or grove.yml found in the current directory.\n\nTo create a new Grove ecosystem, run:\n  grove ecosystem init\n\nOr to create a standalone repository without an ecosystem:\n  grove repo add %s --alias %s (without --ecosystem flag)", opts.Name, opts.Alias)
 		}
 		// Check for alias conflicts in existing ecosystem
 		if err := checkBinaryAliasConflict(opts.Alias); err != nil {
@@ -456,7 +461,7 @@ func (c *Creator) dryRunLocal(opts CreateOptions) error {
 	if opts.TemplatePath == "" {
 		c.logger.Info("\nFiles that would be created (minimal repo):")
 		c.logger.Info("  README.md")
-		c.logger.Info("  grove.yml")
+		c.logger.Info("  grove.toml")
 	} else {
 		c.logger.Infof("\nTemplate: %s", opts.TemplatePath)
 		c.logger.Info("Files would be created from template")
@@ -609,11 +614,12 @@ func (c *Creator) validate(opts CreateOptions) error {
 		return fmt.Errorf("binary alias cannot be empty")
 	}
 
-	// Check if we're in grove-ecosystem root (only if ecosystem mode)
+	// Check if we're in grove-ecosystem root (only if ecosystem mode).
+	// Either manifest dialect marks the root.
 	if opts.Ecosystem {
-		if _, err := os.Stat("grove.yml"); err != nil {
-			// grove.yml doesn't exist - tell user to initialize first
-			return fmt.Errorf("no grove.yml found in the current directory.\n\nTo create a new Grove ecosystem, run:\n  grove ws init\n\nOr to create a standalone repository without an ecosystem:\n  grove add-repo %s --alias %s (without --ecosystem flag)", opts.Name, opts.Alias)
+		if config.FindEcosystemManifest(".") == "" {
+			// Neither dialect is present - tell user to initialize first
+			return fmt.Errorf("no grove.toml or grove.yml found in the current directory.\n\nTo create a new Grove ecosystem, run:\n  grove ecosystem init\n\nOr to create a standalone repository without an ecosystem:\n  grove add-repo %s --alias %s (without --ecosystem flag)", opts.Name, opts.Alias)
 		}
 		// Check for alias conflicts in existing ecosystem
 		if err := checkBinaryAliasConflict(opts.Alias); err != nil {
@@ -691,7 +697,7 @@ func (c *Creator) generateSkeleton(opts CreateOptions, targetPath string) error 
 	return c.generateFromExternalTemplate(opts, data, targetPath)
 }
 
-// generateMinimalSkeleton creates a minimal repository with just README.md and grove.yml
+// generateMinimalSkeleton creates a minimal repository with just README.md and grove.toml
 func (c *Creator) generateMinimalSkeleton(opts CreateOptions, targetPath string) error {
 	c.logger.Info("Creating minimal repository...")
 
@@ -706,12 +712,14 @@ func (c *Creator) generateMinimalSkeleton(opts CreateOptions, targetPath string)
 		return fmt.Errorf("failed to create README.md: %w", err)
 	}
 
-	// Create grove.yml
-	groveYmlContent := fmt.Sprintf(`name: %s
-description: %s
-`, opts.Name, opts.Description)
-	if err := os.WriteFile(filepath.Join(targetPath, "grove.yml"), []byte(groveYmlContent), 0o600); err != nil {
-		return fmt.Errorf("failed to create grove.yml: %w", err)
+	// Create grove.toml. This is a project manifest, not an ecosystem one, so
+	// it carries no `workspaces` key. Values go through strconv.Quote because
+	// a description is free-form user text and a stray quote or backslash
+	// would otherwise emit unparseable TOML.
+	groveTomlContent := fmt.Sprintf("name = %s\ndescription = %s\n",
+		strconv.Quote(opts.Name), strconv.Quote(opts.Description))
+	if err := os.WriteFile(filepath.Join(targetPath, "grove.toml"), []byte(groveTomlContent), 0o600); err != nil {
+		return fmt.Errorf("failed to create grove.toml: %w", err)
 	}
 
 	// Initialize git repository

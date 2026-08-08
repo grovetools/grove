@@ -3,9 +3,11 @@ package repository
 import (
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/grovetools/core/config"
 	"github.com/sirupsen/logrus"
 )
 
@@ -76,7 +78,7 @@ func TestValidateCreateOptions(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "ecosystem mode without grove.yml",
+			name: "ecosystem mode without a manifest",
 			opts: CreateOptions{
 				Name:        "grove-test",
 				Alias:       "gt",
@@ -86,9 +88,10 @@ func TestValidateCreateOptions(t *testing.T) {
 			},
 			setup: func() {
 				os.Remove("grove.yml")
+				os.Remove("grove.toml")
 			},
 			expectError: true,
-			errorMsg:    "no grove.yml found in the current directory",
+			errorMsg:    "no grove.toml or grove.yml found in the current directory",
 		},
 		{
 			name: "invalid repo name - uppercase",
@@ -210,9 +213,9 @@ func TestGenerateSkeleton(t *testing.T) {
 		t.Fatalf("generateSkeleton() failed: %v", err)
 	}
 
-	// Minimal skeleton creates README.md and grove.yml
+	// Minimal skeleton creates README.md and grove.toml
 	expectedFiles := []string{
-		"grove-skeleton/grove.yml",
+		"grove-skeleton/grove.toml",
 		"grove-skeleton/README.md",
 	}
 
@@ -222,13 +225,133 @@ func TestGenerateSkeleton(t *testing.T) {
 		}
 	}
 
-	groveYmlContent, err := os.ReadFile("grove-skeleton/grove.yml")
+	groveTomlContent, err := os.ReadFile("grove-skeleton/grove.toml")
 	if err != nil {
-		t.Fatalf("Failed to read grove.yml: %v", err)
+		t.Fatalf("Failed to read grove.toml: %v", err)
 	}
 
-	if !strings.Contains(string(groveYmlContent), "name: grove-skeleton") {
-		t.Error("grove.yml does not contain expected name")
+	if !strings.Contains(string(groveTomlContent), `name = "grove-skeleton"`) {
+		t.Error("grove.toml does not contain expected name")
+	}
+}
+
+// TestEcosystemGatesAcceptEitherManifest pins the ecosystem-root probe used by
+// both `grove repo add` (validateLocal) and the legacy `grove add-repo`
+// (validate): TOML is what new ecosystems carry, YAML is what older ones kept,
+// and neither means "not an ecosystem".
+func TestEcosystemGatesAcceptEitherManifest(t *testing.T) {
+	logger := logrus.New()
+	logger.SetLevel(logrus.FatalLevel)
+	creator := NewCreator(logger)
+
+	tests := []struct {
+		name         string
+		manifestName string
+		manifestBody string
+		expectError  bool
+	}{
+		{
+			name:         "grove.toml ecosystem",
+			manifestName: "grove.toml",
+			manifestBody: "name = \"test-eco\"\nworkspaces = [\"*\"]\n",
+		},
+		{
+			name:         "grove.yml ecosystem",
+			manifestName: "grove.yml",
+			manifestBody: "name: test-eco\nworkspaces:\n  - \"*\"\n",
+		},
+		{
+			name:        "no manifest at all",
+			expectError: true,
+		},
+	}
+
+	gates := map[string]func(CreateOptions) error{
+		"validateLocal": creator.validateLocal,
+		"validate":      creator.validate,
+	}
+
+	for _, tt := range tests {
+		for gateName, gate := range gates {
+			t.Run(tt.name+"/"+gateName, func(t *testing.T) {
+				tmpDir := t.TempDir()
+				t.Chdir(tmpDir)
+
+				if tt.manifestName != "" {
+					manifest := filepath.Join(tmpDir, tt.manifestName)
+					if err := os.WriteFile(manifest, []byte(tt.manifestBody), 0o600); err != nil {
+						t.Fatalf("Failed to write %s: %v", tt.manifestName, err)
+					}
+				}
+
+				err := gate(CreateOptions{
+					Name:        "grove-newtest",
+					Alias:       "nt",
+					Description: "Test repository",
+					SkipGitHub:  true,
+					Ecosystem:   true,
+				})
+
+				if (err != nil) != tt.expectError {
+					t.Fatalf("%s() error = %v, expectError %v", gateName, err, tt.expectError)
+				}
+				if !tt.expectError {
+					return
+				}
+
+				if !strings.Contains(err.Error(), "no grove.toml or grove.yml found") {
+					t.Errorf("%s() error = %v, expected it to name both manifest dialects", gateName, err)
+				}
+				// `grove ws init` is not a command; the advice must point at
+				// the one that exists.
+				if !strings.Contains(err.Error(), "grove ecosystem init") {
+					t.Errorf("%s() error = %v, expected it to suggest 'grove ecosystem init'", gateName, err)
+				}
+				if strings.Contains(err.Error(), "grove ws init") {
+					t.Errorf("%s() error = %v, suggests the nonexistent 'grove ws init'", gateName, err)
+				}
+			})
+		}
+	}
+}
+
+// TestGenerateMinimalSkeletonManifestParses checks the scaffolded project
+// manifest round-trips through the loader that every other grove tool reads it
+// with, rather than only asserting on its text.
+func TestGenerateMinimalSkeletonManifestParses(t *testing.T) {
+	logger := logrus.New()
+	logger.SetLevel(logrus.FatalLevel)
+	creator := NewCreator(logger)
+
+	t.Chdir(t.TempDir())
+
+	opts := CreateOptions{
+		Name:        "grove-parsed",
+		Alias:       "gp",
+		Description: `A "quoted" description`,
+	}
+
+	if err := creator.generateMinimalSkeleton(opts, opts.Name); err != nil {
+		t.Fatalf("generateMinimalSkeleton() failed: %v", err)
+	}
+
+	cfg, err := config.Load(filepath.Join(opts.Name, "grove.toml"))
+	if err != nil {
+		t.Fatalf("config.Load() failed: %v", err)
+	}
+
+	if cfg.Name != opts.Name {
+		t.Errorf("config.Load() name = %q, want %q", cfg.Name, opts.Name)
+	}
+	// `description` is not a field on config.Config, so the loader parks it in
+	// Extensions alongside any other non-core top-level key.
+	if got := cfg.Extensions["description"]; got != opts.Description {
+		t.Errorf("config.Load() description = %v, want %q", got, opts.Description)
+	}
+	// A project manifest describes one repo; `workspaces` would make grove
+	// treat the new repo as an ecosystem root of its own.
+	if len(cfg.Workspaces) != 0 {
+		t.Errorf("config.Load() workspaces = %v, want none in a project manifest", cfg.Workspaces)
 	}
 }
 
