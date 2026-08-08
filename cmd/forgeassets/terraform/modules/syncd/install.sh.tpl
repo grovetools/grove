@@ -34,18 +34,38 @@ set -eu
 # acme.defaults (email/provider/domain) is rendered configuration; acme.env is
 # the operator-installed DNS provider credential file and may override any
 # default. Sourced in that order, on purpose.
+# set -a is load-bearing: lego reads DNS provider credentials from the
+# ENVIRONMENT, but a sourced assignment is only a shell variable unless
+# exported. Without it lego silently falls back to Application Default
+# Credentials — on a GCE VM that is the metadata server, whose default scopes
+# lack ndev.clouddns.readwrite, so DNS-01 fails with a 403 scope error that
+# names neither this file nor the real cause. It also covers acme.env files
+# written by hand for the non-gcloud providers.
+set -a
 . /etc/grove-forge/acme.defaults
 if [ ! -f /etc/grove-forge/acme.env ]; then
   echo "grove-forge-acme: /etc/grove-forge/acme.env is missing — install the DNS-01 credentials with 'grove forge acme install-credentials <sa-key.json>'" >&2
   exit 1
 fi
 . /etc/grove-forge/acme.env
+set +a
+# ACME_DNS_RESOLVERS (optional, space-separated host:port) overrides where lego
+# checks TXT propagation. Needed when the forge domain is a DELEGATED SUBDOMAIN:
+# lego walks up to the parent zone's SOA and queries the PARENT's nameservers,
+# which correctly answer with a referral rather than the challenge record, so
+# the pre-check times out even though Let's Encrypt itself would validate fine.
+# Point this at the nameservers the subdomain is delegated TO. Word splitting
+# below is deliberate — lego takes --dns.resolvers once per resolver.
+ACME_RESOLVER_FLAGS=""
+for _r in $${ACME_DNS_RESOLVERS:-}; do
+  ACME_RESOLVER_FLAGS="$ACME_RESOLVER_FLAGS --dns.resolvers $_r"
+done
 ACME_CERT="/var/lib/grove-forge/acme/certificates/$ACME_DOMAIN.crt"
 if [ -f "$ACME_CERT" ]; then
-  lego --accept-tos --email "$ACME_EMAIL" --dns "$ACME_DNS_PROVIDER" \
+  lego --accept-tos --email "$ACME_EMAIL" --dns "$ACME_DNS_PROVIDER" $ACME_RESOLVER_FLAGS \
     --domains "$ACME_DOMAIN" --path /var/lib/grove-forge/acme renew
 else
-  lego --accept-tos --email "$ACME_EMAIL" --dns "$ACME_DNS_PROVIDER" \
+  lego --accept-tos --email "$ACME_EMAIL" --dns "$ACME_DNS_PROVIDER" $ACME_RESOLVER_FLAGS \
     --domains "$ACME_DOMAIN" --path /var/lib/grove-forge/acme run
 fi
 install -m 0644 -o root -g root "$ACME_CERT" /etc/grove-forge/tls/cert.pem
