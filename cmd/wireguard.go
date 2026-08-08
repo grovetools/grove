@@ -128,23 +128,13 @@ func wireGuardConvergeScript(cfg config.WireGuardConfig, paths wireGuardPaths) s
 	return strings.Join(lines, "\n") + "\n"
 }
 
-func reconcileWireGuard(ssh *satelliteSSH, cfg config.WireGuardConfig, stateDir string) (wgStatus, error) {
-	if err := cfg.Validate(); err != nil {
-		return wgStatus{}, err
-	}
-	out, err := ssh.outputScript(wireGuardConvergeScript(cfg, defaultWireGuardPaths(stateDir)))
-	if err != nil {
-		return wgStatus{}, fmt.Errorf("converge wireguard: %w", err)
-	}
-	status, err := parseWGShow(out)
-	if err != nil {
-		return wgStatus{}, fmt.Errorf("parse wireguard converge result: %w", err)
-	}
-	if status.Pubkey == "" {
-		return wgStatus{}, fmt.Errorf("parse wireguard converge result: empty PUBKEY trailer")
-	}
-	return status, nil
-}
+// The transport-bound wrapper that used to sit here — reconcileWireGuard(ssh,
+// cfg, stateDir): converge, parse the trailers, insist on a PUBKEY — left with
+// the forge, its only caller (grove-plugin-forge-gcp, internal/cmd/wireguard.go).
+// What stays is the part that is genuinely generic and genuinely reusable: the
+// renderer, the script builder and the trailer parser, none of which knows
+// which host it is aimed at or how it gets there. `grove satellite` is the
+// next caller; it will bring its own transport, as the forge did.
 
 func parseWGShow(raw string) (wgStatus, error) {
 	status := wgStatus{HandshakeAge: -1}

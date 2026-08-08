@@ -48,7 +48,14 @@ func init() {
 	rootCmd.AddCommand(newCheckCmd())
 	rootCmd.AddCommand(newDepsCmd())
 	rootCmd.AddCommand(newFmtCmd())
-	rootCmd.AddCommand(newForgeCmd())
+	// No newForgeCmd(): `grove forge` is no longer compiled in. Provisioning a
+	// forge is a REFERENCE DEPLOYMENT (GCP + WireGuard + Forgejo/syncd), not
+	// the product, so it ships as the grove-plugin-forge-gcp recipe building a
+	// binary named `forge`. The RunE fallback below already delegates any
+	// unrecognized first argument to <bin dir>/<name>, so `grove forge up`
+	// resolves it with no dispatch code here. What grove KEEPS is the client
+	// contract: [forge]/[forge.poll] config, core/pkg/forge, the daemon poller
+	// and every read surface over it.
 	rootCmd.AddCommand(newKeysCmd())
 	rootCmd.AddCommand(newLintCmd())
 	rootCmd.AddCommand(newPluginCmd())
