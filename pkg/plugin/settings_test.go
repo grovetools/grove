@@ -346,3 +346,101 @@ func TestSetRefusesWhenTheFragmentIsGone(t *testing.T) {
 		t.Fatalf("Set = %v, want a refusal naming the repair", err)
 	}
 }
+
+// optionsInstallManifest is the settings fixture plus the option declarations,
+// as the HN panel ships them.
+func optionsInstallManifest(name string) string {
+	return `schema_version = 1
+
+[plugin]
+name        = "` + name + `"
+description = "a test panel with a declared vocabulary"
+
+[build]
+command = ["cp", "panel.sh", "built-panel"]
+binary  = "built-panel"
+
+[panel]
+protocol = "embed/v1"
+
+[panel.settings]
+open_url_command        = "system"
+open_url_custom_command = ""
+palette                 = "hn"
+
+[[panel.setting_options]]
+setting        = "open_url_command"
+description    = "which browser opens a story"
+options        = ["system", "firefox", "custom"]
+custom_option  = "custom"
+custom_setting = "open_url_custom_command"
+`
+}
+
+// `set` rebuilds the fragment FROM THE FRAGMENT, and refuses one carrying keys
+// it does not write rather than dropping them silently. So a declaration the
+// installer writes and this command cannot read back is not a cosmetic gap: it
+// is every settings edit on that panel failing, and the option declaration
+// vanishing if it did not.
+func TestSetKeepsTheOptionDeclarationInTheFragment(t *testing.T) {
+	isolate(t)
+	repo := newFixtureRepo(t, optionsInstallManifest("choosy"))
+	var seen []*ConsentRequest
+	if _, err := approving(t, &seen).Install(context.Background(), repo+"@v1.0.0", Options{}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	pin := mustPin(t, "choosy")
+
+	declared := func(where string) []any {
+		t.Helper()
+		entry := fragmentEntry(t, pin.Fragment, "choosy")
+		options, ok := entry["setting_options"].([]any)
+		if !ok || len(options) != 1 {
+			t.Fatalf("%s: setting_options = %#v", where, entry["setting_options"])
+		}
+		return options
+	}
+	declared("after the install")
+
+	res, err := setter(t).Set("choosy", []string{"open_url_command=firefox"}, false)
+	if err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	first, ok := declared("after the edit")[0].(map[string]any)
+	if !ok {
+		t.Fatalf("the declaration did not round-trip: %#v", declared("after the edit")[0])
+	}
+	if first["setting"] != "open_url_command" || first["custom_setting"] != "open_url_custom_command" {
+		t.Errorf("declaration = %#v", first)
+	}
+	if got := fragmentSettings(t, pin.Fragment, "choosy")["open_url_command"]; got != "firefox" {
+		t.Errorf("open_url_command = %v, want the value that was set", got)
+	}
+	// The edit is the settings' alone: the vocabulary is not something `set`
+	// writes, so it must not show up as something that moved.
+	for _, c := range res.Changes {
+		if strings.HasPrefix(c.Field, "options.") {
+			t.Errorf("a settings edit reported a changed vocabulary: %+v", c)
+		}
+	}
+}
+
+// A value outside the declared list is still writable. The vocabulary is a
+// DECLARATION and not a gate — the author's list is what they tested, and a user
+// who knows about a browser they did not is not being protected by a refusal
+// here. The panel is the only party that decides what an unfamiliar value means.
+func TestSetWritesAValueOutsideTheDeclaredVocabulary(t *testing.T) {
+	isolate(t)
+	repo := newFixtureRepo(t, optionsInstallManifest("choosy"))
+	var seen []*ConsentRequest
+	if _, err := approving(t, &seen).Install(context.Background(), repo+"@v1.0.0", Options{}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	pin := mustPin(t, "choosy")
+	if _, err := setter(t).Set("choosy", []string{"open_url_command=vivaldi"}, false); err != nil {
+		t.Fatalf("Set refused a value outside the list: %v", err)
+	}
+	if got := fragmentSettings(t, pin.Fragment, "choosy")["open_url_command"]; got != "vivaldi" {
+		t.Errorf("open_url_command = %v", got)
+	}
+}

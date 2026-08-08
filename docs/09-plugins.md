@@ -98,6 +98,15 @@ restart          = true
 
 [panel.settings]               # the panel's own defaults
 work_minutes = 25
+palette      = "auto"
+palette_hex  = ""
+
+[[panel.setting_options]]      # optional: a setting with a closed vocabulary
+setting        = "palette"
+description    = "which colors the panel draws in"
+options        = ["auto", "host", "custom"]
+custom_option  = "custom"      # choosing it hands over to...
+custom_setting = "palette_hex" # ...this setting (or use allow_custom instead)
 
 [[panel.keys]]                 # host chords it intends to claim
 key         = "ctrl+f"
@@ -133,6 +142,12 @@ things a consent screen depends on:
   exactly what runs. It is optional: a panel that ships an interpreted program
   (see treemux's `examples/grove-panel-sh`) needs no toolchain, and that is the
   no-build-required path release assets would otherwise be needed for.
+- A `[[panel.setting_options]]` entry must name a setting `[panel.settings]`
+  declares, and that setting's default must be one of the values it offers
+  (unless `allow_custom` says the list is only a suggestion). Both are author
+  errors that are otherwise invisible: options hung on a mistyped setting path
+  silently do nothing, and a default outside its own list means a UI offering
+  that list has no entry to show as current.
 - `build.binary` must stay inside the checkout. `notebook.subtree` is held to the
   same path rules — relative, no `..` escapes, printable — not because grove ever
   walks it (it never does) but because it is rendered on the consent screen, and
@@ -148,14 +163,16 @@ things a consent screen depends on:
 
 ### Declarations, not grants
 
-`keys`, `views`, `digest` and `notebook` are all **declarations**. grove copies
-each into the installed fragment, prints each on the consent screen, and binds
-each into the approval digest — and enforces none of them:
+`keys`, `views`, `setting_options`, `digest` and `notebook` are all
+**declarations**. grove copies each into the installed fragment, prints each on
+the consent screen, and binds each into the approval digest — and enforces none
+of them:
 
 | Table | What the host does with it |
 | --- | --- |
 | `[[panel.keys]]` | compares it against the claims the panel's handshake actually makes; a disagreement is logged and surfaced, never refused. It is also the only hosted key reference reachable without a running panel, which is what lets `treemux keys` describe a configured panel. |
 | `[panel.views.<n>]` | reads exactly one field, `drawer`, and never a name. A drawer pane naming no view gets the first view declared `true`; a view declared `false` mounted in a drawer warns and mounts anyway. The names are an open set only the panel can define. |
+| `[[panel.setting_options]]` | offers the list where a config UI would otherwise draw a text box — treemux's plugin editor cycles it, and opens text entry for the `allow_custom` slot or the setting `custom_option` hands over to. Nothing is refused: `grove plugin set` still writes a value outside the list, and the panel remains the only party that decides what an unfamiliar one means. |
 | `[panel.digest]` | nothing. The host draws the live digest frame and never reads this. It exists so the question "does this panel publish a digest" has an answer *before* anyone has opened the panel — which is exactly when it is asked, reading a roster or writing a drawer page. |
 | `[panel.notebook]` | nothing. No path is resolved, created or fenced. A process the user approved writes wherever its own authority reaches, and pretending otherwise would dress a disclosure up as a sandbox. |
 

@@ -121,18 +121,19 @@ func (in *Installer) Set(name string, assignments []string, allowNew bool) (*Set
 // fragment came from the manifest the user approved, so round-tripping it can
 // only change the settings.
 type fragmentPanel struct {
-	Command         string         `toml:"command"`
-	Args            []string       `toml:"args"`
-	Icon            string         `toml:"icon"`
-	Label           string         `toml:"label"`
-	Env             []string       `toml:"env"`
-	Restart         bool           `toml:"restart"`
-	Protocol        string         `toml:"protocol"`
-	ProtocolTimeout string         `toml:"protocol_timeout"`
-	Keys            []Key          `toml:"keys"`
-	Views           []fragmentView `toml:"views"`
-	Notebook        *Notebook      `toml:"notebook"`
-	Settings        map[string]any `toml:"settings"`
+	Command         string           `toml:"command"`
+	Args            []string         `toml:"args"`
+	Icon            string           `toml:"icon"`
+	Label           string           `toml:"label"`
+	Env             []string         `toml:"env"`
+	Restart         bool             `toml:"restart"`
+	Protocol        string           `toml:"protocol"`
+	ProtocolTimeout string           `toml:"protocol_timeout"`
+	Keys            []Key            `toml:"keys"`
+	Views           []fragmentView   `toml:"views"`
+	Notebook        *Notebook        `toml:"notebook"`
+	Settings        map[string]any   `toml:"settings"`
+	SettingOptions  []SettingOptions `toml:"setting_options"`
 }
 
 // fragmentView is one entry of the fragment's `views` ARRAY — the form the
@@ -208,6 +209,7 @@ func (p *fragmentPanel) manifest(name string, pin *Pin) *Manifest {
 			Restart:         p.Restart,
 			Keys:            p.Keys,
 			Settings:        p.Settings,
+			SettingOptions:  p.SettingOptions,
 		},
 	}
 	if len(p.Views) > 0 {

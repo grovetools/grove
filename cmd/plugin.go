@@ -670,6 +670,19 @@ func printConsent(req *plugin.ConsentRequest, out io.Writer) {
 		}
 	}
 
+	// In the settings block rather than the declarations block above, because
+	// unlike the views these describe a knob the user is expected to turn: the
+	// values a config UI will offer for the settings just listed. They are a
+	// DECLARATION all the same — a value outside the list is still writable —
+	// so what is being read here is what the panel says it understands.
+	if len(f.SettingOptions) > 0 {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "  Some of those take one of a declared set of values:")
+		for _, s := range f.SettingOptions {
+			fmt.Fprintf(out, "      %s\n", s)
+		}
+	}
+
 	if len(req.Unknown) > 0 {
 		fmt.Fprintln(out)
 		fmt.Fprintf(out, "  This grove does not understand these manifest keys, and ignores them:\n      %s\n", strings.Join(req.Unknown, ", "))

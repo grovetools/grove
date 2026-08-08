@@ -40,14 +40,15 @@ const (
 
 // The manifest, the pin, and what the approval is bound to.
 type (
-	Manifest = coreplugin.Manifest
-	Plugin   = coreplugin.Plugin
-	Build    = coreplugin.Build
-	Panel    = coreplugin.Panel
-	View     = coreplugin.View
-	Key      = coreplugin.Key
-	Notebook = coreplugin.Notebook
-	Digest   = coreplugin.Digest
+	Manifest       = coreplugin.Manifest
+	Plugin         = coreplugin.Plugin
+	Build          = coreplugin.Build
+	Panel          = coreplugin.Panel
+	View           = coreplugin.View
+	Key            = coreplugin.Key
+	SettingOptions = coreplugin.SettingOptions
+	Notebook       = coreplugin.Notebook
+	Digest         = coreplugin.Digest
 
 	Lock = coreplugin.Lock
 	Pin  = coreplugin.Pin
@@ -65,6 +66,7 @@ func ParseManifest(data []byte) (*Manifest, error)           { return coreplugin
 func FlattenSettings(settings map[string]any) []string { return coreplugin.FlattenSettings(settings) }
 func ViewFacts(p *Panel) []string                      { return coreplugin.ViewFacts(p) }
 func KeyFacts(p *Panel) []string                       { return coreplugin.KeyFacts(p) }
+func SettingOptionFacts(p *Panel) []string             { return coreplugin.SettingOptionFacts(p) }
 func Diff(old, next ConsentFacts) []FactChange         { return coreplugin.Diff(old, next) }
 
 // Install-time trust, recorded in the same store `grove config trust` writes.

@@ -47,6 +47,7 @@ func NewConsentFacts(m *Manifest, src ResolvedSource, manifestBytes []byte, runB
 		Keys:           KeyFacts(&m.Panel),
 		Views:          ViewFacts(&m.Panel),
 		Settings:       FlattenSettings(m.Panel.Settings),
+		SettingOptions: SettingOptionFacts(&m.Panel),
 	}
 	if m.Panel.Notebook != nil {
 		facts.NotebookSubtree = m.Panel.Notebook.Subtree

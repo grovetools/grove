@@ -273,3 +273,103 @@ func TestFragmentOmitsTheDigestTableWhenTheManifestDeclaresNone(t *testing.T) {
 		t.Errorf("a manifest declaring no digest still wrote one:\n%s", data)
 	}
 }
+
+// optionsFragmentManifest declares a browser selector: a closed list, one entry
+// of which hands the decision to a free-text setting beside it, plus a second
+// setting whose list is only a suggestion.
+const optionsFragmentManifest = `
+schema_version = 1
+
+[plugin]
+name        = "hn"
+description = "A Hacker News reader"
+
+[build]
+binary = "bin/grove-panel-hn"
+
+[panel]
+protocol = "embed/v1"
+
+[panel.settings]
+open_url_command        = "system"
+open_url_custom_command = ""
+palette                 = "hn"
+
+[[panel.setting_options]]
+setting        = "open_url_command"
+description    = "which browser opens a story"
+options        = ["system", "firefox", "custom"]
+custom_option  = "custom"
+custom_setting = "open_url_custom_command"
+
+[[panel.setting_options]]
+setting      = "palette"
+options      = ["hn", "host"]
+allow_custom = true
+`
+
+// The declaration has to arrive as something core/config decodes, in the
+// author's order, because that order is the order the host's editor offers the
+// values in — and it has to nest under the panel rather than strand a
+// [setting_options] beside [tui].
+func TestFragmentCarriesTheSettingOptionsToTheHost(t *testing.T) {
+	m, err := ParseManifest([]byte(optionsFragmentManifest))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	data, err := RenderFragment(m, "/opt/grove/bin/grove-panel-hn", &Pin{Spec: "x", Commit: "abc"})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+
+	var frag struct {
+		TUI struct {
+			Plugins map[string]*config.PluginConfig `toml:"plugins"`
+		} `toml:"tui"`
+	}
+	if err := toml.Unmarshal(data, &frag); err != nil {
+		t.Fatalf("the fragment does not decode into core's own config type: %v\n%s", err, data)
+	}
+	entry := frag.TUI.Plugins["hn"]
+	if entry == nil {
+		t.Fatalf("no [tui.plugins.hn]:\n%s", data)
+	}
+	if len(entry.SettingOptions) != 2 {
+		t.Fatalf("setting options = %+v, wanted both:\n%s", entry.SettingOptions, data)
+	}
+	first, second := entry.SettingOptions[0], entry.SettingOptions[1]
+	if first.Setting != "open_url_command" || second.Setting != "palette" {
+		t.Errorf("fragment order = %q, %q, want the author's", first.Setting, second.Setting)
+	}
+	if strings.Join(first.Options, ",") != "system,firefox,custom" {
+		t.Errorf("options = %v", first.Options)
+	}
+	if first.Description != "which browser opens a story" {
+		t.Errorf("description = %q", first.Description)
+	}
+	if first.CustomOption != "custom" || first.CustomSetting != "open_url_custom_command" {
+		t.Errorf("custom pair = %+v", first)
+	}
+	if first.AllowCustom {
+		t.Error("allow_custom was written for a declaration that does not set it")
+	}
+	if !second.AllowCustom {
+		t.Errorf("allow_custom did not survive: %+v", second)
+	}
+}
+
+// A manifest that declares no options writes no array. Absence stays absent for
+// the reason the digest table's does: an empty declaration is one nobody made.
+func TestFragmentOmitsSettingOptionsWhenTheManifestDeclaresNone(t *testing.T) {
+	m, err := ParseManifest([]byte(notebookManifest))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	data, err := RenderFragment(m, "/opt/grove/bin/grove-panel-hn", &Pin{Spec: "x", Commit: "abc"})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if strings.Contains(string(data), "setting_options") {
+		t.Errorf("a manifest declaring no options still wrote some:\n%s", data)
+	}
+}

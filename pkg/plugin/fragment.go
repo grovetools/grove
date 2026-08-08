@@ -106,6 +106,31 @@ func RenderFragment(m *Manifest, runBinary string, pin *Pin) ([]byte, error) {
 	if len(m.Panel.Settings) > 0 {
 		panel["settings"] = m.Panel.Settings
 	}
+	// The option declarations travel beside the settings they describe, in the
+	// author's order, because the file the user edits to retune the panel is
+	// where "which values does this one take" has to be answerable. The host
+	// never reads them at spawn — a settings value outside the list is delivered
+	// exactly like one inside it — but treemux's plugin editor does, and it is
+	// what lets the editor offer a choice where it would otherwise offer a text
+	// box.
+	if len(m.Panel.SettingOptions) > 0 {
+		options := make([]map[string]any, 0, len(m.Panel.SettingOptions))
+		for _, o := range m.Panel.SettingOptions {
+			entry := map[string]any{"setting": o.Setting, "options": o.Options}
+			if o.Description != "" {
+				entry["description"] = o.Description
+			}
+			if o.AllowCustom {
+				entry["allow_custom"] = true
+			}
+			if o.CustomSetting != "" {
+				entry["custom_option"] = o.CustomOption
+				entry["custom_setting"] = o.CustomSetting
+			}
+			options = append(options, entry)
+		}
+		panel["setting_options"] = options
+	}
 
 	// Marshal the FULLY NESTED document and delete the two empty parent
 	// headers afterwards, rather than marshalling the panel table alone under
