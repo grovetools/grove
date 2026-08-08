@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -13,7 +12,6 @@ import (
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/machine"
-	"github.com/grovetools/core/pkg/paths"
 )
 
 func init() {
@@ -179,11 +177,12 @@ func runMachineStatus(cmd *cobra.Command, args []string) error {
 
 	printMachineIntent(out)
 
-	if configDir := paths.ConfigDir(); configDir != "" {
-		legacy := filepath.Join(configDir, config.LegacyMachinesDirName)
-		if info, err := os.Stat(legacy); err == nil && info.IsDir() {
-			fmt.Fprintf(out, "\n! %s is ignored; migrate with `grove machine migrate`\n", legacy)
-		}
+	// The dead machines/ directory is a standing condition, reported here and
+	// by `grove doctor` (legacy_machines_dir) — never by config load, which
+	// every grove process performs and would turn one condition into one log
+	// line per invocation.
+	if legacy := config.LegacyMachinesDir(); legacy != "" {
+		fmt.Fprintf(out, "\n! %s is ignored; migrate with `grove machine migrate`\n", legacy)
 	}
 	return nil
 }

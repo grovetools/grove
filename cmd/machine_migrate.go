@@ -238,10 +238,11 @@ func collectGroveSources() ([]migrateSource, error) {
 }
 
 // collectLegacyMachinesGroves imports ~/.config/grove/machines/. The directory
-// is never loaded by the config cascade (LoadFromWithLogger only warns about
-// it), so whatever groves it declares are invisible today — importing them is
-// the whole reason the warning names this command. Files there are full grove
-// configs in either dialect; the incumbent on the author's machine is YAML.
+// is never loaded by the config cascade (`grove machine` and `grove doctor`
+// only report that it exists), so whatever groves it declares are invisible
+// today — importing them is the whole reason those reports name this command.
+// Files there are full grove configs in either dialect; the incumbent on the
+// author's machine is YAML.
 func collectLegacyMachinesGroves() ([]migrateSource, error) {
 	configDir := paths.ConfigDir()
 	if configDir == "" {
