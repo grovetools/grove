@@ -203,12 +203,7 @@ func (p *ThemesPage) Title() string {
 }
 
 func (p *ThemesPage) globalConfigPath() string {
-	if p.layered != nil && p.layered.FilePaths != nil {
-		if path := p.layered.FilePaths[config.SourceGlobal]; path != "" {
-			return path
-		}
-	}
-	return setup.GlobalTOMLConfigPath()
+	return globalSettingTargetPath(p.layered, []string{"tui", "theme"})
 }
 
 // Init implements pager.Page.

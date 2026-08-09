@@ -467,3 +467,96 @@ func TestSaveGlobalSettingNilLayered(t *testing.T) {
 		t.Errorf("typed bool missing from fallback file:\n%s", raw)
 	}
 }
+
+// Existing keys in modular global config belong to that file. The curated TUI
+// must not duplicate them into grove.toml, where the lower-priority copy would
+// be hidden by (and drift from) tui.toml.
+func TestSaveGlobalSettingPreservesExistingFragmentOwnership(t *testing.T) {
+	_, globalPath, workspace := newCuratedTestModel(t)
+	fragmentPath := filepath.Join(filepath.Dir(globalPath), "tui.toml")
+	fragmentSeed := `[tui]
+icons = "nerd"
+
+[tui.focus]
+style = "border"
+`
+	if err := os.WriteFile(fragmentPath, []byte(fragmentSeed), 0o600); err != nil {
+		t.Fatalf("seed tui.toml: %v", err)
+	}
+
+	layered, err := config.LoadLayered(workspace)
+	if err != nil {
+		t.Fatalf("LoadLayered with fragment: %v", err)
+	}
+	svc := setup.NewService(false)
+	th := setup.NewTOMLHandler(svc)
+	yh := setup.NewYAMLHandler(svc)
+
+	if err := SaveGlobalSetting(th, yh, layered, []string{"tui", "focus", "style"}, "title"); err != nil {
+		t.Fatalf("save existing fragment key: %v", err)
+	}
+	fragment, err := os.ReadFile(fragmentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(fragment), `style = 'title'`) && !strings.Contains(string(fragment), `style = "title"`) {
+		t.Errorf("focus style was not updated in tui.toml:\n%s", fragment)
+	}
+	global, err := os.ReadFile(globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(global), "style") {
+		t.Errorf("focus style was duplicated into grove.toml:\n%s", global)
+	}
+
+	// Exact ownership beats a fragment's more general [tui] section: the seed
+	// keeps theme in grove.toml, so changing it must not create a second copy.
+	if err := SaveGlobalSetting(th, yh, layered, []string{"tui", "theme"}, "oxocarbon"); err != nil {
+		t.Fatalf("save exact primary key: %v", err)
+	}
+	fragment, _ = os.ReadFile(fragmentPath)
+	if strings.Contains(string(fragment), "theme") {
+		t.Errorf("primary theme key was duplicated into tui.toml:\n%s", fragment)
+	}
+	global, _ = os.ReadFile(globalPath)
+	if !strings.Contains(string(global), "oxocarbon") {
+		t.Errorf("primary theme key was not updated in grove.toml:\n%s", global)
+	}
+
+	page := NewCuratedPage("Appearance", AppearanceSettings(), layered, grovekeymap.NewConfigKeyMap(nil), 100, 30, CuratedOpts{})
+	for i, setting := range page.settings {
+		if setting.ID == "focus_style" {
+			page.cursor = i
+			break
+		}
+	}
+	if title := page.Title(); !strings.Contains(title, "tui.toml") {
+		t.Errorf("page title does not show the selected key's fragment target: %q", title)
+	}
+
+	// A new key joins the fragment that owns its closest parent section.
+	if err := SaveGlobalSetting(th, yh, layered, []string{"tui", "sidebar_expanded"}, true); err != nil {
+		t.Fatalf("save new TUI key: %v", err)
+	}
+	fragment, err = os.ReadFile(fragmentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(fragment), "sidebar_expanded = true") {
+		t.Errorf("new TUI key did not join tui.toml:\n%s", fragment)
+	}
+
+	// With no exact key or parent section in a fragment, preserve the primary
+	// grove.toml fallback.
+	if err := SaveGlobalSetting(th, yh, layered, []string{"notebooks", "rules", "default"}, "nb"); err != nil {
+		t.Fatalf("save unrelated new global key: %v", err)
+	}
+	global, err = os.ReadFile(globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(global), "default = 'nb'") && !strings.Contains(string(global), `default = "nb"`) {
+		t.Errorf("unowned key did not fall back to grove.toml:\n%s", global)
+	}
+}

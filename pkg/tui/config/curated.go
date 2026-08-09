@@ -201,11 +201,12 @@ type CuratedPage struct {
 	pendingIdx   int
 	pendingValue string
 
-	layered *config.LayeredConfig
-	keys    grovekeymap.ConfigKeyMap
-	width   int
-	height  int
-	active  bool
+	layered      *config.LayeredConfig
+	writeTargets map[string]string
+	keys         grovekeymap.ConfigKeyMap
+	width        int
+	height       int
+	active       bool
 }
 
 // Compile-time interface checks.
@@ -225,7 +226,7 @@ func NewCuratedPage(name string, settings []Setting, layered *config.LayeredConf
 	ti.CharLimit = 200
 	ti.Width = 40
 
-	return &CuratedPage{
+	p := &CuratedPage{
 		name:       name,
 		tabID:      strings.ToLower(name),
 		settings:   filterSettings(settings, opts),
@@ -236,6 +237,8 @@ func NewCuratedPage(name string, settings []Setting, layered *config.LayeredConf
 		height:     height,
 		pendingIdx: -1,
 	}
+	p.refreshWriteTargets()
+	return p
 }
 
 // filterSettings applies the essentials filter.
@@ -263,8 +266,25 @@ func (p *CuratedPage) TabID() string { return p.tabID }
 
 // Title implements pager.PageWithTitle.
 func (p *CuratedPage) Title() string {
-	title := "  saves to " + setup.AbbreviatePath(globalConfigDisplayPath(p.layered))
+	target := globalConfigDisplayPath(p.layered)
+	if setting := p.currentSetting(); setting != nil && setting.Save == nil {
+		if resolved := p.writeTargets[settingPathKey(setting.Path)]; resolved != "" {
+			target = resolved
+		}
+	}
+	title := "  saves to " + setup.AbbreviatePath(target)
 	return theme.DefaultTheme.Muted.Render(title)
+}
+
+func settingPathKey(path []string) string { return strings.Join(path, "\x00") }
+
+func (p *CuratedPage) refreshWriteTargets() {
+	p.writeTargets = make(map[string]string, len(p.settings))
+	for _, setting := range p.settings {
+		if setting.Save == nil && len(setting.Path) > 0 {
+			p.writeTargets[settingPathKey(setting.Path)] = globalSettingTargetPath(p.layered, setting.Path)
+		}
+	}
 }
 
 // globalConfigDisplayPath resolves the global config file path for display.
@@ -309,6 +329,7 @@ func (p *CuratedPage) SetSize(width, height int) {
 // read from it at render time so nothing else needs recomputing.
 func (p *CuratedPage) Refresh(layered *config.LayeredConfig) {
 	p.layered = layered
+	p.refreshWriteTargets()
 }
 
 // IsTextEntryActive implements pager.PageWithTextInput. A key capture in

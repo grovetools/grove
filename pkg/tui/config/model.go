@@ -16,6 +16,7 @@ import (
 	"github.com/grovetools/core/tui/components/pager"
 	"github.com/grovetools/core/tui/embed"
 	corekeymap "github.com/grovetools/core/tui/keymap"
+	"github.com/pelletier/go-toml/v2"
 
 	"github.com/grovetools/grove/pkg/configui"
 	grovekeymap "github.com/grovetools/grove/pkg/keymap"
@@ -858,18 +859,12 @@ func (m *Model) availableLayers() []config.ConfigSource {
 	return layers
 }
 
-// SaveGlobalSetting writes a single value at path into the global grove
-// config file (the layer every curated setting saves to). value must
-// already be Go-typed — bool/int/string per the setting's ControlKind (see
-// Setting.TypedValue) — because TOML values are typed: a bool written as a
-// quoted "true" fails core's strict decode and the loader silently drops
-// the ENTIRE global config (see treemux/cmd/welcome_prefs.go for the
-// documented hazard and the typed-write precedent).
-//
-// Exported so spec 23's onboarding can persist essentials directly without
-// constructing a full Model; Model.saveToLayer routes its global-layer case
-// through it.
-func SaveGlobalSetting(tomlHandler *setup.TOMLHandler, yamlHandler *setup.YAMLHandler, layered *config.LayeredConfig, path []string, value interface{}) error {
+// globalSettingTargetPath returns the user-controlled global file that owns
+// path or its closest existing parent table. Modular files such as
+// ~/.config/grove/tui.toml are global fragments, but FilePaths has no one-to-one
+// slot for them. Preserve an exact key's home; for a new key, prefer the
+// fragment with the deepest matching section, then fall back to grove.toml.
+func globalSettingTargetPath(layered *config.LayeredConfig, path []string) string {
 	targetPath := ""
 	if layered != nil && layered.FilePaths != nil {
 		targetPath = layered.FilePaths[config.SourceGlobal]
@@ -877,6 +872,89 @@ func SaveGlobalSetting(tomlHandler *setup.TOMLHandler, yamlHandler *setup.YAMLHa
 	if targetPath == "" {
 		targetPath = setup.GlobalTOMLConfigPath()
 	}
+	if layered == nil {
+		return targetPath
+	}
+
+	bestFragment := ""
+	bestPrefix := 0
+	for i := len(layered.GlobalFragments) - 1; i >= 0; i-- {
+		fragmentPath := layered.GlobalFragments[i].Path
+		if fragmentPath == "" || strings.ToLower(filepath.Ext(fragmentPath)) != ".toml" {
+			continue
+		}
+		root, ok := loadTOMLMap(fragmentPath)
+		if !ok {
+			continue
+		}
+		depth := tomlPathPrefixDepth(root, path)
+		if depth == len(path) {
+			return fragmentPath
+		}
+		// Installed plugin manifests also contain [tui], but they own only
+		// their plugin declaration — never use one as the general home for an
+		// unrelated Appearance/Layout/Keys setting.
+		if filepath.Base(filepath.Dir(fragmentPath)) != "plugins" && depth > bestPrefix {
+			bestFragment, bestPrefix = fragmentPath, depth
+		}
+	}
+
+	// An exact key in the primary file owns itself even when a fragment has a
+	// matching parent table. Otherwise, use the fragment with the deepest
+	// existing parent (e.g. [tui.focus] before [tui]) so a new sibling lands
+	// with the rest of its section.
+	if root, ok := loadTOMLMap(targetPath); ok && tomlPathPrefixDepth(root, path) == len(path) {
+		return targetPath
+	}
+	if bestPrefix > 0 {
+		return bestFragment
+	}
+	return targetPath
+}
+
+func loadTOMLMap(path string) (map[string]interface{}, bool) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	var root map[string]interface{}
+	if err := toml.Unmarshal(raw, &root); err != nil {
+		return nil, false
+	}
+	return root, true
+}
+
+func tomlPathPrefixDepth(root map[string]interface{}, path []string) int {
+	current := root
+	for i, key := range path {
+		value, ok := current[key]
+		if !ok {
+			return i
+		}
+		if i == len(path)-1 {
+			return len(path)
+		}
+		next, ok := value.(map[string]interface{})
+		if !ok {
+			return i + 1
+		}
+		current = next
+	}
+	return 0
+}
+
+// SaveGlobalSetting writes a single value at path into the global config file
+// that already owns the key or its closest parent section, including modular
+// fragments such as tui.toml. Otherwise it falls back to the primary
+// grove.toml. value must already be Go-typed —
+// bool/int/string per the setting's ControlKind (see Setting.TypedValue) —
+// because TOML values are typed: a bool written as a quoted "true" fails core's
+// strict decode and the loader silently drops the ENTIRE global config.
+//
+// Exported so onboarding can persist essentials directly without constructing
+// a full Model; Model.saveToLayer routes its global-layer case through it.
+func SaveGlobalSetting(tomlHandler *setup.TOMLHandler, yamlHandler *setup.YAMLHandler, layered *config.LayeredConfig, path []string, value interface{}) error {
+	targetPath := globalSettingTargetPath(layered, path)
 	if targetPath == "" {
 		return fmt.Errorf("cannot resolve global config path")
 	}
