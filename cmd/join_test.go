@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/devicekey"
 	"github.com/grovetools/core/pkg/syncproto"
 )
@@ -29,6 +30,10 @@ func sandboxAdoption(t *testing.T) (home, configDir, notebookRoot string) {
 	t.Helper()
 	home = t.TempDir()
 	t.Setenv("GROVE_HOME", home)
+	// Adoption probes the global sync daemon explicitly. Keep every sandboxed
+	// test away from the developer's real daemon unless that test installs its
+	// own socket fixture.
+	t.Setenv(daemon.HostSocketEnv, filepath.Join(home, "no-such-daemon.sock"))
 	t.Setenv("GROVE_SYNC_TOKEN", "") // never inherit the developer's token
 	config.ResetLoadCache()
 	t.Cleanup(config.ResetLoadCache)
@@ -680,7 +685,7 @@ func TestJoinWithoutADaemonIsIncomplete(t *testing.T) {
 	// Point the daemon client at a socket that does not exist, so the wait
 	// resolves quickly to "no daemon answered" rather than talking to the
 	// developer's real groved.
-	t.Setenv("GROVE_DAEMON_SOCKET", filepath.Join(home, "no-such-daemon.sock"))
+	t.Setenv(daemon.HostSocketEnv, filepath.Join(home, "no-such-daemon.sock"))
 	srv := capabilitiesServer(t, func(string) int { return http.StatusOK })
 
 	opts := joinOpts(srv.URL, configDir)

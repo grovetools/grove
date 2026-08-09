@@ -18,6 +18,7 @@ import (
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/machine"
 	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/registry"
 )
 
@@ -202,7 +203,18 @@ func renderOffer(out io.Writer, offer registry.Offer, dest string) {
 // treats the daemon as optional: it is what makes replication happen, not what
 // makes the config write valid.
 func syncStatusSoft(ctx context.Context) *models.SyncStatus {
-	status, err := daemon.New().GetSyncStatus(ctx)
+	// Notebook sync is owned by the global daemon, not the cwd-scoped daemon.
+	// Using daemon.New() here made `grove join` report "no running daemon" from
+	// inside a worktree even while the global daemon was actively replicating.
+	socketPath := strings.TrimSpace(os.Getenv(daemon.HostSocketEnv))
+	if socketPath == "" {
+		socketPath = paths.SocketPath()
+	}
+	client, err := daemon.NewRemoteClient(socketPath)
+	if err != nil {
+		return nil
+	}
+	status, err := client.GetSyncStatus(ctx)
 	if err != nil {
 		return nil
 	}
