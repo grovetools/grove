@@ -39,6 +39,8 @@ func TestLayoutSettingsRows(t *testing.T) {
 		{"drawer_orientation", "Drawer position", []string{"tui", "drawer_orientation"}, ControlSelect, []string{"right", "bottom"}, embed.SettingDomainDrawerOrientation},
 		{"drawer_expanded", "Drawer expanded on start", []string{"tui", "drawer_expanded"}, ControlBool, nil, embed.SettingDomainDrawerExpanded},
 		{"sidebar_expanded", "Rail expanded on start", []string{"tui", "sidebar_expanded"}, ControlBool, nil, embed.SettingDomainSidebarExpanded},
+		{"rail_shortcuts", "Rail workspace shortcuts", []string{"tui", "rail", "shortcuts"}, ControlSelect, []string{"auto", "always", "never"}, embed.SettingDomainRail},
+		{"rail_max_shortcuts", "Rail shortcut limit", []string{"tui", "rail", "max_shortcuts"}, ControlInt, nil, embed.SettingDomainRail},
 		{"show_home_on_startup", "Show Home on startup", []string{"tui", "hide_splash_on_startup"}, ControlBool, nil, ""},
 	}
 
@@ -187,7 +189,7 @@ func TestShowHomeOnStartupInverted(t *testing.T) {
 	// direction: off ("false") toggles to on ("true").
 	page := NewCuratedPage("Layout", LayoutSettings(), m.layered, grovekeymap.NewConfigKeyMap(nil), 80, 24, CuratedOpts{})
 	page.Focus()
-	for i := 0; i < 3; i++ { // cursor to row 3 (show_home_on_startup)
+	for i := 0; i < 5; i++ { // cursor to the last row (show_home_on_startup)
 		_, _ = page.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
 	}
 	_, cmd := page.Update(tea.KeyMsg{Type: tea.KeyEnter})

@@ -332,6 +332,27 @@ var SchemaFields = []FieldMeta{
 				Priority:    56,
 			},
 			{
+				Path:        []string{"tui", "rail"},
+				Type:        FieldObject,
+				Description: "Icon rail (left sidebar) behavior",
+				Layer:       config.SourceGlobal,
+				Priority:    57,
+				RefType:     "RailConfig",
+				Children: []FieldMeta{
+					{
+						Path:        []string{"tui", "rail", "max_shortcuts"},
+						Type:        FieldInt,
+						Description: "Maximum workspace shortcuts listed in the rail footer (0 = all)",
+					},
+					{
+						Path:        []string{"tui", "rail", "shortcuts"},
+						Type:        FieldSelect,
+						Description: "When the expanded rail shows its pinned workspace-shortcut footer",
+						Options:     []string{"auto", "always", "never"},
+					},
+				},
+			},
+			{
 				Path:        []string{"tui", "sidebar_expanded"},
 				Type:        FieldBool,
 				Description: "Start terminal sidebar expanded (icon + label) instead of icon-only",

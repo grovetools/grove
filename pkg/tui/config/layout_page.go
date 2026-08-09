@@ -11,7 +11,10 @@ import (
 // core/config/types.go TUIConfig: when a key is unset in every layer the
 // page displays — and toggling/cycling starts from — the value the app
 // actually uses.
-const defaultDrawerOrientation = "right"
+const (
+	defaultDrawerOrientation = "right"
+	defaultRailShortcuts     = "auto"
+)
 
 // layoutTUI returns the merged [tui] section, or nil when absent.
 func layoutTUI(lc *config.LayeredConfig) *config.TUIConfig {
@@ -81,6 +84,35 @@ func LayoutSettings() []Setting {
 				return strconv.FormatBool(t != nil && t.SidebarExpanded)
 			},
 			ApplyDomain: embed.SettingDomainSidebarExpanded,
+		},
+		{
+			ID:          "rail_shortcuts",
+			Label:       "Rail workspace shortcuts",
+			Description: "When the expanded rail pins its workspace-shortcut footer: auto (yield rows to the pane list on a short rail), always, or never",
+			Path:        []string{"tui", "rail", "shortcuts"},
+			Control:     ControlSelect,
+			Options:     []string{"auto", "always", "never"},
+			Read: func(lc *config.LayeredConfig) string {
+				if t := layoutTUI(lc); t != nil && t.Rail != nil && t.Rail.Shortcuts != "" {
+					return t.Rail.Shortcuts
+				}
+				return defaultRailShortcuts
+			},
+			ApplyDomain: embed.SettingDomainRail,
+		},
+		{
+			ID:          "rail_max_shortcuts",
+			Label:       "Rail shortcut limit",
+			Description: "Maximum workspace shortcuts the rail footer lists (0 = all); the remainder shows as a +N count on the divider",
+			Path:        []string{"tui", "rail", "max_shortcuts"},
+			Control:     ControlInt,
+			Read: func(lc *config.LayeredConfig) string {
+				if t := layoutTUI(lc); t != nil && t.Rail != nil {
+					return strconv.Itoa(t.Rail.MaxShortcuts)
+				}
+				return "0"
+			},
+			ApplyDomain: embed.SettingDomainRail,
 		},
 		{
 			ID:          "show_home_on_startup",
