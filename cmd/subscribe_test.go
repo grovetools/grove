@@ -44,6 +44,26 @@ func TestSubscribeWritesIntentOnly(t *testing.T) {
 	}
 }
 
+func TestSubscribeWritesPartialMemberIntent(t *testing.T) {
+	_, configDir, _ := sandboxAdoption(t)
+	var out bytes.Buffer
+	if err := runSubscribeWithFilters(&out, "grovetools", "/code/grovetools", "", false, []string{"core", "nav", "core"}, nil); err != nil {
+		t.Fatalf("subscribe with filters: %v", err)
+	}
+	cfg, err := config.LoadMachineConfigFrom(filepath.Join(configDir, "machine.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.Machine.Ecosystems["grovetools"].Repos
+	if strings.Join(got, ",") != "core,nav" {
+		t.Fatalf("repos = %v, want deduplicated [core nav]", got)
+	}
+
+	if err := runSubscribeWithFilters(&out, "grovetools", "/code/grovetools", "", false, []string{"core"}, []string{"nav"}); err == nil {
+		t.Fatal("subscribe accepted both include and exclude filters")
+	}
+}
+
 // TestSubscribePreservesTheRestOfMachineToml: machine.toml is hand-authored
 // and dotfiles-portable, so the edit must be surgical — a marshaller round-trip
 // would quietly rewrite the user's file.

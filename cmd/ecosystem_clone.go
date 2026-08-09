@@ -54,6 +54,9 @@ type ecosystemCloneOptions struct {
 	// here too — a clone of a real ecosystem is minutes long and a silent
 	// command looks hung.
 	Out io.Writer
+	// Subscription carries subscriber-local member selection. Its zero value
+	// selects every member and preserves the pre-subscription behavior.
+	Subscription config.MachineEcosystem
 }
 
 func (o ecosystemCloneOptions) jobs() int {
@@ -141,9 +144,21 @@ func cloneSuperrepoEcosystem(ctx context.Context, card config.EcosystemCard, des
 		}
 	}
 
-	fmt.Fprintf(out, "Initializing submodules (--jobs %d)...\n", opts.jobs())
-	if err := runGit(ctx, dest, out, "submodule", "update", "--init", "--jobs", fmt.Sprint(opts.jobs())); err != nil {
-		return fmt.Errorf("submodule update in %s: %w", dest, err)
+	paths, err := gitmoduleSubmodulePaths(dest)
+	if err != nil {
+		return err
+	}
+	selected, err := selectedMembers(paths, opts.Subscription)
+	if err != nil {
+		return fmt.Errorf("select superrepo members: %w", err)
+	}
+	fmt.Fprintf(out, "Initializing %d/%d submodules (--jobs %d)...\n", len(selected), len(paths), opts.jobs())
+	if len(selected) > 0 {
+		args := []string{"submodule", "update", "--init", "--jobs", fmt.Sprint(opts.jobs()), "--"}
+		args = append(args, selected...)
+		if err := runGit(ctx, dest, out, args...); err != nil {
+			return fmt.Errorf("submodule update in %s: %w", dest, err)
+		}
 	}
 	if err := healAbortedSubmoduleCheckouts(ctx, dest, out); err != nil {
 		return err
@@ -252,8 +267,25 @@ func cloneFlatEcosystem(ctx context.Context, card config.EcosystemCard, dest str
 		return fmt.Errorf("create %s: %w", dest, err)
 	}
 
+	memberNames := make([]string, 0, len(card.Remotes))
+	for _, remote := range card.Remotes {
+		memberNames = append(memberNames, remote.Name)
+	}
+	selected, err := selectedMembers(memberNames, opts.Subscription)
+	if err != nil {
+		return fmt.Errorf("select flat members: %w", err)
+	}
+	selectedSet := make(map[string]bool, len(selected))
+	for _, name := range selected {
+		selectedSet[name] = true
+	}
+
 	var failed []string
 	for _, r := range card.Remotes {
+		if !selectedSet[r.Name] {
+			fmt.Fprintf(out, "%s: omitted by subscription\n", r.Name)
+			continue
+		}
 		// The name becomes a directory under dest and, later, a repo name in
 		// generated shell on satellites — hold it to the same class the mirror
 		// holds repo names to.
@@ -288,6 +320,32 @@ func cloneFlatEcosystem(ctx context.Context, card config.EcosystemCard, dest str
 		return fmt.Errorf("flat materialize incomplete: %s could not be cloned (re-run to finish)", strings.Join(failed, ", "))
 	}
 	return nil
+}
+
+// selectedMembers applies subscriber-local include/exclude intent to the
+// card's complete member list. Unknown names are rejected: silently accepting
+// a typo would produce a permanently incomplete checkout that looked healthy.
+func selectedMembers(all []string, subscription config.MachineEcosystem) ([]string, error) {
+	known := make(map[string]bool, len(all))
+	for _, name := range all {
+		known[name] = true
+	}
+	requested := subscription.Exclude
+	if len(subscription.Repos) > 0 {
+		requested = subscription.Repos
+	}
+	for _, name := range requested {
+		if !known[name] {
+			return nil, fmt.Errorf("repository %q is not in the ecosystem card (known: %s)", name, strings.Join(all, ", "))
+		}
+	}
+	selected := make([]string, 0, len(all))
+	for _, name := range all {
+		if subscription.IncludesRepo(name) {
+			selected = append(selected, name)
+		}
+	}
+	return selected, nil
 }
 
 // seedFlatEcosystemRoot gives a flat ecosystem root the manifest that makes it

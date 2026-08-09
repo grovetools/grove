@@ -245,6 +245,68 @@ func TestCloneFlatEcosystemYieldsDiscoverableRepos(t *testing.T) {
 	}
 }
 
+func TestCloneFlatEcosystemMaterializesSelectedSubset(t *testing.T) {
+	sandboxGitEnv(t)
+	root := t.TempDir()
+	alphaSrc := seedSourceRepo(t, filepath.Join(root, "source", "alpha"), "a.txt", "alpha")
+	betaSrc := seedSourceRepo(t, filepath.Join(root, "source", "beta"), "b.txt", "beta")
+	card := config.EcosystemCard{ID: "01J8PARTIALFLAT", Layout: config.LayoutFlat, Remotes: []config.EcosystemRemote{
+		{Name: "alpha", URL: alphaSrc}, {Name: "beta", URL: betaSrc},
+	}}
+	dest := filepath.Join(root, "peer", "flatco")
+	var log strings.Builder
+	err := cloneEcosystem(context.Background(), card, dest, ecosystemCloneOptions{
+		Out: &log, Subscription: config.MachineEcosystem{Repos: []string{"alpha"}},
+	})
+	if err != nil {
+		t.Fatalf("partial flat clone: %v\n%s", err, log.String())
+	}
+	if _, err := os.Stat(filepath.Join(dest, "alpha", "a.txt")); err != nil {
+		t.Fatalf("selected member missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "beta")); !os.IsNotExist(err) {
+		t.Fatalf("omitted member was materialized: %v", err)
+	}
+	if cardOnDisk, err := config.LoadEcosystemCard(filepath.Join(dest, "grove.toml")); err != nil || cardOnDisk == nil || len(cardOnDisk.Remotes) != 2 {
+		t.Fatalf("partial root must retain the complete card for later widening: card=%+v err=%v", cardOnDisk, err)
+	}
+}
+
+func TestCloneSuperrepoEcosystemInitializesSelectedSubmodules(t *testing.T) {
+	sandboxGitEnv(t)
+	root := t.TempDir()
+	source := filepath.Join(root, "source", "grovetools")
+	card := config.EcosystemCard{ID: "01J8PARTIALSUPER", Layout: config.LayoutSuperrepo}
+	seedSourceSuperrepo(t, source, card)
+	beta := seedSourceRepo(t, filepath.Join(root, "beta-src"), "beta.txt", "beta")
+	mustGit(t, source, "submodule", "add", "-q", beta, "beta")
+	mustGit(t, source, "commit", "-q", "-am", "add beta")
+	card.Remotes = []config.EcosystemRemote{{Name: "origin", URL: source}}
+
+	dest := filepath.Join(root, "peer", "grovetools")
+	if err := cloneEcosystem(context.Background(), card, dest, ecosystemCloneOptions{
+		Out: io.Discard, Subscription: config.MachineEcosystem{Exclude: []string{"beta"}},
+	}); err != nil {
+		t.Fatalf("partial superrepo clone: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "alpha", "member.txt")); err != nil {
+		t.Fatalf("selected submodule missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "beta", "beta.txt")); !os.IsNotExist(err) {
+		t.Fatalf("excluded submodule was checked out: %v", err)
+	}
+}
+
+func TestCloneEcosystemRejectsUnknownSelectedMember(t *testing.T) {
+	card := config.EcosystemCard{Layout: config.LayoutFlat, Remotes: []config.EcosystemRemote{{Name: "alpha", URL: "unused"}}}
+	err := cloneEcosystem(context.Background(), card, t.TempDir(), ecosystemCloneOptions{
+		Out: io.Discard, Subscription: config.MachineEcosystem{Repos: []string{"typo"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "not in the ecosystem card") {
+		t.Fatalf("error = %v, want unknown-member error", err)
+	}
+}
+
 func TestCloneEcosystemRejectsUnusableCards(t *testing.T) {
 	sandboxGitEnv(t)
 	root := t.TempDir()

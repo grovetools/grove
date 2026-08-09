@@ -118,7 +118,15 @@ func runEcosystemMaterialize(ctx context.Context, in io.Reader, out io.Writer, o
 		return fmt.Errorf("an ecosystem name is required")
 	}
 
-	dest, err := resolveMaterializeDest(name, opts.path)
+	existing, err := existingEcosystemSubscription(name)
+	if err != nil {
+		return err
+	}
+	pathIntent := opts.path
+	if strings.TrimSpace(pathIntent) == "" && existing != nil {
+		pathIntent = existing.Path
+	}
+	dest, err := resolveMaterializeDest(name, pathIntent)
 	if err != nil {
 		return err
 	}
@@ -132,7 +140,12 @@ func runEcosystemMaterialize(ctx context.Context, in io.Reader, out io.Writer, o
 	// 1. Intent, before the expensive part. If the clone is interrupted the
 	// subscription is still declared, which is exactly the state
 	// `grove machine status` calls declared-missing and this command repairs.
-	cfgPath, changed, err := writeEcosystemSubscription(name, config.MachineEcosystem{Path: dest})
+	subscription := config.MachineEcosystem{Path: dest}
+	if existing != nil {
+		subscription = *existing
+		subscription.Path = dest
+	}
+	cfgPath, changed, err := writeEcosystemSubscription(name, subscription)
 	if err != nil {
 		return err
 	}
@@ -143,7 +156,13 @@ func runEcosystemMaterialize(ctx context.Context, in io.Reader, out io.Writer, o
 	}
 
 	// 2. The tree.
-	if err := cloneEcosystem(ctx, card, dest, ecosystemCloneOptions{Jobs: opts.jobs, Out: out}); err != nil {
+	if len(subscription.Repos) > 0 || len(subscription.Exclude) > 0 {
+		fmt.Fprintf(out, "Partial subscription: repos=%v exclude=%v. The full notebook still syncs.\n", subscription.Repos, subscription.Exclude)
+		if card.Layout == config.LayoutSuperrepo {
+			fmt.Fprintln(out, "Note: root-level builds and cross-repo plans may require all submodules; widen the subscription and re-run materialize to upgrade.")
+		}
+	}
+	if err := cloneEcosystem(ctx, card, dest, ecosystemCloneOptions{Jobs: opts.jobs, Out: out, Subscription: subscription}); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "✓ %s is materialized at %s\n", name, dest)

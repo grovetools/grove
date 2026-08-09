@@ -85,6 +85,40 @@ func TestDiscoverEcosystemRemotes(t *testing.T) {
 // card must carry the URL as configured, not as this host rewrites it, because
 // the whole point of a card is to be read on a machine that does not share
 // this host's git config.
+func TestDiscoverFlatMemberRemotesUsesMemberNames(t *testing.T) {
+	root := t.TempDir()
+	for _, member := range []string{"beta", "alpha"} {
+		dir := filepath.Join(root, member)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		initTestRepo(t, dir)
+		cmd := exec.Command("git", "remote", "add", "origin", "https://example.test/"+member+".git")
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("remote add: %v\n%s", err, out)
+		}
+	}
+	// A non-repo sibling must not become a card member.
+	if err := os.Mkdir(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	card := deriveEcosystemCard(root, nil)
+	want := []config.EcosystemRemote{
+		{Name: "alpha", URL: "https://example.test/alpha.git"},
+		{Name: "beta", URL: "https://example.test/beta.git"},
+	}
+	if len(card.Remotes) != len(want) {
+		t.Fatalf("flat remotes = %+v, want %+v", card.Remotes, want)
+	}
+	for i := range want {
+		if card.Remotes[i] != want[i] {
+			t.Errorf("remote[%d] = %+v, want %+v", i, card.Remotes[i], want[i])
+		}
+	}
+}
+
 func TestDiscoverEcosystemRemotesIgnoresInsteadOf(t *testing.T) {
 	dir := t.TempDir()
 	initTestRepo(t, dir)

@@ -88,6 +88,42 @@ func discoverEcosystemRemotes(root string) []config.EcosystemRemote {
 	return remotes
 }
 
+// discoverFlatMemberRemotes captures one clone URL per immediate member repo.
+// Flat cards use the remote name as the destination directory, so the member
+// directory name (not its local git remote name) is recorded. Immediate
+// children are a deliberately bounded rule: adopt never wanders outside the
+// ecosystem root or guesses through arbitrary nested directories.
+func discoverFlatMemberRemotes(root string) []config.EcosystemRemote {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var remotes []config.EcosystemRemote
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		memberRoot := filepath.Join(root, entry.Name())
+		top, err := exec.Command("git", "-C", memberRoot, "rev-parse", "--show-toplevel").Output()
+		if err != nil {
+			continue
+		}
+		memberInfo, memberErr := os.Stat(memberRoot)
+		topInfo, topErr := os.Stat(strings.TrimSpace(string(top)))
+		if memberErr != nil || topErr != nil || !os.SameFile(memberInfo, topInfo) {
+			continue // ordinary directory inside a root repo, not a member repo
+		}
+		memberRemotes := discoverEcosystemRemotes(memberRoot)
+		if len(memberRemotes) == 0 {
+			continue
+		}
+		// discoverEcosystemRemotes orders origin first, then by name. The first
+		// fetch URL is therefore the conventional clone source when available.
+		remotes = append(remotes, config.EcosystemRemote{Name: entry.Name(), URL: memberRemotes[0].URL})
+	}
+	return remotes
+}
+
 // deriveEcosystemCard builds the card for the ecosystem rooted at root.
 //
 // The id is the one invariant: an existing card's id is carried forward
@@ -97,9 +133,14 @@ func discoverEcosystemRemotes(root string) []config.EcosystemRemote {
 // Notebooks are carried forward, because they are a declaration no probe can
 // reconstruct.
 func deriveEcosystemCard(root string, existing *config.EcosystemCard) config.EcosystemCard {
+	layout := detectEcosystemLayout(root)
+	remotes := discoverEcosystemRemotes(root)
+	if layout == config.LayoutFlat {
+		remotes = discoverFlatMemberRemotes(root)
+	}
 	card := config.EcosystemCard{
-		Layout:  detectEcosystemLayout(root),
-		Remotes: discoverEcosystemRemotes(root),
+		Layout:  layout,
+		Remotes: remotes,
 	}
 	if existing != nil {
 		card.ID = existing.ID

@@ -30,6 +30,8 @@ func newSubscribeCmd() *cobra.Command {
 		path     string
 		notebook string
 		disabled bool
+		repos    []string
+		exclude  []string
 	)
 	cmd := &cobra.Command{
 		Use:   "subscribe <ecosystem>",
@@ -52,16 +54,22 @@ byte of machine.toml â€” comments, ordering, tables this schema does not model â
 survives unchanged.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSubscribe(cmd.OutOrStdout(), args[0], path, notebook, disabled)
+			return runSubscribeWithFilters(cmd.OutOrStdout(), args[0], path, notebook, disabled, repos, exclude)
 		},
 	}
 	cmd.Flags().StringVar(&path, "path", "", "Where this machine keeps the ecosystem (default: alongside the others, else ~/code/<name>)")
 	cmd.Flags().StringVar(&notebook, "notebook", "", "Override the ecosystem card's default notebook binding on this machine")
 	cmd.Flags().BoolVar(&disabled, "disabled", false, "Record the subscription but do not scan it")
+	cmd.Flags().StringSliceVar(&repos, "repo", nil, "Materialize only this member repository (repeatable)")
+	cmd.Flags().StringSliceVar(&exclude, "exclude-repo", nil, "Omit this member repository (repeatable; cannot be combined with --repo)")
 	return cmd
 }
 
 func runSubscribe(out io.Writer, name, path, notebook string, disabled bool) error {
+	return runSubscribeWithFilters(out, name, path, notebook, disabled, nil, nil)
+}
+
+func runSubscribeWithFilters(out io.Writer, name, path, notebook string, disabled bool, repos, exclude []string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("an ecosystem name is required")
@@ -76,10 +84,16 @@ func runSubscribe(out io.Writer, name, path, notebook string, disabled bool) err
 		resolved = abs
 	}
 
-	entry := config.MachineEcosystem{Path: resolved, Notebook: strings.TrimSpace(notebook)}
+	entry := config.MachineEcosystem{
+		Path: resolved, Notebook: strings.TrimSpace(notebook),
+		Repos: cleanRepoFilter(repos), Exclude: cleanRepoFilter(exclude),
+	}
 	if disabled {
 		off := false
 		entry.Enabled = &off
+	}
+	if len(entry.Repos) > 0 && len(entry.Exclude) > 0 {
+		return fmt.Errorf("--repo and --exclude-repo cannot be combined")
 	}
 
 	cfgPath, changed, err := writeEcosystemSubscription(name, entry)
@@ -102,4 +116,18 @@ func runSubscribe(out io.Writer, name, path, notebook string, disabled bool) err
 	}
 	fmt.Fprintf(out, "\nDeclared but not present. Materialize it with:\n  grove ecosystem materialize %s\n", name)
 	return nil
+}
+
+func cleanRepoFilter(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
