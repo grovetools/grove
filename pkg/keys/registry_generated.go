@@ -1875,6 +1875,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "NeedsYouQueue", Keys: []string{"<leader> !"}, Description: "open needs-you queue", Enabled: true, ConfigKey: "needs_you_queue"},
 					{Name: "CloseOverlay", Keys: []string{"<leader> x"}, Description: "close active overlay (when an overlay is open)", Enabled: true, ConfigKey: "close_overlay"},
 					{Name: "BackButton", Keys: []string{"<leader> b"}, Description: "back to previous session (last workspace)", Enabled: true, ConfigKey: "back_button"},
+					{Name: "LastWindow", Keys: []string{"<leader> v", "<leader> )"}, Description: "back to last-used window (window-level MRU)", Enabled: true, ConfigKey: "last_window"},
 				},
 			},
 			{
