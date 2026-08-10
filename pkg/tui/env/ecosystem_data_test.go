@@ -3,6 +3,7 @@ package env
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -150,15 +151,23 @@ func TestEnumerateWorktreeStates_FiltersStatelessXDGDir(t *testing.T) {
 	t.Setenv("GROVE_CONFIG_OVERLAY", filepath.Join(globalConfigDir, "grove.yml"))
 
 	emptyStr := ""
-	globalCfg := config.Config{
-		SearchPaths: map[string]config.SearchPathConfig{
-			"work": {Path: workDir, Enabled: true},
-		},
-		Context: &config.ContextConfig{ReposDir: &emptyStr},
-	}
+	globalCfg := config.Config{Context: &config.ContextConfig{ReposDir: &emptyStr}}
 	globalBytes, _ := yaml.Marshal(globalCfg)
 	if err := os.WriteFile(filepath.Join(globalConfigDir, "grove.yml"), globalBytes, 0o644); err != nil {
 		t.Fatalf("write global grove.yml: %v", err)
+	}
+
+	// Discovery roots and notebook routing are recorded in their authoritative
+	// standalone files. The legacy search_paths config no longer participates
+	// in discovery after the roots/notebooks cutover.
+	notebookRoot := filepath.Join(rootDir, "notes")
+	notebooks := "default = \"test\"\n[notebooks.test]\nroot = " + strconv.Quote(notebookRoot) + "\n"
+	roots := "[roots.work]\npath = " + strconv.Quote(workDir) + "\nscan = true\nnotebook = \"test\"\n"
+	if err := os.WriteFile(filepath.Join(globalConfigDir, "notebooks.toml"), []byte(notebooks), 0o644); err != nil {
+		t.Fatalf("write notebooks.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(globalConfigDir, "roots.toml"), []byte(roots), 0o644); err != nil {
+		t.Fatalf("write roots.toml: %v", err)
 	}
 
 	// The ecosystem root: a grove.yml with a 'workspaces' key.
