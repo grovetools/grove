@@ -26,6 +26,7 @@ func init() { rootCmd.AddCommand(newMigrateCmd()) }
 
 func newMigrateCmd() *cobra.Command {
 	var dryRun, yes, stageSync, jsonOutput bool
+	var evidenceDir string
 	cmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "Migrate frozen legacy configuration to recorded roots and notebooks",
@@ -38,23 +39,43 @@ backed up with a UTC timestamp. notebooks.toml is always written before
 roots.toml so a notebook reference is never recorded before its definition.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runLegacyMigrateWithOptions(cmd.OutOrStdout(), cmd.InOrStdin(), migrationOptions{DryRun: dryRun, Yes: yes, StageSync: stageSync, JSON: jsonOutput}, time.Now().UTC())
+			return runLegacyMigrateWithOptions(cmd.OutOrStdout(), cmd.InOrStdin(), migrationOptions{DryRun: dryRun, Yes: yes, StageSync: stageSync, JSON: jsonOutput, EvidenceDir: evidenceDir}, time.Now().UTC())
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print the migration diff without writing")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Apply after printing the diff without prompting")
 	cmd.Flags().BoolVar(&stageSync, "stage-sync", false, "Park legacy sync intent in sync.toml.p2-staged for the later P2 migration")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Render final transition evidence as JSON")
+	cmd.Flags().StringVar(&evidenceDir, "evidence-dir", "", "Write normalized before/after effective topology evidence")
 	return cmd
 }
 
 type migrationOptions struct {
 	DryRun, Yes, StageSync, JSON bool
+	EvidenceDir                  string
 }
 
 // migrationFailureHook is a test-only seam invoked after every state write.
 // Production leaves it nil. Returning an error exercises the rollback stack.
 var migrationFailureHook func(string) error
+
+// runMigrationFailureHook also exposes the same seam to the checked-in
+// config-lab, which must exercise rollback through the real built binary. The
+// two-variable opt-in keeps this inert in every normal invocation.
+func runMigrationFailureHook(path string) error {
+	if migrationFailureHook != nil {
+		if err := migrationFailureHook(path); err != nil {
+			return err
+		}
+	}
+	if os.Getenv("GROVE_CONFIGLAB") == "1" {
+		failAfter := os.Getenv("GROVE_CONFIGLAB_FAIL_AFTER")
+		if failAfter != "" && (failAfter == path || failAfter == filepath.Base(path)) {
+			return fmt.Errorf("config-lab injected failure after %s", path)
+		}
+	}
+	return nil
+}
 
 func runLegacyMigrate(out io.Writer, in io.Reader, dryRun, yes bool, now time.Time) error {
 	return runLegacyMigrateWithOptions(out, in, migrationOptions{DryRun: dryRun, Yes: yes}, now)
@@ -179,10 +200,8 @@ func runLegacyMigrateWithOptions(out io.Writer, in io.Reader, opts migrationOpti
 			return fail("backup "+p, err)
 		}
 		backup := p + "." + stamp + ".bak"
-		if migrationFailureHook != nil {
-			if err := migrationFailureHook(backup); err != nil {
-				return fail("backup "+p, err)
-			}
+		if err := runMigrationFailureHook(backup); err != nil {
+			return fail("backup "+p, err)
 		}
 		if !opts.JSON {
 			fmt.Fprintf(out, "backup: %s.%s.bak\n", p, stamp)
@@ -192,10 +211,8 @@ func runLegacyMigrateWithOptions(out io.Writer, in io.Reader, opts migrationOpti
 		if err := atomicMigrationWrite(p, updates[p]); err != nil {
 			return fail("write "+p, err)
 		}
-		if migrationFailureHook != nil {
-			if err := migrationFailureHook(p); err != nil {
-				return fail("write "+p, err)
-			}
+		if err := runMigrationFailureHook(p); err != nil {
+			return fail("write "+p, err)
 		}
 	}
 
@@ -216,6 +233,11 @@ func runLegacyMigrateWithOptions(out io.Writer, in io.Reader, opts migrationOpti
 	}
 	if !bytes.Equal(expected, actual) {
 		return fail("effective-config equivalence check", fmt.Errorf("canonical pre/post mismatch:\n%s", effectiveDiff(expected, actual)))
+	}
+	if opts.EvidenceDir != "" {
+		if err := writeMigrationEquivalenceEvidence(opts.EvidenceDir, expected, actual); err != nil {
+			return fail("write equivalence evidence", err)
+		}
 	}
 	txn.Commit()
 
@@ -246,6 +268,26 @@ func renderMigrationEvidence(out io.Writer, evidence transition.Evidence, jsonOu
 		return transition.RenderJSON(out, evidence)
 	}
 	return transition.RenderHuman(out, evidence)
+}
+
+func writeMigrationEquivalenceEvidence(dir string, before, after []byte) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create evidence directory %s: %w", dir, err)
+	}
+	for name, raw := range map[string][]byte{
+		"before-effective.json": before,
+		"after-effective.json":  after,
+	} {
+		var pretty bytes.Buffer
+		if err := json.Indent(&pretty, raw, "", "  "); err != nil {
+			return fmt.Errorf("format %s: %w", name, err)
+		}
+		pretty.WriteByte('\n')
+		if err := os.WriteFile(filepath.Join(dir, name), pretty.Bytes(), 0o600); err != nil {
+			return fmt.Errorf("write %s: %w", name, err)
+		}
+	}
+	return os.WriteFile(filepath.Join(dir, "effective-equivalence.diff"), nil, 0o600)
 }
 
 func migrationWriteOrder(m *legacyMigration, targets []string) []string {

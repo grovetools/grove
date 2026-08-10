@@ -1,0 +1,16 @@
+name = "config-lab"
+
+[notebooks.definitions.notes]
+root_dir = "@NOTES_ROOT@"
+
+[notebooks.definitions.cardnotes]
+root_dir = "@CARD_NOTES_ROOT@"
+
+[notebooks.rules]
+default = "notes"
+
+[groves.code]
+path = "@CODE_ROOT@"
+notebook = "notes"
+depth = 2
+include_repos = ["alpha"]

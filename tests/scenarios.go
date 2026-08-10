@@ -46,6 +46,9 @@ func AllScenarios() []*harness.Scenario {
 		// Notebook TOML / grove init scenarios (discovery tests are in core)
 		GroveInitNotebookScenario(),
 
+		// Explicit real-binary V2/V3 configuration cutover acceptance gate.
+		ConfigCutoverV2V3Scenario(),
+
 		// Dev Commands scenarios
 		DevCwdWorkflow(),
 		DevLinkAndUseWorkflow(),

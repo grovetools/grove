@@ -586,8 +586,40 @@ func TestTopLevelMigrateCommand(t *testing.T) {
 	if got := cmd.Name(); got != "migrate" {
 		t.Fatalf("name=%q", got)
 	}
-	if cmd.Flags().Lookup("stage-sync") == nil || cmd.Flags().Lookup("json") == nil {
-		t.Fatal("migrate command omitted staging or transition JSON flag")
+	if cmd.Flags().Lookup("stage-sync") == nil || cmd.Flags().Lookup("json") == nil || cmd.Flags().Lookup("evidence-dir") == nil {
+		t.Fatal("migrate command omitted staging, transition JSON, or equivalence evidence flag")
+	}
+}
+
+func TestMigrationConfigLabFailureHookRequiresDoubleOptIn(t *testing.T) {
+	migrationFailureHook = nil
+	t.Cleanup(func() { migrationFailureHook = nil })
+	t.Setenv("GROVE_CONFIGLAB_FAIL_AFTER", "roots.toml")
+	if err := runMigrationFailureHook("/tmp/roots.toml"); err != nil {
+		t.Fatalf("single-variable opt-in activated failure seam: %v", err)
+	}
+	t.Setenv("GROVE_CONFIGLAB", "1")
+	if err := runMigrationFailureHook("/tmp/notebooks.toml"); err != nil {
+		t.Fatalf("non-matching write activated failure seam: %v", err)
+	}
+	if err := runMigrationFailureHook("/tmp/roots.toml"); err == nil || !strings.Contains(err.Error(), "config-lab injected failure") {
+		t.Fatalf("double opt-in did not activate matching failure seam: %v", err)
+	}
+}
+
+func TestWriteMigrationEquivalenceEvidence(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "evidence")
+	canonical := []byte(`{"groves":{"code":{"path":"/code"}},"notebooks":{}}`)
+	if err := writeMigrationEquivalenceEvidence(dir, canonical, canonical); err != nil {
+		t.Fatal(err)
+	}
+	before := migrateRead(t, filepath.Join(dir, "before-effective.json"))
+	after := migrateRead(t, filepath.Join(dir, "after-effective.json"))
+	if before != after || !strings.HasSuffix(before, "\n") {
+		t.Fatalf("unstable equivalence evidence: before=%q after=%q", before, after)
+	}
+	if info, err := os.Stat(filepath.Join(dir, "effective-equivalence.diff")); err != nil || info.Size() != 0 {
+		t.Fatalf("empty equivalence diff: info=%v err=%v", info, err)
 	}
 }
 

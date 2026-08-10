@@ -1,0 +1,7 @@
+mode = "keep"
+
+[[workspaces]]
+name = "notes"
+
+[notebooks.personal]
+remote = "origin"

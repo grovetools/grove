@@ -1,0 +1,10 @@
+[machine]
+name = "config-lab"
+
+[machine.ecosystems.card]
+path = "@ECOSYSTEM_ROOT@"
+
+[machine.roots.extra]
+path = "@EXTRA_ROOT@"
+notebook = "notes"
+exclude = ["scratch"]
