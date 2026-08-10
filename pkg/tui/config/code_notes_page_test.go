@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	coreconfig "github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/coderoot"
+	"github.com/grovetools/core/tui/theme"
 	grovekeymap "github.com/grovetools/grove/pkg/keymap"
 )
 
@@ -23,7 +24,7 @@ func recordedConfigDir(t *testing.T) string {
 	return dir
 }
 
-func TestCodePageEmptyStateDoesNotScanUntilEnter(t *testing.T) {
+func TestCodePageEmptyStateDoesNotScanUntilConfirmationStartsScan(t *testing.T) {
 	dir := recordedConfigDir(t)
 	candidate := filepath.Join(t.TempDir(), "code")
 	if err := os.MkdirAll(filepath.Join(candidate, "repo"), 0o755); err != nil {
@@ -33,21 +34,24 @@ func TestCodePageEmptyStateDoesNotScanUntilEnter(t *testing.T) {
 	if len(p.rows) != 0 {
 		t.Fatalf("fresh page scanned rows: %#v", p.rows)
 	}
-	if !strings.Contains(p.View(), "Where does your code live?") {
-		t.Fatal("missing empty prompt")
+	if view := p.View(); !strings.Contains(view, "Where does your code live?") || strings.Contains(view, "Grove will scan") {
+		t.Fatalf("empty state is not minimal: %q", view)
 	}
-	m := Model{codePage: p}
-	if err := m.addCodeRoot(candidate); err != nil {
-		t.Fatal(err)
+
+	// Drive the real input confirmation -> apply message path. No test-only
+	// mutation of expanded is allowed: confirmation itself owns the first scan.
+	p.active = true
+	p.editing = true
+	p.input.SetValue(candidate)
+	_, cmd := p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("confirmation did not emit applyCodeRootMsg")
 	}
-	p.Refresh(nil)
-	if len(p.rows) != 1 {
-		t.Fatalf("recorded root rows=%d", len(p.rows))
-	}
-	p.expanded[p.rows[0].root] = true
-	p.Refresh(nil)
-	if len(p.rows) != 2 {
-		t.Fatalf("scan-on-enter tree rows=%d", len(p.rows))
+	m := Model{codePage: p, workspacePath: t.TempDir()}
+	updated, _ := m.Update(cmd())
+	m = updated.(Model)
+	if len(m.codePage.rows) != 2 {
+		t.Fatalf("confirmed root did not scan immediately; rows=%#v status=%q", m.codePage.rows, m.statusMsg)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "roots.toml"))
 	if err != nil {
@@ -81,6 +85,122 @@ func TestCodePageCheckboxWritesExcludeThroughSharedWriter(t *testing.T) {
 	}
 	if len(table.Roots[name].Exclude) != 1 || table.Roots[name].Exclude[0] != "repo" {
 		t.Fatalf("exclude=%v", table.Roots[name].Exclude)
+	}
+}
+
+func TestAddCodeRootSameBasenameDoesNotOverwrite(t *testing.T) {
+	recordedConfigDir(t)
+	m := Model{}
+	first := filepath.Join(t.TempDir(), "one", "code")
+	second := filepath.Join(t.TempDir(), "two", "code")
+	for _, path := range []string{first, second} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	firstName, err := m.addCodeRoot(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondName, err := m.addCodeRoot(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstName == secondName {
+		t.Fatalf("same-basename roots reused key %q", firstName)
+	}
+	table, err := coderoot.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := table.Roots[firstName].Path; got != first {
+		t.Fatalf("first binding overwritten: got %q want %q", got, first)
+	}
+	if got := table.Roots[secondName].Path; got != second {
+		t.Fatalf("second binding missing: got %q want %q", got, second)
+	}
+}
+
+func TestEcosystemRowsFollowManifestAndMembersAreReadOnly(t *testing.T) {
+	eco := filepath.Join(t.TempDir(), "eco")
+	for _, rel := range []string{"packages/alpha/.git", "nested/bravo/.git", "incidental/.git"} {
+		if err := os.MkdirAll(filepath.Join(eco, rel), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifest := "workspaces = [\"packages/alpha\", \"nested/*\"]\n"
+	if err := os.WriteFile(filepath.Join(eco, "grove.toml"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rows := discoverEcosystemMembers("code", eco, "nb")
+	if len(rows) != 2 || rows[0].label != "nested/bravo" || rows[1].label != "packages/alpha" {
+		t.Fatalf("manifest members=%#v", rows)
+	}
+	for _, row := range rows {
+		if row.repo != "eco" || row.level != 2 || !row.member {
+			t.Fatalf("member lost parent/member identity: %#v", row)
+		}
+	}
+
+	p := &CodePage{keys: grovekeymap.NewConfigKeyMap(nil), width: 100, height: 30, active: true, expanded: map[string]bool{"eco": true}}
+	p.rebuild(coderoot.Table{Roots: map[string]coderoot.Root{"eco": {Path: eco, Scan: true, Notebook: "nb"}}})
+	if len(p.rows) != 3 || p.rows[1].label != "nested/bravo" || p.rows[2].label != "packages/alpha" {
+		t.Fatalf("recorded ecosystem did not render manifest members: %#v", p.rows)
+	}
+	p.cursor = 1
+	if _, cmd := p.Update(tea.KeyMsg{Type: tea.KeySpace}); cmd != nil {
+		t.Fatalf("member checkbox emitted ineffective exclusion: %#v", cmd())
+	}
+	view := p.View()
+	if strings.Contains(view, "☑") || strings.Contains(view, "include/exclude") || !strings.Contains(view, theme.IconRepo) {
+		t.Fatalf("member rendering is not read-only/minimal: %q", view)
+	}
+}
+
+func TestContainingEcosystemCheckboxPersistsRepresentableExclude(t *testing.T) {
+	dir := recordedConfigDir(t)
+	scanRoot := filepath.Join(t.TempDir(), "code")
+	eco := filepath.Join(scanRoot, "eco")
+	if err := os.MkdirAll(filepath.Join(eco, "member", ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(eco, "grove.toml"), []byte("workspaces = [\"member\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	name := "code"
+	if _, err := coreconfig.WriteNotebooks(filepath.Join(dir, "notebooks.toml"), coreconfig.NotebookEdits{Default: &name, Upserts: map[string]coderoot.Notebook{name: {Root: "~/notes"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coreconfig.WriteCodeRoots(filepath.Join(dir, "roots.toml"), coreconfig.CodeRootEdits{Upserts: map[string]coderoot.Root{name: {Path: scanRoot, Scan: true, Notebook: name}}}); err != nil {
+		t.Fatal(err)
+	}
+	p := NewCodePage(nil, grovekeymap.NewConfigKeyMap(nil), 100, 30)
+	p.active = true
+	p.expanded[name] = true
+	p.expanded[name+"/eco"] = true
+	p.Refresh(nil)
+	if len(p.rows) != 3 || !p.rows[1].ecosystem || !p.rows[2].member {
+		t.Fatalf("ecosystem tree=%#v", p.rows)
+	}
+	p.cursor = 1
+	_, cmd := p.Update(tea.KeyMsg{Type: tea.KeySpace})
+	if cmd == nil {
+		t.Fatal("containing ecosystem has no editable checkbox")
+	}
+	msg, ok := cmd().(toggleCodeExcludeMsg)
+	if !ok || msg.root != name || msg.repo != "eco" {
+		t.Fatalf("exclude message=%#v", msg)
+	}
+	m := Model{}
+	if err := m.toggleCodeExclude(msg.root, msg.repo); err != nil {
+		t.Fatal(err)
+	}
+	table, err := coderoot.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := table.Roots[name].Exclude; len(got) != 1 || got[0] != "eco" {
+		t.Fatalf("ecosystem exclude=%v", got)
 	}
 }
 

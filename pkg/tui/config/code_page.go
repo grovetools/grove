@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/BurntSushi/toml"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -17,6 +18,7 @@ import (
 	"github.com/grovetools/core/tui/theme"
 	grovekeymap "github.com/grovetools/grove/pkg/keymap"
 	"github.com/grovetools/grove/pkg/setup"
+	"gopkg.in/yaml.v3"
 )
 
 const defaultCodeRoot = "~/Code"
@@ -27,8 +29,8 @@ type toggleCodeExcludeMsg struct{ root, repo string }
 type codeRow struct {
 	root, repo, label, notebook string
 	level                       int
-	excluded, ecosystem         bool
-}
+	excluded, ecosystem, member bool
+} // level-2 rows retain their direct ecosystem parent in repo and their manifest-relative member path in label.
 
 // CodePage edits the recorded code-root table. Filesystem discovery is lazy:
 // a fresh page performs no scan until the user submits a directory.
@@ -93,14 +95,20 @@ func (p *CodePage) rebuild(t coderoot.Table) {
 		if notebook == "" {
 			notebook = t.Default
 		}
-		p.rows = append(p.rows, codeRow{root: name, label: name + "  " + setup.AbbreviatePath(r.Path), notebook: notebook, ecosystem: setup.HasEcosystemManifest(setup.ExpandPath(r.Path))})
-		if p.expanded[name] {
-			children := discoverCodeRows(name, r, notebook)
-			for _, child := range children {
-				p.rows = append(p.rows, child)
-				if child.ecosystem && p.expanded[name+"/"+child.repo] {
-					p.rows = append(p.rows, discoverEcosystemMembers(name, filepath.Join(setup.ExpandPath(r.Path), child.repo), notebook)...)
-				}
+		rootPath := setup.ExpandPath(r.Path)
+		isEcosystem := setup.HasEcosystemManifest(rootPath)
+		p.rows = append(p.rows, codeRow{root: name, label: name + "  " + setup.AbbreviatePath(r.Path), notebook: notebook, ecosystem: isEcosystem})
+		if !p.expanded[name] {
+			continue
+		}
+		if isEcosystem {
+			p.rows = append(p.rows, discoverEcosystemMembers(name, rootPath, notebook)...)
+			continue
+		}
+		for _, child := range discoverCodeRows(name, r, notebook) {
+			p.rows = append(p.rows, child)
+			if child.ecosystem && p.expanded[name+"/"+child.repo] {
+				p.rows = append(p.rows, discoverEcosystemMembers(name, filepath.Join(rootPath, child.repo), notebook)...)
 			}
 		}
 	}
@@ -129,19 +137,53 @@ func discoverCodeRows(rootName string, r coderoot.Root, notebook string) []codeR
 }
 
 func discoverEcosystemMembers(rootName, path, notebook string) []codeRow {
-	entries, err := os.ReadDir(path)
+	manifest := coreconfig.FindEcosystemManifest(path)
+	if manifest == "" {
+		return nil
+	}
+	data, err := os.ReadFile(manifest)
 	if err != nil {
 		return nil
 	}
+	var declared struct {
+		Workspaces []string `toml:"workspaces" yaml:"workspaces"`
+	}
+	if filepath.Ext(manifest) == ".toml" {
+		_, err = toml.Decode(string(data), &declared)
+	} else {
+		err = yaml.Unmarshal(data, &declared)
+	}
+	if err != nil {
+		return nil
+	}
+
+	seen := make(map[string]bool)
 	var rows []codeRow
-	for _, e := range entries {
-		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+	for _, pattern := range declared.Workspaces {
+		pattern = filepath.Clean(strings.TrimSpace(pattern))
+		if pattern == "." || filepath.IsAbs(pattern) || pattern == ".." || strings.HasPrefix(pattern, ".."+string(filepath.Separator)) {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(path, e.Name(), ".git")); err != nil {
+		matches, globErr := filepath.Glob(filepath.Join(path, pattern))
+		if globErr != nil {
 			continue
 		}
-		rows = append(rows, codeRow{root: rootName, repo: e.Name(), label: e.Name(), notebook: notebook, level: 2})
+		for _, match := range matches {
+			info, statErr := os.Stat(match)
+			if statErr != nil || !info.IsDir() {
+				continue
+			}
+			// A workspace is a repository, possibly with .git as a worktree file.
+			if _, gitErr := os.Stat(filepath.Join(match, ".git")); gitErr != nil {
+				continue
+			}
+			rel, relErr := filepath.Rel(path, match)
+			if relErr != nil || rel == "." || seen[rel] {
+				continue
+			}
+			seen[rel] = true
+			rows = append(rows, codeRow{root: rootName, repo: filepath.Base(path), label: filepath.ToSlash(rel), notebook: notebook, level: 2, member: true})
+		}
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].label < rows[j].label })
 	return rows
@@ -184,13 +226,18 @@ func (p *CodePage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 	case " ", "x":
 		if len(p.rows) > 0 {
 			r := p.rows[p.cursor]
-			if r.repo != "" {
+			// Only direct children are representable by roots.<name>.exclude.
+			// Manifest members inherit the containing ecosystem's checkbox.
+			if r.level == 1 && r.repo != "" {
 				return p, func() tea.Msg { return toggleCodeExcludeMsg{r.root, r.repo} }
 			}
 		}
 	case "enter":
 		if len(p.rows) > 0 {
 			r := p.rows[p.cursor]
+			if r.member {
+				return p, nil
+			}
 			if r.repo == "" {
 				p.expanded[r.root] = !p.expanded[r.root]
 				if t, e := coderoot.Load(); e == nil {
@@ -227,14 +274,13 @@ func (p *CodePage) View() string {
 		lines = append(lines, t.Error.Render(p.loadErr.Error()), "")
 	}
 	if len(p.rows) == 0 {
-		lines = append(lines, t.Bold.Render("Where does your code live?"), t.Normal.Render("Record a directory. Grove will scan it only after you press enter."), "")
+		lines = append(lines, t.Bold.Render("Where does your code live?"), "")
 		if p.editing {
 			lines = append(lines, "  "+p.input.View())
 		} else {
 			lines = append(lines, "  "+t.Highlight.Render(theme.IconArrowRightBold)+" "+t.Normal.Render(p.pathValue))
 		}
 	} else {
-		lines = append(lines, t.Muted.Render("Code roots  (enter expand · space include/exclude · a add)"), "")
 		for i, r := range p.rows {
 			cur := "  "
 			if i == p.cursor {
@@ -255,11 +301,13 @@ func (p *CodePage) View() string {
 				lines = append(lines, cur+t.Bold.Render(glyph+" "+r.label)+route)
 				continue
 			}
-			box := "☑"
 			style := t.Normal
 			if r.excluded {
-				box = "☐"
 				style = t.Muted
+			}
+			prefix := "☑ "
+			if r.excluded {
+				prefix = "☐ "
 			}
 			glyph := ""
 			if r.ecosystem {
@@ -271,8 +319,9 @@ func (p *CodePage) View() string {
 			indent := "  "
 			if r.level > 1 {
 				indent = "      "
+				prefix = theme.IconRepo + " "
 			}
-			lines = append(lines, cur+indent+style.Render(box+" "+glyph+r.label)+route)
+			lines = append(lines, cur+indent+style.Render(prefix+glyph+r.label)+route)
 		}
 		if p.editing {
 			lines = append(lines, "", p.input.View())
@@ -281,26 +330,40 @@ func (p *CodePage) View() string {
 	return lipgloss.NewStyle().MaxWidth(p.width).Render(strings.Join(lines, "\n"))
 }
 
-func (m *Model) addCodeRoot(raw string) error {
+func (m *Model) addCodeRoot(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return fmt.Errorf("code root path cannot be empty")
+		return "", fmt.Errorf("code root path cannot be empty")
 	}
-	path := setup.ExpandPath(raw)
-	name := setup.DeriveEcosystemName(path)
+	path := filepath.Clean(setup.ExpandPath(raw))
+	base := setup.DeriveEcosystemName(path)
 	t, err := coderoot.Load()
 	if err != nil {
-		return err
+		return "", err
+	}
+	// Re-confirming an existing path selects it; a distinct same-basename path
+	// receives a stable suffix instead of overwriting the first binding.
+	for _, name := range t.SortedRootNames() {
+		if filepath.Clean(setup.ExpandPath(t.Roots[name].Path)) == path {
+			return name, nil
+		}
+	}
+	name := base
+	for suffix := 2; ; suffix++ {
+		if _, occupied := t.Roots[name]; !occupied {
+			break
+		}
+		name = fmt.Sprintf("%s-%d", base, suffix)
 	}
 	notebook := t.Default
 	if notebook == "" {
 		notebook = "nb"
 		if _, err = configWriteDefaultNotebook(notebook); err != nil {
-			return err
+			return "", err
 		}
 	}
 	_, err = coreconfig.WriteCodeRoots(coderoot.RootsPath(), coreconfig.CodeRootEdits{Upserts: map[string]coderoot.Root{name: {Path: path, Scan: true, Notebook: notebook}}})
-	return err
+	return name, err
 }
 func configWriteDefaultNotebook(name string) (bool, error) {
 	root := "~/notebooks/" + name

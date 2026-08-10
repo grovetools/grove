@@ -297,9 +297,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case applyCodeRootMsg:
-		if err := m.addCodeRoot(msg.path); err != nil {
+		name, err := m.addCodeRoot(msg.path)
+		if err != nil {
 			m.statusMsg = fmt.Sprintf("Error: %v", err)
 			return m, nil
+		}
+		// Confirmation is the scan boundary: expand before refresh so rebuild
+		// discovers this root immediately, while a fresh page still prescans none.
+		if m.codePage != nil {
+			m.codePage.expanded[name] = true
 		}
 		if err := m.reloadConfig(); err != nil {
 			m.statusMsg = fmt.Sprintf("Error reloading: %v", err)

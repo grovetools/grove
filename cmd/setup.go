@@ -1751,16 +1751,20 @@ func runSetup(cmd *cobra.Command, args []string) error {
 }
 
 func runSetupDefaults(service *setup.Service, selectedOnly map[string]bool, logger *logrus.Entry, pretty *logging.PrettyLogger) error {
+	// With no --only filter, --defaults runs every surviving non-interactive
+	// setup step. Topology writers were retired, but that must not turn the
+	// documented command into a successful no-op.
+	runAll := len(selectedOnly) == 0
 
-	if selectedOnly["gemini"] {
+	if runAll || selectedOnly["gemini"] {
 		pretty.InfoPretty("Skipping Gemini API key (requires interactive input)...")
 	}
 
-	if selectedOnly["anthropic"] {
+	if runAll || selectedOnly["anthropic"] {
 		pretty.InfoPretty("Skipping Anthropic API key (requires interactive input; you can also set ANTHROPIC_API_KEY)...")
 	}
 
-	if selectedOnly["tmux"] {
+	if runAll || selectedOnly["tmux"] {
 		pretty.InfoPretty("Setting up tmux bindings...")
 
 		// Generate tmux popup config using grove keys generate tmux
@@ -1776,7 +1780,7 @@ func runSetupDefaults(service *setup.Service, selectedOnly map[string]bool, logg
 		}
 	}
 
-	if selectedOnly["nvim"] {
+	if runAll || selectedOnly["nvim"] {
 		pretty.InfoPretty("Setting up Neovim plugin...")
 		nvimPluginDir := filepath.Join(paths.DataDir(), "nvim-plugins", "grove-nvim")
 		nvimPluginPath := strings.ReplaceAll(setup.AbbreviatePath(nvimPluginDir), "\\", "/")
