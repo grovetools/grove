@@ -104,12 +104,19 @@ func notebookEmbeddedConfigs(table coderoot.Table) []string {
 		if err != nil {
 			continue
 		}
+		// ReadDir reports IsDir=false for directory symlinks. Stat each
+		// immediate workspace entry deliberately so linked workspace directories
+		// participate too. This remains a fixed-depth inventory (three known
+		// filenames only), so a link cannot make the scan recurse, cycle, or walk
+		// arbitrary descendants; broken and cyclic links are simply ignored.
 		for _, entry := range entries {
-			if !entry.IsDir() {
+			workspace := filepath.Join(root, "workspaces", entry.Name())
+			info, err := os.Stat(workspace)
+			if err != nil || !info.IsDir() {
 				continue
 			}
 			for _, filename := range []string{"grove.toml", "grove.yml", "grove.yaml"} {
-				path := filepath.Join(root, "workspaces", entry.Name(), filename)
+				path := filepath.Join(workspace, filename)
 				info, err := os.Stat(path)
 				if err != nil || info.IsDir() || seen[path] {
 					continue

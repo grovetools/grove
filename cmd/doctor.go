@@ -38,7 +38,9 @@ orphan sockets, GROVE_SCOPE vs cwd mismatch, etc.) and reports their status.
 
 Use --fix to apply safe auto-fixes, --check <id> to run a single diagnostic,
 and --json for machine-readable output.`,
-		RunE: runDoctor,
+		RunE:          runDoctor,
+		SilenceErrors: true,
+		SilenceUsage:  true,
 	}
 	cmd.Flags().BoolVar(&doctorFix, "fix", false, "apply safe auto-fixes for failing checks")
 	cmd.Flags().StringVar(&doctorCheckID, "check", "", "run only the check with this ID")

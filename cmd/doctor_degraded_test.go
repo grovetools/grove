@@ -17,8 +17,6 @@ func runDoctorCheckForTest(t *testing.T, checkID string, jsonOutput bool) (strin
 	doctorVerbose = false
 
 	cmd := newDoctorCmd()
-	cmd.SilenceErrors = true
-	cmd.SilenceUsage = true
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
@@ -68,6 +66,11 @@ func TestDoctorJSONSurfacesConfigDegradationAndKeepsIndependentCheck(t *testing.
 			}
 			if results[1].Check != "config_fragments" {
 				t.Errorf("independent check was suppressed: %+v", results)
+			}
+			for _, spam := range []string{"Error: doctor found failures", "Usage:"} {
+				if strings.Contains(output, spam) {
+					t.Errorf("production doctor command emitted Cobra spam %q:\n%s", spam, output)
+				}
 			}
 		})
 	}

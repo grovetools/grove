@@ -100,7 +100,9 @@ func TestCollectLayerFiles_EnumeratesGlobalLayers(t *testing.T) {
 func TestConfigLayersCheck_UsesStrictRecordedParsers(t *testing.T) {
 	for _, tc := range []struct{ name, file, content, want string }{
 		{name: "roots unknown field", file: "roots.toml", content: "[roots.alpha]\npath = \"/tmp/a\"\ntyop = true\n", want: "strict mode"},
+		{name: "roots missing path", file: "roots.toml", content: "[roots.alpha]\nenabled = true\nnotebook = \"main\"\n", want: "[roots.alpha] has no path"},
 		{name: "notebooks reserved sync", file: "notebooks.toml", content: "[notebooks.main]\nroot = \"/tmp/n\"\n[notebooks.main.sync]\nmode = \"x\"\n", want: "reserved"},
+		{name: "duplicate notebook table", file: "notebooks.toml", content: "[notebooks.main]\nroot = \"/tmp/a\"\n[notebooks.main]\nroot = \"/tmp/b\"\n", want: "table main already exists"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			groveDir := setupScratchConfig(t)
