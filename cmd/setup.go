@@ -1067,10 +1067,8 @@ func (m *setupModel) generateTOMLConfig() ([]byte, string) {
 		}
 	}
 
-	// Ecosystem registration is NOT part of this file: it is a machine.toml
-	// subscription, written by setupEcosystemFiles. Keeping it out of the
-	// generated global config is what makes the config dotfiles-shareable
-	// while the subscription stays machine-local.
+	// Ecosystem registration is NOT part of this file: setupEcosystemFiles
+	// records it in roots.toml after scaffolding.
 
 	// Notebook: define a named notebook and point the default rule at it
 	if m.selectedSteps["notebook"] {
@@ -1153,7 +1151,7 @@ func (m *setupModel) generateYAMLConfig() ([]byte, string) {
 		_ = setup.SetValue(root, []string{"w", "e", "r", "t", "y", "o", "a", "f", "g", "v"}, "tmux", "available_keys")
 	}
 
-	// Ecosystem registration lives in machine.toml — see generateTOMLConfig.
+	// Ecosystem registration lives in roots.toml — see generateTOMLConfig.
 
 	// Notebook: define a named notebook and point the default rule at it
 	if m.selectedSteps["notebook"] {
@@ -1205,11 +1203,11 @@ func (m *setupModel) setupEcosystemFiles() {
 		format = setup.ManifestTOML
 	}
 	_ = m.service.ScaffoldEcosystem(m.ecosystemPath, m.ecosystemName, format)
-	// The registration is a machine.toml subscription, written AFTER the
-	// scaffold: a failed scaffold must not leave a subscription pointing at a
+	// The registration is a recorded root, written AFTER the scaffold: a failed
+	// scaffold must not leave a subscription pointing at a
 	// half-created directory.
 	if !m.service.IsDryRun() {
-		_, _ = registerMachineEcosystem(m.ecosystemName, m.ecosystemPath, "nb")
+		_, _ = registerCodeRoot(m.ecosystemName, m.ecosystemPath, "nb")
 	}
 }
 
@@ -2056,10 +2054,10 @@ func runSetupDefaults(service *setup.Service, selectedOnly map[string]bool, logg
 			pretty.InfoPretty(fmt.Sprintf("Directory %s already exists; registering it without modifying its contents", ecosystemPath))
 		}
 
-		// Registration is a machine.toml subscription, not a [groves.*] entry
+		// Registration is a roots.toml entry, not a legacy [groves.*] entry
 		// in the shareable global config.
 		if !service.IsDryRun() {
-			if path, err := registerMachineEcosystem(ecosystemName, ecosystemPath, ""); err == nil {
+			if path, err := registerCodeRoot(ecosystemName, ecosystemPath, ""); err == nil {
 				pretty.InfoPretty(fmt.Sprintf("Subscribed to ecosystem %s (%s)", ecosystemName, path))
 			} else {
 				pretty.InfoPretty(fmt.Sprintf("Could not write the ecosystem subscription: %v", err))

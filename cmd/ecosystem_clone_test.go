@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/coderoot"
 )
 
 // sandboxGitEnv makes a test's git hermetic: its own HOME (so the developer's
@@ -256,7 +257,7 @@ func TestCloneFlatEcosystemMaterializesSelectedSubset(t *testing.T) {
 	dest := filepath.Join(root, "peer", "flatco")
 	var log strings.Builder
 	err := cloneEcosystem(context.Background(), card, dest, ecosystemCloneOptions{
-		Out: &log, Subscription: config.MachineEcosystem{Repos: []string{"alpha"}},
+		Out: &log, Subscription: coderoot.Root{Repos: []string{"alpha"}},
 	})
 	if err != nil {
 		t.Fatalf("partial flat clone: %v\n%s", err, log.String())
@@ -285,7 +286,7 @@ func TestCloneSuperrepoEcosystemInitializesSelectedSubmodules(t *testing.T) {
 
 	dest := filepath.Join(root, "peer", "grovetools")
 	if err := cloneEcosystem(context.Background(), card, dest, ecosystemCloneOptions{
-		Out: io.Discard, Subscription: config.MachineEcosystem{Exclude: []string{"beta"}},
+		Out: io.Discard, Subscription: coderoot.Root{Exclude: []string{"beta"}},
 	}); err != nil {
 		t.Fatalf("partial superrepo clone: %v", err)
 	}
@@ -300,7 +301,7 @@ func TestCloneSuperrepoEcosystemInitializesSelectedSubmodules(t *testing.T) {
 func TestCloneEcosystemRejectsUnknownSelectedMember(t *testing.T) {
 	card := config.EcosystemCard{Layout: config.LayoutFlat, Remotes: []config.EcosystemRemote{{Name: "alpha", URL: "unused"}}}
 	err := cloneEcosystem(context.Background(), card, t.TempDir(), ecosystemCloneOptions{
-		Out: io.Discard, Subscription: config.MachineEcosystem{Repos: []string{"typo"}},
+		Out: io.Discard, Subscription: coderoot.Root{Repos: []string{"typo"}},
 	})
 	if err == nil || !strings.Contains(err.Error(), "not in the ecosystem card") {
 		t.Fatalf("error = %v, want unknown-member error", err)

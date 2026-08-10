@@ -18,6 +18,9 @@ import (
 // returns a LayeredConfig wired to it.
 func writeProjectLayer(t *testing.T) (*config.LayeredConfig, string) {
 	t.Helper()
+	t.Setenv("GROVE_HOME", t.TempDir())
+	config.ResetLoadCache()
+	t.Cleanup(config.ResetLoadCache)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "grove.toml")

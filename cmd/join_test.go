@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/coderoot"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/devicekey"
 	"github.com/grovetools/core/pkg/syncproto"
@@ -392,13 +393,19 @@ func TestJoinRefusesToReplaceADifferentToken(t *testing.T) {
 }
 
 // TestJoinDotfilesRestoreOffersMaterialize is the supported fast path: a
-// restored machine.toml declares ecosystems this fresh host does not have, and
+// restored roots.toml declares ecosystems this fresh host does not have, and
 // join must end by naming them and the command that fixes each one.
 func TestJoinDotfilesRestoreOffersMaterialize(t *testing.T) {
 	home, configDir, _ := sandboxAdoption(t)
-	restored := "[machine]\nname = \"restored\"\n\n[machine.ecosystems.grovetools]\npath = \"" +
-		filepath.Join(home, "code", "grovetools") + "\"\n"
-	if err := os.WriteFile(filepath.Join(configDir, "machine.toml"), []byte(restored), 0o644); err != nil {
+	nb := "nb"
+	if _, err := config.WriteNotebooks(filepath.Join(configDir, coderoot.NotebooksFileName), config.NotebookEdits{
+		Default: &nb, Upserts: map[string]coderoot.Notebook{"nb": {Root: filepath.Join(home, "notebooks", "nb")}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.WriteCodeRoots(filepath.Join(configDir, coderoot.RootsFileName), config.CodeRootEdits{
+		Upserts: map[string]coderoot.Root{"grovetools": {Path: filepath.Join(home, "code", "grovetools"), Notebook: "nb"}},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	config.ResetLoadCache()

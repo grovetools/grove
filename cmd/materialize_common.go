@@ -15,6 +15,7 @@ import (
 	"github.com/mattn/go-isatty"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/coderoot"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/machine"
 	"github.com/grovetools/core/pkg/models"
@@ -29,7 +30,7 @@ import (
 // four times over:
 //
 //  1. NOTHING IS DESTRUCTIVE. Every write is create-or-converge: config edits
-//     go through the append-only sync editor or the surgical machine.toml
+//     go through the append-only sync editor or the surgical roots.toml
 //     writer, clones repair rather than replace, and no verb removes anything
 //     from the laptop tree.
 //  2. THE CONFIRMATION GATE IS REAL. Consuming registry data before device
@@ -76,25 +77,23 @@ func confirm(in io.Reader, out io.Writer, question string, assumeYes bool) error
 	}
 }
 
-// --- machine.toml subscriptions ---
+// --- recorded code roots ---
 
-// writeEcosystemSubscription upserts one [machine.ecosystems.<name>] entry and
+// writeEcosystemSubscription upserts one specific root in roots.toml and
 // resets the config load cache so the caller's next read sees it.
-//
-// It reports whether the file changed, which is what makes `subscribe` and a
-// re-run of `materialize` able to say "already declared" instead of implying
-// they did something.
-func writeEcosystemSubscription(name string, entry config.MachineEcosystem) (path string, changed bool, err error) {
-	path = config.MachineConfigPath()
+func writeEcosystemSubscription(name string, entry coderoot.Root) (path string, changed bool, err error) {
+	if err := ensureRecordedRouting(&entry); err != nil {
+		return "", false, err
+	}
+	path = coderoot.RootsPath()
 	if path == "" {
 		return "", false, fmt.Errorf("cannot resolve the grove config directory")
 	}
-	changed, err = config.WriteMachineSubscriptions(path, config.MachineSubscriptions{
-		Ecosystems: map[string]config.MachineEcosystem{name: entry},
+	changed, err = config.WriteCodeRoots(path, config.CodeRootEdits{
+		Upserts: map[string]coderoot.Root{name: entry},
 		Header: []string{
-			"# This machine's grove intent — name, ecosystem subscriptions, bare roots.",
-			"# Dotfiles-portable on purpose: restoring it onto a new host declares the",
-			"# same intent there, and `grove ecosystem materialize` fills in what is missing.",
+			"# This machine's recorded code roots.",
+			"# Specific roots are materializable ecosystems; scan roots discover repos beneath a directory.",
 		},
 	})
 	if changed {
@@ -103,32 +102,58 @@ func writeEcosystemSubscription(name string, entry config.MachineEcosystem) (pat
 	return path, changed, err
 }
 
-// existingEcosystemSubscription returns this machine's declared subscription
-// for name, or nil when it declares none.
-func existingEcosystemSubscription(name string) (*config.MachineEcosystem, error) {
-	cfg, err := config.LoadMachineConfig()
+// ensureRecordedRouting makes a newly-authored root independently valid. New
+// user flows use the longstanding "nb" convention when no routing exists;
+// migration never calls this helper and therefore never infers legacy paths.
+func ensureRecordedRouting(root *coderoot.Root) error {
+	table, err := coderoot.Load()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if cfg == nil {
-		return nil, nil
+	name := root.Notebook
+	if name == "" {
+		name = table.Default
 	}
-	if eco, ok := cfg.Machine.Ecosystems[name]; ok {
-		return &eco, nil
+	if name == "" {
+		name = "nb"
 	}
-	return nil, nil
+	if root.Notebook == "" {
+		root.Notebook = name
+	}
+	if _, ok := table.Notebooks[name]; ok && table.Default != "" {
+		return nil
+	}
+	edits := config.NotebookEdits{Upserts: map[string]coderoot.Notebook{}}
+	if _, ok := table.Notebooks[name]; !ok {
+		edits.Upserts[name] = coderoot.Notebook{Root: "~/notebooks/" + name}
+	}
+	if table.Default == "" {
+		value := name
+		edits.Default = &value
+	}
+	_, err = config.WriteNotebooks(coderoot.NotebooksPath(), edits)
+	return err
 }
 
-// declaredMissingEcosystems returns the subscriptions this machine declares
-// but does not have on disk — the materialization verb's input, and what join
-// offers immediately after a dotfiles restore.
-func declaredMissingEcosystems() ([]config.MachineEcosystemState, error) {
-	cfg, err := config.LoadMachineConfig()
+func existingEcosystemSubscription(name string) (*coderoot.Root, error) {
+	table, err := coderoot.Load()
 	if err != nil {
 		return nil, err
 	}
-	var out []config.MachineEcosystemState
-	for _, state := range config.ReconcileMachineEcosystems(cfg) {
+	root, ok := table.Roots[name]
+	if !ok || root.Scan {
+		return nil, nil
+	}
+	return &root, nil
+}
+
+func declaredMissingEcosystems() ([]config.CodeRootState, error) {
+	table, err := coderoot.Load()
+	if err != nil {
+		return nil, err
+	}
+	var out []config.CodeRootState
+	for _, state := range config.ReconcileCodeRoots(table) {
 		if state.Missing() {
 			out = append(out, state)
 		}
@@ -297,10 +322,14 @@ func defaultEcosystemPath(name string) string {
 	if existing, err := existingEcosystemSubscription(name); err == nil && existing != nil && existing.Path != "" {
 		return expandUserPath(existing.Path)
 	}
-	if cfg, err := config.LoadMachineConfig(); err == nil && cfg != nil {
+	if table, err := coderoot.Load(); err == nil {
 		var parents []string
-		for _, other := range sortedEcosystemNames(cfg) {
-			p := expandUserPath(cfg.Machine.Ecosystems[other].Path)
+		for _, other := range table.SortedRootNames() {
+			root := table.Roots[other]
+			if root.Scan {
+				continue
+			}
+			p := expandUserPath(root.Path)
 			if p == "" {
 				continue
 			}
@@ -318,16 +347,4 @@ func defaultEcosystemPath(name string) string {
 		return filepath.Join("code", name)
 	}
 	return filepath.Join(home, "code", name)
-}
-
-func sortedEcosystemNames(cfg *config.MachineConfig) []string {
-	if cfg == nil {
-		return nil
-	}
-	out := make([]string, 0, len(cfg.Machine.Ecosystems))
-	for name := range cfg.Machine.Ecosystems {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
 }

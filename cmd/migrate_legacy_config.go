@@ -1,0 +1,498 @@
+package cmd
+
+// This file is the deliberately frozen legacy boundary for `grove migrate`.
+// Keep these DTOs private: normal config loading must never regain an
+// authoring dependency on the schemas being removed.
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/pelletier/go-toml/v2"
+	"gopkg.in/yaml.v3"
+
+	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/coderoot"
+	"github.com/grovetools/core/pkg/paths"
+)
+
+type legacySearchPath struct {
+	Path        string `toml:"path" yaml:"path"`
+	Enabled     *bool  `toml:"enabled" yaml:"enabled"`
+	Description string `toml:"description" yaml:"description"`
+}
+
+type legacyGrove struct {
+	Path         string   `toml:"path" yaml:"path"`
+	Notebook     string   `toml:"notebook" yaml:"notebook"`
+	Enabled      *bool    `toml:"enabled" yaml:"enabled"`
+	Description  string   `toml:"description" yaml:"description"`
+	Depth        *int     `toml:"depth" yaml:"depth"`
+	IncludeRepos []string `toml:"include_repos" yaml:"include_repos"`
+	ExcludeRepos []string `toml:"exclude_repos" yaml:"exclude_repos"`
+	Repos        []string `toml:"repos" yaml:"repos"`
+	Exclude      []string `toml:"exclude" yaml:"exclude"`
+}
+
+type legacyNotebook struct {
+	RootDir string `toml:"root_dir" yaml:"root_dir"`
+	Root    string `toml:"root" yaml:"root"`
+}
+
+type legacyNotebookRules struct {
+	Default string `toml:"default" yaml:"default"`
+}
+
+type legacyNotebooks struct {
+	Definitions map[string]legacyNotebook `toml:"definitions" yaml:"definitions"`
+	Rules       legacyNotebookRules       `toml:"rules" yaml:"rules"`
+}
+
+type legacyConfig struct {
+	Groves      map[string]legacyGrove      `toml:"groves" yaml:"groves"`
+	SearchPaths map[string]legacySearchPath `toml:"search_paths" yaml:"search_paths"`
+	Notebooks   legacyNotebooks             `toml:"notebooks" yaml:"notebooks"`
+	GroveMeta   struct {
+		Priority int `toml:"priority" yaml:"priority"`
+	} `toml:"_grove" yaml:"_grove"`
+}
+
+type legacyEcosystem struct {
+	Path        string   `toml:"path" yaml:"path"`
+	Notebook    string   `toml:"notebook" yaml:"notebook"`
+	Enabled     *bool    `toml:"enabled" yaml:"enabled"`
+	Description string   `toml:"description" yaml:"description"`
+	Repos       []string `toml:"repos" yaml:"repos"`
+	Exclude     []string `toml:"exclude" yaml:"exclude"`
+}
+
+type legacyRoot struct {
+	Path        string   `toml:"path" yaml:"path"`
+	Notebook    string   `toml:"notebook" yaml:"notebook"`
+	Enabled     *bool    `toml:"enabled" yaml:"enabled"`
+	Description string   `toml:"description" yaml:"description"`
+	Depth       *int     `toml:"depth" yaml:"depth"`
+	Repos       []string `toml:"repos" yaml:"repos"`
+	Exclude     []string `toml:"exclude" yaml:"exclude"`
+}
+
+type legacyMachineConfig struct {
+	Topology struct {
+		Ecosystems map[string]legacyEcosystem `toml:"ecosystems" yaml:"ecosystems"`
+		Roots      map[string]legacyRoot      `toml:"roots" yaml:"roots"`
+	} `toml:"machine" yaml:"machine"`
+}
+
+type legacySource struct {
+	Path, Resolved, Label string
+	Config                legacyConfig
+	RemoveGlobal          bool
+	RemoveMachine         bool
+}
+
+type legacyRootCandidate struct {
+	Root   coderoot.Root
+	Source string
+	Kind   string
+}
+
+type legacyMigration struct {
+	Roots         map[string]legacyRootCandidate
+	Notebooks     map[string]coderoot.Notebook
+	Default       string
+	Sources       []legacySource
+	RootsPath     string
+	NotebooksPath string
+}
+
+func parseLegacyFile(path string, out any) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if strings.EqualFold(filepath.Ext(path), ".toml") {
+		if err := toml.Unmarshal(data, out); err != nil {
+			return err
+		}
+	} else if err := yaml.Unmarshal(data, out); err != nil {
+		return err
+	}
+	return nil
+}
+
+func resolvedLegacyPath(path string) string {
+	if p, err := filepath.EvalSymlinks(path); err == nil {
+		return p
+	}
+	return path
+}
+
+func legacyGlobalFiles(dir string) ([]legacySource, error) {
+	var out []legacySource
+	main := ""
+	for _, name := range []string{"grove.toml", "grove.yml", "grove.yaml"} {
+		p := filepath.Join(dir, name)
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			main = p
+			break
+		}
+	}
+	add := func(path, label string) error {
+		var c legacyConfig
+		if err := parseLegacyFile(path, &c); err != nil {
+			return fmt.Errorf("%s (%s): %w", label, path, err)
+		}
+		out = append(out, legacySource{Path: path, Resolved: resolvedLegacyPath(path), Label: label, Config: c, RemoveGlobal: len(c.Groves) > 0 || len(c.SearchPaths) > 0})
+		return nil
+	}
+	if main != "" {
+		if err := add(main, "global"); err != nil {
+			return nil, err
+		}
+	}
+
+	files, _ := filepath.Glob(filepath.Join(dir, "*.toml"))
+	type fragment struct {
+		path     string
+		priority int
+	}
+	var frags []fragment
+	for _, p := range files {
+		base := filepath.Base(p)
+		switch base {
+		case "grove.toml", "grove.override.toml", "machine.toml", "sync.toml", "roots.toml", "notebooks.toml":
+			continue
+		}
+		var c legacyConfig
+		if err := parseLegacyFile(p, &c); err != nil {
+			return nil, fmt.Errorf("fragment %s: %w", p, err)
+		}
+		priority := c.GroveMeta.Priority
+		if priority == 0 {
+			priority = 50
+		}
+		frags = append(frags, fragment{p, priority})
+	}
+	sort.Slice(frags, func(i, j int) bool {
+		if frags[i].priority != frags[j].priority {
+			return frags[i].priority < frags[j].priority
+		}
+		return frags[i].path < frags[j].path
+	})
+	for _, f := range frags {
+		if err := add(f.path, fmt.Sprintf("fragment priority %d", f.priority)); err != nil {
+			return nil, err
+		}
+	}
+	for _, name := range []string{"grove.override.yml", "grove.override.yaml", "grove.override.toml"} {
+		p := filepath.Join(dir, name)
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			if err := add(p, "override"); err != nil {
+				return nil, err
+			}
+			break
+		}
+	}
+	return out, nil
+}
+
+func legacyDeadMachineFiles(dir string) ([]legacySource, error) {
+	entries, err := os.ReadDir(filepath.Join(dir, "machines"))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []legacySource
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(e.Name()))
+		if ext != ".toml" && ext != ".yml" && ext != ".yaml" {
+			continue
+		}
+		p := filepath.Join(dir, "machines", e.Name())
+		var c legacyConfig
+		if err := parseLegacyFile(p, &c); err != nil {
+			return nil, fmt.Errorf("legacy machine %s: %w", p, err)
+		}
+		out = append(out, legacySource{Path: p, Resolved: resolvedLegacyPath(p), Label: "machines/", Config: c, RemoveGlobal: len(c.Groves) > 0 || len(c.SearchPaths) > 0})
+	}
+	return out, nil
+}
+
+func legacySyncRequiresLaterMigration(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var raw map[string]any
+	if err := toml.Unmarshal(data, &raw); err != nil {
+		return false, fmt.Errorf("%s: %w", path, err)
+	}
+	for _, key := range []string{"workspaces", "notebooks"} {
+		if v, ok := raw[key]; ok && v != nil {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func collectLegacyMigration() (*legacyMigration, error) {
+	dir := paths.ConfigDir()
+	if dir == "" {
+		return nil, fmt.Errorf("cannot resolve the grove config directory")
+	}
+	if blocked, err := legacySyncRequiresLaterMigration(filepath.Join(dir, "sync.toml")); err != nil {
+		return nil, err
+	} else if blocked {
+		return nil, fmt.Errorf("%s contains legacy workspace entries that must be migrated with the P2 notespace step first; refusing to change config ordering", filepath.Join(dir, "sync.toml"))
+	}
+
+	globals, err := legacyGlobalFiles(dir)
+	if err != nil {
+		return nil, err
+	}
+	dead, err := legacyDeadMachineFiles(dir)
+	if err != nil {
+		return nil, err
+	}
+	m := &legacyMigration{Roots: map[string]legacyRootCandidate{}, Notebooks: map[string]coderoot.Notebook{}, RootsPath: coderoot.RootsPath(), NotebooksPath: coderoot.NotebooksPath()}
+	// Dead files are import-only and lowest precedence. The live global cascade follows.
+	all := append(dead, globals...)
+	m.Sources = append(m.Sources, all...)
+	for _, src := range all {
+		for name, nb := range src.Config.Notebooks.Definitions {
+			root := nb.RootDir
+			if root == "" {
+				root = nb.Root
+			}
+			if root != "" {
+				m.Notebooks[name] = coderoot.Notebook{Root: root}
+			}
+		}
+		if src.Config.Notebooks.Rules.Default != "" {
+			m.Default = src.Config.Notebooks.Rules.Default
+		}
+		for name, s := range src.Config.SearchPaths {
+			m.Roots[name] = legacyRootCandidate{Root: coderoot.Root{Path: s.Path, Scan: true, Enabled: s.Enabled, Description: s.Description}, Source: src.Label + ": " + src.Path, Kind: "root"}
+		}
+		for name, g := range src.Config.Groves {
+			repos := g.Repos
+			if len(repos) == 0 {
+				repos = g.IncludeRepos
+			}
+			exclude := g.Exclude
+			if len(exclude) == 0 {
+				exclude = g.ExcludeRepos
+			}
+			scan, kind, notebook := true, "root", g.Notebook
+			if config.FindEcosystemManifest(expandPath(g.Path)) != "" {
+				scan, kind = false, "ecosystem"
+				if notebook == "" {
+					cardDefault, err := legacyCardDefault(g.Path)
+					if err != nil {
+						return nil, fmt.Errorf("%s [groves.%s]: %w", src.Path, name, err)
+					}
+					notebook = cardDefault
+				}
+			}
+			m.Roots[name] = legacyRootCandidate{Root: coderoot.Root{Path: g.Path, Scan: scan, Notebook: notebook, Enabled: g.Enabled, Description: g.Description, Depth: g.Depth, Repos: repos, Exclude: exclude}, Source: src.Label + ": " + src.Path, Kind: kind}
+		}
+	}
+
+	machinePath := filepath.Join(dir, "machine.toml")
+	if st, statErr := os.Stat(machinePath); statErr == nil && !st.IsDir() {
+		var mc legacyMachineConfig
+		if err := parseLegacyFile(machinePath, &mc); err != nil {
+			return nil, fmt.Errorf("machine config %s: %w", machinePath, err)
+		}
+		src := legacySource{Path: machinePath, Resolved: resolvedLegacyPath(machinePath), Label: "machine", RemoveMachine: len(mc.Topology.Ecosystems) > 0 || len(mc.Topology.Roots) > 0}
+		m.Sources = append(m.Sources, src)
+		for name, e := range mc.Topology.Ecosystems {
+			if _, exists := m.Roots[name]; exists {
+				continue
+			}
+			nb := e.Notebook
+			if nb == "" {
+				card, err := legacyCardDefault(e.Path)
+				if err != nil {
+					return nil, fmt.Errorf("%s [machine.ecosystems.%s]: %w", machinePath, name, err)
+				}
+				nb = card
+			}
+			m.Roots[name] = legacyRootCandidate{Root: coderoot.Root{Path: e.Path, Scan: false, Notebook: nb, Enabled: e.Enabled, Description: e.Description, Repos: e.Repos, Exclude: e.Exclude}, Source: "machine: " + machinePath, Kind: "ecosystem"}
+		}
+		for name, r := range mc.Topology.Roots {
+			if _, exists := m.Roots[name]; exists {
+				continue
+			}
+			m.Roots[name] = legacyRootCandidate{Root: coderoot.Root{Path: r.Path, Scan: true, Notebook: r.Notebook, Enabled: r.Enabled, Description: r.Description, Depth: r.Depth, Repos: r.Repos, Exclude: r.Exclude}, Source: "machine: " + machinePath, Kind: "root"}
+		}
+	}
+
+	current, err := coderoot.Load()
+	if err != nil {
+		return nil, err
+	}
+	for name, nb := range current.Notebooks {
+		if _, ok := m.Notebooks[name]; !ok {
+			m.Notebooks[name] = nb
+		}
+	}
+	if current.Default != "" {
+		m.Default = current.Default
+	}
+	for name, r := range current.Roots {
+		m.Roots[name] = legacyRootCandidate{Root: r, Source: current.RootsFilePath, Kind: "recorded"}
+	}
+	for name, c := range m.Roots {
+		if c.Root.Notebook == "" {
+			c.Root.Notebook = m.Default
+			m.Roots[name] = c
+		}
+		if c.Root.Notebook == "" {
+			return nil, fmt.Errorf("%s [root %s]: no notebook binding and no legacy recorded default", c.Source, name)
+		}
+		if _, ok := m.Notebooks[c.Root.Notebook]; !ok {
+			return nil, fmt.Errorf("%s [root %s]: notebook %q has no migrated definition; refusing to infer a path", c.Source, name, c.Root.Notebook)
+		}
+	}
+	if m.Default != "" {
+		if _, ok := m.Notebooks[m.Default]; !ok {
+			return nil, fmt.Errorf("legacy notebook default %q has no migrated definition", m.Default)
+		}
+	}
+	return m, nil
+}
+
+func legacyCardDefault(path string) (string, error) {
+	manifest := config.FindEcosystemManifest(expandPath(path))
+	if manifest == "" {
+		return "", nil
+	}
+	var raw struct {
+		Ecosystem struct {
+			Notebooks map[string]struct {
+				Default bool `toml:"default" yaml:"default"`
+			} `toml:"notebooks" yaml:"notebooks"`
+		} `toml:"ecosystem" yaml:"ecosystem"`
+	}
+	if err := parseLegacyFile(manifest, &raw); err != nil {
+		return "", err
+	}
+	var names []string
+	for name, nb := range raw.Ecosystem.Notebooks {
+		if nb.Default {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	if len(names) > 1 {
+		return "", fmt.Errorf("ecosystem card %s declares multiple default notebooks", manifest)
+	}
+	if len(names) == 1 {
+		return names[0], nil
+	}
+	return "", nil
+}
+
+func migrationSourceTargets(sources []legacySource) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range sources {
+		if !s.RemoveGlobal && !s.RemoveMachine {
+			continue
+		}
+		p := s.Resolved
+		if p == "" {
+			p = s.Path
+		}
+		if !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func removeLegacyDeclarations(path string, removeGlobal, removeMachine bool) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.EqualFold(filepath.Ext(path), ".toml") {
+		if removeGlobal {
+			return removeYAMLTopKeys(data, map[string]bool{"groves": true, "search_paths": true})
+		}
+		return data, nil
+	}
+	prefixes := []string{}
+	if removeGlobal {
+		prefixes = append(prefixes, "groves", "search_paths")
+	}
+	if removeMachine {
+		prefixes = append(prefixes, "machine.ecosystems", "machine.roots")
+	}
+	return []byte(removeTOMLPrefixes(string(data), prefixes)), nil
+}
+
+func removeTOMLPrefixes(content string, prefixes []string) string {
+	lines := strings.Split(content, "\n")
+	out := make([]string, 0, len(lines))
+	skip := false
+	for _, line := range lines {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "[") && strings.HasSuffix(trim, "]") {
+			key := strings.Trim(strings.TrimSpace(trim), "[]")
+			key = strings.ReplaceAll(key, "\"", "")
+			skip = false
+			for _, p := range prefixes {
+				if key == p || strings.HasPrefix(key, p+".") {
+					skip = true
+					break
+				}
+			}
+		}
+		if !skip {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+func removeYAMLTopKeys(data []byte, keys map[string]bool) ([]byte, error) {
+	// Validate first, then remove only the selected top-level blocks from the
+	// original bytes. This keeps comments, quoting, ordering, and unrelated
+	// formatting exactly as the operator wrote them.
+	var check yaml.Node
+	if err := yaml.Unmarshal(data, &check); err != nil {
+		return nil, err
+	}
+	lines := strings.SplitAfter(string(data), "\n")
+	out := make([]string, 0, len(lines))
+	skip := false
+	for _, line := range lines {
+		plain := strings.TrimSuffix(line, "\n")
+		trimmed := strings.TrimSpace(plain)
+		topLevel := plain == strings.TrimLeft(plain, " \t") && trimmed != "" && !strings.HasPrefix(trimmed, "#")
+		if topLevel {
+			name, _, hasColon := strings.Cut(trimmed, ":")
+			name = strings.Trim(strings.TrimSpace(name), "\"'")
+			skip = hasColon && keys[name]
+		}
+		if !skip {
+			out = append(out, line)
+		}
+	}
+	return []byte(strings.Join(out, "")), nil
+}

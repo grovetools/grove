@@ -11,7 +11,7 @@ import (
 	"github.com/grovetools/grove/cmd/satelliteassets"
 )
 
-func TestSatelliteSeedDeclaresIntentAsMachineConfig(t *testing.T) {
+func TestSatelliteSeedDeclaresRecordedCodeRoot(t *testing.T) {
 	files, err := buildSatelliteConfigSeed("vm1", []string{"cloud", "grovetools"}).Files()
 	if err != nil {
 		t.Fatalf("Files: %v", err)
@@ -25,9 +25,14 @@ func TestSatelliteSeedDeclaresIntentAsMachineConfig(t *testing.T) {
 	if !strings.Contains(machine, `name = "vm1"`) {
 		t.Errorf("the VM does not adopt its registry name as its machine name:\n%s", machine)
 	}
-	if !strings.Contains(machine, "[machine.ecosystems.grovetools]") ||
-		!strings.Contains(machine, `path = "`+bootstrapRemoteCodeDir+`"`) {
-		t.Errorf("machine.toml does not declare the ecosystem the bootstrap clones:\n%s", machine)
+	roots := byName[config.SeedFileRootsTOML]
+	if !strings.Contains(roots, "[roots.grovetools]") ||
+		!strings.Contains(roots, bootstrapRemoteCodeDir) {
+		t.Errorf("roots.toml does not declare the ecosystem the bootstrap clones:\n%s", roots)
+	}
+	notebooks := byName[config.SeedFileNotebooksTOML]
+	if !strings.Contains(notebooks, `[notebooks.grovetools]`) || !strings.Contains(notebooks, "default = 'grovetools'") {
+		t.Errorf("notebooks.toml does not record routing:\n%s", notebooks)
 	}
 }
 
@@ -136,6 +141,12 @@ func TestSatelliteConfigSeedUnpacksThroughTheRealBootstrapBlock(t *testing.T) {
 	}
 
 	configDir := filepath.Join(home, ".config", "grove")
+	// Byte loaders intentionally consult canonical recorded files; point that
+	// convention at the unpacked sandbox rather than the developer's config.
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	config.ResetLoadCache()
+	t.Cleanup(config.ResetLoadCache)
 	mc, err := config.LoadMachineConfigFrom(filepath.Join(configDir, config.SeedFileMachineTOML))
 	if err != nil {
 		t.Fatalf("unpacked machine.toml does not load: %v", err)

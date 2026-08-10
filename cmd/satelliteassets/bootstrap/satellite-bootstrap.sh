@@ -370,7 +370,7 @@ while IFS= read -r line; do
       name="${rest%% *}"
       mode="${rest##* }"
       case "$name" in
-        grove.toml | machine.toml | sync.toml) ;;
+        grove.toml | machine.toml | roots.toml | notebooks.toml | sync.toml) ;;
         *) echo "config seed: refusing to write unexpected file '$name'" >&2; exit 1 ;;
       esac
       case "$mode" in

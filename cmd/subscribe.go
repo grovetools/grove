@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/coderoot"
 )
 
 func init() {
@@ -17,7 +18,7 @@ func init() {
 }
 
 // `grove subscribe` is deliberately the thinnest verb in the set: it writes a
-// [machine.ecosystems.<name>] table and stops.
+// specific [roots.<name>] table and stops.
 //
 // The split matters. A SUBSCRIPTION is a standing statement of intent ("this
 // machine wants grovetools at ~/code/grovetools") and is dotfiles-portable;
@@ -36,10 +37,10 @@ func newSubscribeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "subscribe <ecosystem>",
 		Short: "Declare that this machine wants an ecosystem",
-		Long: `Record an ecosystem subscription in ~/.config/grove/machine.toml.
+		Long: `Record an ecosystem subscription in ~/.config/grove/roots.toml.
 
-This writes intent, not files. Nothing is cloned and nothing on disk changes
-besides machine.toml; the subscription simply becomes visible to every surface
+This writes intent, not code. Nothing is cloned; the recorded root simply
+becomes visible to every surface
 that reconciles intent against disk:
 
   grove machine status              shows it as present or declared-missing
@@ -50,8 +51,8 @@ that reconciles intent against disk:
 beside the ecosystems this machine already has, otherwise ~/code/<name>.
 
 The edit is surgical: only this ecosystem's table is written, and every other
-byte of machine.toml — comments, ordering, tables this schema does not model —
-survives unchanged.`,
+byte of roots.toml — comments, ordering, and unrelated root tables — survives
+unchanged.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSubscribeWithFilters(cmd.OutOrStdout(), args[0], path, notebook, disabled, repos, exclude)
@@ -84,7 +85,7 @@ func runSubscribeWithFilters(out io.Writer, name, path, notebook string, disable
 		resolved = abs
 	}
 
-	entry := config.MachineEcosystem{
+	entry := coderoot.Root{
 		Path: resolved, Notebook: strings.TrimSpace(notebook),
 		Repos: cleanRepoFilter(repos), Exclude: cleanRepoFilter(exclude),
 	}

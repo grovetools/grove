@@ -883,7 +883,7 @@ func writeSyncTokenFile(path, token string, force bool) (bool, error) {
 // what it already declared but does not have.
 //
 // The two lists are kept APART on purpose. An ecosystem this machine declares
-// in machine.toml and an ecosystem another machine published to the registry
+// in roots.toml and an ecosystem another machine published to the registry
 // are different facts, and printing the first under the second's heading is how
 // a join with nothing replicated reported two ecosystems "published in the
 // registry".

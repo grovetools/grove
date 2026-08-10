@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/coderoot"
 	"github.com/grovetools/core/pkg/registry"
 )
 
@@ -92,11 +93,11 @@ func TestMaterializeFromURLClonesAndConverges(t *testing.T) {
 		t.Errorf("materialize did not report success:\n%s", out)
 	}
 
-	machineCfg, err := config.LoadMachineConfigFrom(filepath.Join(configDir, "machine.toml"))
-	if err != nil || machineCfg == nil {
-		t.Fatalf("subscription not written: %v (%v)", machineCfg, err)
+	table, err := coderoot.LoadFrom(filepath.Join(configDir, coderoot.RootsFileName), filepath.Join(configDir, coderoot.NotebooksFileName))
+	if err != nil {
+		t.Fatalf("subscription not written: %v", err)
 	}
-	if got := machineCfg.Machine.Ecosystems["grovetools"].Path; got != dest {
+	if got := table.Roots["grovetools"].Path; got != dest {
 		t.Errorf("subscription path = %q, want %q", got, dest)
 	}
 

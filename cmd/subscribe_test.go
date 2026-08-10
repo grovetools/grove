@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/coderoot"
 )
 
 func runSubscribeCmd(t *testing.T, name, path, notebook string, disabled bool) (string, error) {
@@ -17,30 +17,30 @@ func runSubscribeCmd(t *testing.T, name, path, notebook string, disabled bool) (
 	return out.String(), err
 }
 
-// TestSubscribeWritesIntentOnly: the verb declares, it does not materialize.
-// Nothing on disk changes besides machine.toml, and the output says what to
-// run next.
+func loadSandboxRoots(t *testing.T, configDir string) coderoot.Table {
+	t.Helper()
+	table, err := coderoot.LoadFrom(filepath.Join(configDir, coderoot.RootsFileName), filepath.Join(configDir, coderoot.NotebooksFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return table
+}
+
 func TestSubscribeWritesIntentOnly(t *testing.T) {
 	home, configDir, _ := sandboxAdoption(t)
 	dest := filepath.Join(home, "code", "grovetools")
-
 	out, err := runSubscribeCmd(t, "grovetools", dest, "", false)
 	if err != nil {
 		t.Fatalf("subscribe: %v\n%s", err, out)
 	}
 	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
-		t.Errorf("subscribe created something on disk at %s (%v)", dest, statErr)
+		t.Errorf("subscribe created %s", dest)
 	}
 	if !strings.Contains(out, "grove ecosystem materialize grovetools") {
-		t.Errorf("subscribe did not point at materialize:\n%s", out)
+		t.Errorf("missing materialize hint: %s", out)
 	}
-
-	cfg, err := config.LoadMachineConfigFrom(filepath.Join(configDir, "machine.toml"))
-	if err != nil || cfg == nil {
-		t.Fatalf("machine.toml not written: %v (%v)", cfg, err)
-	}
-	if got := cfg.Machine.Ecosystems["grovetools"].Path; got != dest {
-		t.Errorf("path = %q, want %q", got, dest)
+	if got := loadSandboxRoots(t, configDir).Roots["grovetools"].Path; got != dest {
+		t.Errorf("path=%q want %q", got, dest)
 	}
 }
 
@@ -48,104 +48,81 @@ func TestSubscribeWritesPartialMemberIntent(t *testing.T) {
 	_, configDir, _ := sandboxAdoption(t)
 	var out bytes.Buffer
 	if err := runSubscribeWithFilters(&out, "grovetools", "/code/grovetools", "", false, []string{"core", "nav", "core"}, nil); err != nil {
-		t.Fatalf("subscribe with filters: %v", err)
-	}
-	cfg, err := config.LoadMachineConfigFrom(filepath.Join(configDir, "machine.toml"))
-	if err != nil {
 		t.Fatal(err)
 	}
-	got := cfg.Machine.Ecosystems["grovetools"].Repos
+	got := loadSandboxRoots(t, configDir).Roots["grovetools"].Repos
 	if strings.Join(got, ",") != "core,nav" {
-		t.Fatalf("repos = %v, want deduplicated [core nav]", got)
+		t.Fatalf("repos=%v", got)
 	}
-
 	if err := runSubscribeWithFilters(&out, "grovetools", "/code/grovetools", "", false, []string{"core"}, []string{"nav"}); err == nil {
-		t.Fatal("subscribe accepted both include and exclude filters")
+		t.Fatal("accepted include and exclude")
 	}
 }
 
-// TestSubscribePreservesTheRestOfMachineToml: machine.toml is hand-authored
-// and dotfiles-portable, so the edit must be surgical — a marshaller round-trip
-// would quietly rewrite the user's file.
-func TestSubscribePreservesTheRestOfMachineToml(t *testing.T) {
+func TestSubscribePreservesTheRestOfRootsToml(t *testing.T) {
 	home, configDir, _ := sandboxAdoption(t)
-	original := "# my machine\n[machine]\nname = \"mbp\"\n\n[machine.roots.chickens]\npath = \"~/code/chickens\"\nnotebook = \"nb\"\n"
-	machinePath := filepath.Join(configDir, "machine.toml")
-	if err := os.WriteFile(machinePath, []byte(original), 0o644); err != nil {
+	original := "# my roots\n[roots.chickens]\npath = \"~/code/chickens\"\nscan = true\n"
+	if err := os.WriteFile(filepath.Join(configDir, coderoot.NotebooksFileName), []byte("default = \"nb\"\n[notebooks.nb]\nroot = \"~/notebooks/nb\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	config.ResetLoadCache()
-
+	rootsPath := filepath.Join(configDir, coderoot.RootsFileName)
+	if err := os.WriteFile(rootsPath, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if out, err := runSubscribeCmd(t, "grovetools", filepath.Join(home, "code", "grovetools"), "", false); err != nil {
-		t.Fatalf("subscribe: %v\n%s", err, out)
+		t.Fatalf("%v\n%s", err, out)
 	}
-	data, err := os.ReadFile(machinePath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	data, _ := os.ReadFile(rootsPath)
 	text := string(data)
-	for _, want := range []string{"# my machine", "name = \"mbp\"", "[machine.roots.chickens]", "notebook = \"nb\""} {
+	for _, want := range []string{"# my roots", "[roots.chickens]", "scan = true", "[roots.grovetools]"} {
 		if !strings.Contains(text, want) {
-			t.Errorf("subscribe lost %q from machine.toml:\n%s", want, text)
+			t.Errorf("lost %q:\n%s", want, text)
 		}
 	}
-	if !strings.Contains(text, "[machine.ecosystems.grovetools]") {
-		t.Errorf("the new subscription is missing:\n%s", text)
-	}
 }
 
-// TestSubscribeIsIdempotent.
 func TestSubscribeIsIdempotent(t *testing.T) {
 	home, configDir, _ := sandboxAdoption(t)
 	dest := filepath.Join(home, "code", "grovetools")
-
 	if out, err := runSubscribeCmd(t, "grovetools", dest, "", false); err != nil {
-		t.Fatalf("first: %v\n%s", err, out)
+		t.Fatalf("%v\n%s", err, out)
 	}
-	before, _ := os.ReadFile(filepath.Join(configDir, "machine.toml"))
-
+	path := filepath.Join(configDir, coderoot.RootsFileName)
+	before, _ := os.ReadFile(path)
 	out, err := runSubscribeCmd(t, "grovetools", dest, "", false)
 	if err != nil {
-		t.Fatalf("second: %v\n%s", err, out)
+		t.Fatal(err)
 	}
-	after, _ := os.ReadFile(filepath.Join(configDir, "machine.toml"))
+	after, _ := os.ReadFile(path)
 	if string(after) != string(before) {
-		t.Errorf("second subscribe rewrote machine.toml:\n%s", after)
+		t.Errorf("second subscribe rewrote roots.toml")
 	}
 	if !strings.Contains(out, "already declared") {
-		t.Errorf("second subscribe did not report the entry as present:\n%s", out)
+		t.Errorf("missing idempotence output: %s", out)
 	}
 }
 
-// TestSubscribeDefaultsBesideExistingEcosystems: a second ecosystem lands next
-// to the first rather than in a directory the user has never used.
 func TestSubscribeDefaultsBesideExistingEcosystems(t *testing.T) {
 	home, configDir, _ := sandboxAdoption(t)
 	first := filepath.Join(home, "src", "alpha")
 	if err := os.MkdirAll(first, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(configDir, "machine.toml"),
-		[]byte("[machine.ecosystems.alpha]\npath = \""+first+"\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(configDir, coderoot.NotebooksFileName), []byte("default = \"nb\"\n[notebooks.nb]\nroot = \"~/notebooks/nb\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	config.ResetLoadCache()
-
+	if err := os.WriteFile(filepath.Join(configDir, coderoot.RootsFileName), []byte("[roots.alpha]\npath = \""+first+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if out, err := runSubscribeCmd(t, "beta", "", "", false); err != nil {
-		t.Fatalf("subscribe: %v\n%s", err, out)
-	}
-	cfg, err := config.LoadMachineConfigFrom(filepath.Join(configDir, "machine.toml"))
-	if err != nil || cfg == nil {
-		t.Fatal(err)
+		t.Fatalf("%v\n%s", err, out)
 	}
 	want := filepath.Join(home, "src", "beta")
-	if got := cfg.Machine.Ecosystems["beta"].Path; got != want {
-		t.Errorf("beta went to %q, want %q (beside alpha)", got, want)
+	if got := loadSandboxRoots(t, configDir).Roots["beta"].Path; got != want {
+		t.Errorf("beta=%q want %q", got, want)
 	}
 }
 
-// TestSubscribeNoticesAnExistingCheckout: declaring intent for something that
-// is already there is not an error, and the output must not imply work was done.
 func TestSubscribeNoticesAnExistingCheckout(t *testing.T) {
 	home, _, _ := sandboxAdoption(t)
 	dest := filepath.Join(home, "code", "grovetools")
@@ -155,15 +132,11 @@ func TestSubscribeNoticesAnExistingCheckout(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dest, "grove.toml"), []byte("name = \"grovetools\"\nworkspaces = [\"*\"]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-
 	out, err := runSubscribeCmd(t, "grovetools", dest, "", false)
 	if err != nil {
-		t.Fatalf("subscribe: %v\n%s", err, out)
+		t.Fatal(err)
 	}
-	if !strings.Contains(out, "present on disk") {
-		t.Errorf("subscribe did not notice the existing checkout:\n%s", out)
-	}
-	if strings.Contains(out, "materialize") {
-		t.Errorf("subscribe offered materialize for an ecosystem that is already here:\n%s", out)
+	if !strings.Contains(out, "present on disk") || strings.Contains(out, "materialize") {
+		t.Errorf("bad output: %s", out)
 	}
 }

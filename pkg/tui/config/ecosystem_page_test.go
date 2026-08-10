@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/coderoot"
 
 	grovekeymap "github.com/grovetools/grove/pkg/keymap"
 	"github.com/grovetools/grove/pkg/setup"
@@ -117,15 +118,24 @@ func TestEcosystemCommitCreate(t *testing.T) {
 	if g.Path != dir || g.Enabled == nil || !*g.Enabled || g.Notebook != "nb" || g.Description != "My projects" {
 		t.Errorf("groves entry wrong: %+v", g)
 	}
-	// The registration is a machine.toml subscription, not a [groves.*] entry
-	// in the shareable global config — which is therefore left byte-identical.
-	machineRaw, err := os.ReadFile(filepath.Join(filepath.Dir(globalPath), config.MachineConfigFileName))
+	// Registration is the validated roots/notebooks pair, not machine.toml or
+	// a legacy [groves.*] entry in the shareable global config.
+	rootsRaw, err := os.ReadFile(coderoot.RootsPath())
 	if err != nil {
-		t.Fatalf("read machine config: %v", err)
+		t.Fatalf("read roots config: %v", err)
 	}
-	for _, want := range []string{"[machine.ecosystems.eco-fresh]", dir, "My projects"} {
-		if !strings.Contains(string(machineRaw), want) {
-			t.Errorf("machine.toml missing %q:\n%s", want, machineRaw)
+	for _, want := range []string{"[roots.eco-fresh]", dir, "My projects", `notebook = "nb"`} {
+		if !strings.Contains(string(rootsRaw), want) {
+			t.Errorf("roots.toml missing %q:\n%s", want, rootsRaw)
+		}
+	}
+	notebooksRaw, err := os.ReadFile(coderoot.NotebooksPath())
+	if err != nil {
+		t.Fatalf("read notebooks config: %v", err)
+	}
+	for _, want := range []string{`default = "nb"`, "[notebooks.nb]"} {
+		if !strings.Contains(string(notebooksRaw), want) {
+			t.Errorf("notebooks.toml missing %q:\n%s", want, notebooksRaw)
 		}
 	}
 	raw, err := os.ReadFile(globalPath)

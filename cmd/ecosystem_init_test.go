@@ -14,6 +14,9 @@ import (
 // point — an ecosystem scaffolded as YAML is one every later `grove` read has
 // to keep supporting.
 func TestEcosystemManifestScaffoldDefaultsToTOML(t *testing.T) {
+	t.Setenv("GROVE_HOME", t.TempDir())
+	config.ResetLoadCache()
+	t.Cleanup(config.ResetLoadCache)
 	for _, format := range []string{"", "toml", "TOML", " toml "} {
 		name, content, err := ecosystemManifestScaffold(format, "solab")
 		if err != nil {

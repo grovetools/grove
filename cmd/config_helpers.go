@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/coderoot"
 )
 
 // getGlobalOverridePath returns the path to the global override config file.
@@ -99,120 +100,40 @@ func expandPath(path string) string {
 	return path
 }
 
-// findGrovesConfigFile finds the config file where LEGACY [groves.*] entries
-// are defined. New registrations no longer go here — they are machine.toml
-// subscriptions (see registerMachineEcosystem) — but an existing entry still
-// wins over a compiled subscription, so callers use this to tell the user
-// which file is actually in charge.
-func findGrovesConfigFile() (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		cwd = "."
-	}
-
-	layered, err := config.LoadLayered(cwd)
-	if err != nil {
-		// If we can't load layered config, fall back to global override
-		return getGlobalOverridePath()
-	}
-
-	// Check where groves is defined, in priority order for editing
-	// We prefer to edit the global override if it has groves, then global
-
-	// 1. Check global override first (preferred for user additions)
-	if layered.GlobalOverride != nil && layered.GlobalOverride.Config != nil {
-		if len(layered.GlobalOverride.Config.Groves) > 0 {
-			return layered.GlobalOverride.Path, nil
-		}
-	}
-
-	// 2. Check global config
-	if layered.Global != nil && len(layered.Global.Groves) > 0 {
-		if path, ok := layered.FilePaths[config.SourceGlobal]; ok {
-			return path, nil
-		}
-	}
-
-	// 3. If groves isn't defined anywhere, use global override (creates it if needed)
-	return getGlobalOverridePath()
-}
-
-// machineSubscriptionHeader is the comment block written above the first
-// subscription in a machine.toml this tooling creates.
-var machineSubscriptionHeader = []string{
-	"# This machine's intent: name, ecosystem subscriptions, bare scan roots.",
-	"# Dotfiles-portable on purpose — a restored copy plus a freshly minted",
-	"# machine id is a NEW machine with the SAME intent.",
+var recordedRootHeader = []string{
+	"# This machine's recorded code roots.",
+	"# Specific roots are ecosystems; scan roots discover repositories beneath a directory.",
 	"",
 }
 
-// registerMachineEcosystem records a directory as one of this machine's
-// ecosystem subscriptions in ~/.config/grove/machine.toml, and returns the
-// file written.
-//
-// This replaces writing a [groves.<name>] entry into the global config. The
-// subscription compiles into the same cfg.Groves map every discovery consumer
-// already reads, so nothing downstream changes — but the declaration now lives
-// where "which ecosystems does this machine want" is answerable, which is what
-// makes declared-but-missing and materialize possible.
-//
-// Old configs keep working untouched: compilation fills only absent keys, so
-// an existing [groves.<name>] still wins.
-func registerMachineEcosystem(groveName, grovePath, notebook string) (string, error) {
-	cfgPath := config.MachineConfigPath()
-	if cfgPath == "" {
-		return "", fmt.Errorf("cannot resolve the grove config directory")
-	}
-	if _, err := config.WriteMachineSubscriptions(cfgPath, config.MachineSubscriptions{
-		Ecosystems: map[string]config.MachineEcosystem{
-			groveName: {Path: grovePath, Notebook: notebook},
-		},
-		Header: machineSubscriptionHeader,
-	}); err != nil {
+// registerCodeRoot records a specific ecosystem root in roots.toml.
+// If the caller supplies a notebook binding that only exists in the compiled
+// legacy view, its definition is recorded first so the roots/notebooks pair
+// remains independently loadable.
+func registerCodeRoot(groveName, grovePath, notebook string) (string, error) {
+	root := coderoot.Root{Path: grovePath, Notebook: notebook}
+	if err := ensureRecordedRouting(&root); err != nil {
 		return "", err
 	}
-	return cfgPath, nil
+	path := coderoot.RootsPath()
+	if path == "" {
+		return "", fmt.Errorf("cannot resolve the grove config directory")
+	}
+	_, err := config.WriteCodeRoots(path, config.CodeRootEdits{
+		Upserts: map[string]coderoot.Root{groveName: root},
+		Header:  recordedRootHeader,
+	})
+	if err != nil {
+		return "", err
+	}
+	config.ResetLoadCache()
+	return path, nil
 }
 
-// updateGlobalConfig registers an ecosystem for discovery. Kept under its
-// historical name because several call sites read as "put this on the map";
-// the map is now machine.toml.
+// updateGlobalConfig keeps its historical call-site name but now writes the
+// machine-local recorded roots file.
 func updateGlobalConfig(groveName, grovePath, notebook string) (string, error) {
-	return registerMachineEcosystem(groveName, grovePath, notebook)
-}
-
-// legacyGrovesOwner reports the config file that already declares
-// [groves.<name>], or "" when none does. A legacy entry outranks the
-// subscription just written, so surfaces that register an ecosystem say so
-// rather than letting the user wonder why their new path is ignored.
-func legacyGrovesOwner(groveName string) string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		cwd = "."
-	}
-	layered, err := config.LoadLayered(cwd)
-	if err != nil {
-		return ""
-	}
-	declares := func(cfg *config.Config) bool {
-		if cfg == nil {
-			return false
-		}
-		_, ok := cfg.Groves[groveName]
-		return ok
-	}
-	if declares(layered.Global) {
-		return layered.FilePaths[config.SourceGlobal]
-	}
-	for _, frag := range layered.GlobalFragments {
-		if declares(frag.Config) {
-			return frag.Path
-		}
-	}
-	if layered.GlobalOverride != nil && declares(layered.GlobalOverride.Config) {
-		return layered.GlobalOverride.Path
-	}
-	return ""
+	return registerCodeRoot(groveName, grovePath, notebook)
 }
 
 // deriveGroveName derives a grove name from a path.

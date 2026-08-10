@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/coderoot"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/registry"
 )
@@ -80,7 +81,7 @@ Resolution order for the ecosystem's identity card:
 
 What it does:
 
-  - writes the [machine.ecosystems.<name>] subscription (if absent);
+  - writes the specific [roots.<name>] subscription (if absent);
   - clones per the card's declared layout — superrepo (clone + submodule init +
     aborted-checkout self-heal) or flat (the remotes ARE the member repos);
   - subscribes this machine's notebook workspace with role = "peer" so notes
@@ -92,7 +93,7 @@ Every step is idempotent. Re-running a completed materialization reports what
 is already true and writes nothing.
 
 Nothing is ever removed: an existing checkout is converged, an existing remote
-is never re-pointed, and sync.toml and machine.toml are edited surgically.`,
+is never re-pointed, and sync.toml and roots.toml are edited surgically.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.name = args[0]
@@ -140,7 +141,7 @@ func runEcosystemMaterialize(ctx context.Context, in io.Reader, out io.Writer, o
 	// 1. Intent, before the expensive part. If the clone is interrupted the
 	// subscription is still declared, which is exactly the state
 	// `grove machine status` calls declared-missing and this command repairs.
-	subscription := config.MachineEcosystem{Path: dest}
+	subscription := coderoot.Root{Path: dest}
 	if existing != nil {
 		subscription = *existing
 		subscription.Path = dest

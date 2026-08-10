@@ -40,8 +40,9 @@ Because names collide after such a restore, every surface renders
 Subcommands:
   init    — mint the identity (if absent) and record the display name
   status  — show id, name, subscriptions, config/state paths, sync origin
-  migrate — move legacy [groves.*] declarations into machine.toml
   retire  — remove a decommissioned machine's note from the registry
+
+Legacy topology migration is the top-level ` + "`grove migrate`" + ` command.
 
 To see the OTHER machines in this account, use ` + "`grove machines`" + `.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -50,7 +51,6 @@ To see the OTHER machines in this account, use ` + "`grove machines`" + `.`,
 	}
 	cmd.AddCommand(newMachineInitCmd())
 	cmd.AddCommand(newMachineStatusCmd())
-	cmd.AddCommand(newMachineMigrateCmd())
 	cmd.AddCommand(newMachineRetireCmd())
 	return cmd
 }
@@ -182,7 +182,7 @@ func runMachineStatus(cmd *cobra.Command, args []string) error {
 	// every grove process performs and would turn one condition into one log
 	// line per invocation.
 	if legacy := config.LegacyMachinesDir(); legacy != "" {
-		fmt.Fprintf(out, "\n! %s is ignored; migrate with `grove machine migrate`\n", legacy)
+		fmt.Fprintf(out, "\n! %s is ignored; migrate with `grove migrate`\n", legacy)
 	}
 	return nil
 }
@@ -202,7 +202,7 @@ func printMachineIntent(out io.Writer) {
 		return
 	}
 	if len(status.Ecosystems) == 0 && len(status.Roots) == 0 {
-		fmt.Fprintf(out, "\nNo ecosystem subscriptions declared. Run `grove machine migrate` to import\nlegacy [groves.*] entries, or declare them under [machine.ecosystems.*].\n")
+		fmt.Fprintf(out, "\nNo recorded code roots declared. Run `grove migrate` to import legacy\n[groves.*], search_paths, and machine topology declarations.\n")
 		return
 	}
 
@@ -211,9 +211,9 @@ func printMachineIntent(out io.Writer) {
 		for _, eco := range status.Ecosystems {
 			marker, note := "✓", ""
 			switch eco.State {
-			case config.MachineEcosystemDeclaredMissing:
+			case "declared-missing":
 				marker, note = "!", "  declared but missing — materialize it or drop the subscription"
-			case config.MachineEcosystemUnmanifested:
+			case "unmanifested":
 				marker, note = "?", "  directory exists but carries no grove manifest"
 			}
 			suffix := ""

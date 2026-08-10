@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/coderoot"
 )
 
 // Card-declared ecosystem materialization: turning an [ecosystem] card plus a
@@ -56,7 +57,7 @@ type ecosystemCloneOptions struct {
 	Out io.Writer
 	// Subscription carries subscriber-local member selection. Its zero value
 	// selects every member and preserves the pre-subscription behavior.
-	Subscription config.MachineEcosystem
+	Subscription coderoot.Root
 }
 
 func (o ecosystemCloneOptions) jobs() int {
@@ -325,7 +326,7 @@ func cloneFlatEcosystem(ctx context.Context, card config.EcosystemCard, dest str
 // selectedMembers applies subscriber-local include/exclude intent to the
 // card's complete member list. Unknown names are rejected: silently accepting
 // a typo would produce a permanently incomplete checkout that looked healthy.
-func selectedMembers(all []string, subscription config.MachineEcosystem) ([]string, error) {
+func selectedMembers(all []string, subscription coderoot.Root) ([]string, error) {
 	known := make(map[string]bool, len(all))
 	for _, name := range all {
 		known[name] = true

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/coderoot"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/mattn/go-isatty"
@@ -260,7 +261,7 @@ func checkAndPromptDiscoverability(ecosystemPath string) error {
 		fmt.Printf("\n%s This ecosystem is not in a configured grove and won't be\n", theme.IconWarning)
 		fmt.Printf("   discovered by grove tools.\n")
 		fmt.Printf("   Run in an interactive terminal to add it, or declare it yourself in\n")
-		fmt.Printf("   %s under [machine.ecosystems.<name>].\n", config.MachineConfigPath())
+		fmt.Printf("   %s under [roots.<name>].\n", coderoot.RootsPath())
 		return nil
 	}
 
@@ -270,7 +271,7 @@ func checkAndPromptDiscoverability(ecosystemPath string) error {
 		fmt.Printf("\n%s This ecosystem is not in a configured grove and won't be\n", theme.IconWarning)
 		fmt.Printf("   discovered by grove tools.\n")
 		fmt.Printf("   Error: %v\n", err)
-		fmt.Printf("   Declare it yourself in %s under [machine.ecosystems.<name>].\n", config.MachineConfigPath())
+		fmt.Printf("   Declare it yourself in %s under [roots.<name>].\n", coderoot.RootsPath())
 		return nil
 	}
 
@@ -290,17 +291,13 @@ func checkAndPromptDiscoverability(ecosystemPath string) error {
 	}
 
 	// Record the ecosystem as one of this machine's subscriptions.
-	configPath, err := registerMachineEcosystem(groveName, absPath, result.SelectedNotebook)
+	configPath, err := registerCodeRoot(groveName, absPath, result.SelectedNotebook)
 	if err != nil {
 		return fmt.Errorf("failed to update config: %w", err)
 	}
 
 	fmt.Printf("\n%s Subscribed to ecosystem '%s' (%s)\n", theme.IconSuccess, groveName, absPath)
 	fmt.Printf("  Updated %s\n", configPath)
-	if owner := legacyGrovesOwner(groveName); owner != "" {
-		fmt.Printf("  %s a legacy [groves.%s] entry in %s still takes precedence;\n", theme.IconWarning, groveName, owner)
-		fmt.Printf("     run `grove machine migrate` and delete it when ready.\n")
-	}
 
 	return nil
 }

@@ -19,6 +19,9 @@ import (
 // whose global layer points at a temp file.
 func newTestModel(t *testing.T) (Model, string) {
 	t.Helper()
+	t.Setenv("GROVE_HOME", t.TempDir())
+	config.ResetLoadCache()
+	t.Cleanup(config.ResetLoadCache)
 	dir := t.TempDir()
 	globalPath := filepath.Join(dir, "grove.toml")
 

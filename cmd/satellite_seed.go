@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/coderoot"
 )
 
 // The VM's config seed — `grove satellite up` as materialize + provisioning.
@@ -24,9 +25,8 @@ import (
 //     single rendering choke point (config.RenderSyncWorkspaces), so the
 //     push-only invariant is enforced on the VM's file by the same code that
 //     enforces it on the laptop's.
-//   - The VM declares its ecosystem as machine INTENT (machine.toml
-//     `[machine.ecosystems.*]`) like every other machine, rather than as a raw
-//     `[groves.*]` entry.
+//   - The VM declares its ecosystem as a specific recorded root in roots.toml,
+//     with notebook routing recorded separately in notebooks.toml.
 //   - The generated TOML is parsed back through the real loaders before it
 //     leaves the laptop, so a malformed seed fails here rather than as a
 //     silently broken daemon on a remote host.
@@ -71,22 +71,18 @@ func buildSatelliteConfigSeed(name string, workspaces []string) config.ConfigSee
 	seed := config.ConfigSeed{
 		Provenance:  fmt.Sprintf("Written by `grove satellite up %s` (config seed).", name),
 		MachineName: name,
-		Ecosystems: map[string]config.MachineEcosystem{
+		CodeRoots: map[string]coderoot.Root{
 			satelliteEcosystemName: {
 				Path:        bootstrapRemoteCodeDir,
 				Notebook:    satelliteEcosystemName,
 				Description: "Grove ecosystem (satellite)",
 			},
 		},
-		Notebooks: map[string]string{satelliteEcosystemName: satelliteNotebookRoot},
-		DaemonSSH: true,
-		// Migration window: in source mode the VM builds grove from the
-		// grovetools superrepo's PINNED submodule SHAs, which may predate
-		// machine.toml support entirely. An explicit [groves.*] entry wins over
-		// a compiled one, so shipping both is correct on a new grove and the
-		// only thing that works on an old one. Remove once the pins carry
-		// machine-config support.
-		LegacyGroves: true,
+		RecordedNotebooks: map[string]coderoot.Notebook{
+			satelliteEcosystemName: {Root: satelliteNotebookRoot},
+		},
+		RecordedDefaultNotebook: satelliteEcosystemName,
+		DaemonSSH:               true,
 	}
 
 	// A satellite with no sync workspaces (`--sync-port 0`, or an explicitly

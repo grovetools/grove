@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/coderoot"
 	"github.com/grovetools/core/tui/components/pager"
 	"github.com/grovetools/core/tui/theme"
 
@@ -329,23 +330,25 @@ func (m *Model) commitEcosystem(raw string) (name string, imported bool, err err
 		}
 	}
 
-	// The registration is a machine.toml subscription, not a [groves.*] entry
-	// in the shareable global config: which ecosystems THIS machine wants is
-	// machine intent. It compiles into the same groves map the config UI reads
-	// back, so the page's read path is unchanged.
-	cfgPath := config.MachineConfigPath()
-	if cfgPath == "" {
-		return "", false, fmt.Errorf("cannot resolve the grove config directory")
+	// Record notebook routing before the root so the pair is valid at every
+	// observable write boundary. The existing page keeps its "nb" convention
+	// until the new Code/Notes onboarding pages land.
+	nbRoot := "~/notebooks/nb"
+	if m.layered != nil && m.layered.Final != nil && m.layered.Final.Notebooks != nil {
+		if def := m.layered.Final.Notebooks.Definitions["nb"]; def != nil && def.RootDir != "" {
+			nbRoot = def.RootDir
+		}
 	}
-	if _, err := config.WriteMachineSubscriptions(cfgPath, config.MachineSubscriptions{
-		Ecosystems: map[string]config.MachineEcosystem{
+	defaultNotebook := "nb"
+	if _, err := config.WriteNotebooks(coderoot.NotebooksPath(), config.NotebookEdits{
+		Default: &defaultNotebook,
+		Upserts: map[string]coderoot.Notebook{"nb": {Root: nbRoot}},
+	}); err != nil {
+		return "", false, err
+	}
+	if _, err := config.WriteCodeRoots(coderoot.RootsPath(), config.CodeRootEdits{
+		Upserts: map[string]coderoot.Root{
 			name: {Path: path, Notebook: "nb", Description: "My projects"},
-		},
-		Header: []string{
-			"# This machine's intent: name, ecosystem subscriptions, bare scan roots.",
-			"# Dotfiles-portable on purpose — a restored copy plus a freshly minted",
-			"# machine id is a NEW machine with the SAME intent.",
-			"",
 		},
 	}); err != nil {
 		return "", false, err

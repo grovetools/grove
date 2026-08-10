@@ -168,7 +168,7 @@ func TestMachineStatusFlagsLegacyMachinesDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("machine status: %v (%s)", err, out)
 	}
-	if !strings.Contains(out, "grove machine migrate") {
+	if !strings.Contains(out, "grove migrate") {
 		t.Errorf("status did not flag the legacy machines/ dir:\n%s", out)
 	}
 }
