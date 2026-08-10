@@ -91,6 +91,28 @@ func TestConfigShowEffectiveJSONDegradedForMalformedRecordedAndFragmentFiles(t *
 	}
 }
 
+func TestConfigShowEffectiveIncludesCanonicalRecordedTopology(t *testing.T) {
+	configDir := sandboxConfigCLI(t)
+	writeCLIConfig(t, filepath.Join(configDir, "notebooks.toml"), "default=\"nb\"\n[notebooks.nb]\nroot=\"/notes\"\n")
+	writeCLIConfig(t, filepath.Join(configDir, "roots.toml"), "[roots.code]\npath=\"/code\"\nscan=true\nnotebook=\"nb\"\n")
+	output, err := runConfigShowForTest(t, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope effectiveConfigEnvelope
+	if err := json.Unmarshal([]byte(output), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	groves, ok := envelope.Effective["groves"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("effective topology missing: %+v", envelope.Effective)
+	}
+	code, ok := groves["code"].(map[string]interface{})
+	if !ok || code["path"] != "/code" || code["notebook"] != "nb" {
+		t.Fatalf("effective code root = %+v", groves["code"])
+	}
+}
+
 func TestConfigShowEffectiveHealthyAndHumanDegradedOutput(t *testing.T) {
 	sandboxConfigCLI(t)
 	output, err := runConfigShowForTest(t, false)

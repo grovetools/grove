@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -123,7 +125,14 @@ func TestMigrateMachineTablesCardDefaultApplyBackupAndIdempotence(t *testing.T) 
 	if got := migrateRead(t, filepath.Join(dir, "grove.toml")); !strings.Contains(got, "name=\"keep\"") || strings.Contains(got, "[groves.scan]") {
 		t.Fatalf("global edit not surgical:\n%s", got)
 	}
-	for _, p := range []string{filepath.Join(dir, "grove.toml"), filepath.Join(dir, "machine.toml")} {
+	card := migrateRead(t, filepath.Join(eco, "grove.toml"))
+	if !strings.Contains(card, cardDeprecationComment) || !strings.Contains(card, "[ecosystem.notebooks.cardnotes]") {
+		t.Fatalf("card default was not retained and annotated:\n%s", card)
+	}
+	if !strings.Contains(out.String(), filepath.Join(eco, "grove.toml")) || !strings.Contains(out.String(), cardDeprecationComment) {
+		t.Fatalf("card source/diff missing from migration plan:\n%s", out.String())
+	}
+	for _, p := range []string{filepath.Join(dir, "grove.toml"), filepath.Join(dir, "machine.toml"), filepath.Join(eco, "grove.toml")} {
 		if _, err := os.Stat(p + ".20260810T123456Z.bak"); err != nil {
 			t.Fatalf("backup %s: %v", p, err)
 		}
@@ -196,8 +205,30 @@ func TestMigrateRefusesLegacySyncOrdering(t *testing.T) {
 	migrateWrite(t, filepath.Join(dir, "sync.toml"), "[[workspaces]]\nname=\"nb\"\n")
 	var out bytes.Buffer
 	err := runLegacyMigrate(&out, strings.NewReader(""), true, false, time.Now())
-	if err == nil || !strings.Contains(err.Error(), "P2 notespace step") {
+	if err == nil || !strings.Contains(err.Error(), "--stage-sync") || !strings.Contains(err.Error(), "P2 input") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestMigrateStagesSyncIntentForP2WithoutLoss(t *testing.T) {
+	dir := migrateSandbox(t)
+	legacy := "mode=\"keep\"\n[[workspaces]]\nname=\"nb\"\n[notebooks.personal]\nremote=\"origin\"\n"
+	migrateWrite(t, filepath.Join(dir, "sync.toml"), legacy)
+	migrateWrite(t, filepath.Join(dir, "grove.toml"), "[notebooks.definitions.nb]\nroot_dir=\"/notes\"\n[notebooks.rules]\ndefault=\"nb\"\n[groves.x]\npath=\"/x\"\nnotebook=\"nb\"\n")
+	var out bytes.Buffer
+	err := runLegacyMigrateWithOptions(&out, strings.NewReader(""), migrationOptions{Yes: true, StageSync: true}, time.Unix(10, 0))
+	if err != nil {
+		t.Fatalf("migrate: %v\n%s", err, out.String())
+	}
+	if got := migrateRead(t, filepath.Join(dir, "sync.toml.p2-staged")); got != legacy {
+		t.Fatalf("staged sync intent changed:\n%s", got)
+	}
+	live := migrateRead(t, filepath.Join(dir, "sync.toml"))
+	if !strings.Contains(live, `mode="keep"`) || strings.Contains(live, "workspaces") || strings.Contains(live, "notebooks") {
+		t.Fatalf("live sync was not staged surgically:\n%s", live)
+	}
+	if !strings.Contains(out.String(), "sync staging") || !strings.Contains(out.String(), "equivalence: verified") {
+		t.Fatalf("missing staging/equivalence evidence:\n%s", out.String())
 	}
 }
 
@@ -296,9 +327,105 @@ func TestCutoverHelpAndPreviewDescribeRecordedTopology(t *testing.T) {
 	}
 }
 
+func TestMigrateRollbackAfterEveryWriteRestoresByteIdenticalInputs(t *testing.T) {
+	for failAt := 1; failAt <= 4; failAt++ {
+		t.Run(fmt.Sprintf("write-%d", failAt), func(t *testing.T) {
+			dir := migrateSandbox(t)
+			eco := filepath.Join(t.TempDir(), "eco")
+			cardPath := filepath.Join(eco, "grove.toml")
+			globalPath := filepath.Join(dir, "grove.toml")
+			global := "keep=\"yes\"\n[notebooks.definitions.nb]\nroot_dir=\"/notes\"\n[notebooks.rules]\ndefault=\"nb\"\n[groves.eco]\npath=" + quoteTOML(eco) + "\n"
+			card := "name=\"eco\"\n[ecosystem.notebooks.nb]\ndefault=true\n"
+			migrateWrite(t, globalPath, global)
+			migrateWrite(t, cardPath, card)
+			writes := 0
+			migrationFailureHook = func(string) error {
+				writes++
+				if writes == failAt {
+					return fmt.Errorf("injected write %d", failAt)
+				}
+				return nil
+			}
+			t.Cleanup(func() { migrationFailureHook = nil })
+			var out bytes.Buffer
+			err := runLegacyMigrate(&out, strings.NewReader(""), false, true, time.Unix(11, 0))
+			if err == nil || !strings.Contains(err.Error(), "restored every changed file byte-for-byte") {
+				t.Fatalf("err=%v\n%s", err, out.String())
+			}
+			if got := migrateRead(t, globalPath); got != global {
+				t.Fatalf("global input changed after rollback:\n%s", got)
+			}
+			if got := migrateRead(t, cardPath); got != card {
+				t.Fatalf("card input changed after rollback:\n%s", got)
+			}
+			for _, path := range []string{filepath.Join(dir, "roots.toml"), filepath.Join(dir, "notebooks.toml"), globalPath + ".19700101T000011Z.bak", cardPath + ".19700101T000011Z.bak"} {
+				if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+					t.Fatalf("rollback residue %s: %v", path, statErr)
+				}
+			}
+		})
+	}
+}
+
+func TestMigrateEffectiveMismatchRollsBack(t *testing.T) {
+	dir := migrateSandbox(t)
+	path := filepath.Join(dir, "grove.toml")
+	original := "[notebooks.definitions.nb]\nroot_dir=\"/notes\"\n[notebooks.rules]\ndefault=\"nb\"\n[groves.x]\npath=\"/x\"\nnotebook=\"nb\"\n"
+	migrateWrite(t, path, original)
+	migrationFailureHook = func(written string) error {
+		if written == resolvedLegacyPath(path) {
+			roots := filepath.Join(dir, "roots.toml")
+			data := strings.ReplaceAll(migrateRead(t, roots), `path = "/x"`, `path = "/different"`)
+			migrateWrite(t, roots, data)
+		}
+		return nil
+	}
+	t.Cleanup(func() { migrationFailureHook = nil })
+	var out bytes.Buffer
+	err := runLegacyMigrate(&out, strings.NewReader(""), false, true, time.Unix(12, 0))
+	if err == nil || !strings.Contains(err.Error(), "effective-config equivalence check") {
+		t.Fatalf("err=%v", err)
+	}
+	if got := migrateRead(t, path); got != original {
+		t.Fatalf("source changed after mismatch rollback:\n%s", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "roots.toml")); !os.IsNotExist(err) {
+		t.Fatalf("roots survived mismatch rollback: %v", err)
+	}
+}
+
+func TestMigrateIdempotentNoOpHasTransitionJSONEvidence(t *testing.T) {
+	dir := migrateSandbox(t)
+	migrateWrite(t, filepath.Join(dir, "notebooks.toml"), "default=\"nb\"\n[notebooks.nb]\nroot=\"/notes\"\n")
+	migrateWrite(t, filepath.Join(dir, "roots.toml"), "[roots.x]\npath=\"/x\"\nscan=true\nnotebook=\"nb\"\n")
+	var out bytes.Buffer
+	if err := runLegacyMigrateWithOptions(&out, strings.NewReader(""), migrationOptions{Yes: true, JSON: true}, time.Unix(13, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(out.Bytes()) || !strings.Contains(out.String(), `"action": "grove migrate step 1"`) || !strings.Contains(out.String(), `"reason": "legacy configuration is already migrated`) {
+		t.Fatalf("missing/invalid no-op transition evidence:\n%s", out.String())
+	}
+}
+
+func TestMigrateApplyJSONIsOnlyTransitionEvidence(t *testing.T) {
+	dir := migrateSandbox(t)
+	migrateWrite(t, filepath.Join(dir, "grove.toml"), "[notebooks.definitions.nb]\nroot_dir=\"/notes\"\n[notebooks.rules]\ndefault=\"nb\"\n[groves.x]\npath=\"/x\"\nnotebook=\"nb\"\n")
+	var out bytes.Buffer
+	if err := runLegacyMigrateWithOptions(&out, strings.NewReader(""), migrationOptions{Yes: true, JSON: true}, time.Unix(14, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(out.Bytes()) || strings.Contains(out.String(), "Migration step 1 plan") || !strings.Contains(out.String(), `"counts"`) {
+		t.Fatalf("apply JSON is not pure transition evidence:\n%s", out.String())
+	}
+}
+
 func TestTopLevelMigrateCommand(t *testing.T) {
-	if got := newMigrateCmd().Name(); got != "migrate" {
+	cmd := newMigrateCmd()
+	if got := cmd.Name(); got != "migrate" {
 		t.Fatalf("name=%q", got)
+	}
+	if cmd.Flags().Lookup("stage-sync") == nil || cmd.Flags().Lookup("json") == nil {
+		t.Fatal("migrate command omitted staging or transition JSON flag")
 	}
 }
 

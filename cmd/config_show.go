@@ -81,7 +81,7 @@ func loadEffectiveConfig(startDir string) (effectiveConfigEnvelope, error) {
 		final.SetDefaults()
 	}
 
-	effective, marshalErr := configAsMap(final)
+	effective, marshalErr := configAsEffectiveMap(final)
 	if marshalErr != nil {
 		return effectiveConfigEnvelope{}, marshalErr
 	}
@@ -95,6 +95,44 @@ func loadEffectiveConfig(startDir string) (effectiveConfigEnvelope, error) {
 		envelope.Error = &message
 	}
 	return envelope, loadErr
+}
+
+// configAsEffectiveMap starts with the source-key representation and adds the
+// compiled code-root compatibility view. Config.Groves is intentionally
+// yaml:"-" because roots.toml is not an authoring layer, but omitting it from
+// config-show would make topology migrations impossible to compare.
+func configAsEffectiveMap(cfg *config.Config) (map[string]interface{}, error) {
+	asMap, err := configAsMap(cfg)
+	if err != nil {
+		return nil, err
+	}
+	groves := map[string]interface{}{}
+	if cfg != nil {
+		for name, grove := range cfg.Groves {
+			entry := map[string]interface{}{"path": grove.Path}
+			if grove.Enabled != nil {
+				entry["enabled"] = *grove.Enabled
+			}
+			if grove.Description != "" {
+				entry["description"] = grove.Description
+			}
+			if grove.Notebook != "" {
+				entry["notebook"] = grove.Notebook
+			}
+			if grove.Depth != nil {
+				entry["depth"] = *grove.Depth
+			}
+			if len(grove.IncludeRepos) > 0 {
+				entry["include_repos"] = grove.IncludeRepos
+			}
+			if len(grove.ExcludeRepos) > 0 {
+				entry["exclude_repos"] = grove.ExcludeRepos
+			}
+			groves[name] = entry
+		}
+	}
+	asMap["groves"] = groves
+	return asMap, nil
 }
 
 func renderEffectiveConfig(out interface{ Write([]byte) (int, error) }, envelope effectiveConfigEnvelope) error {

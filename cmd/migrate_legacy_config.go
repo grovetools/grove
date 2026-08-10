@@ -94,6 +94,8 @@ type legacySource struct {
 	TOML                  bool // dialect follows the logical source, never its symlink target
 	RemoveGlobal          bool
 	RemoveMachine         bool
+	RemoveSync            bool
+	AnnotateCard          bool
 }
 
 type legacyRootCandidate struct {
@@ -109,6 +111,8 @@ type legacyMigration struct {
 	Sources       []legacySource
 	RootsPath     string
 	NotebooksPath string
+	SyncPath      string
+	SyncStagePath string
 }
 
 func parseLegacyFile(path string, out any) error {
@@ -250,14 +254,28 @@ func legacySyncRequiresLaterMigration(path string) (bool, error) {
 }
 
 func collectLegacyMigration() (*legacyMigration, error) {
+	return collectLegacyMigrationWithOptions(false)
+}
+
+func collectLegacyMigrationWithOptions(stageSync bool) (*legacyMigration, error) {
 	dir := paths.ConfigDir()
 	if dir == "" {
 		return nil, fmt.Errorf("cannot resolve the grove config directory")
 	}
-	if blocked, err := legacySyncRequiresLaterMigration(filepath.Join(dir, "sync.toml")); err != nil {
+	syncPath := filepath.Join(dir, "sync.toml")
+	blocked, err := legacySyncRequiresLaterMigration(syncPath)
+	if err != nil {
 		return nil, err
-	} else if blocked {
-		return nil, fmt.Errorf("%s contains legacy workspace entries that must be migrated with the P2 notespace step first; refusing to change config ordering", filepath.Join(dir, "sync.toml"))
+	}
+	if blocked && !stageSync {
+		return nil, fmt.Errorf("%s contains legacy workspace/notebook sync intent; run `grove migrate --stage-sync` to park an exact copy at %s, complete P1, then use that parked file as P2 input", syncPath, syncPath+".p2-staged")
+	}
+	if blocked {
+		if _, err := os.Stat(syncPath + ".p2-staged"); err == nil {
+			return nil, fmt.Errorf("sync staging target %s already exists; preserve or remove it explicitly before retrying", syncPath+".p2-staged")
+		} else if !os.IsNotExist(err) {
+			return nil, err
+		}
 	}
 
 	globals, err := legacyGlobalFiles(dir)
@@ -269,6 +287,10 @@ func collectLegacyMigration() (*legacyMigration, error) {
 		return nil, err
 	}
 	m := &legacyMigration{Roots: map[string]legacyRootCandidate{}, Notebooks: map[string]coderoot.Notebook{}, RootsPath: coderoot.RootsPath(), NotebooksPath: coderoot.NotebooksPath()}
+	if blocked {
+		m.SyncPath, m.SyncStagePath = syncPath, syncPath+".p2-staged"
+		m.Sources = append(m.Sources, legacySource{Path: syncPath, Resolved: resolvedLegacyPath(syncPath), Label: "sync intent (parked for P2)", TOML: true, RemoveSync: true})
+	}
 	// Dead files are import-only and lowest precedence. The live global cascade follows.
 	all := append(dead, globals...)
 	m.Sources = append(m.Sources, all...)
@@ -301,11 +323,14 @@ func collectLegacyMigration() (*legacyMigration, error) {
 			if config.FindEcosystemManifest(expandPath(g.Path)) != "" {
 				scan, kind = false, "ecosystem"
 				if notebook == "" {
-					cardDefault, err := legacyCardDefault(g.Path)
+					cardDefault, manifest, err := legacyCardDefault(g.Path)
 					if err != nil {
 						return nil, fmt.Errorf("%s [groves.%s]: %w", src.Path, name, err)
 					}
 					notebook = cardDefault
+					if cardDefault != "" {
+						m.Sources = appendCardSource(m.Sources, manifest)
+					}
 				}
 			}
 			m.Roots[name] = legacyRootCandidate{Root: coderoot.Root{Path: g.Path, Scan: scan, Notebook: notebook, Enabled: g.Enabled, Description: g.Description, Depth: g.Depth, Repos: repos, Exclude: exclude}, Source: src.Label + ": " + src.Path, Kind: kind}
@@ -326,11 +351,14 @@ func collectLegacyMigration() (*legacyMigration, error) {
 			}
 			nb := e.Notebook
 			if nb == "" {
-				card, err := legacyCardDefault(e.Path)
+				card, manifest, err := legacyCardDefault(e.Path)
 				if err != nil {
 					return nil, fmt.Errorf("%s [machine.ecosystems.%s]: %w", machinePath, name, err)
 				}
 				nb = card
+				if card != "" {
+					m.Sources = appendCardSource(m.Sources, manifest)
+				}
 			}
 			m.Roots[name] = legacyRootCandidate{Root: coderoot.Root{Path: e.Path, Scan: false, Notebook: nb, Enabled: e.Enabled, Description: e.Description, Repos: e.Repos, Exclude: e.Exclude}, Source: "machine: " + machinePath, Kind: "ecosystem"}
 		}
@@ -377,10 +405,10 @@ func collectLegacyMigration() (*legacyMigration, error) {
 	return m, nil
 }
 
-func legacyCardDefault(path string) (string, error) {
+func legacyCardDefault(path string) (string, string, error) {
 	manifest := config.FindEcosystemManifest(expandPath(path))
 	if manifest == "" {
-		return "", nil
+		return "", "", nil
 	}
 	var raw struct {
 		Ecosystem struct {
@@ -390,7 +418,7 @@ func legacyCardDefault(path string) (string, error) {
 		} `toml:"ecosystem" yaml:"ecosystem"`
 	}
 	if err := parseLegacyFile(manifest, &raw); err != nil {
-		return "", err
+		return "", manifest, err
 	}
 	var names []string
 	for name, nb := range raw.Ecosystem.Notebooks {
@@ -400,19 +428,34 @@ func legacyCardDefault(path string) (string, error) {
 	}
 	sort.Strings(names)
 	if len(names) > 1 {
-		return "", fmt.Errorf("ecosystem card %s declares multiple default notebooks", manifest)
+		return "", manifest, fmt.Errorf("ecosystem card %s declares multiple default notebooks", manifest)
 	}
 	if len(names) == 1 {
-		return names[0], nil
+		return names[0], manifest, nil
 	}
-	return "", nil
+	return "", manifest, nil
+}
+
+func appendCardSource(sources []legacySource, manifest string) []legacySource {
+	resolved := resolvedLegacyPath(manifest)
+	for i := range sources {
+		p := sources[i].Resolved
+		if p == "" {
+			p = sources[i].Path
+		}
+		if p == resolved {
+			sources[i].AnnotateCard = true
+			return sources
+		}
+	}
+	return append(sources, legacySource{Path: manifest, Resolved: resolved, Label: "ecosystem card default", TOML: strings.EqualFold(filepath.Ext(manifest), ".toml"), AnnotateCard: true})
 }
 
 func migrationSourceTargets(sources []legacySource) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, s := range sources {
-		if !s.RemoveGlobal && !s.RemoveMachine {
+		if !s.RemoveGlobal && !s.RemoveMachine && !s.RemoveSync && !s.AnnotateCard {
 			continue
 		}
 		p := s.Resolved
@@ -439,7 +482,13 @@ func removeLegacyDeclarations(source legacySource) ([]byte, error) {
 	}
 	if !source.TOML {
 		if source.RemoveGlobal {
-			return removeYAMLTopKeys(data, map[string]bool{"groves": true, "search_paths": true})
+			data, err = removeYAMLTopKeys(data, map[string]bool{"groves": true, "search_paths": true})
+			if err != nil {
+				return nil, err
+			}
+		}
+		if source.AnnotateCard {
+			data = annotateDeprecatedCardYAML(data)
 		}
 		return data, nil
 	}
@@ -450,7 +499,17 @@ func removeLegacyDeclarations(source legacySource) ([]byte, error) {
 	if source.RemoveMachine {
 		prefixes = append(prefixes, "machine.ecosystems", "machine.roots")
 	}
-	return removeTOMLPrefixes(data, prefixes)
+	if source.RemoveSync {
+		prefixes = append(prefixes, "workspaces", "notebooks")
+	}
+	updated, err := removeTOMLPrefixes(data, prefixes)
+	if err != nil {
+		return nil, err
+	}
+	if source.AnnotateCard {
+		updated = annotateDeprecatedCardTOML(updated)
+	}
+	return updated, nil
 }
 
 type tomlRemoval struct{ start, end int }
@@ -643,6 +702,48 @@ func tomlValueEnd(data []byte, value *unstable.Node) int {
 		}
 	}
 	return len(data)
+}
+
+const cardDeprecationComment = "DEPRECATED: ecosystem.notebooks is retained only as migration history; roots.toml/notebooks.toml are authoritative."
+
+func annotateDeprecatedCardTOML(data []byte) []byte {
+	if bytes.Contains(data, []byte(cardDeprecationComment)) {
+		return data
+	}
+	lines := strings.SplitAfter(string(data), "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "[ecosystem.notebooks]" || strings.HasPrefix(trimmed, "[ecosystem.notebooks.") {
+			lines[i] = "# " + cardDeprecationComment + "\n" + line
+			break
+		}
+	}
+	return []byte(strings.Join(lines, ""))
+}
+
+func annotateDeprecatedCardYAML(data []byte) []byte {
+	if bytes.Contains(data, []byte(cardDeprecationComment)) {
+		return data
+	}
+	lines := strings.SplitAfter(string(data), "\n")
+	inEcosystem := false
+	for i, line := range lines {
+		plain := strings.TrimSuffix(line, "\n")
+		trimmed := strings.TrimSpace(plain)
+		indent := len(plain) - len(strings.TrimLeft(plain, " \t"))
+		if indent == 0 && strings.HasPrefix(trimmed, "ecosystem:") {
+			inEcosystem = true
+			continue
+		}
+		if inEcosystem && indent == 0 && trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+			break
+		}
+		if inEcosystem && indent > 0 && strings.HasPrefix(trimmed, "notebooks:") {
+			lines[i] = strings.Repeat(" ", indent) + "# " + cardDeprecationComment + "\n" + line
+			break
+		}
+	}
+	return []byte(strings.Join(lines, ""))
 }
 
 func removeYAMLTopKeys(data []byte, keys map[string]bool) ([]byte, error) {
