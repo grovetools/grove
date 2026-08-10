@@ -477,7 +477,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "Implement", Keys: []string{"n"}, Description: "new implementation", Enabled: true, ConfigKey: "implement"},
 					{Name: "AgentFromChat", Keys: []string{"I"}, Description: "agent from chat", Enabled: true, ConfigKey: "agent_from_chat"},
 					{Name: "Resume", Keys: []string{"U"}, Description: "resume job", Enabled: true, ConfigKey: "resume"},
-					{Name: "DemoteToNote", Keys: []string{"D"}, Description: "demote to note", Enabled: true, ConfigKey: "demote_to_note"},
+					{Name: "DemoteToNote", Keys: []string{"D"}, Description: "demote to note (selection or row)", Enabled: true, ConfigKey: "demote_to_note"},
 					{Name: "Archive", Keys: []string{"X"}, Description: "archive selected", Enabled: true, ConfigKey: "archive"},
 					{Name: "SendInput", Keys: []string{"i"}, Description: "input to agent", Enabled: true, ConfigKey: "send_input"},
 					{Name: "CopyPath", Keys: []string{"ctrl+y"}, Description: "copy path", Enabled: true, ConfigKey: "copy_path"},
