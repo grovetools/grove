@@ -10,6 +10,7 @@ import (
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/coderoot"
+	"github.com/grovetools/grove/pkg/setup"
 )
 
 func migrateSandbox(t *testing.T) string {
@@ -197,6 +198,101 @@ func TestMigrateRefusesLegacySyncOrdering(t *testing.T) {
 	err := runLegacyMigrate(&out, strings.NewReader(""), true, false, time.Now())
 	if err == nil || !strings.Contains(err.Error(), "P2 notespace step") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestMigrateRemovesEveryAcceptedTOMLDeclarationShape(t *testing.T) {
+	cases := map[string]string{
+		"inline":    `groves = { x = { path = "/x", notebook = "nb" } }`,
+		"dotted":    `groves.x = { path = "/x", notebook = "nb" }`,
+		"commented": "[groves.x] # local root\npath = \"/x\"\nnotebook = \"nb\"",
+	}
+	for name, declaration := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := migrateSandbox(t)
+			path := filepath.Join(dir, "grove.toml")
+			migrateWrite(t, path, "keep = \"yes\"\n"+declaration+"\n[notebooks.definitions.nb]\nroot_dir = \"/notes\"\n[notebooks.rules]\ndefault = \"nb\"\n")
+			var out bytes.Buffer
+			if err := runLegacyMigrate(&out, strings.NewReader(""), false, true, time.Unix(2, 0)); err != nil {
+				t.Fatalf("migrate: %v\n%s", err, out.String())
+			}
+			got := migrateRead(t, path)
+			if strings.Contains(got, "groves") || !strings.Contains(got, `keep = "yes"`) {
+				t.Fatalf("migration was not surgical:\n%s", got)
+			}
+		})
+	}
+
+	input := []byte(`machine = { name = "laptop", ecosystems = { eco = { path = "/eco" } }, roots = { bare = { path = "/bare" } } }
+keep = "yes"
+`)
+	got, err := removeTOMLPrefixes(input, []string{"machine.ecosystems", "machine.roots"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	if strings.Contains(text, "ecosystems") || strings.Contains(text, "roots") || !strings.Contains(text, `name = "laptop"`) || !strings.Contains(text, `keep = "yes"`) {
+		t.Fatalf("inline machine migration was not surgical:\n%s", text)
+	}
+}
+
+func TestMigrateMutatesSymlinkUsingLogicalSourceDialect(t *testing.T) {
+	dir := migrateSandbox(t)
+	target := filepath.Join(t.TempDir(), "legacy-config")
+	migrateWrite(t, target, "keep=\"yes\"\n[notebooks.definitions.nb]\nroot_dir=\"/notes\"\n[notebooks.rules]\ndefault=\"nb\"\n[groves.x]\npath=\"/x\"\nnotebook=\"nb\"\n")
+	if err := os.Symlink(target, filepath.Join(dir, "grove.toml")); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := runLegacyMigrate(&out, strings.NewReader(""), false, true, time.Unix(3, 0)); err != nil {
+		t.Fatalf("migrate: %v\n%s", err, out.String())
+	}
+	got := migrateRead(t, target)
+	if strings.Contains(got, "groves.x") || !strings.Contains(got, `keep="yes"`) {
+		t.Fatalf("symlink target edited with wrong dialect:\n%s", got)
+	}
+}
+
+func TestMigrationRejectsConflictingAliasDialects(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "shared")
+	_, err := sourceForTarget([]legacySource{
+		{Path: "grove.toml", Resolved: target, TOML: true, RemoveGlobal: true},
+		{Path: "grove.override.yml", Resolved: target, TOML: false, RemoveGlobal: true},
+	}, target)
+	if err == nil || !strings.Contains(err.Error(), "disagree") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestMigrationBackupCollisionIsImmutable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "grove.toml")
+	migrateWrite(t, path, "original")
+	stamp := "20260810T123456Z"
+	backup := path + "." + stamp + ".bak"
+	migrateWrite(t, backup, "first backup")
+	if err := backupMigrationFile(path, stamp); err == nil {
+		t.Fatal("backup collision unexpectedly overwrote existing backup")
+	}
+	if got := migrateRead(t, backup); got != "first backup" {
+		t.Fatalf("existing backup changed to %q", got)
+	}
+}
+
+func TestCutoverHelpAndPreviewDescribeRecordedTopology(t *testing.T) {
+	m := newSetupModel(setup.NewService(false), nil)
+	m.width = 100
+	preview := m.viewConfigFormatStep()
+	if strings.Contains(preview, "groves.projects") || strings.Contains(preview, "groves:") || !strings.Contains(preview, "roots.toml") {
+		t.Fatalf("stale setup preview:\n%s", preview)
+	}
+	help := newSatelliteUpCmd().Long
+	for _, want := range []string{"five-file recorded", "roots.toml", "notebooks.toml"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("satellite help missing %q", want)
+		}
+	}
+	if strings.Contains(help, "[machine.ecosystems.grovetools]") {
+		t.Fatal("satellite help still advertises machine ecosystem topology")
 	}
 }
 

@@ -5,6 +5,7 @@ package cmd
 // authoring dependency on the schemas being removed.
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
+	"github.com/pelletier/go-toml/v2/unstable"
 	"gopkg.in/yaml.v3"
 
 	"github.com/grovetools/core/config"
@@ -89,6 +91,7 @@ type legacyMachineConfig struct {
 type legacySource struct {
 	Path, Resolved, Label string
 	Config                legacyConfig
+	TOML                  bool // dialect follows the logical source, never its symlink target
 	RemoveGlobal          bool
 	RemoveMachine         bool
 }
@@ -145,7 +148,7 @@ func legacyGlobalFiles(dir string) ([]legacySource, error) {
 		if err := parseLegacyFile(path, &c); err != nil {
 			return fmt.Errorf("%s (%s): %w", label, path, err)
 		}
-		out = append(out, legacySource{Path: path, Resolved: resolvedLegacyPath(path), Label: label, Config: c, RemoveGlobal: len(c.Groves) > 0 || len(c.SearchPaths) > 0})
+		out = append(out, legacySource{Path: path, Resolved: resolvedLegacyPath(path), Label: label, Config: c, TOML: strings.EqualFold(filepath.Ext(path), ".toml"), RemoveGlobal: len(c.Groves) > 0 || len(c.SearchPaths) > 0})
 		return nil
 	}
 	if main != "" {
@@ -221,7 +224,7 @@ func legacyDeadMachineFiles(dir string) ([]legacySource, error) {
 		if err := parseLegacyFile(p, &c); err != nil {
 			return nil, fmt.Errorf("legacy machine %s: %w", p, err)
 		}
-		out = append(out, legacySource{Path: p, Resolved: resolvedLegacyPath(p), Label: "machines/", Config: c, RemoveGlobal: len(c.Groves) > 0 || len(c.SearchPaths) > 0})
+		out = append(out, legacySource{Path: p, Resolved: resolvedLegacyPath(p), Label: "machines/", Config: c, TOML: strings.EqualFold(filepath.Ext(p), ".toml"), RemoveGlobal: len(c.Groves) > 0 || len(c.SearchPaths) > 0})
 	}
 	return out, nil
 }
@@ -315,7 +318,7 @@ func collectLegacyMigration() (*legacyMigration, error) {
 		if err := parseLegacyFile(machinePath, &mc); err != nil {
 			return nil, fmt.Errorf("machine config %s: %w", machinePath, err)
 		}
-		src := legacySource{Path: machinePath, Resolved: resolvedLegacyPath(machinePath), Label: "machine", RemoveMachine: len(mc.Topology.Ecosystems) > 0 || len(mc.Topology.Roots) > 0}
+		src := legacySource{Path: machinePath, Resolved: resolvedLegacyPath(machinePath), Label: "machine", TOML: strings.EqualFold(filepath.Ext(machinePath), ".toml"), RemoveMachine: len(mc.Topology.Ecosystems) > 0 || len(mc.Topology.Roots) > 0}
 		m.Sources = append(m.Sources, src)
 		for name, e := range mc.Topology.Ecosystems {
 			if _, exists := m.Roots[name]; exists {
@@ -425,49 +428,221 @@ func migrationSourceTargets(sources []legacySource) []string {
 	return out
 }
 
-func removeLegacyDeclarations(path string, removeGlobal, removeMachine bool) ([]byte, error) {
+func removeLegacyDeclarations(source legacySource) ([]byte, error) {
+	path := source.Resolved
+	if path == "" {
+		path = source.Path
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	if !strings.EqualFold(filepath.Ext(path), ".toml") {
-		if removeGlobal {
+	if !source.TOML {
+		if source.RemoveGlobal {
 			return removeYAMLTopKeys(data, map[string]bool{"groves": true, "search_paths": true})
 		}
 		return data, nil
 	}
-	prefixes := []string{}
-	if removeGlobal {
+	var prefixes []string
+	if source.RemoveGlobal {
 		prefixes = append(prefixes, "groves", "search_paths")
 	}
-	if removeMachine {
+	if source.RemoveMachine {
 		prefixes = append(prefixes, "machine.ecosystems", "machine.roots")
 	}
-	return []byte(removeTOMLPrefixes(string(data), prefixes)), nil
+	return removeTOMLPrefixes(data, prefixes)
 }
 
-func removeTOMLPrefixes(content string, prefixes []string) string {
-	lines := strings.Split(content, "\n")
-	out := make([]string, 0, len(lines))
-	skip := false
-	for _, line := range lines {
-		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "[") && strings.HasSuffix(trim, "]") {
-			key := strings.Trim(strings.TrimSpace(trim), "[]")
-			key = strings.ReplaceAll(key, "\"", "")
-			skip = false
-			for _, p := range prefixes {
-				if key == p || strings.HasPrefix(key, p+".") {
-					skip = true
-					break
-				}
+type tomlRemoval struct{ start, end int }
+type tomlExpression struct {
+	start  int
+	remove bool
+	nested []tomlRemoval
+}
+
+// removeTOMLPrefixes uses parsed semantic paths rather than textual header
+// guesses, covering tables with comments, dotted assignments, and inline
+// tables while preserving unrelated source bytes.
+func removeTOMLPrefixes(data []byte, prefixes []string) ([]byte, error) {
+	var parser unstable.Parser
+	parser.KeepComments = true
+	parser.Reset(data)
+	var expressions []tomlExpression
+	var tablePath []string
+	tableRemoved := false
+	for parser.NextExpression() {
+		n := parser.Expression()
+		expr := tomlExpression{start: tomlNodeLineStart(data, n), remove: tableRemoved && n.Kind != unstable.Table && n.Kind != unstable.ArrayTable}
+		switch n.Kind {
+		case unstable.Table, unstable.ArrayTable:
+			tablePath = tomlNodeKey(n)
+			tableRemoved = pathHasPrefix(tablePath, prefixes)
+			expr.remove = tableRemoved
+		case unstable.KeyValue:
+			path := append(append([]string{}, tablePath...), tomlNodeKey(n)...)
+			if pathHasPrefix(path, prefixes) {
+				expr.remove = true
+			} else if n.Value().Kind == unstable.InlineTable {
+				expr.nested = tomlInlineRemovals(data, n.Value(), path, prefixes)
 			}
 		}
-		if !skip {
-			out = append(out, line)
+		expressions = append(expressions, expr)
+	}
+	if err := parser.Error(); err != nil {
+		return nil, err
+	}
+	var removals []tomlRemoval
+	for i, expr := range expressions {
+		end := len(data)
+		if i+1 < len(expressions) {
+			end = expressions[i+1].start
+		}
+		if expr.remove {
+			removals = append(removals, tomlRemoval{expr.start, end})
+		} else {
+			removals = append(removals, expr.nested...)
 		}
 	}
-	return strings.Join(out, "\n")
+	sort.Slice(removals, func(i, j int) bool { return removals[i].start < removals[j].start })
+	merged := removals[:0]
+	for _, r := range removals {
+		if len(merged) > 0 && r.start <= merged[len(merged)-1].end {
+			if r.end > merged[len(merged)-1].end {
+				merged[len(merged)-1].end = r.end
+			}
+			continue
+		}
+		merged = append(merged, r)
+	}
+	for i := range merged {
+		j := merged[i].end
+		for j < len(data) && (data[j] == ' ' || data[j] == '\t') {
+			j++
+		}
+		if j < len(data) && data[j] == '}' {
+			for merged[i].start > 0 && (data[merged[i].start-1] == ' ' || data[merged[i].start-1] == '\t') {
+				merged[i].start--
+			}
+			if merged[i].start > 0 && data[merged[i].start-1] == ',' {
+				merged[i].start--
+			}
+		}
+	}
+	for i := len(merged) - 1; i >= 0; i-- {
+		r := merged[i]
+		data = append(data[:r.start], data[r.end:]...)
+	}
+	var check map[string]interface{}
+	if err := toml.Unmarshal(data, &check); err != nil {
+		return nil, fmt.Errorf("validate surgically migrated TOML: %w", err)
+	}
+	return data, nil
+}
+
+func tomlNodeKey(n *unstable.Node) []string {
+	var out []string
+	it := n.Key()
+	for it.Next() {
+		out = append(out, string(it.Node().Data))
+	}
+	return out
+}
+
+func tomlNodeLineStart(data []byte, n *unstable.Node) int {
+	offset := 0
+	if n.Kind == unstable.Comment {
+		offset = int(n.Raw.Offset)
+	} else if it := n.Key(); it.Next() {
+		offset = int(it.Node().Raw.Offset)
+	}
+	if i := bytes.LastIndexByte(data[:offset], '\n'); i >= 0 {
+		return i + 1
+	}
+	return 0
+}
+
+func pathHasPrefix(path []string, prefixes []string) bool {
+	joined := strings.Join(path, ".")
+	for _, prefix := range prefixes {
+		if joined == prefix || strings.HasPrefix(joined, prefix+".") {
+			return true
+		}
+	}
+	return false
+}
+
+func tomlInlineRemovals(data []byte, table *unstable.Node, base []string, prefixes []string) []tomlRemoval {
+	var out []tomlRemoval
+	it := table.Children()
+	for it.Next() {
+		entry := it.Node()
+		path := append(append([]string{}, base...), tomlNodeKey(entry)...)
+		if pathHasPrefix(path, prefixes) {
+			keys := entry.Key()
+			keys.Next()
+			start, end := int(keys.Node().Raw.Offset), tomlValueEnd(data, entry.Value())
+			for end < len(data) && (data[end] == ' ' || data[end] == '\t') {
+				end++
+			}
+			if end < len(data) && data[end] == ',' {
+				end++
+				for end < len(data) && (data[end] == ' ' || data[end] == '\t') {
+					end++
+				}
+			} else {
+				for start > 0 && (data[start-1] == ' ' || data[start-1] == '\t') {
+					start--
+				}
+				if start > 0 && data[start-1] == ',' {
+					start--
+				}
+			}
+			out = append(out, tomlRemoval{start, end})
+		} else if entry.Value().Kind == unstable.InlineTable {
+			out = append(out, tomlInlineRemovals(data, entry.Value(), path, prefixes)...)
+		}
+	}
+	return out
+}
+
+func tomlValueEnd(data []byte, value *unstable.Node) int {
+	start := int(value.Raw.Offset)
+	if value.Kind != unstable.InlineTable && value.Kind != unstable.Array {
+		return start + int(value.Raw.Length)
+	}
+	open, close := byte('{'), byte('}')
+	if value.Kind == unstable.Array {
+		open, close = '[', ']'
+	}
+	depth, quote, escaped := 0, byte(0), false
+	for i := start; i < len(data); i++ {
+		c := data[i]
+		if quote != 0 {
+			if quote == '"' && c == '\\' && !escaped {
+				escaped = true
+				continue
+			}
+			if c == quote && !escaped {
+				quote = 0
+			}
+			escaped = false
+			continue
+		}
+		if c == '"' || c == '\'' {
+			quote = c
+			continue
+		}
+		if c == open {
+			depth++
+		}
+		if c == close {
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+	return len(data)
 }
 
 func removeYAMLTopKeys(data []byte, keys map[string]bool) ([]byte, error) {

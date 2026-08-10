@@ -78,6 +78,37 @@ func commitEcosystemPath(t *testing.T, m Model, path string) Model {
 	return m
 }
 
+// TestEcosystemCommitPreservesRecordedDefault verifies that adding a root
+// cannot reroute pre-existing roots that rely on the machine default.
+func TestEcosystemCommitPreservesRecordedDefault(t *testing.T) {
+	m, _, _, _ := newEcosystemTestModel(t, "")
+	work := "work"
+	if _, err := config.WriteNotebooks(coderoot.NotebooksPath(), config.NotebookEdits{
+		Default: &work,
+		Upserts: map[string]coderoot.Notebook{"work": {Root: "/notes/work"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	m = commitEcosystemPath(t, m, "~/another-ecosystem")
+	if strings.HasPrefix(m.statusMsg, "Error") {
+		t.Fatalf("commit failed: %s", m.statusMsg)
+	}
+	table, err := coderoot.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if table.Default != "work" {
+		t.Fatalf("recorded default changed to %q, want work", table.Default)
+	}
+	if _, ok := table.Notebooks["nb"]; !ok {
+		t.Fatal("nb definition was not ensured")
+	}
+	if got := table.Roots["another-ecosystem"].Notebook; got != "nb" {
+		t.Fatalf("new root notebook=%q, want explicit nb", got)
+	}
+}
+
 // TestEcosystemCommitCreate: a fresh directory is scaffolded (manifest,
 // README, .gitignore, git init) and registered as a typed groves entry —
 // scaffold first, global write last.

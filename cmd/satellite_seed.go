@@ -15,8 +15,9 @@ import (
 // satellite-bootstrap.sh step 5 used to write the VM's grove.toml and sync.toml
 // from hand-written heredocs: a `cat > grove.toml <<'CFG'` block and a `printf`
 // loop that assembled `[[workspaces]]` entries in bash. Both are gone. The CLI
-// now renders the same three files through core/config's shared config-seed
-// writer and ships them as a bundle; step 5 only unpacks what it is handed.
+// now renders the five-file recorded seed through core/config's shared
+// config-seed writer and ships it as a bundle; step 5 only unpacks what it is
+// handed.
 //
 // Three things that were structurally impossible before become true by
 // construction:

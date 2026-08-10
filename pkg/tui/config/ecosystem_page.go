@@ -339,9 +339,20 @@ func (m *Model) commitEcosystem(raw string) (name string, imported bool, err err
 			nbRoot = def.RootDir
 		}
 	}
-	defaultNotebook := "nb"
+	// A recorded default belongs to the machine, not to this page. Establish
+	// the historical "nb" default only on a fresh table; never silently reroute
+	// existing roots that rely on another recorded default.
+	var defaultEdit *string
+	recorded, loadErr := coderoot.Load()
+	if loadErr != nil {
+		return "", false, loadErr
+	}
+	if recorded.Default == "" {
+		defaultNotebook := "nb"
+		defaultEdit = &defaultNotebook
+	}
 	if _, err := config.WriteNotebooks(coderoot.NotebooksPath(), config.NotebookEdits{
-		Default: &defaultNotebook,
+		Default: defaultEdit,
 		Upserts: map[string]coderoot.Notebook{"nb": {Root: nbRoot}},
 	}); err != nil {
 		return "", false, err

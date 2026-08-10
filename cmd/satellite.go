@@ -288,13 +288,14 @@ over its pinned SSH connection — no manual tunnel. Workspaces come from a
 [satellites.<name>.sync] block (workspaces = ["cloud", "grovetools"]) with
 --sync-workspaces overriding; --sync-port 0 disables the whole sync half.
 
-VM configuration (materialization): 'up' RENDERS the VM's grove.toml,
-machine.toml and sync.toml locally — through the same shared config-seed
-writer and role-aware sync editor every other grove machine uses — and ships
-them to the bootstrap, which only unpacks them. The VM declares its ecosystem
-as machine intent ([machine.ecosystems.grovetools]) and its workspaces as
-pull-enabled role="peer" entries (the VM materializes its own notebook from
-its own syncd; the laptop's entries stay push-only role="satellite").
+VM configuration (materialization): 'up' RENDERS the VM's five-file recorded
+seed locally — grove.toml, machine.toml, sync.toml, notebooks.toml, and
+roots.toml — through the same shared config-seed writer and role-aware sync
+editor every other grove machine uses, then ships it to the bootstrap, which
+only unpacks it. The VM records its ecosystem as a specific root in roots.toml
+and its workspaces as pull-enabled role="peer" entries (the VM materializes
+its own notebook from its own syncd; the laptop's entries stay push-only
+role="satellite").
 
 CAPABILITY LOSS ON THE SATELLITE TIER — the VM's ecosystem is FLAT, regardless
 of what the ecosystem card's layout says. A satellite gets its repos as

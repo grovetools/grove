@@ -79,8 +79,11 @@ func runLegacyMigrate(out io.Writer, in io.Reader, dryRun, yes bool, now time.Ti
 		return err
 	}
 	for _, p := range legacyTargets {
-		s := sourceForTarget(m.Sources, p)
-		updated, err := removeLegacyDeclarations(p, s.RemoveGlobal, s.RemoveMachine)
+		s, err := sourceForTarget(m.Sources, p)
+		if err != nil {
+			return err
+		}
+		updated, err := removeLegacyDeclarations(s)
 		if err != nil {
 			return err
 		}
@@ -131,8 +134,11 @@ func runLegacyMigrate(out io.Writer, in io.Reader, dryRun, yes bool, now time.Ti
 	}
 
 	for _, p := range legacyTargets {
-		s := sourceForTarget(m.Sources, p)
-		updated, err := removeLegacyDeclarations(p, s.RemoveGlobal, s.RemoveMachine)
+		s, err := sourceForTarget(m.Sources, p)
+		if err != nil {
+			return err
+		}
+		updated, err := removeLegacyDeclarations(s)
 		if err != nil {
 			return err
 		}
@@ -188,20 +194,31 @@ func sortedLegacyRootNames(m map[string]legacyRootCandidate) []string {
 	return out
 }
 
-func sourceForTarget(sources []legacySource, target string) legacySource {
-	var out legacySource
+func sourceForTarget(sources []legacySource, target string) (legacySource, error) {
+	out := legacySource{Path: target, Resolved: target}
+	found := false
 	for _, s := range sources {
 		p := s.Resolved
 		if p == "" {
 			p = s.Path
 		}
-		if p == target {
-			out.Path = target
-			out.RemoveGlobal = out.RemoveGlobal || s.RemoveGlobal
-			out.RemoveMachine = out.RemoveMachine || s.RemoveMachine
+		if p != target || (!s.RemoveGlobal && !s.RemoveMachine) {
+			continue
 		}
+		if found && out.TOML != s.TOML {
+			return legacySource{}, fmt.Errorf("legacy aliases for %s disagree on TOML/YAML dialect; remove the conflicting alias before migrating", target)
+		}
+		if !found {
+			out.TOML = s.TOML
+			found = true
+		}
+		out.RemoveGlobal = out.RemoveGlobal || s.RemoveGlobal
+		out.RemoveMachine = out.RemoveMachine || s.RemoveMachine
 	}
-	return out
+	if !found {
+		return legacySource{}, fmt.Errorf("internal migration error: no source for %s", target)
+	}
+	return out, nil
 }
 
 func uniqueStrings(in []string) []string {
@@ -247,7 +264,15 @@ func backupMigrationFile(path, stamp string) error {
 	if err == nil {
 		mode = info.Mode().Perm()
 	}
-	if err := os.WriteFile(backup, data, mode); err != nil {
+	f, err := os.OpenFile(backup, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
+		return fmt.Errorf("backup %s (refusing to overwrite an existing backup): %w", path, err)
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return fmt.Errorf("backup %s: %w", path, err)
+	}
+	if err := f.Close(); err != nil {
 		return fmt.Errorf("backup %s: %w", path, err)
 	}
 	return nil

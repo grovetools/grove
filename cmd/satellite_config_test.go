@@ -27,7 +27,8 @@ func TestSeedFragmentDenylist(t *testing.T) {
 		"keys.toml",                 // keys*.toml
 		"keys-extra.toml",           // keys*.toml
 		"groves.toml",               // laptop topology
-		"notebooks.toml",            // laptop topology
+		"roots.toml",                // recorded laptop code-root topology
+		"notebooks.toml",            // recorded laptop notebook topology
 		"projects.toml",             // laptop topology
 		satelliteCustomFragmentName, // reserved for the rendered custom fragment
 		"../evil.toml",              // path escape

@@ -36,6 +36,7 @@ import (
 
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/coderoot"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
@@ -79,7 +80,8 @@ var seedFragmentDenylist = []string{
 	"secrets*.toml", // secret-bearing conventions never leave the laptop
 	"keys*.toml",
 	"groves.toml", // laptop-topology fragments meaningless on the VM
-	"notebooks.toml",
+	coderoot.RootsFileName,
+	coderoot.NotebooksFileName,
 	"projects.toml",
 	satelliteCustomFragmentName, // reserved: rendered from [satellites.<name>.config]
 }

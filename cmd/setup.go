@@ -1479,17 +1479,12 @@ YAML is supported for backwards compatibility.`
 		formatPreview = `[tui]
 theme = "terminal"
 
-[groves.projects]
-path = "~/Code/projects"
-enabled = true`
+# Code roots are recorded in roots.toml.`
 	} else {
 		formatPreview = `tui:
   theme: terminal
 
-groves:
-  projects:
-    path: ~/Code/projects
-    enabled: true`
+# Code roots are recorded in roots.toml.`
 	}
 	content.WriteString(theme.DefaultTheme.Box.Width(m.width - 12).Render(formatPreview))
 
