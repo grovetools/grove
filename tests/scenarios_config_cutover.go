@@ -31,12 +31,25 @@ func ConfigCutoverV2V3Scenario() *harness.Scenario {
 				}
 				artifacts := ctx.NewDir("configlab-evidence")
 				sandbox := ctx.NewDir("configlab-sandbox")
+				hostileParent := ctx.NewDir("configlab-hostile-parent")
+				hostileOverlay := filepath.Join(hostileParent, "operator-overlay.toml")
+				// A malformed overlay makes successful completion proof that the lab did
+				// not read this inherited path. The byte comparison below separately
+				// proves that the path outside the lab sandbox was not modified.
+				hostileBytes := []byte("[broken\nexternal = true\n")
+				if err := os.WriteFile(hostileOverlay, hostileBytes, 0o600); err != nil {
+					return fmt.Errorf("seed hostile parent overlay: %w", err)
+				}
 				script := filepath.Join(ctx.ProjectRoot, "tests", "configlab", "run.sh")
 				cmd := ctx.Command("bash", script,
 					"--grove", groveBin,
 					"--groved", grovedBin,
 					"--artifacts", artifacts,
 					"--sandbox", sandbox,
+				).Env(
+					"GROVE_CONFIG_OVERLAY="+hostileOverlay,
+					"GROVE_CONFIGLAB=1",
+					"GROVE_CONFIGLAB_FAIL_AFTER=roots.toml",
 				).Timeout(3 * time.Minute)
 				result := cmd.Run()
 				ctx.ShowCommandOutput("config-cutover-v2-v3", result.Stdout, result.Stderr)
@@ -45,8 +58,11 @@ func ConfigCutoverV2V3Scenario() *harness.Scenario {
 				}
 				before, beforeErr := os.ReadFile(filepath.Join(artifacts, "before-effective.json"))
 				after, afterErr := os.ReadFile(filepath.Join(artifacts, "after-effective.json"))
+				hostileAfter, hostileErr := os.ReadFile(hostileOverlay)
 				return ctx.Verify(func(v *verify.Collector) {
 					v.Equal("summary exists", nil, fs.AssertExists(filepath.Join(artifacts, "configlab-summary.json")))
+					v.Equal("hostile parent overlay remains readable", nil, hostileErr)
+					v.Equal("hostile inherited malformed overlay was neither read nor modified", string(hostileBytes), string(hostileAfter))
 					v.Equal("before effective JSON readable", nil, beforeErr)
 					v.Equal("after effective JSON readable", nil, afterErr)
 					v.Equal("before/after effective JSON match", string(before), string(after))

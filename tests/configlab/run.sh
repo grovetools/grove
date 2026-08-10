@@ -53,6 +53,10 @@ export XDG_DATA_HOME="$SANDBOX/xdg/data"
 export XDG_STATE_HOME="$SANDBOX/xdg/state"
 export XDG_CACHE_HOME="$SANDBOX/xdg/cache"
 export XDG_RUNTIME_DIR="$SANDBOX/run"
+# Do not let an operator's process environment add config layers or activate
+# config-lab fault injection. Individual probes opt into the latter with
+# command-local env assignments below.
+unset GROVE_CONFIG_OVERLAY GROVE_CONFIGLAB GROVE_CONFIGLAB_FAIL_AFTER
 export GROVE_SCOPE=
 export GROVE_DAEMON_PAIR_PID=
 export GROVE_BIN=
@@ -230,6 +234,6 @@ DAEMON_PID=""
 if find "$GROVE_HOME" -type f \( -name '*.db' -o -name '*job-queue*' \) -print | grep -q .; then fail "degraded daemon created pipeline persistence"; fi
 
 cat >"$ARTIFACTS/configlab-summary.json" <<'EOF'
-{"schema_version":1,"scenario":"config-cutover-v2-v3","status":"pass","operator_state_access":"none; HOME, GROVE_HOME, and every XDG directory were sandboxed"}
+{"schema_version":1,"scenario":"config-cutover-v2-v3","status":"pass","operator_state_access":"none; HOME, GROVE_HOME, and every XDG directory were sandboxed; inherited config overlay and config-lab controls were cleared"}
 EOF
 echo "config-lab PASS: $ARTIFACTS"
