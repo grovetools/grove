@@ -90,7 +90,7 @@ func TestThemesPageRegistration(t *testing.T) {
 
 	pages := m.pager.Pages()
 	if len(pages) != 7 {
-		t.Fatalf("expected 7 pages (appearance, layout, keys, themes, notebook, ecosystem, data), got %d", len(pages))
+		t.Fatalf("expected 7 pages (appearance, layout, keys, themes, code, notes, data), got %d", len(pages))
 	}
 	tp, ok := pages[3].(*ThemesPage)
 	if !ok {

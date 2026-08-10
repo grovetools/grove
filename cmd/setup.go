@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -45,9 +44,6 @@ const (
 	stepSelectComponents wizardStep = iota
 	stepConfigFormat
 	stepTUITheme
-	stepEcosystem
-	stepFirstProject
-	stepNotebook
 	stepGeminiKey
 	stepAnthropicKey
 	stepFlowSettings
@@ -177,17 +173,6 @@ type setupModel struct {
 	tuiTheme  string
 	themeList list.Model
 
-	// Ecosystem step state
-	ecosystemPath string
-	ecosystemName string
-
-	// First project step state
-	firstProjectName string
-	skipFirstProject bool
-
-	// Notebook step state
-	notebookPath string
-
 	// Gemini key step state
 	geminiMethod apiKeyMethod
 	geminiValue  string
@@ -249,8 +234,6 @@ func newSetupModel(service *setup.Service, selectedOnly map[string]bool) *setupM
 	// Initialize components
 	components := []componentItem{
 		{id: "tui", title: "TUI Theme", description: "Select the color theme for terminal interfaces", selected: true},
-		{id: "ecosystem", title: "Ecosystem Directory", description: "Configure a Grove ecosystem directory", selected: true},
-		{id: "notebook", title: "Notebook Directory", description: "Set up a notebook directory for notes and plans", selected: true},
 		{id: "gemini", title: "Gemini API Key", description: "Configure Gemini API access for LLM features", selected: true},
 		{id: "anthropic", title: "Anthropic API Key", description: "Configure Anthropic API access for Claude LLM features", selected: true},
 		{id: "flow", title: "Flow Settings", description: "Configure default model for LLM jobs", selected: true},
@@ -332,11 +315,6 @@ func newSetupModel(service *setup.Service, selectedOnly map[string]bool) *setupM
 	ti.CharLimit = 256
 	ti.Width = 50
 
-	// Set default paths
-	homeDir, _ := os.UserHomeDir()
-	defaultEcosystemPath := filepath.Join(homeDir, "Code")
-	defaultNotebookPath := filepath.Join(homeDir, "notebooks")
-
 	// Initialize agent argument items
 	agentArgs := []agentArgItem{
 		{arg: "--dangerously-skip-permissions", desc: "Skip permission prompts", selected: true},
@@ -355,9 +333,6 @@ func newSetupModel(service *setup.Service, selectedOnly map[string]bool) *setupM
 		formatList:        formatList,
 		tuiTheme:          "terminal",
 		themeList:         themeList,
-		ecosystemPath:     defaultEcosystemPath,
-		ecosystemName:     filepath.Base(defaultEcosystemPath),
-		notebookPath:      defaultNotebookPath,
 		geminiMethod:      apiKeyMethodCommand,
 		geminiValue:       "op read 'op://Private/Gemini API Key/credential' --no-newline",
 		anthropicMethod:   apiKeyMethodCommand,
@@ -395,12 +370,6 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateConfigFormatStep(msg)
 		case stepTUITheme:
 			return m.updateTUIThemeStep(msg)
-		case stepEcosystem:
-			return m.updateEcosystemStep(msg)
-		case stepFirstProject:
-			return m.updateFirstProjectStep(msg)
-		case stepNotebook:
-			return m.updateNotebookStep(msg)
 		case stepGeminiKey:
 			return m.updateGeminiKeyStep(msg)
 		case stepAnthropicKey:
@@ -578,11 +547,6 @@ func (m *setupModel) buildOrderedSteps() {
 			switch c.id {
 			case "tui":
 				m.orderedSteps = append(m.orderedSteps, stepTUITheme)
-			case "ecosystem":
-				m.orderedSteps = append(m.orderedSteps, stepEcosystem)
-				m.orderedSteps = append(m.orderedSteps, stepFirstProject)
-			case "notebook":
-				m.orderedSteps = append(m.orderedSteps, stepNotebook)
 			case "gemini":
 				m.orderedSteps = append(m.orderedSteps, stepGeminiKey)
 			case "anthropic":
@@ -608,18 +572,6 @@ func (m *setupModel) prepareStepInput() {
 		// No text input needed, uses formatList
 	case stepTUITheme:
 		// No text input needed, uses themeList
-	case stepEcosystem:
-		m.currentInput = inputPath
-		m.textInput.SetValue(m.ecosystemPath)
-		m.textInput.Placeholder = "Path to ecosystem directory"
-	case stepFirstProject:
-		m.currentInput = inputName
-		m.textInput.SetValue(m.firstProjectName)
-		m.textInput.Placeholder = "my-project"
-	case stepNotebook:
-		m.currentInput = inputPath
-		m.textInput.SetValue(m.notebookPath)
-		m.textInput.Placeholder = "Path to notebook directory"
 	case stepGeminiKey:
 		m.currentInput = inputMethod
 	case stepAnthropicKey:
@@ -657,66 +609,6 @@ func (m *setupModel) prevStep() {
 	} else {
 		m.step = stepSelectComponents
 	}
-}
-
-func (m *setupModel) updateEcosystemStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch {
-	case key.Matches(msg, m.keys.Base.Quit):
-		return m, tea.Quit
-	case key.Matches(msg, m.keys.Back):
-		m.prevStep()
-		return m, nil
-	case key.Matches(msg, m.keys.Confirm):
-		m.ecosystemPath = m.textInput.Value()
-		// Automatically derive ecosystem name from directory
-		m.ecosystemName = filepath.Base(m.ecosystemPath)
-		if m.ecosystemName == "." || m.ecosystemName == "/" || m.ecosystemName == "" {
-			m.ecosystemName = "my-projects"
-		}
-		m.nextStep()
-		return m, nil
-	}
-
-	var cmd tea.Cmd
-	m.textInput, cmd = m.textInput.Update(msg)
-	return m, cmd
-}
-
-func (m *setupModel) updateFirstProjectStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch {
-	case key.Matches(msg, m.keys.Base.Quit):
-		return m, tea.Quit
-	case key.Matches(msg, m.keys.Back):
-		m.prevStep()
-		return m, nil
-	case key.Matches(msg, m.keys.Confirm):
-		m.firstProjectName = m.textInput.Value()
-		m.skipFirstProject = m.firstProjectName == ""
-		m.nextStep()
-		return m, nil
-	}
-
-	var cmd tea.Cmd
-	m.textInput, cmd = m.textInput.Update(msg)
-	return m, cmd
-}
-
-func (m *setupModel) updateNotebookStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch {
-	case key.Matches(msg, m.keys.Base.Quit):
-		return m, tea.Quit
-	case key.Matches(msg, m.keys.Back):
-		m.prevStep()
-		return m, nil
-	case key.Matches(msg, m.keys.Confirm):
-		m.notebookPath = m.textInput.Value()
-		m.nextStep()
-		return m, nil
-	}
-
-	var cmd tea.Cmd
-	m.textInput, cmd = m.textInput.Update(msg)
-	return m, cmd
 }
 
 func (m *setupModel) updateGeminiKeyStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -984,18 +876,7 @@ func (m *setupModel) executeSetup() {
 		m.err = err
 	}
 
-	// Create notebook directory if selected
-	if m.selectedSteps["notebook"] {
-		_ = m.service.MkdirAll(m.notebookPath, 0o755)
-	}
-
-	// These don't depend on config format
-	if m.selectedSteps["ecosystem"] {
-		m.setupEcosystemFiles()
-		if !m.skipFirstProject && m.firstProjectName != "" {
-			m.setupFirstProject()
-		}
-	}
+	// These don't depend on config format.
 	if m.selectedSteps["tmux"] {
 		m.setupTmuxBindings()
 	}
@@ -1067,23 +948,6 @@ func (m *setupModel) generateTOMLConfig() ([]byte, string) {
 		}
 	}
 
-	// Ecosystem registration is NOT part of this file: setupEcosystemFiles
-	// records it in roots.toml after scaffolding.
-
-	// Notebook: define a named notebook and point the default rule at it
-	if m.selectedSteps["notebook"] {
-		config["notebooks"] = map[string]interface{}{
-			"definitions": map[string]interface{}{
-				"personal": map[string]interface{}{
-					"root_dir": m.notebookPath,
-				},
-			},
-			"rules": map[string]interface{}{
-				"default": "personal",
-			},
-		}
-	}
-
 	// Gemini settings
 	if m.selectedSteps["gemini"] {
 		geminiConfig := make(map[string]interface{})
@@ -1151,14 +1015,6 @@ func (m *setupModel) generateYAMLConfig() ([]byte, string) {
 		_ = setup.SetValue(root, []string{"w", "e", "r", "t", "y", "o", "a", "f", "g", "v"}, "tmux", "available_keys")
 	}
 
-	// Ecosystem registration lives in roots.toml — see generateTOMLConfig.
-
-	// Notebook: define a named notebook and point the default rule at it
-	if m.selectedSteps["notebook"] {
-		_ = setup.SetValue(root, m.notebookPath, "notebooks", "definitions", "personal", "root_dir")
-		_ = setup.SetValue(root, "personal", "notebooks", "rules", "default")
-	}
-
 	// Agent settings (flow reads provider args from flow.providers.*)
 	if m.selectedSteps["agent"] {
 		_ = setup.SetValue(root, m.claudeArgs, "flow", "providers", "claude", "args")
@@ -1195,50 +1051,6 @@ func (m *setupModel) generateYAMLConfig() ([]byte, string) {
 	// Marshal to YAML
 	data, _ := yaml.Marshal(root)
 	return data, setup.GlobalConfigPath()
-}
-
-func (m *setupModel) setupEcosystemFiles() {
-	format := setup.ManifestYAML
-	if m.configFormat == formatTOML {
-		format = setup.ManifestTOML
-	}
-	_ = m.service.ScaffoldEcosystem(m.ecosystemPath, m.ecosystemName, format)
-	// The registration is a recorded root, written AFTER the scaffold: a failed
-	// scaffold must not leave a subscription pointing at a
-	// half-created directory.
-	if !m.service.IsDryRun() {
-		_, _ = registerCodeRoot(m.ecosystemName, m.ecosystemPath, "nb")
-	}
-}
-
-func (m *setupModel) setupFirstProject() {
-	projectPath := filepath.Join(m.ecosystemPath, m.firstProjectName)
-
-	// Create project directory
-	_ = m.service.MkdirAll(projectPath, 0o755)
-
-	// Create grove.yml or grove.toml for the project based on format selection
-	if m.configFormat == formatTOML {
-		groveTOMLContent := fmt.Sprintf(`name = "%s"
-description = "A Grove project"
-`, m.firstProjectName)
-		_ = m.service.WriteFile(filepath.Join(projectPath, "grove.toml"), []byte(groveTOMLContent), 0o600)
-	} else {
-		groveYMLContent := fmt.Sprintf(`name: %s
-description: A Grove project
-`, m.firstProjectName)
-		_ = m.service.WriteFile(filepath.Join(projectPath, "grove.yml"), []byte(groveYMLContent), 0o600)
-	}
-
-	// Create README.md
-	readmeContent := fmt.Sprintf(`# %s
-
-A Grove project.
-`, m.firstProjectName)
-	_ = m.service.WriteFile(filepath.Join(projectPath, "README.md"), []byte(readmeContent), 0o600)
-
-	// Initialize git repository
-	_ = m.service.RunGitInit(projectPath)
 }
 
 func (m *setupModel) setupTmuxBindings() {
@@ -1336,12 +1148,6 @@ func (m *setupModel) View() string {
 		title = theme.DefaultTheme.Info.Render(theme.IconNote) + " Configuration Format"
 	case stepTUITheme:
 		title = theme.DefaultTheme.Highlight.Render(theme.IconSparkle) + " TUI Theme"
-	case stepEcosystem:
-		title = theme.DefaultTheme.Success.Render(theme.IconPineTreeBox) + " Ecosystem Directory"
-	case stepFirstProject:
-		title = theme.DefaultTheme.Info.Render(theme.IconRepo) + " First Project"
-	case stepNotebook:
-		title = theme.DefaultTheme.Highlight.Render(theme.IconNotebook) + " Notebook Directory"
 	case stepGeminiKey:
 		title = theme.DefaultTheme.Info.Render(theme.IconRobot) + " Gemini API Key"
 	case stepAnthropicKey:
@@ -1374,12 +1180,6 @@ func (m *setupModel) View() string {
 		content.WriteString(m.viewConfigFormatStep())
 	case stepTUITheme:
 		content.WriteString(m.viewTUIThemeStep())
-	case stepEcosystem:
-		content.WriteString(m.viewEcosystemStep())
-	case stepFirstProject:
-		content.WriteString(m.viewFirstProjectStep())
-	case stepNotebook:
-		content.WriteString(m.viewNotebookStep())
 	case stepGeminiKey:
 		content.WriteString(m.viewGeminiKeyStep())
 	case stepAnthropicKey:
@@ -1529,81 +1329,6 @@ This affects tools like nav, nb, and flow TUIs.`
 		content.WriteString(fmt.Sprintf("%s%s %s\n", cursor, icon, title))
 		content.WriteString(fmt.Sprintf("     %s\n", theme.DefaultTheme.Muted.Render(t.desc)))
 	}
-
-	return content.String()
-}
-
-func (m *setupModel) viewEcosystemStep() string {
-	var content strings.Builder
-
-	// Explanation
-	explanation := `An ecosystem is a meta-repo where projects can be explored and managed as a group.
-It enables coordinated worktree creation, cross-project context, and shared commands
-across several possibly related git repositories.`
-	content.WriteString(theme.DefaultTheme.Muted.Render(explanation))
-	content.WriteString("\n\n")
-
-	// Clean input section without box borders
-	content.WriteString(theme.DefaultTheme.Bold.Render("Where should your ecosystem be created?") + "\n\n")
-	content.WriteString("  " + m.textInput.View() + "\n\n")
-	content.WriteString("  " + theme.DefaultTheme.Muted.Render("The filesystem directory where your projects will live."))
-	content.WriteString("\n\n")
-
-	// Show nav preview with dynamic path from user input
-	content.WriteString(theme.DefaultTheme.Muted.Render("Preview: Your ecosystem in nav"))
-	content.WriteString("\n")
-	content.WriteString(renderNavPreview(m.textInput.Value(), "", m.width-6))
-
-	return content.String()
-}
-
-func (m *setupModel) viewFirstProjectStep() string {
-	var content strings.Builder
-
-	// Explanation
-	explanation := `You can create your first project inside the ecosystem now.
-Leave blank and press Enter to skip this step.`
-	content.WriteString(theme.DefaultTheme.Muted.Render(explanation))
-	content.WriteString("\n\n")
-
-	// Clean input section without box borders
-	content.WriteString(theme.DefaultTheme.Bold.Render("What should your first project be called?") + "\n\n")
-	content.WriteString("  " + m.textInput.View() + "\n\n")
-	projectPath := filepath.Join(m.ecosystemPath, m.textInput.Value())
-	if m.textInput.Value() == "" {
-		projectPath = filepath.Join(m.ecosystemPath, "<project-name>")
-	}
-	content.WriteString("  " + theme.DefaultTheme.Muted.Render(fmt.Sprintf("Will be created at: %s", projectPath)))
-	content.WriteString("\n\n")
-
-	// Show nav preview with the new project
-	content.WriteString(theme.DefaultTheme.Muted.Render("Preview: Your ecosystem in nav"))
-	content.WriteString("\n")
-	projectName := m.textInput.Value()
-	content.WriteString(renderNavPreview(m.ecosystemPath, projectName, m.width-6))
-
-	return content.String()
-}
-
-func (m *setupModel) viewNotebookStep() string {
-	var content strings.Builder
-
-	// Explanation
-	explanation := `Notebooks store your development notes, plans, and AI chat histories.
-Each workspace gets its own section, keeping project context organized.`
-	content.WriteString(theme.DefaultTheme.Muted.Render(explanation))
-	content.WriteString("\n\n")
-
-	// Clean input section without box borders
-	content.WriteString(theme.DefaultTheme.Bold.Render("Where should your notebooks be stored?") + "\n\n")
-	content.WriteString("  " + m.textInput.View() + "\n\n")
-	content.WriteString("  " + theme.DefaultTheme.Muted.Render("This directory will store your notes and plans."))
-	content.WriteString("\n\n")
-
-	// Show a simple preview of the notebook structure
-	content.WriteString(theme.DefaultTheme.Muted.Render("Preview: Your notebook structure"))
-	content.WriteString("\n")
-	content.WriteString(renderNotebookPreview(m.textInput.Value(), m.width-6))
 
 	return content.String()
 }
@@ -1934,7 +1659,7 @@ func (m *setupModel) viewSummary() string {
 	content.WriteString(theme.DefaultTheme.Bold.Render("Next Steps:") + "\n")
 	content.WriteString(theme.DefaultTheme.Muted.Render("  1. Restart your terminal or source your shell config") + "\n")
 	content.WriteString(theme.DefaultTheme.Muted.Render("  2. Run 'grove list' to see available tools") + "\n")
-	content.WriteString(theme.DefaultTheme.Muted.Render("  3. Start building with 'grove build' in your ecosystem") + "\n")
+	content.WriteString(theme.DefaultTheme.Muted.Render("  3. Record code roots and notebooks in the config panel") + "\n")
 
 	// Wrap in box with success border
 	boxStyle := theme.DefaultTheme.Box.
@@ -1948,9 +1673,10 @@ func newSetupCmd() *cobra.Command {
 	cmd := cli.NewStandardCommand("setup", "Interactive setup wizard for Grove")
 	cmd.Long = `Interactive setup wizard for configuring Grove.
 
-The setup wizard guides you through configuring:
-- Ecosystem directory: Where your Grove projects live
-- Notebook directory: For notes and development plans
+The setup wizard guides you through configuring integrations and credentials.
+Code roots and notebooks are configured in treemux's Code and Notes pages.
+
+Available setup steps:
 - Gemini API key: For LLM-powered features
 - Anthropic API key: For Claude-powered features (ANTHROPIC_API_KEY)
 - tmux popup bindings: Quick access to Grove tools
@@ -1964,7 +1690,7 @@ Examples:
   grove setup --defaults
 
   # Run specific steps only
-  grove setup --only ecosystem,notebook
+  grove setup --only gemini,anthropic
 
   # Preview changes without making them
   grove setup --dry-run`
@@ -1972,7 +1698,7 @@ Examples:
 	cmd.RunE = runSetup
 	cmd.SilenceUsage = true
 
-	cmd.Flags().StringSliceVar(&setupOnlySteps, "only", nil, "Run only specific setup steps (ecosystem,notebook,gemini,anthropic,flow,tmux,agent,nvim,hooks)")
+	cmd.Flags().StringSliceVar(&setupOnlySteps, "only", nil, "Run only specific setup steps (tui,gemini,anthropic,flow,tmux,agent,nvim,hooks)")
 	cmd.Flags().BoolVar(&setupDefaults, "defaults", false, "Use default values without interactive prompts")
 	cmd.Flags().BoolVar(&setupDryRun, "dry-run", false, "Preview changes without making them")
 
@@ -2025,51 +1751,6 @@ func runSetup(cmd *cobra.Command, args []string) error {
 }
 
 func runSetupDefaults(service *setup.Service, selectedOnly map[string]bool, logger *logrus.Entry, pretty *logging.PrettyLogger) error {
-	yamlHandler := setup.NewYAMLHandler(service)
-
-	// Determine which steps to run
-	runAll := len(selectedOnly) == 0
-
-	homeDir, _ := os.UserHomeDir()
-
-	if runAll || selectedOnly["ecosystem"] {
-		pretty.InfoPretty("Setting up ecosystem directory...")
-		ecosystemPath := filepath.Join(homeDir, "Code")
-		ecosystemName := filepath.Base(ecosystemPath)
-
-		// Only scaffold the directory when it doesn't exist yet; an existing
-		// directory (e.g. ~/Code full of repos) is registered as-is, never
-		// overwritten or git-initialized.
-		if _, err := os.Stat(ecosystemPath); os.IsNotExist(err) {
-			// TOML, matching `grove ecosystem init` and the config TUI: the
-			// non-interactive path should not be the one that leaves a machine
-			// with a YAML manifest.
-			_ = service.ScaffoldEcosystem(ecosystemPath, ecosystemName, setup.ManifestTOML)
-		} else {
-			pretty.InfoPretty(fmt.Sprintf("Directory %s already exists; registering it without modifying its contents", ecosystemPath))
-		}
-
-		// Registration is a roots.toml entry, not a legacy [groves.*] entry
-		// in the shareable global config.
-		if !service.IsDryRun() {
-			if path, err := registerCodeRoot(ecosystemName, ecosystemPath, ""); err == nil {
-				pretty.InfoPretty(fmt.Sprintf("Subscribed to ecosystem %s (%s)", ecosystemName, path))
-			} else {
-				pretty.InfoPretty(fmt.Sprintf("Could not write the ecosystem subscription: %v", err))
-			}
-		}
-	}
-
-	if runAll || selectedOnly["notebook"] {
-		pretty.InfoPretty("Setting up notebook directory...")
-		notebookPath := filepath.Join(homeDir, "notebooks")
-		_ = service.MkdirAll(notebookPath, 0o755)
-
-		root, _ := yamlHandler.LoadGlobalConfig()
-		_ = setup.SetValue(root, notebookPath, "notebooks", "definitions", "personal", "root_dir")
-		_ = setup.SetValue(root, "personal", "notebooks", "rules", "default")
-		_ = yamlHandler.SaveGlobalConfig(root)
-	}
 
 	if selectedOnly["gemini"] {
 		pretty.InfoPretty("Skipping Gemini API key (requires interactive input)...")

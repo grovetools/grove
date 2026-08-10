@@ -15,16 +15,13 @@ import (
 
 // SinglePageOpts configures NewSinglePage.
 type SinglePageOpts struct {
-	// EssentialsOnly filters curated pages to their Essential-tagged rows —
-	// onboarding's density (spec 23). Ignored by non-curated pages (Themes,
-	// which is already a single decision; Ecosystem, whose whole form is the
-	// essential content).
+	// EssentialsOnly filters curated pages to their Essential-tagged rows.
+	// It is ignored by bespoke pages such as Themes and Code.
 	EssentialsOnly bool
 }
 
 // NewSinglePage builds a config Model hosting exactly ONE page, identified
-// by its tab ID ("themes", "appearance", "layout", "keys", "notebook",
-// "ecosystem"). The onboarding
+// by its tab ID ("themes", "appearance", "layout", "keys", "code", "notes"). The onboarding
 // steps embed these so the Theme/Keys steps ARE the real config machinery:
 // the full commit path (setSettingMsg → TypedValue → WriteTransform →
 // SaveGlobalSetting → reloadConfig → SettingAppliedMsg) lives in the Model
@@ -74,15 +71,12 @@ func NewSinglePage(pageID string, layered *config.LayeredConfig, yamlHandler *se
 		m.curatedPages = []*CuratedPage{cp}
 		m.keysPage = cp
 		page = cp
-	case "notebook":
-		cp := NewCuratedPage("Notebook", NotebookSettings(), layered, keys, width, height, curatedOpts)
-		m.curatedPages = []*CuratedPage{cp}
-		page = cp
-	case "ecosystem":
-		// Non-curated form page: the whole form IS the essential content, so
-		// EssentialsOnly is a deliberate no-op here (like Themes).
-		m.ecosystemPage = NewEcosystemPage(layered, keys, width, height)
-		page = m.ecosystemPage
+	case "code":
+		m.codePage = NewCodePage(layered, keys, width, height)
+		page = m.codePage
+	case "notes":
+		m.notesPage = NewNotesPage(layered, keys, width, height)
+		page = m.notesPage
 	default:
 		return Model{}, fmt.Errorf("unknown config page %q", pageID)
 	}

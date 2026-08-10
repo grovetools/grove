@@ -93,9 +93,9 @@ type Model struct {
 	// themesPage is the bespoke theme-gallery page (4th tab).
 	themesPage *ThemesPage
 
-	// ecosystemPage is the bespoke create/import-ecosystem form page
-	// (after Notebook, before Data).
-	ecosystemPage *EcosystemPage
+	// Code and Notes are the recorded roots/notebooks surfaces.
+	codePage  *CodePage
+	notesPage *NotesPage
 
 	// curatedPages tracks the CuratedPage tabs so refreshAllPages can
 	// re-point them at a reloaded config.
@@ -167,18 +167,17 @@ func New(
 
 	width, height := 80, 24 // Initial dummy size
 
-	// Curated pages: Appearance, Layout, Keys, and Notebook are the
-	// task-shaped tabs; Themes is the existing gallery; Data is the raw
-	// per-layer tree collapsed into one tab with a layer cycler.
+	// Curated pages: Appearance, Layout, and Keys are task-shaped tabs;
+	// Code and Notes own the recorded roots/notebooks files; Data is raw config.
 	appearancePage := NewCuratedPage("Appearance", AppearanceSettings(), layered, keys, width, height, CuratedOpts{})
 	layoutPage := NewCuratedPage("Layout", LayoutSettings(), layered, keys, width, height, CuratedOpts{})
 	keysPage := NewCuratedPage("Keys", KeysSettings(), layered, keys, width, height, CuratedOpts{})
 	themesPage := NewThemesPage(layered, keys, width, height)
-	notebookPage := NewCuratedPage("Notebook", NotebookSettings(), layered, keys, width, height, CuratedOpts{})
-	ecosystemPage := NewEcosystemPage(layered, keys, width, height)
+	codePage := NewCodePage(layered, keys, width, height)
+	notesPage := NewNotesPage(layered, keys, width, height)
 	dataPage := NewDataPage(layered, filters, keys, width, height)
 
-	pages := []pager.Page{appearancePage, layoutPage, keysPage, themesPage, notebookPage, ecosystemPage, dataPage}
+	pages := []pager.Page{appearancePage, layoutPage, keysPage, themesPage, codePage, notesPage, dataPage}
 
 	pagerKeys := newPagerKeyMap(keys)
 
@@ -203,21 +202,22 @@ func New(
 	}
 
 	m := Model{
-		pager:         pgr,
-		dataPage:      dataPage,
-		themesPage:    themesPage,
-		ecosystemPage: ecosystemPage,
-		curatedPages:  []*CuratedPage{appearancePage, layoutPage, keysPage, notebookPage},
-		keysPage:      keysPage,
-		input:         ti,
-		layered:       layered,
-		yamlHandler:   yamlHandler,
-		tomlHandler:   tomlHandler,
-		filters:       filters,
-		keys:          keys,
-		whichKey:      corekeymap.NewWhichKeyHost(coreCfg, keys.Namespaces()...),
-		help:          help.NewBuilder().WithKeys(keys).WithTitle("Configuration Editor").Build(),
-		state:         viewList,
+		pager:        pgr,
+		dataPage:     dataPage,
+		themesPage:   themesPage,
+		codePage:     codePage,
+		notesPage:    notesPage,
+		curatedPages: []*CuratedPage{appearancePage, layoutPage, keysPage},
+		keysPage:     keysPage,
+		input:        ti,
+		layered:      layered,
+		yamlHandler:  yamlHandler,
+		tomlHandler:  tomlHandler,
+		filters:      filters,
+		keys:         keys,
+		whichKey:     corekeymap.NewWhichKeyHost(coreCfg, keys.Namespaces()...),
+		help:         help.NewBuilder().WithKeys(keys).WithTitle("Configuration Editor").Build(),
+		state:        viewList,
 	}
 
 	// Focus the first page
@@ -296,13 +296,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMsg = fmt.Sprintf("Theme %q saved to %s!", msg.name, LayerDisplayName(config.SourceGlobal))
 		return m, nil
 
-	case applyEcosystemMsg:
-		// Create-or-import + register the ecosystem (see commitEcosystem for
-		// the scaffold-before-write ordering). Like the theme write there is
-		// no SettingAppliedMsg — no groves apply domain exists; workspace
-		// discovery picks the new ecosystem up on the next daemon refresh.
-		name, imported, err := m.commitEcosystem(msg.path)
-		if err != nil {
+	case applyCodeRootMsg:
+		if err := m.addCodeRoot(msg.path); err != nil {
 			m.statusMsg = fmt.Sprintf("Error: %v", err)
 			return m, nil
 		}
@@ -310,11 +305,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = fmt.Sprintf("Error reloading: %v", err)
 			return m, nil
 		}
-		verb := "created"
-		if imported {
-			verb = "imported"
+		m.statusMsg = "Code root recorded; scan complete."
+		return m, nil
+	case toggleCodeExcludeMsg:
+		if err := m.toggleCodeExclude(msg.root, msg.repo); err != nil {
+			m.statusMsg = fmt.Sprintf("Error: %v", err)
+			return m, nil
 		}
-		m.statusMsg = fmt.Sprintf("Ecosystem %q %s and saved to %s!", name, verb, LayerDisplayName(config.SourceGlobal))
+		if err := m.reloadConfig(); err != nil {
+			m.statusMsg = fmt.Sprintf("Error reloading: %v", err)
+		}
 		return m, nil
 
 	case setSettingMsg:
@@ -1084,8 +1084,11 @@ func (m *Model) refreshAllPages() {
 	if m.themesPage != nil {
 		m.themesPage.Refresh(m.layered)
 	}
-	if m.ecosystemPage != nil {
-		m.ecosystemPage.Refresh(m.layered)
+	if m.codePage != nil {
+		m.codePage.Refresh(m.layered)
+	}
+	if m.notesPage != nil {
+		m.notesPage.Refresh(m.layered)
 	}
 	for _, cp := range m.curatedPages {
 		cp.Refresh(m.layered)

@@ -62,7 +62,7 @@ func TestPagerPageOrder(t *testing.T) {
 	m, _ := newTestModel(t)
 
 	pages := m.pager.Pages()
-	wantNames := []string{"Appearance", "Layout", "Keys", "Themes", "Notebook", "Ecosystem", "Data"}
+	wantNames := []string{"Appearance", "Layout", "Keys", "Themes", "Code", "Notes", "Data"}
 	if len(pages) != len(wantNames) {
 		t.Fatalf("expected %d pages, got %d", len(wantNames), len(pages))
 	}
