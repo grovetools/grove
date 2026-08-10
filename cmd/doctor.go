@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,6 +19,8 @@ import (
 func init() {
 	rootCmd.AddCommand(newDoctorCmd())
 }
+
+var errDoctorFailed = errors.New("doctor found failures")
 
 var (
 	doctorFix     bool
@@ -48,6 +51,17 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	opts := doctor.RunOptions{Verbose: doctorVerbose}
 
+	// Config loading is a top-level health signal, not a prerequisite for the
+	// check runner. Capture it first, then always run the requested independent
+	// checks even when configuration is malformed.
+	cwd, cwdErr := os.Getwd()
+	var configErr error
+	if cwdErr != nil {
+		configErr = fmt.Errorf("failed to get current directory: %w", cwdErr)
+	} else {
+		_, configErr = loadEffectiveConfig(cwd)
+	}
+
 	var results []doctor.CheckResult
 	if doctorCheckID != "" {
 		var res doctor.CheckResult
@@ -67,6 +81,10 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		results = doctor.RunAll(ctx, opts)
 	}
 
+	if configErr != nil {
+		results = append([]doctor.CheckResult{configDegradationResult(configErr)}, results...)
+	}
+
 	if doctorJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
@@ -74,13 +92,27 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	} else {
+		if configErr != nil {
+			fmt.Fprintln(cmd.OutOrStdout(), "CONFIG DEGRADED — diagnostics will continue")
+			fmt.Fprintf(cmd.OutOrStdout(), "Configuration error: %s\n\n", configErr)
+		}
 		renderDoctorResults(cmd.OutOrStdout(), results)
 	}
 
 	if hasFailure(results) {
-		os.Exit(1)
+		return errDoctorFailed
 	}
 	return nil
+}
+
+func configDegradationResult(err error) doctor.CheckResult {
+	return doctor.CheckResult{
+		ID:         "effective_config",
+		Status:     doctor.StatusFail,
+		Message:    "configuration is degraded; independent checks still ran",
+		Error:      err.Error(),
+		Resolution: "fix the named configuration file and rerun 'grove doctor'",
+	}
 }
 
 // doctorJSONResult is the machine-readable post-install contract for

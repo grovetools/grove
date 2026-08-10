@@ -45,6 +45,7 @@ instead of opening the TUI (no terminal required).`
 	// Subcommands. The parent's RunE still handles the bare `grove config`
 	// invocation (cobra falls back to it when no subcommand matches).
 	cmd.AddCommand(newConfigAuditCmd())
+	cmd.AddCommand(newConfigShowCmd())
 	cmd.AddCommand(newConfigTrustCmd())
 
 	return cmd
@@ -90,19 +91,14 @@ func runConfigEdit(cmd *cobra.Command, args []string) error {
 // The config is round-tripped through YAML so that the emitted keys match the
 // canonical config file key names (yaml/toml tags) rather than Go field names.
 func printConfigJSON(layered *config.LayeredConfig) error {
+	asMap, err := configAsMap(layered.Final)
+	if err != nil {
+		return err
+	}
+
 	final := layered.Final
 	if final == nil {
 		final = &config.Config{}
-	}
-
-	yamlData, err := yaml.Marshal(final)
-	if err != nil {
-		return fmt.Errorf("failed to marshal configuration: %w", err)
-	}
-
-	var asMap map[string]interface{}
-	if err := yaml.Unmarshal(yamlData, &asMap); err != nil {
-		return fmt.Errorf("failed to convert configuration: %w", err)
 	}
 
 	// The exec-provenance gate removes values before the merge, so the JSON
@@ -120,4 +116,22 @@ func printConfigJSON(layered *config.LayeredConfig) error {
 
 	fmt.Println(string(jsonData))
 	return nil
+}
+
+// configAsMap returns config using its canonical YAML/TOML key names rather
+// than Go field names. Both the compatibility `config --json` surface and the
+// versioned effective-config envelope use this conversion.
+func configAsMap(cfg *config.Config) (map[string]interface{}, error) {
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	yamlData, err := yaml.Marshal(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal configuration: %w", err)
+	}
+	asMap := make(map[string]interface{})
+	if err := yaml.Unmarshal(yamlData, &asMap); err != nil {
+		return nil, fmt.Errorf("failed to convert configuration: %w", err)
+	}
+	return asMap, nil
 }
