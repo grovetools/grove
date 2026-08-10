@@ -521,12 +521,14 @@ func removeLegacyDeclarations(source legacySource) ([]byte, error) {
 	return updated, nil
 }
 
-type tomlRemoval struct{ start, end int }
-type tomlExpression struct {
-	start  int
-	remove bool
-	nested []tomlRemoval
-}
+type (
+	tomlRemoval    struct{ start, end int }
+	tomlExpression struct {
+		start  int
+		remove bool
+		nested []tomlRemoval
+	}
+)
 
 // removeTOMLPrefixes uses parsed semantic paths rather than textual header
 // guesses, covering tables with comments, dotted assignments, and inline

@@ -17,11 +17,13 @@ import (
 	"github.com/grovetools/grove/pkg/setup"
 )
 
-type noteCounts struct{ notes, plans, chats int }
-type notebookRow struct {
-	name, root string
-	counts     noteCounts
-}
+type (
+	noteCounts  struct{ notes, plans, chats int }
+	notebookRow struct {
+		name, root string
+		counts     noteCounts
+	}
+)
 
 // NotesPage is the deliberately small P1 notebook inventory. Sync state and
 // actions arrive in P3; today each notebook gets exactly two lines.
@@ -33,9 +35,11 @@ type NotesPage struct {
 	err           error
 }
 
-var _ pager.Page = (*NotesPage)(nil)
-var _ pager.PageWithTitle = (*NotesPage)(nil)
-var _ pager.PageWithID = (*NotesPage)(nil)
+var (
+	_ pager.Page          = (*NotesPage)(nil)
+	_ pager.PageWithTitle = (*NotesPage)(nil)
+	_ pager.PageWithID    = (*NotesPage)(nil)
+)
 
 func NewNotesPage(layered *coreconfig.LayeredConfig, keys grovekeymap.ConfigKeyMap, w, h int) *NotesPage {
 	p := &NotesPage{layered: layered, keys: keys, width: w, height: h}
@@ -65,6 +69,7 @@ func (p *NotesPage) Refresh(layered *coreconfig.LayeredConfig) {
 		p.rows = append(p.rows, notebookRow{name: name, root: nb.Root, counts: countNotebook(setup.ExpandPath(nb.Root))})
 	}
 }
+
 func countNotebook(root string) (c noteCounts) {
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -96,6 +101,7 @@ func countNotebook(root string) (c noteCounts) {
 	})
 	return
 }
+
 func (p *NotesPage) View() string {
 	t := theme.DefaultTheme
 	var lines []string

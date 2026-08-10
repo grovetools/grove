@@ -23,8 +23,10 @@ import (
 
 const defaultCodeRoot = "~/Code"
 
-type applyCodeRootMsg struct{ path string }
-type toggleCodeExcludeMsg struct{ root, repo string }
+type (
+	applyCodeRootMsg     struct{ path string }
+	toggleCodeExcludeMsg struct{ root, repo string }
+)
 
 type codeRow struct {
 	root, repo, label, notebook string
@@ -47,10 +49,12 @@ type CodePage struct {
 	loadErr         error
 }
 
-var _ pager.Page = (*CodePage)(nil)
-var _ pager.PageWithTitle = (*CodePage)(nil)
-var _ pager.PageWithID = (*CodePage)(nil)
-var _ pager.PageWithTextInput = (*CodePage)(nil)
+var (
+	_ pager.Page              = (*CodePage)(nil)
+	_ pager.PageWithTitle     = (*CodePage)(nil)
+	_ pager.PageWithID        = (*CodePage)(nil)
+	_ pager.PageWithTextInput = (*CodePage)(nil)
+)
 
 func NewCodePage(layered *coreconfig.LayeredConfig, keys grovekeymap.ConfigKeyMap, width, height int) *CodePage {
 	ti := textinput.New()
@@ -365,10 +369,12 @@ func (m *Model) addCodeRoot(raw string) (string, error) {
 	_, err = coreconfig.WriteCodeRoots(coderoot.RootsPath(), coreconfig.CodeRootEdits{Upserts: map[string]coderoot.Root{name: {Path: path, Scan: true, Notebook: notebook}}})
 	return name, err
 }
+
 func configWriteDefaultNotebook(name string) (bool, error) {
 	root := "~/notebooks/" + name
 	return coreconfig.WriteNotebooks(coderoot.NotebooksPath(), coreconfig.NotebookEdits{Default: &name, Upserts: map[string]coderoot.Notebook{name: {Root: root}}})
 }
+
 func (m *Model) toggleCodeExclude(root, repo string) error {
 	t, e := coderoot.Load()
 	if e != nil {
