@@ -3,7 +3,6 @@ package doctorchecks
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -121,18 +120,4 @@ func undeclaredEcosystems(declared map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// canonical normalizes a path for comparison the way isEcosystemDiscoverable
-// does in grove/cmd: absolute, with symlinks resolved (macOS /var →
-// /private/var would otherwise make every comparison miss).
-func canonical(path string) string {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		abs = path
-	}
-	if real, err := filepath.EvalSymlinks(abs); err == nil {
-		return real
-	}
-	return abs
 }

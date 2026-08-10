@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func runDoctorForTest(t *testing.T, jsonOutput bool) (string, error) {
+func runDoctorCheckForTest(t *testing.T, checkID string, jsonOutput bool) (string, error) {
 	t.Helper()
 	doctorFix = false
 	doctorCheckID = ""
@@ -22,13 +22,17 @@ func runDoctorForTest(t *testing.T, jsonOutput bool) (string, error) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	args := []string{"--check", "config_fragments"}
+	args := []string{"--check", checkID}
 	if jsonOutput {
 		args = append(args, "--json")
 	}
 	cmd.SetArgs(args)
 	err := cmd.Execute()
 	return out.String(), err
+}
+
+func runDoctorForTest(t *testing.T, jsonOutput bool) (string, error) {
+	return runDoctorCheckForTest(t, "config_fragments", jsonOutput)
 }
 
 func TestDoctorJSONSurfacesConfigDegradationAndKeepsIndependentCheck(t *testing.T) {
@@ -66,6 +70,55 @@ func TestDoctorJSONSurfacesConfigDegradationAndKeepsIndependentCheck(t *testing.
 				t.Errorf("independent check was suppressed: %+v", results)
 			}
 		})
+	}
+}
+
+func TestDoctorRootsBindingsJSONIncludesIDAndInventoryDetail(t *testing.T) {
+	configDir := sandboxConfigCLI(t)
+	root := t.TempDir()
+	notes := t.TempDir()
+	writeCLIConfig(t, filepath.Join(configDir, "roots.toml"), "[roots.alpha]\npath = \""+root+"\"\nscan = true\nnotebook = \"main\"\n")
+	writeCLIConfig(t, filepath.Join(configDir, "notebooks.toml"), "default = \"main\"\n[notebooks.main]\nroot = \""+notes+"\"\n")
+
+	output, err := runDoctorCheckForTest(t, "roots_bindings", true)
+	if err != nil {
+		t.Fatalf("doctor failed: %v\n%s", err, output)
+	}
+	var results []doctorJSONResult
+	if err := json.Unmarshal([]byte(output), &results); err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Check != "roots_bindings" || results[0].Status != "pass" {
+		t.Fatalf("unexpected roots result: %+v", results)
+	}
+	for _, want := range []string{"alpha", "kind=scan", "expanded=", "canonical=", "notebook=\"main\"", "notebook_root="} {
+		if !strings.Contains(results[0].Detail, want) {
+			t.Errorf("detail missing %q: %s", want, results[0].Detail)
+		}
+	}
+}
+
+func TestDoctorRootsBindingsJSONFailureDetail(t *testing.T) {
+	configDir := sandboxConfigCLI(t)
+	missing := filepath.Join(t.TempDir(), "missing")
+	writeCLIConfig(t, filepath.Join(configDir, "roots.toml"), "[roots.alpha]\npath = \""+missing+"\"\nnotebook = \"main\"\n")
+	writeCLIConfig(t, filepath.Join(configDir, "notebooks.toml"), "default = \"main\"\n[notebooks.main]\nroot = \""+t.TempDir()+"\"\n")
+
+	output, err := runDoctorCheckForTest(t, "roots_bindings", true)
+	if !errors.Is(err, errDoctorFailed) {
+		t.Fatalf("error = %v, want doctor failure: %s", err, output)
+	}
+	var results []doctorJSONResult
+	if err := json.Unmarshal([]byte(output), &results); err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Check != "roots_bindings" || results[0].Status != "fail" {
+		t.Fatalf("unexpected roots result: %+v", results)
+	}
+	for _, want := range []string{"alpha", "state=missing", "kind=specific", "enabled = false"} {
+		if !strings.Contains(results[0].Detail+results[0].Resolution, want) {
+			t.Errorf("JSON result missing %q: %+v", want, results[0])
+		}
 	}
 }
 

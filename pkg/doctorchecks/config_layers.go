@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/coderoot"
 	"github.com/grovetools/core/pkg/doctor"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/pelletier/go-toml/v2"
@@ -69,16 +70,20 @@ func collectLayerFiles(startDir string) []layerFile {
 		}
 
 		// Global fragments: modular *.toml files next to the global config.
-		// sync.toml and machine.toml are NOT fragments — each has its own
-		// standalone typed loader and is excluded from the glob by core (see
-		// config.isExcludedGlobalFragment). They still parse-check here, under
-		// their real kind, so a typo in either is reported as what it is
-		// instead of being mislabeled a fragment.
+		// Recorded roots/notebooks, sync, and machine config are NOT fragments:
+		// each has a standalone typed loader and is excluded from core's glob.
+		// Doctor still parse-checks them under their real kind.
 		if files, err := filepath.Glob(filepath.Join(configDir, "*.toml")); err == nil {
 			sort.Strings(files)
 			for _, f := range files {
 				switch filepath.Base(f) {
 				case "grove.toml", "grove.yml", "grove.override.toml":
+					continue
+				case coderoot.RootsFileName:
+					add("recorded code roots (standalone typed loader)", f)
+					continue
+				case coderoot.NotebooksFileName:
+					add("recorded notebooks (standalone typed loader)", f)
 					continue
 				case "sync.toml":
 					add("sync client config (standalone typed loader)", f)
@@ -91,8 +96,8 @@ func collectLayerFiles(startDir string) []layerFile {
 			}
 		}
 
-		// Global overrides. Core loads the first file that both exists and
-		// parses, so a broken earlier file silently falls through; probe all.
+		// Global overrides. Probe every supported spelling so errors are
+		// attributed to the exact file the operator needs to fix.
 		for _, name := range []string{"grove.override.yml", "grove.override.yaml", "grove.override.toml"} {
 			add("global override", filepath.Join(configDir, name))
 		}
@@ -154,9 +159,15 @@ func expandUserPath(path string) string {
 	return path
 }
 
-// parseLayerFile parses one config layer file with the same semantics as
-// core's unmarshalConfig (env expansion, then TOML or YAML into the typed
-// Config). It also returns the raw generic document for schema validation.
+func isRecordedTopologyFile(path string) bool {
+	base := filepath.Base(path)
+	return base == coderoot.RootsFileName || base == coderoot.NotebooksFileName
+}
+
+// parseLayerFile parses one config file with its owning loader's semantics.
+// Recorded roots/notebooks must never be decoded into permissive config.Config:
+// their strict coderoot decoders reject unknown keys and duplicate tables.
+// The raw generic document is also returned for the separate schema check.
 func parseLayerFile(path string) (map[string]interface{}, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -164,30 +175,40 @@ func parseLayerFile(path string) (map[string]interface{}, error) {
 	}
 	expanded := []byte(expandLayerEnvVars(string(data)))
 
-	var typed config.Config
-	var raw map[string]interface{}
-	if strings.HasSuffix(path, ".toml") {
-		if err := toml.Unmarshal(expanded, &typed); err != nil {
+	switch filepath.Base(path) {
+	case coderoot.RootsFileName:
+		if _, err := coderoot.ParseRoots(path, expanded); err != nil {
 			return nil, err
 		}
+	case coderoot.NotebooksFileName:
+		if _, err := coderoot.ParseNotebooks(path, expanded); err != nil {
+			return nil, err
+		}
+	default:
+		var typed config.Config
+		if strings.HasSuffix(path, ".toml") {
+			if err := toml.Unmarshal(expanded, &typed); err != nil {
+				return nil, err
+			}
+		} else if err := yaml.Unmarshal(expanded, &typed); err != nil {
+			return nil, err
+		}
+	}
+
+	var raw map[string]interface{}
+	if strings.HasSuffix(path, ".toml") {
 		if err := toml.Unmarshal(expanded, &raw); err != nil {
 			return nil, err
 		}
-	} else {
-		if err := yaml.Unmarshal(expanded, &typed); err != nil {
-			return nil, err
-		}
-		if err := yaml.Unmarshal(expanded, &raw); err != nil {
-			return nil, err
-		}
+	} else if err := yaml.Unmarshal(expanded, &raw); err != nil {
+		return nil, err
 	}
 	return raw, nil
 }
 
-// configLayersCheck re-loads every config layer file and reports any that
-// fail to parse. Core's LoadLayered silently warn-and-skips broken global
-// fragments and overrides, so a typo'd file means its settings just vanish;
-// this check surfaces that as a hard failure with the path and parse error.
+// configLayersCheck re-loads every config layer and standalone typed config
+// file and reports any that fail to parse. Normal loading is fail-loud; this
+// independent check keeps doctor useful while that load is degraded.
 type configLayersCheck struct{}
 
 func (c *configLayersCheck) ID() string   { return "config_fragments" }
@@ -231,9 +252,9 @@ func (c *configLayersCheck) Run(ctx context.Context, opts doctor.RunOptions) doc
 
 	if len(failures) > 0 {
 		res.Status = doctor.StatusFail
-		res.Message = fmt.Sprintf("%d of %d config file(s) failed to parse (broken layers are silently skipped at load time)", len(failures), len(files))
+		res.Message = fmt.Sprintf("%d of %d config file(s) failed strict parsing", len(failures), len(files))
 		res.Error = strings.Join(failures, "; ")
-		res.Resolution = "fix the syntax in the listed file(s); until then their settings are not applied"
+		res.Resolution = "fix the syntax or table contract in the listed file(s); normal config loading fails until they are valid"
 		return res
 	}
 

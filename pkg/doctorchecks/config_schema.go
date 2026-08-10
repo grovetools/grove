@@ -55,6 +55,11 @@ func (c *configSchemaCheck) Run(ctx context.Context, opts doctor.RunOptions) doc
 	var violations []string
 	checked := 0
 	for _, f := range files {
+		// roots.toml and notebooks.toml have their own strict coderoot schema;
+		// the composed layered-config schema does not describe those files.
+		if isRecordedTopologyFile(f.Path) {
+			continue
+		}
 		raw, err := parseLayerFile(f.Path)
 		if err != nil {
 			continue // surfaced as a FAIL by the config_fragments check

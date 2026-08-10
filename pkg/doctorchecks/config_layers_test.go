@@ -69,6 +69,8 @@ func TestCollectLayerFiles_EnumeratesGlobalLayers(t *testing.T) {
 	groveDir := setupScratchConfig(t)
 	write(t, filepath.Join(groveDir, "grove.toml"), "version = \"1.0\"\n")
 	write(t, filepath.Join(groveDir, "frag.toml"), "[tui]\n")
+	write(t, filepath.Join(groveDir, "roots.toml"), "[roots]\n")
+	write(t, filepath.Join(groveDir, "notebooks.toml"), "[notebooks]\n")
 	write(t, filepath.Join(groveDir, "grove.override.toml"), "version = \"1.0\"\n")
 
 	cwd, _ := os.Getwd()
@@ -86,5 +88,34 @@ func TestCollectLayerFiles_EnumeratesGlobalLayers(t *testing.T) {
 	}
 	if kinds["grove.override.toml"] != "global override" {
 		t.Errorf("grove.override.toml kind = %q", kinds["grove.override.toml"])
+	}
+	if kinds["roots.toml"] != "recorded code roots (standalone typed loader)" {
+		t.Errorf("roots.toml kind = %q", kinds["roots.toml"])
+	}
+	if kinds["notebooks.toml"] != "recorded notebooks (standalone typed loader)" {
+		t.Errorf("notebooks.toml kind = %q", kinds["notebooks.toml"])
+	}
+}
+
+func TestConfigLayersCheck_UsesStrictRecordedParsers(t *testing.T) {
+	for _, tc := range []struct{ name, file, content, want string }{
+		{name: "roots unknown field", file: "roots.toml", content: "[roots.alpha]\npath = \"/tmp/a\"\ntyop = true\n", want: "strict mode"},
+		{name: "notebooks reserved sync", file: "notebooks.toml", content: "[notebooks.main]\nroot = \"/tmp/n\"\n[notebooks.main.sync]\nmode = \"x\"\n", want: "reserved"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			groveDir := setupScratchConfig(t)
+			path := filepath.Join(groveDir, tc.file)
+			write(t, path, tc.content)
+			res := (&configLayersCheck{}).Run(context.Background(), doctor.RunOptions{})
+			if res.Status != doctor.StatusFail {
+				t.Fatalf("expected fail, got %s: %+v", res.Status, res)
+			}
+			if !strings.Contains(res.Error, path) || !strings.Contains(res.Error, tc.want) {
+				t.Errorf("strict diagnostic missing path/%q: %s", tc.want, res.Error)
+			}
+			if strings.Contains(res.Message, "silently skipped") {
+				t.Errorf("stale skip wording remains: %s", res.Message)
+			}
+		})
 	}
 }
