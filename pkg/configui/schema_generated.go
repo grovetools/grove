@@ -617,6 +617,13 @@ var SchemaFields = []FieldMeta{
 				Layer:       config.SourceGlobal,
 				Priority:    68,
 			},
+			{
+				Path:        []string{"tui", "open_command"},
+				Type:        FieldArray,
+				Description: "Argv used to open a path or URL outside the terminal (browser or desktop handler); the target is appended as the final argument. Empty uses the platform opener (open / xdg-open)",
+				Layer:       config.SourceGlobal,
+				Priority:    69,
+			},
 		},
 	},
 	{
