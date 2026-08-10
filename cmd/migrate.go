@@ -61,6 +61,20 @@ func runLegacyMigrate(out io.Writer, in io.Reader, dryRun, yes bool, now time.Ti
 }
 
 func runLegacyMigrateWithOptions(out io.Writer, in io.Reader, opts migrationOptions, now time.Time) error {
+	// Freeze the old loader's effective result before collection or candidate
+	// construction. This independent replay is the left-hand side of the proof.
+	legacyEffective, err := loadFrozenLegacyEffectiveConfig()
+	if err != nil {
+		return fmt.Errorf("load frozen pre-migration effective topology: %w", err)
+	}
+	expectedMap, err := configAsEffectiveMap(legacyEffective)
+	if err != nil {
+		return err
+	}
+	expected, err := canonicalEffectiveTopology(expectedMap)
+	if err != nil {
+		return err
+	}
 	m, err := collectLegacyMigrationWithOptions(opts.StageSync)
 	if err != nil {
 		return err
@@ -80,10 +94,6 @@ func runLegacyMigrateWithOptions(out io.Writer, in io.Reader, opts migrationOpti
 		return renderMigrationEvidence(out, evidence, opts.JSON)
 	}
 
-	expected, err := canonicalMigrationEffective(m)
-	if err != nil {
-		return err
-	}
 	nbBytes, rootsBytes, err := buildMigrationCandidates(m, roots)
 	if err != nil {
 		return err
@@ -123,11 +133,8 @@ func runLegacyMigrateWithOptions(out io.Writer, in io.Reader, opts migrationOpti
 		}
 	}
 	if opts.DryRun {
-		if opts.JSON {
-			return renderMigrationEvidence(out, transition.Evidence{Action: "grove migrate step 1 dry-run", Reason: "preview completed; no files were changed"}, true)
-		}
-		fmt.Fprintln(out, "\n--dry-run: nothing was written.")
-		return nil
+		evidence := transition.Evidence{Action: "grove migrate step 1 dry-run", Reason: "preview completed; no files were changed"}
+		return renderMigrationEvidence(out, evidence, opts.JSON)
 	}
 	if opts.JSON && !opts.Yes {
 		return fmt.Errorf("--json apply requires --yes (use --dry-run --json for a non-mutating preview)")
@@ -170,6 +177,12 @@ func runLegacyMigrateWithOptions(out io.Writer, in io.Reader, opts migrationOpti
 	for _, p := range backupPaths {
 		if err := backupMigrationFile(p, stamp); err != nil {
 			return fail("backup "+p, err)
+		}
+		backup := p + "." + stamp + ".bak"
+		if migrationFailureHook != nil {
+			if err := migrationFailureHook(backup); err != nil {
+				return fail("backup "+p, err)
+			}
 		}
 		if !opts.JSON {
 			fmt.Fprintf(out, "backup: %s.%s.bak\n", p, stamp)
@@ -264,81 +277,52 @@ func uniqueSortedStrings(in []string) []string {
 	return uniqueStrings(in)
 }
 
-// canonicalMigrationEffective projects the frozen legacy topology through the
-// same source-key conversion used by `config show --effective --json`.
-// Runtime-only scan/notebook-root fields and source attribution are excluded.
-func canonicalMigrationEffective(m *legacyMigration) ([]byte, error) {
-	cfg := &config.Config{
-		Groves: map[string]config.GroveSourceConfig{},
-		Notebooks: &config.NotebooksConfig{
-			Definitions: map[string]*config.Notebook{},
-			Rules:       &config.NotebookRules{Default: m.Default},
-		},
-	}
-	for name, candidate := range m.Roots {
-		r := candidate.Root
-		enabled := r.Enabled
-		if enabled == nil {
-			value := true
-			enabled = &value
-		}
-		cfg.Groves[name] = config.GroveSourceConfig{
-			Path: expandPath(r.Path), Enabled: enabled, Description: r.Description,
-			Notebook: r.Notebook, Depth: r.Depth, IncludeRepos: append([]string(nil), r.Repos...),
-			ExcludeRepos: append([]string(nil), r.Exclude...),
-		}
-	}
-	for name, notebook := range m.Notebooks {
-		cfg.Notebooks.Definitions[name] = &config.Notebook{RootDir: expandPath(notebook.Root)}
-	}
-	effective, err := configAsEffectiveMap(cfg)
-	if err != nil {
-		return nil, err
-	}
-	return canonicalEffectiveTopology(effective)
-}
-
+// canonicalEffectiveTopology projects the complete author-visible topology
+// emitted by config-show. Source attribution and runtime-only metadata are not
+// in that representation. Every path/root_dir is expanded, made absolute and
+// cleaned; existing symlinks are resolved, while missing paths retain the
+// deterministic cleaned absolute spelling.
 func canonicalEffectiveTopology(effective map[string]interface{}) ([]byte, error) {
-	out := map[string]interface{}{"groves": map[string]interface{}{}, "notebooks": map[string]interface{}{"definitions": map[string]interface{}{}, "rules": map[string]interface{}{}}}
-	if rawGroves, ok := effective["groves"].(map[string]interface{}); ok {
-		filtered := map[string]interface{}{}
-		for name, raw := range rawGroves {
-			entry, ok := raw.(map[string]interface{})
-			if !ok {
-				return nil, fmt.Errorf("effective groves.%s is not an object", name)
-			}
-			keep := map[string]interface{}{}
-			for _, key := range []string{"path", "enabled", "description", "notebook", "depth", "include_repos", "exclude_repos"} {
-				if value, exists := entry[key]; exists {
-					keep[key] = value
-				}
-			}
-			filtered[name] = keep
-		}
-		out["groves"] = filtered
+	out := map[string]interface{}{
+		"groves":    map[string]interface{}{},
+		"notebooks": map[string]interface{}{},
 	}
-	if rawNotebooks, ok := effective["notebooks"].(map[string]interface{}); ok {
-		notebooks := out["notebooks"].(map[string]interface{})
-		if definitions, ok := rawNotebooks["definitions"].(map[string]interface{}); ok {
-			filtered := map[string]interface{}{}
-			for name, raw := range definitions {
-				entry, ok := raw.(map[string]interface{})
-				if !ok {
-					return nil, fmt.Errorf("effective notebooks.definitions.%s is not an object", name)
-				}
-				if root, exists := entry["root_dir"]; exists {
-					filtered[name] = map[string]interface{}{"root_dir": root}
-				}
-			}
-			notebooks["definitions"] = filtered
-		}
-		if rules, ok := rawNotebooks["rules"].(map[string]interface{}); ok {
-			if value, exists := rules["default"]; exists {
-				notebooks["rules"] = map[string]interface{}{"default": value}
-			}
+	for _, key := range []string{"groves", "notebooks"} {
+		if value, exists := effective[key]; exists && value != nil {
+			out[key] = normalizeEffectiveTopologyValue(value, "")
 		}
 	}
 	return json.Marshal(out)
+}
+
+func normalizeEffectiveTopologyValue(value interface{}, key string) interface{} {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(typed))
+		for childKey, child := range typed {
+			out[childKey] = normalizeEffectiveTopologyValue(child, childKey)
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, len(typed))
+		for i, child := range typed {
+			out[i] = normalizeEffectiveTopologyValue(child, key)
+		}
+		return out
+	case string:
+		if key == "path" || key == "root_dir" || key == "notebook_root" {
+			path := expandPath(typed)
+			if abs, err := filepath.Abs(path); err == nil {
+				path = abs
+			}
+			path = filepath.Clean(path)
+			if real, err := filepath.EvalSymlinks(path); err == nil {
+				path = real
+			}
+			return path
+		}
+	}
+	return value
 }
 
 func effectiveDiff(before, after []byte) string {

@@ -40,12 +40,15 @@ type legacyGrove struct {
 }
 
 type legacyNotebook struct {
-	RootDir string `toml:"root_dir" yaml:"root_dir"`
-	Root    string `toml:"root" yaml:"root"`
+	// Embed the complete frozen notebook shape so the independent equivalence
+	// side retains every setting, while Root accepts the oldest root alias.
+	config.Notebook `toml:",inline" yaml:",inline"`
+	Root            string `toml:"root" yaml:"root"`
 }
 
 type legacyNotebookRules struct {
-	Default string `toml:"default" yaml:"default"`
+	Default string                       `toml:"default" yaml:"default"`
+	Global  *config.GlobalNotebookConfig `toml:"global" yaml:"global"`
 }
 
 type legacyNotebooks struct {
@@ -488,7 +491,10 @@ func removeLegacyDeclarations(source legacySource) ([]byte, error) {
 			}
 		}
 		if source.AnnotateCard {
-			data = annotateDeprecatedCardYAML(data)
+			data, err = annotateDeprecatedCardYAML(data)
+			if err != nil {
+				return nil, err
+			}
 		}
 		return data, nil
 	}
@@ -507,7 +513,10 @@ func removeLegacyDeclarations(source legacySource) ([]byte, error) {
 		return nil, err
 	}
 	if source.AnnotateCard {
-		updated = annotateDeprecatedCardTOML(updated)
+		updated, err = annotateDeprecatedCardTOML(updated)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return updated, nil
 }
@@ -706,44 +715,89 @@ func tomlValueEnd(data []byte, value *unstable.Node) int {
 
 const cardDeprecationComment = "DEPRECATED: ecosystem.notebooks is retained only as migration history; roots.toml/notebooks.toml are authoritative."
 
-func annotateDeprecatedCardTOML(data []byte) []byte {
+func annotateDeprecatedCardTOML(data []byte) ([]byte, error) {
 	if bytes.Contains(data, []byte(cardDeprecationComment)) {
-		return data
+		return data, nil
 	}
-	lines := strings.SplitAfter(string(data), "\n")
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "[ecosystem.notebooks]" || strings.HasPrefix(trimmed, "[ecosystem.notebooks.") {
-			lines[i] = "# " + cardDeprecationComment + "\n" + line
-			break
+	var parser unstable.Parser
+	parser.Reset(data)
+	var tablePath []string
+	for parser.NextExpression() {
+		n := parser.Expression()
+		var path []string
+		switch n.Kind {
+		case unstable.Table, unstable.ArrayTable:
+			tablePath = tomlNodeKey(n)
+			path = tablePath
+		case unstable.KeyValue:
+			path = append(append([]string{}, tablePath...), tomlNodeKey(n)...)
+			if len(path) == 1 && path[0] == "ecosystem" && n.Value().Kind == unstable.InlineTable && tomlInlineContainsKey(n.Value(), "notebooks") {
+				path = []string{"ecosystem", "notebooks"}
+			}
+		}
+		if len(path) >= 2 && path[0] == "ecosystem" && path[1] == "notebooks" {
+			at := tomlNodeLineStart(data, n)
+			comment := []byte("# " + cardDeprecationComment + "\n")
+			out := append([]byte{}, data[:at]...)
+			out = append(out, comment...)
+			out = append(out, data[at:]...)
+			return out, nil
 		}
 	}
-	return []byte(strings.Join(lines, ""))
+	if err := parser.Error(); err != nil {
+		return nil, fmt.Errorf("locate ecosystem.notebooks in TOML card: %w", err)
+	}
+	return nil, fmt.Errorf("ecosystem card supplies a default notebook but its ecosystem.notebooks declaration could not be annotated")
 }
 
-func annotateDeprecatedCardYAML(data []byte) []byte {
+func tomlInlineContainsKey(table *unstable.Node, want string) bool {
+	it := table.Children()
+	for it.Next() {
+		entry := it.Node()
+		key := tomlNodeKey(entry)
+		if len(key) > 0 && key[0] == want {
+			return true
+		}
+	}
+	return false
+}
+
+func annotateDeprecatedCardYAML(data []byte) ([]byte, error) {
 	if bytes.Contains(data, []byte(cardDeprecationComment)) {
-		return data
+		return data, nil
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("locate ecosystem.notebooks in YAML card: %w", err)
+	}
+	var notebooks *yaml.Node
+	if len(doc.Content) > 0 && doc.Content[0].Kind == yaml.MappingNode {
+		root := doc.Content[0]
+		for i := 0; i+1 < len(root.Content); i += 2 {
+			if root.Content[i].Value != "ecosystem" || root.Content[i+1].Kind != yaml.MappingNode {
+				continue
+			}
+			ecosystem := root.Content[i+1]
+			for j := 0; j+1 < len(ecosystem.Content); j += 2 {
+				if ecosystem.Content[j].Value == "notebooks" {
+					notebooks = ecosystem.Content[j]
+					break
+				}
+			}
+		}
+	}
+	if notebooks == nil || notebooks.Line <= 0 {
+		return nil, fmt.Errorf("ecosystem card supplies a default notebook but its ecosystem.notebooks declaration could not be annotated")
 	}
 	lines := strings.SplitAfter(string(data), "\n")
-	inEcosystem := false
-	for i, line := range lines {
-		plain := strings.TrimSuffix(line, "\n")
-		trimmed := strings.TrimSpace(plain)
-		indent := len(plain) - len(strings.TrimLeft(plain, " \t"))
-		if indent == 0 && strings.HasPrefix(trimmed, "ecosystem:") {
-			inEcosystem = true
-			continue
-		}
-		if inEcosystem && indent == 0 && trimmed != "" && !strings.HasPrefix(trimmed, "#") {
-			break
-		}
-		if inEcosystem && indent > 0 && strings.HasPrefix(trimmed, "notebooks:") {
-			lines[i] = strings.Repeat(" ", indent) + "# " + cardDeprecationComment + "\n" + line
-			break
-		}
+	line := notebooks.Line - 1
+	if line >= len(lines) {
+		return nil, fmt.Errorf("ecosystem.notebooks source location is outside the YAML card")
 	}
-	return []byte(strings.Join(lines, ""))
+	plain := strings.TrimSuffix(lines[line], "\n")
+	indent := len(plain) - len(strings.TrimLeft(plain, " \t"))
+	lines[line] = strings.Repeat(" ", indent) + "# " + cardDeprecationComment + "\n" + lines[line]
+	return []byte(strings.Join(lines, "")), nil
 }
 
 func removeYAMLTopKeys(data []byte, keys map[string]bool) ([]byte, error) {
