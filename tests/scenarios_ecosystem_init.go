@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -369,22 +370,21 @@ func EcosystemInitNonInteractiveScenario() *harness.Scenario {
 	)
 }
 
-// setupGrovesConfig creates a global grove.yml with the new 'groves' key format.
+// setupGrovesConfig records one specific code root and a complete notebook
+// binding in the canonical routing files.
 func setupGrovesConfig(ctx *harness.Context, groveName, grovePath string) error {
 	globalConfigDir := filepath.Join(ctx.ConfigDir(), "grove")
 	if err := os.MkdirAll(globalConfigDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create global config dir: %w", err)
 	}
 
-	// Use the new 'groves' format instead of 'search_paths'
-	config := fmt.Sprintf(`groves:
-  %s:
-    path: %s
-    enabled: true
-`, groveName, grovePath)
-
-	configPath := filepath.Join(globalConfigDir, "grove.yml")
-	return fs.WriteString(configPath, config)
+	roots := fmt.Sprintf("[roots.%s]\npath = %s\n", strconv.Quote(groveName), strconv.Quote(grovePath))
+	if err := fs.WriteString(filepath.Join(globalConfigDir, "roots.toml"), roots); err != nil {
+		return err
+	}
+	notebookRoot := filepath.Join(ctx.RootDir, "notebooks", "nb")
+	notebooks := fmt.Sprintf("default = \"nb\"\n[notebooks.nb]\nroot = %s\n", strconv.Quote(notebookRoot))
+	return fs.WriteString(filepath.Join(globalConfigDir, "notebooks.toml"), notebooks)
 }
 
 // EcosystemInitPreservesConfigScenario tests that adding a grove preserves existing config.

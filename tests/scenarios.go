@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/grovetools/tend/pkg/harness"
-	"gopkg.in/yaml.v3"
 )
 
 // AllScenarios returns all test scenarios for grove-meta
@@ -95,29 +95,22 @@ func AllScenarios() []*harness.Scenario {
 	}
 }
 
-// setupGlobalGroveConfig creates a global grove.yml in the sandboxed home directory
-// to make the discovery service aware of the test's ecosystem directory.
+// setupGlobalGroveConfig records a scan root and a complete notebook binding
+// in the sandboxed canonical routing files.
 func setupGlobalGroveConfig(ctx *harness.Context, searchPath string) error {
 	globalConfigDir := filepath.Join(ctx.ConfigDir(), "grove")
 	if err := os.MkdirAll(globalConfigDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create global config dir: %w", err)
 	}
 
-	config := map[string]interface{}{
-		"search_paths": map[string]interface{}{
-			"work": map[string]interface{}{
-				"path":    searchPath,
-				"enabled": true,
-			},
-		},
+	roots := fmt.Sprintf("[roots.work]\npath = %s\nscan = true\n", strconv.Quote(searchPath))
+	if err := os.WriteFile(filepath.Join(globalConfigDir, "roots.toml"), []byte(roots), 0o600); err != nil {
+		return fmt.Errorf("failed to write roots.toml: %w", err)
 	}
-	yamlData, err := yaml.Marshal(config)
-	if err != nil {
-		return fmt.Errorf("failed to marshal global config: %w", err)
-	}
-
-	if err := os.WriteFile(filepath.Join(globalConfigDir, "grove.yml"), yamlData, 0o600); err != nil {
-		return fmt.Errorf("failed to write global grove.yml: %w", err)
+	notebookRoot := filepath.Join(ctx.RootDir, "notebooks", "nb")
+	notebooks := fmt.Sprintf("default = \"nb\"\n[notebooks.nb]\nroot = %s\n", strconv.Quote(notebookRoot))
+	if err := os.WriteFile(filepath.Join(globalConfigDir, "notebooks.toml"), []byte(notebooks), 0o600); err != nil {
+		return fmt.Errorf("failed to write notebooks.toml: %w", err)
 	}
 	return nil
 }
