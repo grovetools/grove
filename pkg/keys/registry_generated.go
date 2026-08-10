@@ -1483,6 +1483,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "ToggleLink", Keys: []string{"tl"}, Description: "toggle remote", Enabled: true, ConfigKey: "toggle_link"},
 					{Name: "ToggleTaskResults", Keys: []string{"tv"}, Description: "toggle validation matrix", Enabled: true, ConfigKey: "toggle_task_results"},
 					{Name: "ToggleReview", Keys: []string{"te"}, Description: "toggle review column", Enabled: true, ConfigKey: "toggle_review"},
+					{Name: "ToggleMachineSync", Keys: []string{"tm"}, Description: "toggle machine matrix", Enabled: true, ConfigKey: "toggle_machine_sync"},
 				},
 			},
 			{
