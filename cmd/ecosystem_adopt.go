@@ -1,11 +1,17 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/daemon"
+	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/core/pkg/subject"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/spf13/cobra"
 )
@@ -102,6 +108,14 @@ func runEcosystemAdopt(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// This explicit signal is the daemon's only authority to mint a missing
+	// notespace for a newly adopted checkout. The daemon independently proves
+	// that absPath is under an enabled recorded scan root; ordinary discovery
+	// of a missing stamp never calls this API.
+	if err := signalEcosystemNotespaceAdoption(cmd.Context(), absPath, card.ID); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: ecosystem adopted, but its notespace was not materialized: %v\n", err)
+	}
+
 	if !changed {
 		fmt.Printf("\n%s Already adopted — %s is unchanged.\n", theme.IconSuccess, manifest)
 		return nil
@@ -110,4 +124,28 @@ func runEcosystemAdopt(cmd *cobra.Command, args []string) error {
 	fmt.Printf("\n%s Wrote the ecosystem card to %s\n", theme.IconSuccess, manifest)
 	fmt.Fprintf(os.Stdout, "  Commit it so the card travels with clones of this ecosystem.\n")
 	return nil
+}
+
+func signalEcosystemNotespaceAdoption(ctx context.Context, root, ecosystemID string) error {
+	value, err := subject.Ecosystem(ecosystemID)
+	if err != nil {
+		return err
+	}
+	client := daemon.NewGlobalClient()
+	defer client.Close()
+	if !client.IsRunning() {
+		return daemon.ErrNotSupported
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	_, err = client.AdoptNotespace(ctx, models.NotespaceAdoption{
+		Root: filepath.Clean(root), Subject: value.String(), Kind: "ecosystem", DisplayName: filepath.Base(root),
+	})
+	if errors.Is(err, daemon.ErrNotSupported) {
+		return daemon.ErrNotSupported
+	}
+	return err
 }
