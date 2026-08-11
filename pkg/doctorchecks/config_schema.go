@@ -55,9 +55,11 @@ func (c *configSchemaCheck) Run(ctx context.Context, opts doctor.RunOptions) doc
 	var violations []string
 	checked := 0
 	for _, f := range files {
-		// roots.toml and notebooks.toml have their own strict coderoot schema;
-		// the composed layered-config schema does not describe those files.
-		if isRecordedTopologyFile(f.Path) {
+		// Standalone files have distinct typed schemas and are already validated
+		// by parseLayerFile/config_fragments. Applying the layered Config schema
+		// to sync.toml, for example, mistakes [[workspaces]] objects for the
+		// ecosystem manifest's workspaces string globs.
+		if isStandaloneTypedConfigFile(f.Path) {
 			continue
 		}
 		raw, err := parseLayerFile(f.Path)

@@ -30,9 +30,52 @@ func p2Sandbox(t *testing.T) (string, string) {
 	return dir, nb
 }
 
+func assertP2FullConfigAndDoctor(t *testing.T) {
+	t.Helper()
+	config.ResetLoadCache()
+	if _, err := config.LoadDefault(); err != nil {
+		t.Fatalf("full config loader rejected migration state: %v", err)
+	}
+	doctorFix, doctorCheckID, doctorJSON, doctorVerbose = false, "", false, false
+	cmd := newDoctorCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--json"})
+	_ = cmd.Execute() // Unrelated sandbox checks may fail; inspect config results.
+	var results []doctorJSONResult
+	if err := json.Unmarshal(out.Bytes(), &results); err != nil {
+		t.Fatalf("full doctor emitted invalid JSON %q: %v", out.String(), err)
+	}
+	foundFragments, foundSchema := false, false
+	for _, result := range results {
+		if result.Check == "effective_config" {
+			t.Fatalf("full doctor reported effective config degradation: %+v", result)
+		}
+		if result.Check == "config_fragments" {
+			foundFragments = true
+			if result.Status != "pass" {
+				t.Fatalf("full doctor rejected config fragments: %+v", result)
+			}
+		}
+		if result.Check == "config_schema" {
+			foundSchema = true
+			if result.Status != "pass" {
+				t.Fatalf("full doctor applied layered schema to standalone config: %+v", result)
+			}
+		}
+	}
+	if !foundFragments || !foundSchema {
+		t.Fatalf("full doctor omitted config checks: fragments=%t schema=%t", foundFragments, foundSchema)
+	}
+}
+
 func TestP2MigrationDryRunApplyUndoAndScopedRewrite(t *testing.T) {
 	_, nb := p2Sandbox(t)
 	manifest := filepath.Join(t.TempDir(), "manifest.json")
+	stagePath := config.SyncConfigPath() + ".p2-staged"
+	stagedBefore := []byte(migrateRead(t, stagePath))
+	liveBefore := []byte(migrateRead(t, config.SyncConfigPath()))
 	db := filepath.Join(t.TempDir(), "sync.db")
 	oldCommand := p2Command
 	p2Command = func(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -46,6 +89,12 @@ func TestP2MigrationDryRunApplyUndoAndScopedRewrite(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(nb, "notespaces")); !os.IsNotExist(err) {
 		t.Fatal("dry-run mutated layout")
+	}
+	if got := []byte(migrateRead(t, stagePath)); !bytes.Equal(got, stagedBefore) {
+		t.Fatalf("dry-run changed authoritative staged bytes\nwant: %q\n got: %q", stagedBefore, got)
+	}
+	if got := []byte(migrateRead(t, config.SyncConfigPath())); !bytes.Equal(got, liveBefore) {
+		t.Fatalf("dry-run changed live sync config\nwant: %q\n got: %q", liveBefore, got)
 	}
 	opts.DryRun = false
 	out.Reset()
@@ -64,6 +113,23 @@ func TestP2MigrationDryRunApplyUndoAndScopedRewrite(t *testing.T) {
 	if !strings.Contains(machine, "[primaries]") || !strings.Contains(machine, "[sync.registry]") {
 		t.Fatalf("machine=%s", machine)
 	}
+	compiled := []byte(migrateRead(t, config.SyncConfigPath()))
+	if bytes.Equal(compiled, stagedBefore) {
+		t.Fatal("apply copied legacy staged bytes instead of compiling typed sync config")
+	}
+	if _, err := config.LoadSyncConfigFrom(config.SyncConfigPath()); err != nil {
+		t.Fatalf("compiled sync config rejected by typed loader: %v\n%s", err, compiled)
+	}
+	if _, err := os.Stat(stagePath); !os.IsNotExist(err) {
+		t.Fatalf("apply did not consume staged source: %v", err)
+	}
+	var applied p2MigrationManifest
+	data, _ := os.ReadFile(manifest)
+	_ = json.Unmarshal(data, &applied)
+	if len(applied.SyncConversion.Bindings) != 1 || applied.SyncConversion.Bindings[0].Role != config.SyncRoleRegistry || applied.SyncConversion.StagedHash != hashBytes(stagedBefore) || applied.SyncConversion.FinalHash != hashBytes(compiled) {
+		t.Fatalf("conversion evidence=%+v", applied.SyncConversion)
+	}
+	assertP2FullConfigAndDoctor(t)
 	out.Reset()
 	if err := runP2Migration(context.Background(), &out, strings.NewReader(""), opts, time.Unix(101, 0)); err != nil || !strings.Contains(out.String(), "already consumed") {
 		t.Fatalf("idempotent rerun: %v\n%s", err, out.String())
@@ -78,12 +144,28 @@ func TestP2MigrationDryRunApplyUndoAndScopedRewrite(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(nb, "notespaces")); !os.IsNotExist(err) {
 		t.Fatal("undo retained notespaces dir")
 	}
+	if got := []byte(migrateRead(t, stagePath)); !bytes.Equal(got, stagedBefore) {
+		t.Fatalf("undo did not restore authoritative staged bytes exactly\nwant: %q\n got: %q", stagedBefore, got)
+	}
+	if got := []byte(migrateRead(t, config.SyncConfigPath())); !bytes.Equal(got, liveBefore) {
+		t.Fatalf("undo did not restore prior live sync bytes exactly\nwant: %q\n got: %q", liveBefore, got)
+	}
+	assertP2FullConfigAndDoctor(t)
 	var receipt p2MigrationManifest
-	data, _ := os.ReadFile(manifest)
+	data, _ = os.ReadFile(manifest)
 	_ = json.Unmarshal(data, &receipt)
 	if receipt.State != "undone" || !strings.Contains(receipt.ServerState, "NOT undone") {
 		t.Fatalf("receipt=%+v", receipt)
 	}
+
+	out.Reset()
+	if err := runP2Migration(context.Background(), &out, strings.NewReader(""), opts, time.Unix(103, 0)); err != nil {
+		t.Fatalf("reapply: %v\n%s", err, out.String())
+	}
+	if _, err := os.Stat(stagePath); !os.IsNotExist(err) {
+		t.Fatalf("reapply did not consume staged source: %v", err)
+	}
+	assertP2FullConfigAndDoctor(t)
 }
 
 func TestP2MigrationInjectedFailureRollsBackEveryLocalMutation(t *testing.T) {
@@ -114,6 +196,41 @@ func TestP2MigrationInjectedFailureRollsBackEveryLocalMutation(t *testing.T) {
 	}
 	if _, err := os.Stat(config.SyncConfigPath() + ".p2-staged"); err != nil {
 		t.Fatalf("staged input not restored: %v", err)
+	}
+}
+
+func TestP2SyncCompilePreservesTypedIntentAndRejectsUnknownKeys(t *testing.T) {
+	_, nb := p2Sandbox(t)
+	stage := config.SyncConfigPath() + ".p2-staged"
+	t.Setenv("P2_SYNC_SERVER", "https://sync.example.com")
+	legacy := "server = \"${P2_SYNC_SERVER}\"\ntoken_command = \"secret-tool lookup grove sync\"\n[[workspaces]]\nname = \"alpha\"\nrole = \"registry\"\nmode = \"plans-only\"\npull = true\nexcludes = [\"private/\", \"tmp/\"]\nmax_file_size = 4096\n"
+	migrateWrite(t, stage, legacy)
+	manifest := &p2MigrationManifest{Notespaces: []p2NotespacePlan{{Notebook: "nb", Name: "alpha", Root: filepath.Join(nb, "notespaces", "alpha"), ID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Subject: "local:test", Kind: "notes"}}}
+
+	compiled, receipt, err := compileP2StagedSync(manifest)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if !bytes.Contains(compiled, []byte("${P2_SYNC_SERVER}")) {
+		t.Fatalf("compile baked environment expansion into final config:\n%s", compiled)
+	}
+	path := filepath.Join(t.TempDir(), "sync.toml")
+	migrateWrite(t, path, string(compiled))
+	got, err := config.LoadSyncConfigFrom(path)
+	if err != nil || got == nil || len(got.Workspaces) != 1 {
+		t.Fatalf("compiled typed config did not load: %+v err=%v\n%s", got, err, compiled)
+	}
+	ws := got.Workspaces[0]
+	if got.Server != "https://sync.example.com" || got.TokenCommand != "secret-tool lookup grove sync" || ws.Mode != config.SyncModePlansOnly || !ws.Pull || ws.MaxFileSize != 4096 || len(ws.Excludes) != 2 {
+		t.Fatalf("compiled semantics changed: %+v / %+v", got, ws)
+	}
+	if len(receipt.Bindings) != 1 || receipt.Bindings[0].NotespaceID != "01ARZ3NDEKTSV4RRFFQ69G5FAV" || receipt.StagedHash != hashBytes([]byte(legacy)) || receipt.FinalHash != hashBytes(compiled) {
+		t.Fatalf("conversion receipt=%+v", receipt)
+	}
+
+	migrateWrite(t, stage, legacy+"future_intent = \"must-not-drop\"\n")
+	if _, _, err := compileP2StagedSync(manifest); err == nil || !strings.Contains(err.Error(), "unknown workspaces[0] key \"future_intent\"") {
+		t.Fatalf("unknown legacy intent was silently dropped: %v", err)
 	}
 }
 

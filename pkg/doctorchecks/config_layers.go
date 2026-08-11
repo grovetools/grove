@@ -159,9 +159,13 @@ func expandUserPath(path string) string {
 	return path
 }
 
-func isRecordedTopologyFile(path string) bool {
-	base := filepath.Base(path)
-	return base == coderoot.RootsFileName || base == coderoot.NotebooksFileName
+func isStandaloneTypedConfigFile(path string) bool {
+	switch filepath.Base(path) {
+	case coderoot.RootsFileName, coderoot.NotebooksFileName, "sync.toml", config.MachineConfigFileName:
+		return true
+	default:
+		return false
+	}
 }
 
 // parseLayerFile parses one config file with its owning loader's semantics.
@@ -182,6 +186,14 @@ func parseLayerFile(path string) (map[string]interface{}, error) {
 		}
 	case coderoot.NotebooksFileName:
 		if _, err := coderoot.ParseNotebooks(path, expanded); err != nil {
+			return nil, err
+		}
+	case "sync.toml":
+		if _, err := config.LoadSyncConfigFrom(path); err != nil {
+			return nil, err
+		}
+	case config.MachineConfigFileName:
+		if _, err := config.LoadMachineConfigFrom(path); err != nil {
 			return nil, err
 		}
 	default:
@@ -237,16 +249,6 @@ func (c *configLayersCheck) Run(ctx context.Context, opts doctor.RunOptions) doc
 		if _, err := parseLayerFile(f.Path); err != nil {
 			failures = append(failures, fmt.Sprintf("%s [%s]: %v", f.Path, f.Kind, compactError(err)))
 			continue
-		}
-		// machine.toml has a typed loader with its own validation (paths
-		// present, no name claimed by both an ecosystem and a root). A file
-		// that parses as TOML but fails that validation is silently ignored at
-		// load time, which is exactly the class of failure this check exists
-		// to surface.
-		if filepath.Base(f.Path) == config.MachineConfigFileName {
-			if _, err := config.LoadMachineConfigFrom(f.Path); err != nil {
-				failures = append(failures, fmt.Sprintf("%s [%s]: %v", f.Path, f.Kind, compactError(err)))
-			}
 		}
 	}
 

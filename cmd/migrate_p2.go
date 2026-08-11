@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/oklog/ulid/v2"
+	"github.com/pelletier/go-toml/v2"
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/coderoot"
@@ -70,21 +71,38 @@ type p2FileBackup struct {
 	AfterHash  string `json:"after_hash,omitempty"`
 }
 
+type p2SyncBinding struct {
+	Name        string `json:"name"`
+	NotespaceID string `json:"notespace_id"`
+	Notebook    string `json:"notebook"`
+	Subject     string `json:"subject"`
+	Role        string `json:"role,omitempty"`
+	Pull        bool   `json:"pull,omitempty"`
+}
+
+type p2SyncConversion struct {
+	StagedPath string          `json:"staged_path"`
+	StagedHash string          `json:"staged_hash"`
+	FinalHash  string          `json:"final_hash"`
+	Bindings   []p2SyncBinding `json:"bindings"`
+}
+
 type p2MigrationManifest struct {
-	Version       int               `json:"version"`
-	CreatedAt     time.Time         `json:"created_at"`
-	State         string            `json:"state"`
-	Notebooks     []p2NotebookPlan  `json:"notebooks"`
-	Notespaces    []p2NotespacePlan `json:"notespaces"`
-	Files         []p2FileBackup    `json:"files"`
-	SyncDB        string            `json:"sync_db,omitempty"`
-	SyncDBArchive string            `json:"sync_db_archive,omitempty"`
-	SyncDBHash    string            `json:"sync_db_hash,omitempty"`
-	Journal       string            `json:"journal"`
-	ServerBackup  string            `json:"server_backup,omitempty"`
-	ServerReceipt string            `json:"server_receipt,omitempty"`
-	Registrations []string          `json:"registrations,omitempty"`
-	ServerState   string            `json:"server_state"`
+	Version        int               `json:"version"`
+	CreatedAt      time.Time         `json:"created_at"`
+	State          string            `json:"state"`
+	Notebooks      []p2NotebookPlan  `json:"notebooks"`
+	Notespaces     []p2NotespacePlan `json:"notespaces"`
+	Files          []p2FileBackup    `json:"files"`
+	SyncDB         string            `json:"sync_db,omitempty"`
+	SyncDBArchive  string            `json:"sync_db_archive,omitempty"`
+	SyncDBHash     string            `json:"sync_db_hash,omitempty"`
+	Journal        string            `json:"journal"`
+	ServerBackup   string            `json:"server_backup,omitempty"`
+	ServerReceipt  string            `json:"server_receipt,omitempty"`
+	Registrations  []string          `json:"registrations,omitempty"`
+	ServerState    string            `json:"server_state"`
+	SyncConversion p2SyncConversion  `json:"sync_conversion"`
 }
 
 var p2Command = func(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -130,6 +148,10 @@ func runP2Migration(ctx context.Context, out io.Writer, in io.Reader, opts p2Mig
 		for _, ns := range manifest.Notespaces {
 			fmt.Fprintf(out, "  stamp       %s id=%s subject=%s\n", ns.Root, ns.ID, ns.Subject)
 		}
+		for _, binding := range manifest.SyncConversion.Bindings {
+			fmt.Fprintf(out, "  sync compile %s -> id=%s notebook=%s role=%s pull=%t\n", binding.Name, binding.NotespaceID, binding.Notebook, binding.Role, binding.Pull)
+		}
+		fmt.Fprintf(out, "  sync bytes  staged=%s final=%s\n", manifest.SyncConversion.StagedHash, manifest.SyncConversion.FinalHash)
 		fmt.Fprintf(out, "  journal     %s\n", opts.ManifestPath)
 	}
 	if opts.DryRun {
@@ -437,9 +459,11 @@ func planP2MigrationResolved(opts *p2MigrationOptions, now time.Time) (*p2Migrat
 		manifest.State = "already-applied"
 		return manifest, nil
 	}
-	if err := validateStagedSync(manifest); err != nil {
+	_, conversion, err := compileP2StagedSync(manifest)
+	if err != nil {
 		return nil, err
 	}
+	manifest.SyncConversion = conversion
 	files := []string{config.MachineConfigPath(), config.SyncConfigPath(), config.SyncConfigPath() + ".p2-staged"}
 	for _, root := range opts.ContentRoots {
 		candidates, err := p2RewriteCandidates(root)
@@ -496,25 +520,126 @@ func rejectPinnedTemplates() error {
 	return nil
 }
 
-func validateStagedSync(manifest *p2MigrationManifest) error {
+func compileP2StagedSync(manifest *p2MigrationManifest) ([]byte, p2SyncConversion, error) {
 	path := config.SyncConfigPath() + ".p2-staged"
-	cfg, err := config.LoadSyncConfigFrom(path)
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, p2SyncConversion{}, fmt.Errorf("required exact P2 input %s is missing", path)
+	}
 	if err != nil {
-		return fmt.Errorf("parse exact staged P2 input %s: %w", path, err)
+		return nil, p2SyncConversion{}, err
 	}
-	if cfg == nil {
-		return fmt.Errorf("required exact P2 input %s is missing", path)
+
+	// Decode twice. The canonical loader proves the staged input has today's
+	// runtime semantics (including ${VAR} expansion); the unexpanded decode is
+	// what we render so migration never bakes an expanded token or path into the
+	// final file.
+	cfg, err := config.LoadSyncConfigFrom(path)
+	if err != nil || cfg == nil {
+		return nil, p2SyncConversion{}, fmt.Errorf("parse exact staged P2 input %s: %w", path, err)
 	}
+	var raw map[string]interface{}
+	if err := toml.Unmarshal(data, &raw); err != nil {
+		return nil, p2SyncConversion{}, fmt.Errorf("parse exact staged P2 input %s: %w", path, err)
+	}
+	if err := rejectUnknownP2SyncKeys(raw); err != nil {
+		return nil, p2SyncConversion{}, fmt.Errorf("compile exact staged P2 input %s: %w", path, err)
+	}
+	var render config.SyncConfig
+	if err := toml.Unmarshal(data, &render); err != nil {
+		return nil, p2SyncConversion{}, fmt.Errorf("decode exact staged P2 input %s: %w", path, err)
+	}
+
 	byName := map[string][]p2NotespacePlan{}
 	for _, ns := range manifest.Notespaces {
 		byName[ns.Name] = append(byName[ns.Name], ns)
 	}
+	seen := map[string]bool{}
+	registryEntries := 0
+	conversion := p2SyncConversion{StagedPath: path, StagedHash: hashBytes(data)}
 	for _, ws := range cfg.Workspaces {
-		if len(byName[ws.Name]) != 1 {
-			return fmt.Errorf("staged sync entry %q resolves to %d explicit notespaces; refusing inference", ws.Name, len(byName[ws.Name]))
+		if seen[ws.Name] {
+			return nil, p2SyncConversion{}, fmt.Errorf("staged sync entry %q is duplicated; refusing ambiguous intent", ws.Name)
+		}
+		seen[ws.Name] = true
+		matches := byName[ws.Name]
+		if len(matches) != 1 {
+			return nil, p2SyncConversion{}, fmt.Errorf("staged sync entry %q resolves to %d explicit notespaces; refusing inference", ws.Name, len(matches))
+		}
+		ns := matches[0]
+		if ws.Role == config.SyncRoleRegistry {
+			registryEntries++
+			if registryEntries > 1 {
+				return nil, p2SyncConversion{}, fmt.Errorf("staged sync input declares multiple registry-role entries; refusing ambiguous registry binding")
+			}
+		}
+		conversion.Bindings = append(conversion.Bindings, p2SyncBinding{Name: ws.Name, NotespaceID: ns.ID, Notebook: ns.Notebook, Subject: ns.Subject, Role: ws.Role, Pull: ws.Pull})
+	}
+	compiled, err := toml.Marshal(&render)
+	if err != nil {
+		return nil, p2SyncConversion{}, fmt.Errorf("render typed post-P2 sync config: %w", err)
+	}
+	conversion.FinalHash = hashBytes(compiled)
+	return compiled, conversion, nil
+}
+
+func rejectUnknownP2SyncKeys(raw map[string]interface{}) error {
+	allowedTop := map[string]bool{"server": true, "token": true, "token_command": true, "ca_cert": true, "workspaces": true, "providers": true}
+	for _, key := range sortedMapKeys(raw) {
+		if !allowedTop[key] {
+			return fmt.Errorf("unknown top-level key %q cannot be preserved by the typed sync schema", key)
+		}
+	}
+	tables := []struct {
+		name    string
+		allowed map[string]bool
+	}{
+		{"workspaces", map[string]bool{"name": true, "role": true, "mode": true, "pull": true, "excludes": true, "max_file_size": true}},
+		{"providers", map[string]bool{"provider": true, "issues_type": true, "prs_type": true}},
+	}
+	for _, table := range tables {
+		value, ok := raw[table.name]
+		if !ok {
+			continue
+		}
+		var entries []map[string]interface{}
+		switch typed := value.(type) {
+		case []map[string]interface{}:
+			entries = typed
+		case []interface{}:
+			for _, item := range typed {
+				entry, ok := item.(map[string]interface{})
+				if !ok {
+					return fmt.Errorf("%s must be an array of typed tables", table.name)
+				}
+				entries = append(entries, entry)
+			}
+		default:
+			return fmt.Errorf("%s must be an array of typed tables", table.name)
+		}
+		for i, entry := range entries {
+			for _, key := range sortedMapKeys(entry) {
+				if !table.allowed[key] {
+					return fmt.Errorf("unknown %s[%d] key %q cannot be preserved by the typed sync schema", table.name, i, key)
+				}
+			}
 		}
 	}
 	return nil
+}
+
+func sortedMapKeys[V any](values map[string]V) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func hashBytes(data []byte) string {
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("%x", sum)
 }
 
 func writeP2MachineConfig(manifest *p2MigrationManifest) error {
@@ -559,26 +684,47 @@ func writeP2MachineConfig(manifest *p2MigrationManifest) error {
 }
 
 func consumeP2StagedSync(manifest *p2MigrationManifest) error {
-	stage := config.SyncConfigPath() + ".p2-staged"
-	staged, err := config.LoadSyncConfigFrom(stage)
-	if err != nil || staged == nil {
-		return fmt.Errorf("reload exact staged sync input: %w", err)
-	}
-	data, err := os.ReadFile(stage)
+	compiled, conversion, err := compileP2StagedSync(manifest)
 	if err != nil {
 		return err
 	}
-	// P1 parked this file byte-for-byte specifically for this handoff. It is
-	// the authoritative reconciliation table; do not reconstruct, merge, or
-	// infer it through the current schema and accidentally lose unknown intent.
-	if err := atomicMigrationWrite(config.SyncConfigPath(), data); err != nil {
+	if conversion.StagedHash != manifest.SyncConversion.StagedHash || conversion.FinalHash != manifest.SyncConversion.FinalHash {
+		return fmt.Errorf("staged sync input changed after preflight; refusing to consume it")
+	}
+
+	// The staged file remains the byte-exact authority and rollback evidence.
+	// Applying compiles its legacy name-keyed entries through the typed schema;
+	// the immutable name->id proof lives in the manifest and machine.toml rather
+	// than inventing an unsupported id field in sync.toml.
+	if err := atomicMigrationWrite(config.SyncConfigPath(), compiled); err != nil {
 		return err
 	}
 	settled, err := config.LoadSyncConfigFrom(config.SyncConfigPath())
 	if err != nil || settled == nil {
-		return fmt.Errorf("verify consumed staged sync input: %w", err)
+		return fmt.Errorf("verify compiled staged sync input: %w", err)
 	}
-	return os.Remove(stage)
+	staged, err := config.LoadSyncConfigFrom(conversion.StagedPath)
+	if err != nil || staged == nil {
+		return fmt.Errorf("reload exact staged sync input after compile: %w", err)
+	}
+	want, _ := json.Marshal(staged)
+	got, _ := json.Marshal(settled)
+	if !bytes.Equal(want, got) {
+		return fmt.Errorf("compiled sync config changed staged runtime semantics; refusing to consume it")
+	}
+	machine, err := config.LoadMachineConfig()
+	if err != nil || machine == nil {
+		return fmt.Errorf("verify compiled sync identity binding: %w", err)
+	}
+	for _, binding := range conversion.Bindings {
+		if machine.Primaries[binding.Subject] != binding.NotespaceID {
+			return fmt.Errorf("compiled sync binding %q lacks immutable primary %s", binding.Name, binding.NotespaceID)
+		}
+		if binding.Role == config.SyncRoleRegistry && (machine.Sync.Registry == nil || machine.Sync.Registry.Notebook != binding.Notebook || machine.Sync.Registry.NotespaceID != binding.NotespaceID) {
+			return fmt.Errorf("compiled registry entry %q lacks exact [sync.registry] binding to %s", binding.Name, binding.NotespaceID)
+		}
+	}
+	return os.Remove(conversion.StagedPath)
 }
 
 func subjectForRoot(root string) (string, error) {
@@ -664,11 +810,12 @@ func renderP2Result(out io.Writer, asJSON bool, action, reason string, manifest 
 	result := struct {
 		Action, Reason, Manifest, ServerState string
 		Notebooks, Notespaces, Registrations  int
-	}{action, reason, manifest.Journal, manifest.ServerState, len(manifest.Notebooks), len(manifest.Notespaces), len(manifest.Registrations)}
+		SyncConversion                        p2SyncConversion `json:"sync_conversion"`
+	}{action, reason, manifest.Journal, manifest.ServerState, len(manifest.Notebooks), len(manifest.Notespaces), len(manifest.Registrations), manifest.SyncConversion}
 	if asJSON {
 		return json.NewEncoder(out).Encode(result)
 	}
-	fmt.Fprintf(out, "\n✓ %s\n  reason: %s\n  evidence: notebooks=%d notespaces=%d registrations=%d\n  manifest: %s\n  server: %s\n", action, reason, result.Notebooks, result.Notespaces, result.Registrations, result.Manifest, result.ServerState)
+	fmt.Fprintf(out, "\n✓ %s\n  reason: %s\n  evidence: notebooks=%d notespaces=%d registrations=%d sync_bindings=%d\n  sync bytes: staged=%s compiled=%s\n  manifest: %s\n  server: %s\n", action, reason, result.Notebooks, result.Notespaces, result.Registrations, len(result.SyncConversion.Bindings), result.SyncConversion.StagedHash, result.SyncConversion.FinalHash, result.Manifest, result.ServerState)
 	return nil
 }
 

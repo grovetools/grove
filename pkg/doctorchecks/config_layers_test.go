@@ -58,10 +58,22 @@ func TestConfigLayersCheck_PassesOnCleanConfig(t *testing.T) {
 	groveDir := setupScratchConfig(t)
 	write(t, filepath.Join(groveDir, "grove.toml"), "version = \"1.0\"\n")
 	write(t, filepath.Join(groveDir, "20-good.toml"), "[tui]\ntheme = \"kanagawa\"\n")
+	write(t, filepath.Join(groveDir, "sync.toml"), "server = \"https://sync.example.com\"\n[[workspaces]]\nname = \"registry\"\nrole = \"registry\"\npull = true\n")
 
 	res := (&configLayersCheck{}).Run(context.Background(), doctor.RunOptions{})
 	if res.Status != doctor.StatusOK {
 		t.Fatalf("expected ok, got %s (%s / %s)", res.Status, res.Message, res.Error)
+	}
+}
+
+func TestConfigLayersCheck_UsesStandaloneSyncLoader(t *testing.T) {
+	groveDir := setupScratchConfig(t)
+	path := filepath.Join(groveDir, "sync.toml")
+	write(t, path, "[[workspaces]]\nname = \"registry\"\nrole = \"invented\"\n")
+
+	res := (&configLayersCheck{}).Run(context.Background(), doctor.RunOptions{})
+	if res.Status != doctor.StatusFail || !strings.Contains(res.Error, path) || !strings.Contains(res.Error, "invalid role") {
+		t.Fatalf("typed sync diagnostic missing: %+v", res)
 	}
 }
 
