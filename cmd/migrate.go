@@ -100,6 +100,10 @@ func runLegacyMigrateWithOptions(out io.Writer, in io.Reader, opts migrationOpti
 	if err != nil {
 		return err
 	}
+	canonicalTargets, err := resolveCanonicalMigrationTargets(m)
+	if err != nil {
+		return err
+	}
 	current, err := loadModernCanonicalForMigration(filepath.Dir(m.RootsPath))
 	if err != nil {
 		return err
@@ -188,7 +192,14 @@ func runLegacyMigrateWithOptions(out io.Writer, in io.Reader, opts migrationOpti
 	sort.Strings(backupPaths)
 	backupPaths = uniqueStrings(backupPaths)
 	stamp := now.UTC().Format("20060102T150405Z")
+	// Snapshot both the logical canonical names (including their exact symlink
+	// representation) and the resolved mutation targets. Writes go only to the
+	// latter, but retaining both makes rollback robust even against an injected
+	// failure which disturbs a link.
 	allChanged := append([]string{}, ordered...)
+	for _, p := range ordered {
+		allChanged = append(allChanged, canonicalTargets.mutationPath(p))
+	}
 	for _, p := range backupPaths {
 		allChanged = append(allChanged, p+"."+stamp+".bak")
 	}
@@ -216,9 +227,12 @@ func runLegacyMigrateWithOptions(out io.Writer, in io.Reader, opts migrationOpti
 		}
 	}
 	for _, p := range ordered {
-		if err := atomicMigrationWrite(p, updates[p]); err != nil {
+		if err := atomicMigrationWrite(canonicalTargets.mutationPath(p), updates[p]); err != nil {
 			return fail("write "+p, err)
 		}
+		// Hooks and diagnostics deliberately retain the logical config name. A
+		// dotfiles target may have any basename, while operators requested a
+		// failure after (for example) roots.toml.
 		if err := runMigrationFailureHook(p); err != nil {
 			return fail("write "+p, err)
 		}
@@ -333,6 +347,88 @@ func uniqueSortedStrings(in []string) []string {
 	return uniqueStrings(in)
 }
 
+type canonicalMigrationTargets struct {
+	resolved map[string]string
+}
+
+func (t canonicalMigrationTargets) mutationPath(logical string) string {
+	if target, ok := t.resolved[logical]; ok {
+		return target
+	}
+	return logical
+}
+
+// resolveCanonicalMigrationTargets reviews the two special recorded names
+// before any backup or write. Existing symlinks may point outside the config
+// directory (dotfiles managers commonly do this), but they must resolve all the
+// way to an existing regular file. Dangling links, cycles, non-file targets,
+// and aliases to another migration source are not reviewable safely.
+func resolveCanonicalMigrationTargets(m *legacyMigration) (canonicalMigrationTargets, error) {
+	out := canonicalMigrationTargets{resolved: map[string]string{}}
+	logicalPaths := []string{m.NotebooksPath, m.RootsPath}
+	for _, logical := range logicalPaths {
+		target, linked, err := resolveCanonicalMutationTarget(logical)
+		if err != nil {
+			return out, err
+		}
+		out.resolved[logical] = target
+		if !linked {
+			continue
+		}
+		for i := range m.Sources {
+			s := &m.Sources[i]
+			if s.ReplaceCanonical && filepath.Clean(s.Path) == filepath.Clean(logical) {
+				s.Resolved = target
+				continue
+			}
+			resolved := s.Resolved
+			if resolved == "" {
+				resolved = s.Path
+			}
+			if filepath.Clean(resolved) == filepath.Clean(target) {
+				return out, fmt.Errorf("canonical config symlink %s resolves to migration source %s with conflicting logical attribution/dialect; separate the targets before migrating", logical, s.Path)
+			}
+		}
+	}
+	if filepath.Clean(out.resolved[m.NotebooksPath]) == filepath.Clean(out.resolved[m.RootsPath]) && filepath.Clean(m.NotebooksPath) != filepath.Clean(m.RootsPath) {
+		return out, fmt.Errorf("canonical config dialect conflict: %s and %s resolve to the same target %s", m.NotebooksPath, m.RootsPath, out.resolved[m.RootsPath])
+	}
+	return out, nil
+}
+
+func resolveCanonicalMutationTarget(logical string) (target string, linked bool, err error) {
+	info, err := os.Lstat(logical)
+	if os.IsNotExist(err) {
+		return logical, false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("review canonical config path %s: %w", logical, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		if !info.Mode().IsRegular() {
+			return "", false, fmt.Errorf("review canonical config path %s: expected a regular file or symlink, found %s", logical, info.Mode().Type())
+		}
+		return logical, false, nil
+	}
+	resolved, err := filepath.EvalSymlinks(logical)
+	if err != nil {
+		return "", true, fmt.Errorf("refusing unreviewable canonical config symlink %s (dangling, escaping, or cyclic target): %w", logical, err)
+	}
+	resolved, err = filepath.Abs(resolved)
+	if err != nil {
+		return "", true, fmt.Errorf("resolve canonical config symlink %s: %w", logical, err)
+	}
+	resolved = filepath.Clean(resolved)
+	targetInfo, err := os.Stat(resolved)
+	if err != nil {
+		return "", true, fmt.Errorf("review canonical config symlink target %s -> %s: %w", logical, resolved, err)
+	}
+	if !targetInfo.Mode().IsRegular() {
+		return "", true, fmt.Errorf("review canonical config symlink target %s -> %s: target is not a regular file", logical, resolved)
+	}
+	return resolved, true, nil
+}
+
 // canonicalEffectiveTopology projects the complete author-visible topology
 // emitted by config-show. Source attribution and runtime-only metadata are not
 // in that representation. Every path/root_dir is expanded, made absolute and
@@ -393,10 +489,12 @@ func effectiveDiff(before, after []byte) string {
 }
 
 type migrationSnapshot struct {
-	path   string
-	data   []byte
-	mode   os.FileMode
-	exists bool
+	path       string
+	data       []byte
+	mode       os.FileMode
+	linkTarget string
+	exists     bool
+	symlink    bool
 }
 
 type migrationRollbackStack struct {
@@ -408,13 +506,23 @@ func newMigrationRollbackStack(paths []string) (*migrationRollbackStack, error) 
 	stack := &migrationRollbackStack{}
 	for _, path := range paths {
 		snapshot := migrationSnapshot{path: path, mode: 0o600}
-		info, err := os.Stat(path)
+		info, err := os.Lstat(path)
 		if os.IsNotExist(err) {
 			stack.snapshots = append(stack.snapshots, snapshot)
 			continue
 		}
 		if err != nil {
 			return nil, fmt.Errorf("snapshot %s: %w", path, err)
+		}
+		snapshot.exists = true
+		if info.Mode()&os.ModeSymlink != 0 {
+			snapshot.symlink = true
+			snapshot.linkTarget, err = os.Readlink(path)
+			if err != nil {
+				return nil, fmt.Errorf("snapshot symlink %s: %w", path, err)
+			}
+			stack.snapshots = append(stack.snapshots, snapshot)
+			continue
 		}
 		if !info.Mode().IsRegular() {
 			return nil, fmt.Errorf("snapshot %s: target is not a regular file", path)
@@ -423,7 +531,7 @@ func newMigrationRollbackStack(paths []string) (*migrationRollbackStack, error) 
 		if err != nil {
 			return nil, fmt.Errorf("snapshot %s: %w", path, err)
 		}
-		snapshot.exists, snapshot.mode = true, info.Mode().Perm()
+		snapshot.mode = info.Mode().Perm()
 		stack.snapshots = append(stack.snapshots, snapshot)
 	}
 	return stack, nil
@@ -441,6 +549,22 @@ func (s *migrationRollbackStack) Rollback() error {
 		if !snapshot.exists {
 			if err := os.Remove(snapshot.path); err != nil && !os.IsNotExist(err) {
 				failures = append(failures, fmt.Sprintf("remove %s: %v", snapshot.path, err))
+			}
+			continue
+		}
+		if snapshot.symlink {
+			current, err := os.Readlink(snapshot.path)
+			if err == nil && current == snapshot.linkTarget {
+				// Leaving an unchanged link in place preserves representation and
+				// filesystem metadata more exactly than recreating it.
+				continue
+			}
+			if err := os.Remove(snapshot.path); err != nil && !os.IsNotExist(err) {
+				failures = append(failures, fmt.Sprintf("remove changed symlink %s: %v", snapshot.path, err))
+				continue
+			}
+			if err := os.Symlink(snapshot.linkTarget, snapshot.path); err != nil {
+				failures = append(failures, fmt.Sprintf("restore symlink %s: %v", snapshot.path, err))
 			}
 			continue
 		}

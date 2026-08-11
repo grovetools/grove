@@ -241,6 +241,215 @@ root_dir = "/notes/global"
 	}
 }
 
+func TestMigrateCanonicalSymlinkRealShapePreservesLinksTargetsAndRollback(t *testing.T) {
+	type fixture struct {
+		dir, notebooksLink, rootsLink, notebooksTarget, rootsTarget, rootsHop string
+		notebooksBody, rootsBody                                              string
+	}
+	newFixture := func(t *testing.T) fixture {
+		t.Helper()
+		dir := migrateSandbox(t)
+		dotfiles := filepath.Join(t.TempDir(), "dotfiles", "grove")
+		f := fixture{
+			dir:             dir,
+			notebooksLink:   filepath.Join(dir, "notebooks.toml"),
+			rootsLink:       filepath.Join(dir, "roots.toml"),
+			notebooksTarget: filepath.Join(dotfiles, "managed-notebooks.conf"),
+			rootsTarget:     filepath.Join(dotfiles, "managed-roots.conf"),
+			rootsHop:        filepath.Join(dir, "roots-managed-link"),
+			notebooksBody:   "[_grove]\npriority=65\n[notebooks.definitions.nb]\nroot_dir=\"/notes\"\n[notebooks.rules]\ndefault=\"nb\"\n[groves.code]\npath=\"/code\"\nnotebook=\"nb\"\n",
+			rootsBody:       "[roots.existing]\npath=\"/existing\"\nscan=true\nnotebook=\"nb\"\n",
+		}
+		migrateWrite(t, f.notebooksTarget, f.notebooksBody)
+		migrateWrite(t, f.rootsTarget, f.rootsBody)
+		if err := os.Chmod(f.notebooksTarget, 0o640); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(f.rootsTarget, 0o604); err != nil {
+			t.Fatal(err)
+		}
+		// Model the observed dotfiles shape: the canonical notebook name is an
+		// absolute managed link. roots uses a relative link followed by a second
+		// absolute hop, exercising a chain without reading any live config.
+		if err := os.Symlink(f.notebooksTarget, f.notebooksLink); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(f.rootsTarget, f.rootsHop); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Base(f.rootsHop), f.rootsLink); err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+	assertLinks := func(t *testing.T, f fixture) {
+		t.Helper()
+		if got, err := os.Readlink(f.notebooksLink); err != nil || got != f.notebooksTarget {
+			t.Fatalf("notebooks symlink = %q, %v", got, err)
+		}
+		if got, err := os.Readlink(f.rootsLink); err != nil || got != filepath.Base(f.rootsHop) {
+			t.Fatalf("roots symlink = %q, %v", got, err)
+		}
+		if got, err := os.Readlink(f.rootsHop); err != nil || got != f.rootsTarget {
+			t.Fatalf("roots chain hop = %q, %v", got, err)
+		}
+	}
+
+	t.Run("apply-and-idempotent", func(t *testing.T) {
+		f := newFixture(t)
+		m, err := collectLegacyMigration()
+		if err != nil {
+			t.Fatal(err)
+		}
+		resolvedNotebookTarget, err := filepath.EvalSymlinks(f.notebooksTarget)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, source := range m.Sources {
+			if source.Path == f.notebooksLink && source.Resolved == resolvedNotebookTarget && source.ReplaceCanonical && source.TOML {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("canonical symlink lost logical source attribution, resolved target, or TOML dialect")
+		}
+		stamp := time.Date(2026, 8, 10, 15, 0, 0, 0, time.UTC)
+		var out bytes.Buffer
+		if err := runLegacyMigrate(&out, strings.NewReader(""), false, true, stamp); err != nil {
+			t.Fatalf("apply: %v\n%s", err, out.String())
+		}
+		assertLinks(t, f)
+		if got := migrateRead(t, f.notebooksTarget); strings.Contains(got, "definitions") || !strings.Contains(got, "[notebooks.nb]") {
+			t.Fatalf("managed notebook target was not modernized:\n%s", got)
+		}
+		if got := migrateRead(t, f.rootsTarget); !strings.Contains(got, "[roots.code]") || !strings.Contains(got, "[roots.existing]") {
+			t.Fatalf("managed roots target was not atomically updated:\n%s", got)
+		}
+		for path, wantMode := range map[string]os.FileMode{f.notebooksTarget: 0o640, f.rootsTarget: 0o604} {
+			if info, err := os.Stat(path); err != nil || info.Mode().Perm() != wantMode {
+				t.Fatalf("target mode %s = %v, %v; want %o", path, info, err, wantMode)
+			}
+		}
+		for _, logical := range []string{f.notebooksLink, f.rootsLink} {
+			backup := logical + ".20260810T150000Z.bak"
+			if info, err := os.Lstat(backup); err != nil || !info.Mode().IsRegular() {
+				t.Fatalf("regular target-byte backup %s: info=%v err=%v", backup, info, err)
+			}
+		}
+		var second bytes.Buffer
+		if err := runLegacyMigrate(&second, strings.NewReader(""), false, true, stamp.Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		assertLinks(t, f)
+		if !strings.Contains(second.String(), "already migrated") {
+			t.Fatalf("second run was not idempotent:\n%s", second.String())
+		}
+	})
+
+	// Two backups and three writes (compatibility fragment, notebooks, roots).
+	for failAt := 1; failAt <= 5; failAt++ {
+		t.Run(fmt.Sprintf("rollback-mutation-%d", failAt), func(t *testing.T) {
+			f := newFixture(t)
+			seen := 0
+			migrationFailureHook = func(string) error {
+				seen++
+				if seen == failAt {
+					return fmt.Errorf("injected symlink mutation %d", failAt)
+				}
+				return nil
+			}
+			t.Cleanup(func() { migrationFailureHook = nil })
+			var out bytes.Buffer
+			err := runLegacyMigrate(&out, strings.NewReader(""), false, true, time.Date(2026, 8, 10, 15, 1, 0, 0, time.UTC))
+			if err == nil || !strings.Contains(err.Error(), "restored every changed file byte-for-byte") || seen != failAt {
+				t.Fatalf("failAt=%d seen=%d err=%v", failAt, seen, err)
+			}
+			assertLinks(t, f)
+			if got := migrateRead(t, f.notebooksTarget); got != f.notebooksBody {
+				t.Fatalf("notebook target rollback mismatch:\n%s", got)
+			}
+			if got := migrateRead(t, f.rootsTarget); got != f.rootsBody {
+				t.Fatalf("roots target rollback mismatch:\n%s", got)
+			}
+			for path, wantMode := range map[string]os.FileMode{f.notebooksTarget: 0o640, f.rootsTarget: 0o604} {
+				if info, statErr := os.Stat(path); statErr != nil || info.Mode().Perm() != wantMode {
+					t.Fatalf("rollback mode %s: info=%v err=%v", path, info, statErr)
+				}
+			}
+			for _, residue := range []string{
+				f.notebooksLink + ".20260810T150100Z.bak",
+				f.rootsLink + ".20260810T150100Z.bak",
+				filepath.Join(f.dir, "notebooks.legacy-compat.toml"),
+			} {
+				if _, statErr := os.Lstat(residue); !os.IsNotExist(statErr) {
+					t.Fatalf("rollback residue %s: %v", residue, statErr)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveCanonicalMigrationTargetsRefusesUnreviewableAndDialectConflicts(t *testing.T) {
+	t.Run("dangling-escape", func(t *testing.T) {
+		dir := t.TempDir()
+		logical := filepath.Join(dir, "notebooks.toml")
+		if err := os.Symlink(filepath.Join("..", "..", "missing-dotfiles", "notebooks.toml"), logical); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := resolveCanonicalMutationTarget(logical); err == nil || !strings.Contains(err.Error(), "unreviewable") {
+			t.Fatalf("dangling escape err=%v", err)
+		}
+	})
+	t.Run("cycle", func(t *testing.T) {
+		dir := t.TempDir()
+		a, b := filepath.Join(dir, "notebooks.toml"), filepath.Join(dir, "cycle")
+		if err := os.Symlink(b, a); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(a, b); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := resolveCanonicalMutationTarget(a); err == nil || !strings.Contains(err.Error(), "cyclic") {
+			t.Fatalf("cycle err=%v", err)
+		}
+	})
+	t.Run("shared-canonical-target", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "managed")
+		migrateWrite(t, target, "")
+		nb, roots := filepath.Join(dir, "notebooks.toml"), filepath.Join(dir, "roots.toml")
+		if err := os.Symlink(target, nb); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, roots); err != nil {
+			t.Fatal(err)
+		}
+		m := &legacyMigration{NotebooksPath: nb, RootsPath: roots}
+		if _, err := resolveCanonicalMigrationTargets(m); err == nil || !strings.Contains(err.Error(), "dialect conflict") {
+			t.Fatalf("shared target err=%v", err)
+		}
+	})
+	t.Run("canonical-aliases-yaml-source", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "managed")
+		migrateWrite(t, target, "")
+		nb := filepath.Join(dir, "notebooks.toml")
+		if err := os.Symlink(target, nb); err != nil {
+			t.Fatal(err)
+		}
+		roots := filepath.Join(dir, "roots.toml")
+		resolvedTarget, err := filepath.EvalSymlinks(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := &legacyMigration{NotebooksPath: nb, RootsPath: roots, Sources: []legacySource{{Path: filepath.Join(dir, "grove.override.yml"), Resolved: resolvedTarget, TOML: false, RemoveGlobal: true}}}
+		if _, err := resolveCanonicalMigrationTargets(m); err == nil || !strings.Contains(err.Error(), "attribution/dialect") {
+			t.Fatalf("alias conflict err=%v", err)
+		}
+	})
+}
+
 func TestMigrateCanonicalRootsLegacyCollisionWithModernNotebooks(t *testing.T) {
 	dir := migrateSandbox(t)
 	rootsPath := filepath.Join(dir, "roots.toml")

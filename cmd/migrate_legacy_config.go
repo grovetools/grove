@@ -354,7 +354,7 @@ func legacyGlobalFiles(dir string) ([]legacySource, error) {
 	for _, f := range frags {
 		if f.canonicalLegacy != nil {
 			c := *f.canonicalLegacy
-			out = append(out, legacySource{Path: f.path, Resolved: f.path, Label: fmt.Sprintf("canonical-name legacy fragment priority %d", f.priority), Config: c, TOML: true, RemoveGlobal: len(c.Groves) > 0 || len(c.SearchPaths) > 0, ReplaceCanonical: true})
+			out = append(out, legacySource{Path: f.path, Resolved: resolvedLegacyPath(f.path), Label: fmt.Sprintf("canonical-name legacy fragment priority %d", f.priority), Config: c, TOML: true, RemoveGlobal: len(c.Groves) > 0 || len(c.SearchPaths) > 0, ReplaceCanonical: true})
 			continue
 		}
 		if err := add(f.path, fmt.Sprintf("fragment priority %d", f.priority)); err != nil {
@@ -699,7 +699,13 @@ func migrationSourceTargets(sources []legacySource) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, s := range sources {
-		if !s.RemoveGlobal && !s.RemoveMachine && !s.RemoveSync && !s.AnnotateCard && !s.ReplaceCanonical {
+		// A canonical-name legacy source is replaced through its logical
+		// recorded-file operation. Adding its resolved target here would schedule
+		// a second, empty write when that logical path is a symlink.
+		if s.ReplaceCanonical {
+			continue
+		}
+		if !s.RemoveGlobal && !s.RemoveMachine && !s.RemoveSync && !s.AnnotateCard {
 			continue
 		}
 		p := s.Resolved

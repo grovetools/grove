@@ -169,6 +169,60 @@ find "$(config_dir)" -maxdepth 1 -name 'notebooks.toml.*.bak' -print | grep -q .
 "$GROVE_CLI" migrate --yes --json >"$ARTIFACTS/canonical-collision-noop.json"
 json_assert "$ARTIFACTS/canonical-collision-noop.json" '"already migrated" in d.get("reason", "")'
 
+# Real-shape regression: canonical names managed as dotfiles symlinks. One is
+# absolute; the other is a relative link into a chain. Apply and rollback must
+# mutate/restore only the resolved regular targets and never sever either link.
+setup_managed_collision() {
+  reset_home
+  MANAGED_DIR="$SANDBOX/managed-dotfiles/grove"
+  MANAGED_NB="$MANAGED_DIR/notebooks-managed.conf"
+  MANAGED_ROOTS="$MANAGED_DIR/roots-managed.conf"
+  rm -rf "$MANAGED_DIR"
+  mkdir -p "$MANAGED_DIR" "$SANDBOX/case/notes" "$SANDBOX/case/card-notes" "$SANDBOX/case/global-notes" "$SANDBOX/case/code"
+  render_fixture "$FIXTURES/legacy-notebooks-collision.toml.in" "$MANAGED_NB"
+  cat >"$MANAGED_ROOTS" <<EOF
+[roots.code]
+path = "$SANDBOX/case/code"
+scan = true
+notebook = "work"
+EOF
+  chmod 640 "$MANAGED_NB"
+  chmod 604 "$MANAGED_ROOTS"
+  ln -s "$MANAGED_NB" "$(config_dir)/notebooks.toml"
+  ln -s "$MANAGED_ROOTS" "$(config_dir)/roots-managed-hop"
+  ln -s roots-managed-hop "$(config_dir)/roots.toml"
+}
+setup_managed_collision
+MANAGED_NB_BEFORE=$(file_digest "$MANAGED_NB")
+MANAGED_ROOTS_BEFORE=$(file_digest "$MANAGED_ROOTS")
+"$GROVE_CLI" migrate --yes >"$ARTIFACTS/canonical-symlink-apply.txt"
+[ "$(readlink "$(config_dir)/notebooks.toml")" = "$MANAGED_NB" ] || fail "apply severed absolute canonical symlink"
+[ "$(readlink "$(config_dir)/roots.toml")" = roots-managed-hop ] || fail "apply severed relative canonical symlink"
+[ "$(readlink "$(config_dir)/roots-managed-hop")" = "$MANAGED_ROOTS" ] || fail "apply changed canonical symlink chain"
+grep -q 'notebooks.personal' "$MANAGED_NB" || fail "apply did not modernize managed notebooks target"
+grep -q 'roots.code' "$MANAGED_ROOTS" || fail "apply did not retain managed roots target"
+[ -f "$(config_dir)/notebooks.toml."*.bak ] || fail "managed canonical backup missing"
+"$GROVE_CLI" migrate --yes --json >"$ARTIFACTS/canonical-symlink-noop.json"
+json_assert "$ARTIFACTS/canonical-symlink-noop.json" '"already migrated" in d.get("reason", "")'
+
+setup_managed_collision
+expect_fail "$ARTIFACTS/canonical-symlink-rollback.txt" env GROVE_CONFIGLAB=1 GROVE_CONFIGLAB_FAIL_AFTER=roots.toml "$GROVE_CLI" migrate --yes
+[ "$(readlink "$(config_dir)/notebooks.toml")" = "$MANAGED_NB" ] || fail "rollback changed absolute canonical symlink"
+[ "$(readlink "$(config_dir)/roots.toml")" = roots-managed-hop ] || fail "rollback changed relative canonical symlink"
+[ "$(readlink "$(config_dir)/roots-managed-hop")" = "$MANAGED_ROOTS" ] || fail "rollback changed canonical symlink chain"
+[ "$(file_digest "$MANAGED_NB")" = "$MANAGED_NB_BEFORE" ] || fail "rollback changed managed notebooks target bytes"
+[ "$(file_digest "$MANAGED_ROOTS")" = "$MANAGED_ROOTS_BEFORE" ] || fail "rollback changed managed roots target bytes"
+python3 - "$MANAGED_NB" "$MANAGED_ROOTS" <<'PY'
+import os, stat, sys
+expected = {sys.argv[1]: 0o640, sys.argv[2]: 0o604}
+for path, mode in expected.items():
+    actual = stat.S_IMODE(os.stat(path).st_mode)
+    if actual != mode:
+        raise SystemExit(f"mode mismatch {path}: {actual:o} != {mode:o}")
+PY
+if find "$(config_dir)" -maxdepth 1 -name '*.bak' -print | grep -q .; then fail "symlink rollback left backups"; fi
+[ ! -e "$(config_dir)/notebooks.legacy-compat.toml" ] || fail "symlink rollback left compatibility fragment"
+
 # A legacy marker does not excuse unknown fields in a canonical file.
 reset_home
 cat >"$(config_dir)/notebooks.toml" <<'EOF'
