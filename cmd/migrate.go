@@ -28,7 +28,7 @@ func newMigrateCmd() *cobra.Command {
 	var dryRun, yes, stageSync, jsonOutput, undo, localOnly bool
 	var evidenceDir, manifestPath, syncDBPath, grovedBin, syncdBin, serverBackup string
 	var step int
-	var notebookRoots, contentRoots []string
+	var notebookRoots, contentRoots, notespaceIDs []string
 	cmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "Migrate frozen legacy configuration to recorded roots and notebooks",
@@ -44,7 +44,7 @@ roots.toml so a notebook reference is never recorded before its definition.`,
 			if step == 2 || undo {
 				return runP2Migration(cmd.Context(), cmd.OutOrStdout(), cmd.InOrStdin(), p2MigrationOptions{
 					DryRun: dryRun, Yes: yes, Undo: undo, LocalOnly: localOnly, JSON: jsonOutput,
-					NotebookRoots: notebookRoots, ContentRoots: contentRoots, ManifestPath: manifestPath,
+					NotebookRoots: notebookRoots, ContentRoots: contentRoots, NotespaceIDs: notespaceIDs, ManifestPath: manifestPath,
 					SyncDBPath: syncDBPath, GrovedBin: grovedBin, SyncdBin: syncdBin, ServerBackup: serverBackup,
 				}, time.Now().UTC())
 			}
@@ -60,6 +60,7 @@ roots.toml so a notebook reference is never recorded before its definition.`,
 	cmd.Flags().BoolVar(&undo, "undo", false, "Undo step 2 using --manifest (hash guarded)")
 	cmd.Flags().StringSliceVar(&notebookRoots, "notebook-root", nil, "Explicit step-2 notebook binding name=/absolute/path (repeatable; required)")
 	cmd.Flags().StringSliceVar(&contentRoots, "content-root", nil, "Explicit root eligible for scoped old-layout content rewrites (repeatable)")
+	cmd.Flags().StringSliceVar(&notespaceIDs, "notespace-id", nil, "Pin an inherited step-2 identity as notebook/name=ULID (repeatable; use an earlier machine's accepted receipt)")
 	cmd.Flags().StringVar(&manifestPath, "manifest", "", "Step-2 inverse manifest path (required for --undo; optional destination for apply)")
 	cmd.Flags().StringVar(&syncDBPath, "sync-db", "", "Explicit client sync.db path (defaults under GROVE_HOME/XDG)")
 	cmd.Flags().StringVar(&grovedBin, "groved-bin", "groved", "groved binary used for the stopped-daemon archive/rebuild verb")

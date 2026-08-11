@@ -37,6 +37,7 @@ const p2ManifestVersion = 1
 type p2MigrationOptions struct {
 	DryRun, Yes, Undo, LocalOnly, JSON bool
 	NotebookRoots, ContentRoots        []string
+	NotespaceIDs                       []string
 	ManifestPath, SyncDBPath           string
 	GrovedBin, SyncdBin, ServerBackup  string
 }
@@ -340,6 +341,22 @@ func planP2MigrationResolved(opts *p2MigrationOptions, now time.Time) (*p2Migrat
 		return nil, fmt.Errorf("load recorded P1 roots/notebooks: %w", err)
 	}
 	manifest := &p2MigrationManifest{Version: p2ManifestVersion, CreatedAt: now.UTC(), State: "planned", Journal: opts.ManifestPath, SyncDB: opts.SyncDBPath, ServerBackup: opts.ServerBackup, ServerState: "local-only: no server mutation performed or claimed"}
+	pinnedIDs := make(map[string]string, len(opts.NotespaceIDs))
+	for _, raw := range opts.NotespaceIDs {
+		key, id, ok := strings.Cut(raw, "=")
+		key, id = strings.TrimSpace(key), strings.TrimSpace(id)
+		if !ok || key == "" || strings.Count(key, "/") != 1 {
+			return nil, fmt.Errorf("invalid --notespace-id %q; want notebook/name=ULID", raw)
+		}
+		if _, err := ulid.ParseStrict(id); err != nil {
+			return nil, fmt.Errorf("invalid --notespace-id %q: %w", raw, err)
+		}
+		if _, exists := pinnedIDs[key]; exists {
+			return nil, fmt.Errorf("duplicate --notespace-id binding for %q", key)
+		}
+		pinnedIDs[key] = id
+	}
+	usedPinnedIDs := make(map[string]bool, len(pinnedIDs))
 	seenNames, seenPaths := map[string]bool{}, map[string]bool{}
 	for _, raw := range opts.NotebookRoots {
 		name, root, ok := strings.Cut(raw, "=")
@@ -422,6 +439,14 @@ func planP2MigrationResolved(opts *p2MigrationOptions, now time.Time) (*p2Migrat
 			if stamp != nil {
 				plan.ID, plan.Subject, plan.Kind = stamp.ID, stamp.Subject, stamp.Kind
 			}
+			pinKey := nb.Name + "/" + entry.Name()
+			if pinnedID, ok := pinnedIDs[pinKey]; ok {
+				if stamp != nil && stamp.ID != pinnedID {
+					return nil, fmt.Errorf("--notespace-id %s=%s conflicts with existing stamp id %s", pinKey, pinnedID, stamp.ID)
+				}
+				plan.ID = pinnedID
+				usedPinnedIDs[pinKey] = true
+			}
 			if plan.Subject == "" {
 				plan.CodeRoot = rootForName(table, entry.Name(), nb.Name)
 				value, err := subjectForRoot(plan.CodeRoot)
@@ -465,6 +490,12 @@ func planP2MigrationResolved(opts *p2MigrationOptions, now time.Time) (*p2Migrat
 	}
 	manifest.SyncConversion = conversion
 	files := []string{config.MachineConfigPath(), config.SyncConfigPath(), config.SyncConfigPath() + ".p2-staged"}
+	for key := range pinnedIDs {
+		if !usedPinnedIDs[key] {
+			return nil, fmt.Errorf("--notespace-id binding %q does not match an explicit planned notespace", key)
+		}
+	}
+
 	for _, root := range opts.ContentRoots {
 		candidates, err := p2RewriteCandidates(root)
 		if err != nil {

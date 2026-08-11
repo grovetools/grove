@@ -234,6 +234,24 @@ func TestP2SyncCompilePreservesTypedIntentAndRejectsUnknownKeys(t *testing.T) {
 	}
 }
 
+func TestP2MigrationPinsInheritedNotespaceID(t *testing.T) {
+	_, nb := p2Sandbox(t)
+	const inheritedID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	opts := p2MigrationOptions{DryRun: true, LocalOnly: true, NotebookRoots: []string{"nb=" + nb}, NotespaceIDs: []string{"nb/alpha=" + inheritedID}, ManifestPath: filepath.Join(t.TempDir(), "m.json")}
+	manifest, err := planP2Migration(opts, time.Now())
+	if err != nil {
+		t.Fatalf("plan pinned inherited id: %v", err)
+	}
+	if len(manifest.Notespaces) != 1 || manifest.Notespaces[0].ID != inheritedID || manifest.SyncConversion.Bindings[0].NotespaceID != inheritedID {
+		t.Fatalf("pinned identity did not reach stamps/config receipt: %+v / %+v", manifest.Notespaces, manifest.SyncConversion)
+	}
+	bad := opts
+	bad.NotespaceIDs = []string{"nb/missing=" + inheritedID}
+	if _, err := planP2Migration(bad, time.Now()); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("unknown pinned identity was accepted: %v", err)
+	}
+}
+
 func TestP2MigrationRefusesImplicitRootAndMissingStagedInput(t *testing.T) {
 	if err := runP2Migration(context.Background(), &bytes.Buffer{}, strings.NewReader(""), p2MigrationOptions{DryRun: true, LocalOnly: true}, time.Now()); err == nil || !strings.Contains(err.Error(), "explicit --notebook-root") {
 		t.Fatalf("error=%v", err)
