@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 
 	"github.com/grovetools/core/config"
-	"github.com/grovetools/core/pkg/coderoot"
 	"github.com/grovetools/core/pkg/paths"
 )
 
@@ -94,7 +93,7 @@ func loadFrozenLegacyEffectiveConfig() (*config.Config, error) {
 		return nil, statErr
 	}
 
-	recorded, err := coderoot.Load()
+	recorded, err := loadModernCanonicalForMigration(dir)
 	if err != nil {
 		return nil, err
 	}

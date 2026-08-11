@@ -150,6 +150,140 @@ func TestMigrateMachineTablesCardDefaultApplyBackupAndIdempotence(t *testing.T) 
 	}
 }
 
+func TestMigrateCanonicalNotebooksLegacyCollisionDryRunApplyAndIdempotence(t *testing.T) {
+	dir := migrateSandbox(t)
+	notebooksPath := filepath.Join(dir, "notebooks.toml")
+	rootsPath := filepath.Join(dir, "roots.toml")
+	legacy := `[_grove]
+priority = 65
+
+[notebooks.definitions.personal]
+root_dir = "/notes/personal"
+notes_path_template = "notes/{{.Name}}"
+
+[notebooks.definitions.personal.types.plan]
+template_path = "templates/plan.md"
+description = "Planning note"
+
+[notebooks.definitions.work]
+root_dir = "/notes/work"
+
+[notebooks.rules]
+default = "personal"
+
+[notebooks.rules.global]
+root_dir = "/notes/global"
+`
+	migrateWrite(t, notebooksPath, legacy)
+	// The sibling is already modern: mixed canonical states must work, and the
+	// modern declaration remains authoritative.
+	migrateWrite(t, rootsPath, "[roots.code]\npath = \"/code\"\nscan = true\nnotebook = \"work\"\n")
+	beforeNB, beforeRoots := migrateRead(t, notebooksPath), migrateRead(t, rootsPath)
+	collected, err := collectLegacyMigration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	attributed := false
+	for _, source := range collected.Sources {
+		if source.Path == notebooksPath && source.ReplaceCanonical && strings.Contains(source.Label, "canonical-name legacy fragment") {
+			attributed = true
+		}
+	}
+	if !attributed {
+		t.Fatal("legacy collision was not retained as an attributed migration source")
+	}
+	var preview bytes.Buffer
+	if err := runLegacyMigrate(&preview, strings.NewReader(""), true, false, time.Unix(20, 0)); err != nil {
+		t.Fatalf("dry-run: %v\n%s", err, preview.String())
+	}
+	if migrateRead(t, notebooksPath) != beforeNB || migrateRead(t, rootsPath) != beforeRoots {
+		t.Fatal("dry-run mutated a canonical file")
+	}
+	compatPath := filepath.Join(dir, "notebooks.legacy-compat.toml")
+	if _, err := os.Stat(compatPath); !os.IsNotExist(err) {
+		t.Fatalf("dry-run created compatibility fragment: %v", err)
+	}
+
+	stamp := time.Date(2026, 8, 10, 13, 14, 15, 0, time.UTC)
+	var applied bytes.Buffer
+	if err := runLegacyMigrateWithOptions(&applied, strings.NewReader(""), migrationOptions{Yes: true, EvidenceDir: filepath.Join(dir, "evidence")}, stamp); err != nil {
+		t.Fatalf("apply: %v\n%s", err, applied.String())
+	}
+	table, err := coderoot.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if table.Default != "personal" || table.Notebooks["personal"].Root != "/notes/personal" || table.Notebooks["work"].Root != "/notes/work" {
+		t.Fatalf("recorded notebooks = %+v default=%q", table.Notebooks, table.Default)
+	}
+	if table.Roots["code"].Path != "/code" || table.Roots["code"].Notebook != "work" {
+		t.Fatalf("modern roots declaration changed: %+v", table.Roots["code"])
+	}
+	if _, err := os.Stat(notebooksPath + ".20260810T131415Z.bak"); err != nil {
+		t.Fatalf("legacy collision backup: %v", err)
+	}
+	if strings.Contains(migrateRead(t, notebooksPath), "definitions") || !strings.Contains(migrateRead(t, notebooksPath), "[notebooks.personal]") {
+		t.Fatalf("canonical file was not rewritten to modern schema:\n%s", migrateRead(t, notebooksPath))
+	}
+	compat := migrateRead(t, compatPath)
+	if !strings.Contains(compat, "notes_path_template") || !strings.Contains(compat, "[notebooks.definitions.personal.types.plan]") || !strings.Contains(compat, "[notebooks.rules.global]") {
+		t.Fatalf("orthogonal notebook behavior was not retained:\n%s", compat)
+	}
+	if migrateRead(t, filepath.Join(dir, "evidence", "before-effective.json")) != migrateRead(t, filepath.Join(dir, "evidence", "after-effective.json")) {
+		t.Fatal("pre/post effective evidence differs")
+	}
+	var second bytes.Buffer
+	if err := runLegacyMigrate(&second, strings.NewReader(""), false, true, stamp.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(second.String(), "already migrated") {
+		t.Fatalf("second run was not a no-op:\n%s", second.String())
+	}
+}
+
+func TestMigrateCanonicalRootsLegacyCollisionWithModernNotebooks(t *testing.T) {
+	dir := migrateSandbox(t)
+	rootsPath := filepath.Join(dir, "roots.toml")
+	migrateWrite(t, filepath.Join(dir, "notebooks.toml"), "default = \"modern\"\n[notebooks.modern]\nroot = \"/modern-notes\"\n")
+	migrateWrite(t, rootsPath, "[_grove]\npriority = 70\n[notebooks.definitions.modern]\nroot_dir = \"/legacy-must-not-win\"\n[notebooks.rules]\ndefault = \"modern\"\n[groves.code]\npath = \"/code\"\nnotebook = \"modern\"\n")
+	stamp := time.Date(2026, 8, 10, 14, 0, 0, 0, time.UTC)
+	var out bytes.Buffer
+	if err := runLegacyMigrate(&out, strings.NewReader(""), false, true, stamp); err != nil {
+		t.Fatalf("migrate: %v\n%s", err, out.String())
+	}
+	table, err := coderoot.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if table.Notebooks["modern"].Root != "/modern-notes" {
+		t.Fatalf("legacy sibling overrode modern notebook: %+v", table.Notebooks)
+	}
+	if table.Roots["code"].Path != "/code" {
+		t.Fatalf("legacy roots collision was not imported: %+v", table.Roots)
+	}
+	if _, err := os.Stat(rootsPath + ".20260810T140000Z.bak"); err != nil {
+		t.Fatalf("roots collision backup: %v", err)
+	}
+	if !strings.Contains(migrateRead(t, rootsPath), "[roots.code]") || strings.Contains(migrateRead(t, rootsPath), "[groves.code]") {
+		t.Fatalf("roots collision was not rewritten:\n%s", migrateRead(t, rootsPath))
+	}
+}
+
+func TestMigrateCanonicalCollisionMalformedStillFailsLoudly(t *testing.T) {
+	dir := migrateSandbox(t)
+	path := filepath.Join(dir, "notebooks.toml")
+	original := "[_grove]\npriority = 50\nunknown = true\n[notebooks.definitions.nb]\nroot_dir = \"/notes\"\n"
+	migrateWrite(t, path, original)
+	var out bytes.Buffer
+	err := runLegacyMigrate(&out, strings.NewReader(""), true, false, time.Now())
+	if err == nil || !strings.Contains(err.Error(), "legacy-shaped but is malformed") || !strings.Contains(err.Error(), "unknown") {
+		t.Fatalf("err=%v", err)
+	}
+	if migrateRead(t, path) != original {
+		t.Fatal("malformed collision was mutated")
+	}
+}
+
 func TestMigrateImportsDeadMachineYAML(t *testing.T) {
 	dir := migrateSandbox(t)
 	migrateWrite(t, filepath.Join(dir, "machines", "old.yml"), "notebooks:\n  definitions:\n    nb:\n      root_dir: /notes\n  rules:\n    default: nb\ngroves:\n  old:\n    path: /old-code\n    notebook: nb\n")

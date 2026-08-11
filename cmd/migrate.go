@@ -100,7 +100,7 @@ func runLegacyMigrateWithOptions(out io.Writer, in io.Reader, opts migrationOpti
 	if err != nil {
 		return err
 	}
-	current, err := coderoot.Load()
+	current, err := loadModernCanonicalForMigration(filepath.Dir(m.RootsPath))
 	if err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func runLegacyMigrateWithOptions(out io.Writer, in io.Reader, opts migrationOpti
 		roots[name] = c.Root
 	}
 	targets := migrationSourceTargets(m.Sources)
-	changed := !reflect.DeepEqual(roots, current.Roots) || !reflect.DeepEqual(m.Notebooks, current.Notebooks) || m.Default != current.Default || len(targets) > 0
+	changed := !reflect.DeepEqual(roots, current.Roots) || !reflect.DeepEqual(m.Notebooks, current.Notebooks) || m.Default != current.Default || len(targets) > 0 || len(m.Compatibility) > 0
 	if !changed {
 		evidence := transition.Evidence{Action: "grove migrate step 1", Reason: "legacy configuration is already migrated; effective configuration is unchanged"}
 		return renderMigrationEvidence(out, evidence, opts.JSON)
@@ -120,10 +120,18 @@ func runLegacyMigrateWithOptions(out io.Writer, in io.Reader, opts migrationOpti
 		return err
 	}
 	updates := map[string][]byte{m.NotebooksPath: nbBytes, m.RootsPath: rootsBytes}
+	for p, data := range m.Compatibility {
+		updates[p] = data
+	}
 	for _, p := range targets {
 		s, err := sourceForTarget(m.Sources, p)
 		if err != nil {
 			return err
+		}
+		if s.ReplaceCanonical {
+			// buildMigrationCandidates already populated this canonical path;
+			// replacing the collision is the migration, not a surgical strip.
+			continue
 		}
 		updates[p], err = removeLegacyDeclarations(s)
 		if err != nil {
@@ -291,10 +299,16 @@ func writeMigrationEquivalenceEvidence(dir string, before, after []byte) error {
 }
 
 func migrationWriteOrder(m *legacyMigration, targets []string) []string {
-	// The recorded pair is ordered notebooks then roots. A sync staging copy is
-	// durable before the live sync file is stripped. All remaining source/card
-	// edits are deterministic.
-	out := []string{m.NotebooksPath, m.RootsPath}
+	// Compatibility declarations displaced by a canonical-name collision land
+	// before that file is rewritten. The recorded pair remains ordered
+	// notebooks then roots. A sync staging copy is durable before the live sync
+	// file is stripped. All remaining source/card edits are deterministic.
+	compat := make([]string, 0, len(m.Compatibility))
+	for p := range m.Compatibility {
+		compat = append(compat, p)
+	}
+	sort.Strings(compat)
+	out := append(compat, m.NotebooksPath, m.RootsPath)
 	if m.SyncStagePath != "" {
 		out = append(out, m.SyncStagePath)
 	}
@@ -448,13 +462,20 @@ func buildMigrationCandidates(m *legacyMigration, roots map[string]coderoot.Root
 	defer os.RemoveAll(dir)
 	nbPath, rootsPath := filepath.Join(dir, coderoot.NotebooksFileName), filepath.Join(dir, coderoot.RootsFileName)
 	for from, to := range map[string]string{m.NotebooksPath: nbPath, m.RootsPath: rootsPath} {
+		kind := filepath.Base(from)
+		shape, _, classifyErr := classifyCanonicalFile(from, kind)
+		if classifyErr != nil {
+			return nil, nil, classifyErr
+		}
+		if shape != canonicalModern {
+			continue
+		}
 		data, readErr := os.ReadFile(from)
-		if readErr == nil {
-			if writeErr := os.WriteFile(to, data, 0o600); writeErr != nil {
-				return nil, nil, writeErr
-			}
-		} else if !os.IsNotExist(readErr) {
+		if readErr != nil {
 			return nil, nil, readErr
+		}
+		if writeErr := os.WriteFile(to, data, 0o600); writeErr != nil {
+			return nil, nil, writeErr
 		}
 	}
 	def := m.Default
@@ -492,7 +513,7 @@ func sourceForTarget(sources []legacySource, target string) (legacySource, error
 		if p == "" {
 			p = s.Path
 		}
-		if p != target || (!s.RemoveGlobal && !s.RemoveMachine && !s.RemoveSync && !s.AnnotateCard) {
+		if p != target || (!s.RemoveGlobal && !s.RemoveMachine && !s.RemoveSync && !s.AnnotateCard && !s.ReplaceCanonical) {
 			continue
 		}
 		if found && out.TOML != s.TOML {
@@ -506,6 +527,7 @@ func sourceForTarget(sources []legacySource, target string) (legacySource, error
 		out.RemoveMachine = out.RemoveMachine || s.RemoveMachine
 		out.RemoveSync = out.RemoveSync || s.RemoveSync
 		out.AnnotateCard = out.AnnotateCard || s.AnnotateCard
+		out.ReplaceCanonical = out.ReplaceCanonical || s.ReplaceCanonical
 	}
 	if !found {
 		return legacySource{}, fmt.Errorf("internal migration error: no source for %s", target)

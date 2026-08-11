@@ -1,0 +1,20 @@
+[_grove]
+priority = 65
+
+[notebooks.definitions.personal]
+root_dir = "@NOTES_ROOT@"
+notes_path_template = "notes/{{.Name}}"
+
+[notebooks.definitions.personal.types.plan]
+description = "Planning note"
+template_path = "templates/plan.md"
+filename_format = "date-title"
+
+[notebooks.definitions.work]
+root_dir = "@CARD_NOTES_ROOT@"
+
+[notebooks.rules]
+default = "personal"
+
+[notebooks.rules.global]
+root_dir = "@GLOBAL_NOTES_ROOT@"

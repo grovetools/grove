@@ -84,6 +84,7 @@ r = pathlib.Path(root)
 values = {
     "@NOTES_ROOT@": str(r / "notes"),
     "@CARD_NOTES_ROOT@": str(r / "card-notes"),
+    "@GLOBAL_NOTES_ROOT@": str(r / "global-notes"),
     "@CODE_ROOT@": str(r / "code"),
     "@ECOSYSTEM_ROOT@": str(r / "ecosystem"),
     "@EXTRA_ROOT@": str(r / "extra"),
@@ -138,6 +139,49 @@ json_assert "$ARTIFACTS/migration-noop-evidence.json" '"already migrated" in d.g
 seed_legacy
 "$GROVE_CLI" migrate --yes --json --evidence-dir "$SANDBOX/second-proof" >"$ARTIFACTS/migration-evidence.json"
 json_assert "$ARTIFACTS/migration-evidence.json" 'any(c.get("name") == "roots_recorded" and c.get("value", 0) > 0 for c in d.get("counts", []))'
+
+# Canonical-filename collision: this is the exact legacy notebooks shape seen
+# on a real machine. The sibling roots.toml is already modern, proving the
+# mixed case while every probe remains inside the disposable GROVE_HOME.
+reset_home
+mkdir -p "$SANDBOX/case/notes" "$SANDBOX/case/card-notes" "$SANDBOX/case/global-notes" "$SANDBOX/case/code"
+render_fixture "$FIXTURES/legacy-notebooks-collision.toml.in" "$(config_dir)/notebooks.toml"
+cat >"$(config_dir)/roots.toml" <<EOF
+[roots.code]
+path = "$SANDBOX/case/code"
+scan = true
+notebook = "work"
+EOF
+COLLISION_BEFORE=$(file_digest "$(config_dir)/notebooks.toml")
+ROOTS_BEFORE=$(file_digest "$(config_dir)/roots.toml")
+"$GROVE_CLI" migrate --dry-run >"$ARTIFACTS/canonical-collision-dry-run.txt" 2>"$ARTIFACTS/canonical-collision-dry-run.stderr"
+[ "$(file_digest "$(config_dir)/notebooks.toml")" = "$COLLISION_BEFORE" ] || fail "collision dry-run changed notebooks.toml"
+[ "$(file_digest "$(config_dir)/roots.toml")" = "$ROOTS_BEFORE" ] || fail "collision dry-run changed modern roots.toml"
+[ ! -e "$(config_dir)/notebooks.legacy-compat.toml" ] || fail "collision dry-run created compatibility config"
+printf 'yes\n' | "$GROVE_CLI" migrate --evidence-dir "$SANDBOX/collision-proof" >"$ARTIFACTS/canonical-collision-confirm.txt" 2>"$ARTIFACTS/canonical-collision-confirm.stderr"
+cmp -s "$SANDBOX/collision-proof/before-effective.json" "$SANDBOX/collision-proof/after-effective.json" || fail "collision effective topology changed"
+[ -f "$(config_dir)/notebooks.legacy-compat.toml" ] || fail "collision notebook behavior was not retained"
+grep -q 'notebooks.personal' "$(config_dir)/notebooks.toml" || fail "collision was not rewritten to modern notebooks schema"
+! grep -q 'notebooks.definitions' "$(config_dir)/notebooks.toml" || fail "legacy definitions survived canonical rewrite"
+grep -q 'notebooks.definitions.personal.types.plan' "$(config_dir)/notebooks.legacy-compat.toml" || fail "notebook type was lost"
+grep -q 'notebooks.rules.global' "$(config_dir)/notebooks.legacy-compat.toml" || fail "global rule was lost"
+find "$(config_dir)" -maxdepth 1 -name 'notebooks.toml.*.bak' -print | grep -q . || fail "collision backup missing"
+"$GROVE_CLI" migrate --yes --json >"$ARTIFACTS/canonical-collision-noop.json"
+json_assert "$ARTIFACTS/canonical-collision-noop.json" '"already migrated" in d.get("reason", "")'
+
+# A legacy marker does not excuse unknown fields in a canonical file.
+reset_home
+cat >"$(config_dir)/notebooks.toml" <<'EOF'
+[_grove]
+priority = 50
+unknown = true
+[notebooks.definitions.personal]
+root_dir = "/notes"
+EOF
+MALFORMED_BEFORE=$(file_digest "$(config_dir)/notebooks.toml")
+expect_fail "$ARTIFACTS/canonical-collision-malformed.txt" "$GROVE_CLI" migrate --dry-run
+[ "$(file_digest "$(config_dir)/notebooks.toml")" = "$MALFORMED_BEFORE" ] || fail "malformed collision was mutated"
+grep -q 'unknown field' "$ARTIFACTS/canonical-collision-malformed.txt.stderr" || fail "malformed collision did not fail loudly"
 
 # V2 rollback: inject after roots.toml through the binary-only config-lab seam.
 seed_legacy

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -99,6 +100,10 @@ type legacySource struct {
 	RemoveMachine         bool
 	RemoveSync            bool
 	AnnotateCard          bool
+	// ReplaceCanonical marks a legacy fragment which collided with a recorded
+	// filename. Migration backs it up and replaces the whole file with the
+	// modern candidate instead of trying to strip tables in place.
+	ReplaceCanonical bool
 }
 
 type legacyRootCandidate struct {
@@ -116,6 +121,10 @@ type legacyMigration struct {
 	NotebooksPath string
 	SyncPath      string
 	SyncStagePath string
+	// Compatibility holds migration-window notebook behavior (types,
+	// templates and global rules) displaced when a canonical-name legacy
+	// fragment is replaced by the root-only recorded schema.
+	Compatibility map[string][]byte
 }
 
 func parseLegacyFile(path string, out any) error {
@@ -131,6 +140,138 @@ func parseLegacyFile(path string, out any) error {
 		return err
 	}
 	return nil
+}
+
+type canonicalFileShape uint8
+
+const (
+	canonicalMissing canonicalFileShape = iota
+	canonicalModern
+	canonicalLegacy
+)
+
+// classifyCanonicalFile is migration-only. Normal loading remains strict: the
+// exception exists solely so `grove migrate` can rescue a legacy fragment
+// whose basename happens to be a modern recorded target. Modern files win the
+// classification first; only an unambiguous frozen-schema marker permits the
+// legacy path, and that path is decoded strictly so malformed/unknown input is
+// never silently treated as an empty fragment.
+func classifyCanonicalFile(path, kind string) (canonicalFileShape, *legacyConfig, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return canonicalMissing, nil, nil
+	}
+	if err != nil {
+		return canonicalMissing, nil, err
+	}
+	var modernErr error
+	switch kind {
+	case coderoot.RootsFileName:
+		_, modernErr = coderoot.ParseRoots(path, data)
+	case coderoot.NotebooksFileName:
+		_, modernErr = coderoot.ParseNotebooks(path, data)
+	default:
+		return canonicalMissing, nil, fmt.Errorf("unknown canonical config kind %q", kind)
+	}
+	if modernErr == nil {
+		return canonicalModern, nil, nil
+	}
+	var raw map[string]any
+	if err := toml.Unmarshal(data, &raw); err != nil {
+		return canonicalMissing, nil, modernErr
+	}
+	if !hasLegacyCanonicalMarker(raw) {
+		return canonicalMissing, nil, modernErr
+	}
+	if err := validateLegacyCanonicalValue("top level", raw, reflect.TypeOf(legacyConfig{})); err != nil {
+		return canonicalMissing, nil, fmt.Errorf("%s looks legacy-shaped but is malformed: %w", path, err)
+	}
+	var legacy legacyConfig
+	if err := toml.Unmarshal(data, &legacy); err != nil {
+		return canonicalMissing, nil, fmt.Errorf("%s looks legacy-shaped but is malformed: %w", path, err)
+	}
+	return canonicalLegacy, &legacy, nil
+}
+
+func validateLegacyCanonicalValue(scope string, value any, typ reflect.Type) error {
+	for typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
+	switch typ.Kind() {
+	case reflect.Map:
+		entries, ok := value.(map[string]any)
+		if !ok {
+			return fmt.Errorf("%s must be a table", scope)
+		}
+		for key, child := range entries {
+			if err := validateLegacyCanonicalValue(scope+"."+key, child, typ.Elem()); err != nil {
+				return err
+			}
+		}
+	case reflect.Struct:
+		entries, ok := value.(map[string]any)
+		if !ok {
+			return fmt.Errorf("%s must be a table", scope)
+		}
+		fields := map[string]reflect.Type{}
+		collectLegacyTOMLFields(typ, fields)
+		var unknown []string
+		for key, child := range entries {
+			fieldType, ok := fields[key]
+			if !ok {
+				unknown = append(unknown, key)
+				continue
+			}
+			if err := validateLegacyCanonicalValue(scope+"."+key, child, fieldType); err != nil {
+				return err
+			}
+		}
+		if len(unknown) > 0 {
+			sort.Strings(unknown)
+			return fmt.Errorf("%s contains unknown field(s): %s", scope, strings.Join(unknown, ", "))
+		}
+	}
+	return nil
+}
+
+func collectLegacyTOMLFields(typ reflect.Type, out map[string]reflect.Type) {
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		tag := field.Tag.Get("toml")
+		name, options, _ := strings.Cut(tag, ",")
+		if name == "-" {
+			continue
+		}
+		if field.Anonymous && (name == "" || strings.Contains(options, "inline")) {
+			inline := field.Type
+			for inline.Kind() == reflect.Pointer {
+				inline = inline.Elem()
+			}
+			if inline.Kind() == reflect.Struct {
+				collectLegacyTOMLFields(inline, out)
+			}
+			continue
+		}
+		if name == "" {
+			name = field.Name
+		}
+		out[name] = field.Type
+	}
+}
+
+func hasLegacyCanonicalMarker(raw map[string]any) bool {
+	for _, key := range []string{"_grove", "groves", "search_paths"} {
+		if _, ok := raw[key]; ok {
+			return true
+		}
+	}
+	notebooks, ok := raw["notebooks"].(map[string]any)
+	if !ok {
+		return false
+	}
+	_, definitions := notebooks["definitions"]
+	_, rules := notebooks["rules"]
+	return definitions || rules
 }
 
 func resolvedLegacyPath(path string) string {
@@ -166,10 +307,28 @@ func legacyGlobalFiles(dir string) ([]legacySource, error) {
 
 	files, _ := filepath.Glob(filepath.Join(dir, "*.toml"))
 	type fragment struct {
-		path     string
-		priority int
+		path            string
+		priority        int
+		canonicalLegacy *legacyConfig
 	}
 	var frags []fragment
+	// A pre-cutover fragment could already be named after either canonical
+	// target. Classify both explicitly rather than feeding them to coderoot's
+	// intentionally strict post-cutover pair loader.
+	for _, name := range []string{coderoot.NotebooksFileName, coderoot.RootsFileName} {
+		p := filepath.Join(dir, name)
+		shape, legacy, err := classifyCanonicalFile(p, name)
+		if err != nil {
+			return nil, fmt.Errorf("classify canonical collision %s: %w", p, err)
+		}
+		if shape == canonicalLegacy {
+			priority := legacy.GroveMeta.Priority
+			if priority == 0 {
+				priority = 50
+			}
+			frags = append(frags, fragment{path: p, priority: priority, canonicalLegacy: legacy})
+		}
+	}
 	for _, p := range files {
 		base := filepath.Base(p)
 		switch base {
@@ -184,7 +343,7 @@ func legacyGlobalFiles(dir string) ([]legacySource, error) {
 		if priority == 0 {
 			priority = 50
 		}
-		frags = append(frags, fragment{p, priority})
+		frags = append(frags, fragment{path: p, priority: priority})
 	}
 	sort.Slice(frags, func(i, j int) bool {
 		if frags[i].priority != frags[j].priority {
@@ -193,6 +352,11 @@ func legacyGlobalFiles(dir string) ([]legacySource, error) {
 		return frags[i].path < frags[j].path
 	})
 	for _, f := range frags {
+		if f.canonicalLegacy != nil {
+			c := *f.canonicalLegacy
+			out = append(out, legacySource{Path: f.path, Resolved: f.path, Label: fmt.Sprintf("canonical-name legacy fragment priority %d", f.priority), Config: c, TOML: true, RemoveGlobal: len(c.Groves) > 0 || len(c.SearchPaths) > 0, ReplaceCanonical: true})
+			continue
+		}
 		if err := add(f.path, fmt.Sprintf("fragment priority %d", f.priority)); err != nil {
 			return nil, err
 		}
@@ -256,6 +420,47 @@ func legacySyncRequiresLaterMigration(path string) (bool, error) {
 	return false, nil
 }
 
+// loadModernCanonicalForMigration loads each modern-shaped canonical file
+// independently. Pair validation is intentionally deferred until legacy
+// candidates have filled a colliding counterpart; each modern file still uses
+// coderoot's exact strict parser, and normal coderoot.Load is unchanged.
+func loadModernCanonicalForMigration(dir string) (coderoot.Table, error) {
+	table := coderoot.Table{Roots: map[string]coderoot.Root{}, Notebooks: map[string]coderoot.Notebook{}}
+	rootsPath := filepath.Join(dir, coderoot.RootsFileName)
+	shape, _, err := classifyCanonicalFile(rootsPath, coderoot.RootsFileName)
+	if err != nil {
+		return coderoot.Table{}, err
+	}
+	if shape == canonicalModern {
+		data, err := os.ReadFile(rootsPath)
+		if err != nil {
+			return coderoot.Table{}, err
+		}
+		rf, err := coderoot.ParseRoots(rootsPath, data)
+		if err != nil {
+			return coderoot.Table{}, err
+		}
+		table.Roots, table.RootsFilePath = rf.Roots, rootsPath
+	}
+	notebooksPath := filepath.Join(dir, coderoot.NotebooksFileName)
+	shape, _, err = classifyCanonicalFile(notebooksPath, coderoot.NotebooksFileName)
+	if err != nil {
+		return coderoot.Table{}, err
+	}
+	if shape == canonicalModern {
+		data, err := os.ReadFile(notebooksPath)
+		if err != nil {
+			return coderoot.Table{}, err
+		}
+		nf, err := coderoot.ParseNotebooks(notebooksPath, data)
+		if err != nil {
+			return coderoot.Table{}, err
+		}
+		table.Notebooks, table.Default, table.NotebooksFilePath = nf.Notebooks, nf.Default, notebooksPath
+	}
+	return table, nil
+}
+
 func collectLegacyMigration() (*legacyMigration, error) {
 	return collectLegacyMigrationWithOptions(false)
 }
@@ -289,7 +494,7 @@ func collectLegacyMigrationWithOptions(stageSync bool) (*legacyMigration, error)
 	if err != nil {
 		return nil, err
 	}
-	m := &legacyMigration{Roots: map[string]legacyRootCandidate{}, Notebooks: map[string]coderoot.Notebook{}, RootsPath: coderoot.RootsPath(), NotebooksPath: coderoot.NotebooksPath()}
+	m := &legacyMigration{Roots: map[string]legacyRootCandidate{}, Notebooks: map[string]coderoot.Notebook{}, RootsPath: coderoot.RootsPath(), NotebooksPath: coderoot.NotebooksPath(), Compatibility: map[string][]byte{}}
 	if blocked {
 		m.SyncPath, m.SyncStagePath = syncPath, syncPath+".p2-staged"
 		m.Sources = append(m.Sources, legacySource{Path: syncPath, Resolved: resolvedLegacyPath(syncPath), Label: "sync intent (parked for P2)", TOML: true, RemoveSync: true})
@@ -298,6 +503,20 @@ func collectLegacyMigrationWithOptions(stageSync bool) (*legacyMigration, error)
 	all := append(dead, globals...)
 	m.Sources = append(m.Sources, all...)
 	for _, src := range all {
+		if src.ReplaceCanonical && legacyNotebooksHaveCompatibility(src.Config.Notebooks) {
+			compatPath := filepath.Join(dir, strings.TrimSuffix(filepath.Base(src.Path), ".toml")+".legacy-compat.toml")
+			if _, statErr := os.Stat(compatPath); statErr == nil {
+				return nil, fmt.Errorf("canonical collision compatibility target %s already exists; preserve or remove it explicitly before migrating", compatPath)
+			} else if !os.IsNotExist(statErr) {
+				return nil, statErr
+			}
+			compat, err := marshalLegacyNotebookCompatibility(src.Config)
+			if err != nil {
+				return nil, fmt.Errorf("prepare compatibility declarations for %s: %w", src.Path, err)
+			}
+			m.Compatibility[compatPath] = compat
+		}
+
 		for name, nb := range src.Config.Notebooks.Definitions {
 			root := nb.RootDir
 			if root == "" {
@@ -373,14 +592,14 @@ func collectLegacyMigrationWithOptions(stageSync bool) (*legacyMigration, error)
 		}
 	}
 
-	current, err := coderoot.Load()
+	current, err := loadModernCanonicalForMigration(dir)
 	if err != nil {
 		return nil, err
 	}
+	// Successfully parsed modern recorded declarations are authoritative over
+	// every frozen source, including a legacy collision in the sibling file.
 	for name, nb := range current.Notebooks {
-		if _, ok := m.Notebooks[name]; !ok {
-			m.Notebooks[name] = nb
-		}
+		m.Notebooks[name] = nb
 	}
 	if current.Default != "" {
 		m.Default = current.Default
@@ -406,6 +625,28 @@ func collectLegacyMigrationWithOptions(stageSync bool) (*legacyMigration, error)
 		}
 	}
 	return m, nil
+}
+
+func legacyNotebooksHaveCompatibility(n legacyNotebooks) bool {
+	return len(n.Definitions) > 0 || n.Rules.Default != "" || n.Rules.Global != nil
+}
+
+func marshalLegacyNotebookCompatibility(c legacyConfig) ([]byte, error) {
+	// Keep the original priority so the displaced declarations retain their
+	// exact place in the frozen fragment cascade. Recorded notebooks.toml still
+	// overrides membership, roots and default during modern compilation.
+	compat := struct {
+		GroveMeta struct {
+			Priority int `toml:"priority"`
+		} `toml:"_grove"`
+		Notebooks legacyNotebooks `toml:"notebooks"`
+	}{Notebooks: c.Notebooks}
+	compat.GroveMeta.Priority = c.GroveMeta.Priority
+	data, err := toml.Marshal(compat)
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte("# Migration-window notebook behavior; notebooks.toml remains authoritative for names, roots, and default.\n"), data...), nil
 }
 
 func legacyCardDefault(path string) (string, string, error) {
@@ -458,7 +699,7 @@ func migrationSourceTargets(sources []legacySource) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, s := range sources {
-		if !s.RemoveGlobal && !s.RemoveMachine && !s.RemoveSync && !s.AnnotateCard {
+		if !s.RemoveGlobal && !s.RemoveMachine && !s.RemoveSync && !s.AnnotateCard && !s.ReplaceCanonical {
 			continue
 		}
 		p := s.Resolved
