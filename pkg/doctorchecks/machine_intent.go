@@ -3,6 +3,7 @@ package doctorchecks
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -56,9 +57,9 @@ func (c *machineIntentCheck) Run(ctx context.Context, opts doctor.RunOptions) do
 	}
 
 	var missing []string
-	declared := map[string]bool{}
+	declared := make([]string, 0, len(states))
 	for _, st := range states {
-		declared[canonical(st.Path)] = true
+		declared = append(declared, st.Path)
 		if !st.Enabled {
 			continue
 		}
@@ -104,16 +105,40 @@ func (c *machineIntentCheck) AutoFix(ctx context.Context) error {
 // undeclaredEcosystems lists discovered ecosystems whose path no subscription
 // names. Discovery is the same walk every grove surface uses, so this answers
 // "grove can see it, but a restored machine would not".
-func undeclaredEcosystems(declared map[string]bool) []string {
+func undeclaredEcosystems(declared []string) []string {
 	logger := logrus.New()
 	logger.SetLevel(logrus.ErrorLevel)
 	result, err := workspace.NewDiscoveryService(logger).DiscoverAll()
 	if err != nil || result == nil {
 		return nil
 	}
+	return undeclaredDiscoveredEcosystems(declared, result.Ecosystems)
+}
+
+// sameRecordedPath first applies doctor's normal expansion/symlink policy,
+// then falls back to filesystem identity. The latter matters on
+// case-insensitive filesystems: discovery may report /Users/me/Code while the
+// recorded spelling is ~/code, even though both names resolve to one inode.
+func sameRecordedPath(recorded, discovered string) bool {
+	if canonical(recorded) == canonical(discovered) {
+		return true
+	}
+	recordedInfo, recordedErr := os.Stat(inspectPath(recorded).Expanded)
+	discoveredInfo, discoveredErr := os.Stat(inspectPath(discovered).Expanded)
+	return recordedErr == nil && discoveredErr == nil && os.SameFile(recordedInfo, discoveredInfo)
+}
+
+func undeclaredDiscoveredEcosystems(declared []string, ecosystems []workspace.Ecosystem) []string {
 	var out []string
-	for _, eco := range result.Ecosystems {
-		if declared[canonical(eco.Path)] {
+	for _, eco := range ecosystems {
+		matched := false
+		for _, path := range declared {
+			if sameRecordedPath(path, eco.Path) {
+				matched = true
+				break
+			}
+		}
+		if matched {
 			continue
 		}
 		out = append(out, fmt.Sprintf("%s at %s is discoverable but undeclared", eco.Name, eco.Path))

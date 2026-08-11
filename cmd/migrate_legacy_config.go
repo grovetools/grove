@@ -44,7 +44,7 @@ type legacyNotebook struct {
 	// Embed the complete frozen notebook shape so the independent equivalence
 	// side retains every setting, while Root accepts the oldest root alias.
 	config.Notebook `toml:",inline" yaml:",inline"`
-	Root            string `toml:"root" yaml:"root"`
+	Root            string `toml:"root,omitempty" yaml:"root,omitempty"`
 }
 
 type legacyNotebookRules struct {
@@ -632,6 +632,18 @@ func legacyNotebooksHaveCompatibility(n legacyNotebooks) bool {
 }
 
 func marshalLegacyNotebookCompatibility(c legacyConfig) ([]byte, error) {
+	// The frozen reader accepts the oldest `root` alias, but compatibility
+	// fragments remain live layered config and therefore must use the current
+	// schema's `root_dir` spelling. Keeping `root` here makes migration itself
+	// create a config_schema warning.
+	for name, notebook := range c.Notebooks.Definitions {
+		if notebook.RootDir == "" {
+			notebook.RootDir = notebook.Root
+		}
+		notebook.Root = ""
+		c.Notebooks.Definitions[name] = notebook
+	}
+
 	// Keep the original priority so the displaced declarations retain their
 	// exact place in the frozen fragment cascade. Recorded notebooks.toml still
 	// overrides membership, roots and default during modern compilation.

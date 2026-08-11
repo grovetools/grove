@@ -12,7 +12,9 @@ import (
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/coderoot"
+	coreschema "github.com/grovetools/core/schema"
 	"github.com/grovetools/grove/pkg/setup"
+	"github.com/pelletier/go-toml/v2"
 )
 
 func migrateSandbox(t *testing.T) string {
@@ -147,6 +149,46 @@ func TestMigrateMachineTablesCardDefaultApplyBackupAndIdempotence(t *testing.T) 
 	}
 	if !strings.Contains(second.String(), "already migrated") {
 		t.Fatalf("second run output:\n%s", second.String())
+	}
+}
+
+func TestMarshalLegacyNotebookCompatibilityNormalizesRootAliasForSchema(t *testing.T) {
+	legacy := legacyConfig{}
+	legacy.GroveMeta.Priority = 65
+	legacy.Notebooks.Definitions = map[string]legacyNotebook{
+		"personal": {Root: "/notes/personal"},
+	}
+
+	data, err := marshalLegacyNotebookCompatibility(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(data)
+	if !strings.Contains(body, `root_dir = '/notes/personal'`) && !strings.Contains(body, `root_dir = "/notes/personal"`) {
+		t.Fatalf("compatibility fragment did not normalize root to root_dir:\n%s", body)
+	}
+	if strings.Contains(body, "\nroot =") {
+		t.Fatalf("compatibility fragment retained schema-invalid root alias:\n%s", body)
+	}
+
+	var raw map[string]interface{}
+	if err := toml.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var jsonValue interface{}
+	if err := json.Unmarshal(encoded, &jsonValue); err != nil {
+		t.Fatal(err)
+	}
+	validator, err := coreschema.NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validator.Validate(jsonValue); err != nil {
+		t.Fatalf("migrate-generated compatibility fragment violates embedded schema: %v\n%s", err, body)
 	}
 }
 
