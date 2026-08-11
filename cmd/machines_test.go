@@ -28,7 +28,7 @@ func sandboxRegistry(t *testing.T) string {
 
 	configDir := filepath.Join(home, "config", "grove")
 	notebookRoot := filepath.Join(home, "notebooks", "nb")
-	root := filepath.Join(notebookRoot, "workspaces", "registry")
+	root := filepath.Join(notebookRoot, "notespaces", "registry")
 	if err := os.MkdirAll(filepath.Join(root, "notes"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func sandboxRegistry(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	write("grove.toml", "name = \"fixture\"\n\n[notebooks.definitions.nb]\nroot_dir = \""+notebookRoot+"\"\n")
+	write("grove.toml", "name = \"fixture\"\n\n[notebooks.definitions.nb]\nroot_dir = \""+notebookRoot+"\"\n[notebooks.rules]\ndefault = \"nb\"\n")
 	write("sync.toml", "server = \"http://127.0.0.1:1\"\n\n[[workspaces]]\nname = \"registry\"\nrole = \"registry\"\npull = true\n")
 	return root
 }

@@ -18,7 +18,7 @@ import (
 // writes anything.
 func seedAdoptableWorkspace(t *testing.T, configDir, notebookRoot, name string) string {
 	t.Helper()
-	root := filepath.Join(notebookRoot, "workspaces", name)
+	root := filepath.Join(notebookRoot, "notespaces", name)
 	if err := os.MkdirAll(filepath.Join(root, "notes", "inbox"), 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/coderoot"
+	"github.com/grovetools/core/pkg/registry"
 )
 
 // sandboxGitEnv makes a test's git hermetic: its own HOME (so the developer's
@@ -67,7 +68,7 @@ func seedSourceRepo(t *testing.T, dir, file, content string) string {
 // seedSourceSuperrepo builds the fixture a peer materializes: an ecosystem root
 // repo carrying a wildcard grove.toml with an [ecosystem] card, plus one
 // submodule.
-func seedSourceSuperrepo(t *testing.T, root string, card config.EcosystemCard) {
+func seedSourceSuperrepo(t *testing.T, root string, card registry.PublishedEcosystem) {
 	t.Helper()
 	member := seedSourceRepo(t, filepath.Join(filepath.Dir(root), "member-src"), "member.txt", "member")
 
@@ -79,7 +80,7 @@ func seedSourceSuperrepo(t *testing.T, root string, card config.EcosystemCard) {
 	if err := os.WriteFile(manifest, []byte("workspaces = [\"*\"]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := config.WriteEcosystemCard(manifest, card); err != nil {
+	if _, err := config.WriteEcosystemCard(manifest, config.EcosystemCard{ID: card.ID}); err != nil {
 		t.Fatal(err)
 	}
 	mustGit(t, root, "submodule", "add", "-q", member, "alpha")
@@ -97,7 +98,7 @@ func TestCloneSuperrepoEcosystemResolvesAsEcosystemRoot(t *testing.T) {
 	sandboxGitEnv(t)
 	root := t.TempDir()
 	source := filepath.Join(root, "source", "grovetools")
-	card := config.EcosystemCard{ID: "01J8SOURCEID", Layout: config.LayoutSuperrepo}
+	card := registry.PublishedEcosystem{ID: "01J8SOURCEID", Layout: config.LayoutSuperrepo}
 	seedSourceSuperrepo(t, source, card)
 
 	card.Remotes = []config.EcosystemRemote{{Name: "origin", URL: source}}
@@ -124,8 +125,8 @@ func TestCloneSuperrepoEcosystemResolvesAsEcosystemRoot(t *testing.T) {
 	if err != nil || got == nil {
 		t.Fatalf("LoadEcosystemCard on the clone: %v (card %v)", err, got)
 	}
-	if got.ID != card.ID || got.Layout != config.LayoutSuperrepo {
-		t.Errorf("cloned card = %+v, want id %q layout %q", got, card.ID, config.LayoutSuperrepo)
+	if got.ID != card.ID {
+		t.Errorf("cloned identity = %+v, want id %q", got, card.ID)
 	}
 
 	// Idempotent: a re-run converges the existing checkout instead of failing.
@@ -143,7 +144,7 @@ func TestCloneSuperrepoEcosystemHealsAbortedSubmoduleCheckout(t *testing.T) {
 	sandboxGitEnv(t)
 	root := t.TempDir()
 	source := filepath.Join(root, "source", "grovetools")
-	card := config.EcosystemCard{ID: "01J8HEAL", Layout: config.LayoutSuperrepo}
+	card := registry.PublishedEcosystem{ID: "01J8HEAL", Layout: config.LayoutSuperrepo}
 	seedSourceSuperrepo(t, source, card)
 	card.Remotes = []config.EcosystemRemote{{Name: "origin", URL: source}}
 
@@ -192,14 +193,13 @@ func TestCloneFlatEcosystemYieldsDiscoverableRepos(t *testing.T) {
 	alphaSrc := seedSourceRepo(t, filepath.Join(root, "source", "alpha"), "a.txt", "alpha")
 	betaSrc := seedSourceRepo(t, filepath.Join(root, "source", "beta"), "b.txt", "beta")
 
-	card := config.EcosystemCard{
+	card := registry.PublishedEcosystem{
 		ID:     "01J8FLAT",
 		Layout: config.LayoutFlat,
 		Remotes: []config.EcosystemRemote{
 			{Name: "alpha", URL: alphaSrc},
 			{Name: "beta", URL: betaSrc},
 		},
-		Notebooks: map[string]config.EcosystemNotebook{"personal": {Default: true}},
 	}
 	dest := filepath.Join(root, "peer", "flatco")
 
@@ -225,11 +225,8 @@ func TestCloneFlatEcosystemYieldsDiscoverableRepos(t *testing.T) {
 	if err != nil || got == nil {
 		t.Fatalf("LoadEcosystemCard: %v (card %v)", err, got)
 	}
-	if got.ID != card.ID || got.Layout != config.LayoutFlat || len(got.Remotes) != 2 {
-		t.Errorf("seeded card = %+v, want the source card", got)
-	}
-	if !got.Notebooks["personal"].Default {
-		t.Errorf("notebook binding lost: %+v", got.Notebooks)
+	if got.ID != card.ID {
+		t.Errorf("seeded identity = %+v, want id %q", got, card.ID)
 	}
 	// And the repos are discoverable to the mirror's own repo lister.
 	repos, err := discoverLocalRepos(dest)
@@ -251,7 +248,7 @@ func TestCloneFlatEcosystemMaterializesSelectedSubset(t *testing.T) {
 	root := t.TempDir()
 	alphaSrc := seedSourceRepo(t, filepath.Join(root, "source", "alpha"), "a.txt", "alpha")
 	betaSrc := seedSourceRepo(t, filepath.Join(root, "source", "beta"), "b.txt", "beta")
-	card := config.EcosystemCard{ID: "01J8PARTIALFLAT", Layout: config.LayoutFlat, Remotes: []config.EcosystemRemote{
+	card := registry.PublishedEcosystem{ID: "01J8PARTIALFLAT", Layout: config.LayoutFlat, Remotes: []config.EcosystemRemote{
 		{Name: "alpha", URL: alphaSrc}, {Name: "beta", URL: betaSrc},
 	}}
 	dest := filepath.Join(root, "peer", "flatco")
@@ -268,8 +265,8 @@ func TestCloneFlatEcosystemMaterializesSelectedSubset(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dest, "beta")); !os.IsNotExist(err) {
 		t.Fatalf("omitted member was materialized: %v", err)
 	}
-	if cardOnDisk, err := config.LoadEcosystemCard(filepath.Join(dest, "grove.toml")); err != nil || cardOnDisk == nil || len(cardOnDisk.Remotes) != 2 {
-		t.Fatalf("partial root must retain the complete card for later widening: card=%+v err=%v", cardOnDisk, err)
+	if cardOnDisk, err := config.LoadEcosystemCard(filepath.Join(dest, "grove.toml")); err != nil || cardOnDisk == nil || cardOnDisk.ID != card.ID {
+		t.Fatalf("partial root must retain identity: card=%+v err=%v", cardOnDisk, err)
 	}
 }
 
@@ -277,7 +274,7 @@ func TestCloneSuperrepoEcosystemInitializesSelectedSubmodules(t *testing.T) {
 	sandboxGitEnv(t)
 	root := t.TempDir()
 	source := filepath.Join(root, "source", "grovetools")
-	card := config.EcosystemCard{ID: "01J8PARTIALSUPER", Layout: config.LayoutSuperrepo}
+	card := registry.PublishedEcosystem{ID: "01J8PARTIALSUPER", Layout: config.LayoutSuperrepo}
 	seedSourceSuperrepo(t, source, card)
 	beta := seedSourceRepo(t, filepath.Join(root, "beta-src"), "beta.txt", "beta")
 	mustGit(t, source, "submodule", "add", "-q", beta, "beta")
@@ -299,7 +296,7 @@ func TestCloneSuperrepoEcosystemInitializesSelectedSubmodules(t *testing.T) {
 }
 
 func TestCloneEcosystemRejectsUnknownSelectedMember(t *testing.T) {
-	card := config.EcosystemCard{Layout: config.LayoutFlat, Remotes: []config.EcosystemRemote{{Name: "alpha", URL: "unused"}}}
+	card := registry.PublishedEcosystem{ID: "id", Layout: config.LayoutFlat, Remotes: []config.EcosystemRemote{{Name: "alpha", URL: "unused"}}}
 	err := cloneEcosystem(context.Background(), card, t.TempDir(), ecosystemCloneOptions{
 		Out: io.Discard, Subscription: coderoot.Root{Repos: []string{"typo"}},
 	})
@@ -315,15 +312,15 @@ func TestCloneEcosystemRejectsUnusableCards(t *testing.T) {
 
 	cases := []struct {
 		name string
-		card config.EcosystemCard
+		card registry.PublishedEcosystem
 		want string
 	}{
-		{"no layout", config.EcosystemCard{Remotes: remotes}, "declares no layout"},
-		{"unknown layout", config.EcosystemCard{Layout: "monorepo", Remotes: remotes}, "layout"},
-		{"superrepo without remotes", config.EcosystemCard{Layout: config.LayoutSuperrepo}, "no remotes"},
-		{"flat without remotes", config.EcosystemCard{Layout: config.LayoutFlat}, "no remotes"},
-		{"flat with an unusable repo name", config.EcosystemCard{
-			Layout:  config.LayoutFlat,
+		{"no layout", registry.PublishedEcosystem{ID: "id", Remotes: remotes}, "layout"},
+		{"unknown layout", registry.PublishedEcosystem{ID: "id", Layout: "monorepo", Remotes: remotes}, "layout"},
+		{"superrepo without remotes", registry.PublishedEcosystem{ID: "id", Layout: config.LayoutSuperrepo}, "member origins"},
+		{"flat without remotes", registry.PublishedEcosystem{ID: "id", Layout: config.LayoutFlat}, "member origins"},
+		{"flat with an unusable repo name", registry.PublishedEcosystem{
+			ID: "id", Layout: config.LayoutFlat,
 			Remotes: []config.EcosystemRemote{{Name: "../escape", URL: "https://example.invalid/x.git"}},
 		}, "repo directory name"},
 	}
@@ -345,8 +342,8 @@ func TestCloneEcosystemRefusesNonEmptyDestination(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dest, "someones-work.txt"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	card := config.EcosystemCard{
-		Layout:  config.LayoutSuperrepo,
+	card := registry.PublishedEcosystem{
+		ID: "id", Layout: config.LayoutSuperrepo,
 		Remotes: []config.EcosystemRemote{{Name: "origin", URL: "https://example.invalid/x.git"}},
 	}
 	err := cloneEcosystem(context.Background(), card, dest, ecosystemCloneOptions{Out: io.Discard})
@@ -359,15 +356,15 @@ func TestPrimaryEcosystemRemote(t *testing.T) {
 	origin := config.EcosystemRemote{Name: "origin", URL: "o"}
 	fork := config.EcosystemRemote{Name: "fork", URL: "f"}
 
-	got, err := primaryEcosystemRemote(config.EcosystemCard{Remotes: []config.EcosystemRemote{fork, origin}})
+	got, err := primaryEcosystemRemote(registry.PublishedEcosystem{Remotes: []config.EcosystemRemote{fork, origin}})
 	if err != nil || got.Name != "origin" {
 		t.Errorf("origin must win regardless of order: %+v (%v)", got, err)
 	}
-	got, err = primaryEcosystemRemote(config.EcosystemCard{Remotes: []config.EcosystemRemote{fork}})
+	got, err = primaryEcosystemRemote(registry.PublishedEcosystem{Remotes: []config.EcosystemRemote{fork}})
 	if err != nil || got.Name != "fork" {
 		t.Errorf("first remote is the fallback primary: %+v (%v)", got, err)
 	}
-	if _, err := primaryEcosystemRemote(config.EcosystemCard{}); err == nil {
+	if _, err := primaryEcosystemRemote(registry.PublishedEcosystem{}); err == nil {
 		t.Error("a card with no remotes must not resolve a primary")
 	}
 }

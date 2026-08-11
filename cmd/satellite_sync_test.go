@@ -343,7 +343,7 @@ workspaces = ["cloud", "grovetools", "extra"]
 func TestResolveAllNotebookWorkspacesRequiresExplicitEnumeration(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"zeta", "alpha"} {
-		if err := os.MkdirAll(filepath.Join(root, "workspaces", name), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(root, "notespaces", name), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}

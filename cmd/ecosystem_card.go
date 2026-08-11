@@ -133,23 +133,9 @@ func discoverFlatMemberRemotes(root string) []config.EcosystemRemote {
 // Notebooks are carried forward, because they are a declaration no probe can
 // reconstruct.
 func deriveEcosystemCard(root string, existing *config.EcosystemCard) config.EcosystemCard {
-	layout := detectEcosystemLayout(root)
-	remotes := discoverEcosystemRemotes(root)
-	if layout == config.LayoutFlat {
-		remotes = discoverFlatMemberRemotes(root)
-	}
-	card := config.EcosystemCard{
-		Layout:  layout,
-		Remotes: remotes,
-	}
+	card := config.EcosystemCard{}
 	if existing != nil {
 		card.ID = existing.ID
-		if len(existing.Notebooks) > 0 {
-			card.Notebooks = make(map[string]config.EcosystemNotebook, len(existing.Notebooks))
-			for name, nb := range existing.Notebooks {
-				card.Notebooks[name] = nb
-			}
-		}
 	}
 	if card.ID == "" {
 		card.ID = machine.NewID()
@@ -160,21 +146,8 @@ func deriveEcosystemCard(root string, existing *config.EcosystemCard) config.Eco
 // setEcosystemDefaultNotebook records name as the card's default notebook,
 // demoting any previous default. A no-op for an empty name.
 func setEcosystemDefaultNotebook(card *config.EcosystemCard, name string) {
-	if name == "" {
-		return
-	}
-	if card.Notebooks == nil {
-		card.Notebooks = make(map[string]config.EcosystemNotebook, 1)
-	}
-	for existing, nb := range card.Notebooks {
-		if nb.Default && existing != name {
-			nb.Default = false
-			card.Notebooks[existing] = nb
-		}
-	}
-	nb := card.Notebooks[name]
-	nb.Default = true
-	card.Notebooks[name] = nb
+	// Notebook routing is machine-local recorded configuration. Ecosystem cards
+	// are identity-only and deliberately cannot carry a default notebook.
 }
 
 // proposeEcosystemNotebook returns the notebook this machine already
@@ -199,45 +172,5 @@ func proposeEcosystemNotebook(absPath string, cfg *config.Config) string {
 // renderEcosystemCardSummary is the human-readable form both verbs print (and
 // adopt shows before asking for confirmation).
 func renderEcosystemCardSummary(card config.EcosystemCard) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "  id:      %s\n", card.ID)
-	fmt.Fprintf(&b, "  layout:  %s\n", card.Layout)
-	if len(card.Remotes) == 0 {
-		b.WriteString("  remotes: (none — a peer cannot clone this ecosystem until it has one)\n")
-	} else {
-		for i, r := range card.Remotes {
-			label := "remotes:"
-			if i > 0 {
-				label = "         "
-			}
-			fmt.Fprintf(&b, "  %s %s → %s\n", label, r.Name, r.URL)
-		}
-	}
-	if len(card.Notebooks) == 0 {
-		b.WriteString("  notebooks: (none)\n")
-	} else {
-		names := make([]string, 0, len(card.Notebooks))
-		for name := range card.Notebooks {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for i, name := range names {
-			label := "notebooks:"
-			if i > 0 {
-				label = "          "
-			}
-			nb := card.Notebooks[name]
-			suffix := ""
-			switch {
-			case nb.Default && nb.Audience != "":
-				suffix = fmt.Sprintf(" (default, audience=%s)", nb.Audience)
-			case nb.Default:
-				suffix = " (default)"
-			case nb.Audience != "":
-				suffix = fmt.Sprintf(" (audience=%s)", nb.Audience)
-			}
-			fmt.Fprintf(&b, "  %s %s%s\n", label, name, suffix)
-		}
-	}
-	return b.String()
+	return fmt.Sprintf("  id:      %s\n", card.ID)
 }

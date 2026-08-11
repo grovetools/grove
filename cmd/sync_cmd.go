@@ -41,6 +41,8 @@ through to the grove-syncd SERVER binary, so ` + "`grove sync serve`" + ` and
 	}
 	cmd.AddCommand(newSyncDoctorCmd())
 	cmd.AddCommand(newSyncAdoptCmd())
+	cmd.AddCommand(newSyncConflictsCmd())
+	cmd.AddCommand(newSyncAdoptIDCmd())
 	return cmd
 }
 
@@ -49,12 +51,8 @@ func newSyncDoctorCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Diagnose sync configuration and notebook health",
-		Long: `Examine the sync configuration and notebook workspaces for common issues:
-- TCC-protected roots (macOS ~/Documents)
-- Syncthing folder markers (.stfolder)
-- Orphan vaults (machine-suffixed backup directories)
-- Dangling notebook.toml entries`,
-		RunE: runSyncDoctor,
+		Long:  `Examine sync configuration and stamped notespace roots for local health issues.`,
+		RunE:  runSyncDoctor,
 	}
 	return cmd
 }
@@ -95,18 +93,6 @@ func runSyncDoctor(cmd *cobra.Command, args []string) error {
 				continue
 			}
 
-			// Check for .stfolder marker (Syncthing)
-			for _, entry := range entries {
-				if entry.IsDir() && entry.Name() == ".stfolder" {
-					issues = append(issues, fmt.Sprintf(
-						"notebook %q: Syncthing folder marker (.stfolder) detected. "+
-							"Migrate using `grove sync adopt %s` and remove Syncthing folder access",
-						notebookName, notebookName,
-					))
-					break
-				}
-			}
-
 			// Check for machine-suffixed orphan vaults (e.g., vault-machinename)
 			for _, entry := range entries {
 				if !entry.IsDir() {
@@ -124,7 +110,7 @@ func runSyncDoctor(cmd *cobra.Command, args []string) error {
 			}
 
 			// Check for dangling notebooks.toml entries in the workspace directory
-			workspacesDir := filepath.Join(nb.RootDir, "workspaces")
+			workspacesDir := filepath.Join(nb.RootDir, "notespaces")
 			if wsEntries, err := os.ReadDir(workspacesDir); err == nil {
 				for _, wsEntry := range wsEntries {
 					if !wsEntry.IsDir() {
@@ -189,9 +175,8 @@ Adoption never writes to the notebook tree. Hash-equal files are registered
 against the server's document ids by the daemon's own reconcile; divergent
 files surface as conflicts on the conflicts feed, where they can be inspected.
 
-For a Syncthing migration: remove Syncthing's folder access first, then run
-	grove sync adopt <workspace>
-and deregister the device from your Syncthing configuration.`,
+Identity routing is stamp/id based. Display names are accepted only to locate an
+explicit configured tree; they never become server routing keys.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSyncAdopt(cmd.Context(), cmd.OutOrStdout(), syncAdoptOptions{

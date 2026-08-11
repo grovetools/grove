@@ -44,11 +44,11 @@ func sandboxAdoption(t *testing.T) (home, configDir, notebookRoot string) {
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(notebookRoot, "workspaces"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(notebookRoot, "notespaces"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(configDir, "grove.toml"),
-		[]byte("name = \"fixture\"\n\n[notebooks.definitions.nb]\nroot_dir = \""+notebookRoot+"\"\n"), 0o644); err != nil {
+		[]byte("name = \"fixture\"\n\n[notebooks.definitions.nb]\nroot_dir = \""+notebookRoot+"\"\n[notebooks.rules]\ndefault = \"nb\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return home, configDir, notebookRoot
@@ -314,7 +314,7 @@ func TestJoinWritesRegistrySubscription(t *testing.T) {
 	// The registry directory must exist: syntheticNodeFor prefers a root that
 	// is already on disk, so creating it is what pins the subscription to the
 	// notebook join chose rather than one a later rule picks.
-	root := filepath.Join(notebookRoot, "workspaces", defaultRegistryWorkspace, "machines")
+	root := filepath.Join(notebookRoot, "notespaces", defaultRegistryWorkspace, "machines")
 	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
 		t.Errorf("registry workspace not created at %s: %v", root, err)
 	}

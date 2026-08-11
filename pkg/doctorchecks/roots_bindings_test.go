@@ -107,7 +107,7 @@ func TestRootsBindingsStrictPairDiagnostics(t *testing.T) {
 
 func TestRootsBindingsFollowsSymlinkedWorkspaceDirectoriesSafely(t *testing.T) {
 	notes := filepath.Join(t.TempDir(), "notes")
-	workspaces := filepath.Join(notes, "workspaces")
+	workspaces := filepath.Join(notes, "notespaces")
 	if err := os.MkdirAll(workspaces, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestRootsBindingsFollowsSymlinkedWorkspaceDirectoriesSafely(t *testing.T) {
 		t.Fatalf("status = %s: %+v", res.Status, res)
 	}
 	text := res.Message + " " + res.Error
-	for _, want := range []string{"found 1 deprecated", filepath.Join("workspaces", "linked", "grove.toml")} {
+	for _, want := range []string{"found 1 deprecated", filepath.Join("notespaces", "linked", "grove.toml")} {
 		if !strings.Contains(text, want) {
 			t.Errorf("result missing %q: %s", want, text)
 		}
@@ -147,7 +147,7 @@ func TestRootsBindingsWarnsForEveryNotebookEmbeddedConfig(t *testing.T) {
 	for _, item := range []struct{ root, workspace, file string }{
 		{notesA, "alpha", "grove.toml"}, {notesB, "beta", "grove.yml"},
 	} {
-		dir := filepath.Join(item.root, "workspaces", item.workspace)
+		dir := filepath.Join(item.root, "notespaces", item.workspace)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}

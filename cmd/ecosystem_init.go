@@ -187,7 +187,7 @@ clean:
 	if err != nil {
 		return fmt.Errorf("failed to read back the ecosystem card: %w", err)
 	}
-	fmt.Printf("  ecosystem card (id %s, layout %s)\n", card.ID, card.Layout)
+	fmt.Printf("  ecosystem identity card (id %s)\n", card.ID)
 
 	// Initialize git if not already a git repo
 	gitDir := filepath.Join(targetDir, ".git")

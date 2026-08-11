@@ -46,12 +46,7 @@ func sourceEcosystem(t *testing.T, parent, name string) string {
 	if err := os.WriteFile(manifest, []byte("name = \""+name+"\"\nworkspaces = [\"*\"]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := config.WriteEcosystemCard(manifest, config.EcosystemCard{
-		ID:        "01ECOSYSTEMAAAAAAAAAAAAAAA",
-		Layout:    config.LayoutSuperrepo,
-		Remotes:   []config.EcosystemRemote{{Name: "origin", URL: dir}},
-		Notebooks: map[string]config.EcosystemNotebook{"nb": {Default: true}},
-	}); err != nil {
+	if _, err := config.WriteEcosystemCard(manifest, config.EcosystemCard{ID: "01ECOSYSTEMAAAAAAAAAAAAAAA"}); err != nil {
 		t.Fatal(err)
 	}
 	gitFixture(t, dir, "add", ".")
@@ -255,7 +250,7 @@ func TestMaterializeWritesPeerNotebookSubscription(t *testing.T) {
 // ecosystem card, plus the registry subscription that makes it locatable.
 func seedRegistryOffer(t *testing.T, configDir, notebookRoot, eco, remoteURL string) {
 	t.Helper()
-	root := filepath.Join(notebookRoot, "workspaces", "registry")
+	root := filepath.Join(notebookRoot, "notespaces", "registry")
 	if err := os.MkdirAll(filepath.Join(root, "machines"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -275,11 +270,7 @@ func seedRegistryOffer(t *testing.T, configDir, notebookRoot, eco, remoteURL str
 			Path:    "/Users/peer/code/" + eco,
 			Enabled: true,
 			State:   registry.StatePresent,
-			Card: &registry.NoteCard{
-				ID:      "01ECOSYSTEMAAAAAAAAAAAAAAA",
-				Layout:  config.LayoutSuperrepo,
-				Remotes: []registry.NoteRemote{{Name: "origin", URL: remoteURL}},
-			},
+			Card:    &registry.NoteCard{ID: "01ECOSYSTEMAAAAAAAAAAAAAAA", Name: eco, Members: []registry.NoteMemberOrigin{{Path: ".", Origin: remoteURL}}},
 		}},
 	}
 	p := filepath.Join(root, filepath.FromSlash(registry.NotePath(note.MachineID)))

@@ -25,8 +25,10 @@ import (
 func init() { rootCmd.AddCommand(newMigrateCmd()) }
 
 func newMigrateCmd() *cobra.Command {
-	var dryRun, yes, stageSync, jsonOutput bool
-	var evidenceDir string
+	var dryRun, yes, stageSync, jsonOutput, undo, localOnly bool
+	var evidenceDir, manifestPath, syncDBPath, grovedBin, syncdBin, serverBackup string
+	var step int
+	var notebookRoots, contentRoots []string
 	cmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "Migrate frozen legacy configuration to recorded roots and notebooks",
@@ -39,6 +41,13 @@ backed up with a UTC timestamp. notebooks.toml is always written before
 roots.toml so a notebook reference is never recorded before its definition.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if step == 2 || undo {
+				return runP2Migration(cmd.Context(), cmd.OutOrStdout(), cmd.InOrStdin(), p2MigrationOptions{
+					DryRun: dryRun, Yes: yes, Undo: undo, LocalOnly: localOnly, JSON: jsonOutput,
+					NotebookRoots: notebookRoots, ContentRoots: contentRoots, ManifestPath: manifestPath,
+					SyncDBPath: syncDBPath, GrovedBin: grovedBin, SyncdBin: syncdBin, ServerBackup: serverBackup,
+				}, time.Now().UTC())
+			}
 			return runLegacyMigrateWithOptions(cmd.OutOrStdout(), cmd.InOrStdin(), migrationOptions{DryRun: dryRun, Yes: yes, StageSync: stageSync, JSON: jsonOutput, EvidenceDir: evidenceDir}, time.Now().UTC())
 		},
 	}
@@ -47,6 +56,16 @@ roots.toml so a notebook reference is never recorded before its definition.`,
 	cmd.Flags().BoolVar(&stageSync, "stage-sync", false, "Park legacy sync intent in sync.toml.p2-staged for the later P2 migration")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Render final transition evidence as JSON")
 	cmd.Flags().StringVar(&evidenceDir, "evidence-dir", "", "Write normalized before/after effective topology evidence")
+	cmd.Flags().IntVar(&step, "step", 1, "Migration step to execute (1 or 2)")
+	cmd.Flags().BoolVar(&undo, "undo", false, "Undo step 2 using --manifest (hash guarded)")
+	cmd.Flags().StringSliceVar(&notebookRoots, "notebook-root", nil, "Explicit step-2 notebook binding name=/absolute/path (repeatable; required)")
+	cmd.Flags().StringSliceVar(&contentRoots, "content-root", nil, "Explicit root eligible for scoped old-layout content rewrites (repeatable)")
+	cmd.Flags().StringVar(&manifestPath, "manifest", "", "Step-2 inverse manifest path (required for --undo; optional destination for apply)")
+	cmd.Flags().StringVar(&syncDBPath, "sync-db", "", "Explicit client sync.db path (defaults under GROVE_HOME/XDG)")
+	cmd.Flags().StringVar(&grovedBin, "groved-bin", "groved", "groved binary used for the stopped-daemon archive/rebuild verb")
+	cmd.Flags().StringVar(&syncdBin, "syncd-bin", "grove-syncd", "grove-syncd binary used for the pre-migration server backup")
+	cmd.Flags().StringVar(&serverBackup, "server-backup", "", "Destination passed to `grove-syncd backup` before server reconciliation")
+	cmd.Flags().BoolVar(&localOnly, "local-only", false, "Skip server backup/registration with explicit retained-server-state evidence")
 	return cmd
 }
 

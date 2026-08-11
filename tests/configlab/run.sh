@@ -331,7 +331,34 @@ wait "$DAEMON_PID"
 DAEMON_PID=""
 if find "$GROVE_HOME" -type f \( -name '*.db' -o -name '*job-queue*' \) -print | grep -q .; then fail "degraded daemon created pipeline persistence"; fi
 
+# P2: explicit-root dry-run -> apply -> hash-guarded undo. This uses only the
+# sandbox and invokes the daemon's public stopped-daemon DB verb exactly.
+reset_home
+P2_NOTEBOOK="$SANDBOX/case/p2-notebook"
+mkdir -p "$P2_NOTEBOOK/workspaces/alpha/concepts/demo"
+printf 'Preset: `cx rules load %s/workspaces/alpha/context/presets/demo.rules`\n' "$P2_NOTEBOOK" >"$P2_NOTEBOOK/workspaces/alpha/concepts/demo/overview.md"
+cat >"$(config_dir)/notebooks.toml" <<EOF
+default = "nb"
+[notebooks.nb]
+root = "$P2_NOTEBOOK"
+EOF
+: >"$(config_dir)/roots.toml"
+printf 'server="http://sandbox.invalid"\n' >"$(config_dir)/sync.toml"
+printf 'server="http://sandbox.invalid"\n[[workspaces]]\nname="alpha"\nrole="registry"\npull=true\n' >"$(config_dir)/sync.toml.p2-staged"
+P2_MANIFEST="$SANDBOX/case/p2-manifest.json"
+BEFORE=$(find "$P2_NOTEBOOK" "$(config_dir)" -type f -exec shasum -a 256 {} \; | sort | shasum -a 256 | awk '{print $1}')
+"$GROVE_CLI" migrate --step 2 --dry-run --local-only --notebook-root "nb=$P2_NOTEBOOK" --content-root "$P2_NOTEBOOK" --manifest "$P2_MANIFEST" --sync-db "$SANDBOX/case/sync.db" --groved-bin "$GROVED_CLI" >"$ARTIFACTS/p2-dry-run.txt"
+AFTER=$(find "$P2_NOTEBOOK" "$(config_dir)" -type f -exec shasum -a 256 {} \; | sort | shasum -a 256 | awk '{print $1}')
+[ "$BEFORE" = "$AFTER" ] || fail "P2 dry-run mutated sandbox"
+"$GROVE_CLI" migrate --step 2 --yes --local-only --notebook-root "nb=$P2_NOTEBOOK" --content-root "$P2_NOTEBOOK" --manifest "$P2_MANIFEST" --sync-db "$SANDBOX/case/sync.db" --groved-bin "$GROVED_CLI" >"$ARTIFACTS/p2-apply.txt"
+[ -f "$P2_NOTEBOOK/.notebook.toml" ] && [ -f "$P2_NOTEBOOK/notespaces/alpha/.notespace.toml" ] || fail "P2 stamps missing"
+grep -q '/notespaces/' "$P2_NOTEBOOK/notespaces/alpha/concepts/demo/overview.md" || fail "P2 scoped rewrite missing"
+"$GROVE_CLI" migrate --undo --manifest "$P2_MANIFEST" >"$ARTIFACTS/p2-undo.txt"
+[ -d "$P2_NOTEBOOK/workspaces/alpha" ] && [ ! -e "$P2_NOTEBOOK/notespaces" ] || fail "P2 undo did not restore layout"
+[ ! -e "$P2_NOTEBOOK/workspaces/alpha/.notespace.toml" ] || fail "P2 undo retained minted stamp"
+grep -q 'server backup and accepted registrations remain retained and were NOT undone' "$ARTIFACTS/p2-undo.txt" || fail "P2 undo hid retained server state"
+
 cat >"$ARTIFACTS/configlab-summary.json" <<'EOF'
-{"schema_version":1,"scenario":"config-cutover-v2-v3","status":"pass","operator_state_access":"none; HOME, GROVE_HOME, and every XDG directory were sandboxed; inherited config overlay and config-lab controls were cleared"}
+{"schema_version":1,"scenario":"config-cutover-v2-v3-p2","status":"pass","operator_state_access":"none; HOME, GROVE_HOME, and every XDG directory were sandboxed; inherited config overlay and config-lab controls were cleared"}
 EOF
 echo "config-lab PASS: $ARTIFACTS"

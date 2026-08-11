@@ -11,6 +11,7 @@ import (
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/coderoot"
+	"github.com/grovetools/core/pkg/registry"
 )
 
 // Card-declared ecosystem materialization: turning an [ecosystem] card plus a
@@ -77,25 +78,20 @@ func (o ecosystemCloneOptions) out() io.Writer {
 // cloneEcosystem materializes card into dest, dispatching on the card's
 // declared layout. dest is created if absent; an existing dest is converged,
 // not clobbered.
-func cloneEcosystem(ctx context.Context, card config.EcosystemCard, dest string, opts ecosystemCloneOptions) error {
+func cloneEcosystem(ctx context.Context, card registry.PublishedEcosystem, dest string, opts ecosystemCloneOptions) error {
 	if strings.TrimSpace(dest) == "" {
 		return fmt.Errorf("materialize: destination path is empty")
 	}
-	if err := card.Validate(); err != nil {
-		return fmt.Errorf("materialize: %w", err)
+	if card.ID == "" || len(card.Remotes) == 0 {
+		return fmt.Errorf("materialize: registry publication is missing ecosystem id or member origins")
 	}
 	switch card.Layout {
 	case config.LayoutSuperrepo:
 		return cloneSuperrepoEcosystem(ctx, card, dest, opts)
 	case config.LayoutFlat:
 		return cloneFlatEcosystem(ctx, card, dest, opts)
-	case "":
-		// Deliberately not guessed. Layout decides whether the remotes are ONE
-		// superrepo or N member repos, and guessing wrong either clones the
-		// wrong thing or scatters repos that belong under a root.
-		return fmt.Errorf("ecosystem card declares no layout; run `grove ecosystem adopt` on the source to record %q or %q", config.LayoutSuperrepo, config.LayoutFlat)
 	default:
-		return fmt.Errorf("ecosystem card declares unknown layout %q", card.Layout)
+		return fmt.Errorf("materialize: registry publication has no explicit layout")
 	}
 }
 
@@ -104,7 +100,7 @@ func cloneEcosystem(ctx context.Context, card config.EcosystemCard, dest string,
 // cloneSuperrepoEcosystem is satellite-bootstrap.sh step 3 in Go: clone the
 // superrepo (only when there is no clone yet), initialize its submodules in
 // parallel, and heal any submodule whose checkout was aborted.
-func cloneSuperrepoEcosystem(ctx context.Context, card config.EcosystemCard, dest string, opts ecosystemCloneOptions) error {
+func cloneSuperrepoEcosystem(ctx context.Context, card registry.PublishedEcosystem, dest string, opts ecosystemCloneOptions) error {
 	primary, err := primaryEcosystemRemote(card)
 	if err != nil {
 		return err
@@ -259,7 +255,7 @@ func onlyHoldsGitDir(dir string) (bool, error) {
 // seeds the ecosystem root manifest. Sequential on purpose: the repos are
 // independent, the output stays readable, and a flat ecosystem is a handful of
 // repos rather than a superrepo's dozens.
-func cloneFlatEcosystem(ctx context.Context, card config.EcosystemCard, dest string, opts ecosystemCloneOptions) error {
+func cloneFlatEcosystem(ctx context.Context, card registry.PublishedEcosystem, dest string, opts ecosystemCloneOptions) error {
 	if len(card.Remotes) == 0 {
 		return fmt.Errorf("flat ecosystem card lists no remotes; there is nothing to clone (each [[ecosystem.remotes]] entry is one member repo: name = directory, url = clone source)")
 	}
@@ -357,7 +353,7 @@ func selectedMembers(all []string, subscription coderoot.Root) ([]string, error)
 //
 // An existing manifest is never rewritten wholesale: WriteEcosystemCard edits
 // only the [ecosystem] table and refuses to change a minted id.
-func seedFlatEcosystemRoot(dest string, card config.EcosystemCard, out io.Writer) error {
+func seedFlatEcosystemRoot(dest string, card registry.PublishedEcosystem, out io.Writer) error {
 	manifest := config.FindEcosystemManifest(dest)
 	if manifest == "" {
 		manifest = filepath.Join(dest, "grove.toml")
@@ -366,7 +362,7 @@ func seedFlatEcosystemRoot(dest string, card config.EcosystemCard, out io.Writer
 		}
 		fmt.Fprintf(out, "seeded %s (wildcard workspace manifest)\n", manifest)
 	}
-	if _, err := config.WriteEcosystemCard(manifest, card); err != nil {
+	if _, err := config.WriteEcosystemCard(manifest, config.EcosystemCard{ID: card.ID}); err != nil {
 		return fmt.Errorf("write the ecosystem card into %s: %w", manifest, err)
 	}
 	if config.FindEcosystemConfig(dest) == "" {
@@ -382,7 +378,7 @@ func seedFlatEcosystemRoot(dest string, card config.EcosystemCard, out io.Writer
 // primaryEcosystemRemote picks the remote a superrepo is cloned from: the one
 // named origin, else the first listed. Card order is meaningful — the writer
 // sorts origin first.
-func primaryEcosystemRemote(card config.EcosystemCard) (config.EcosystemRemote, error) {
+func primaryEcosystemRemote(card registry.PublishedEcosystem) (config.EcosystemRemote, error) {
 	if len(card.Remotes) == 0 {
 		return config.EcosystemRemote{}, fmt.Errorf("ecosystem card lists no remotes; a peer has nowhere to clone from (git remotes are the only durable transport)")
 	}

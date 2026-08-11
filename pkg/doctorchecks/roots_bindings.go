@@ -100,7 +100,7 @@ func notebookEmbeddedConfigs(table coderoot.Table) []string {
 	var out []string
 	for _, name := range table.SortedNotebookNames() {
 		root := table.NotebookRoot(name)
-		entries, err := os.ReadDir(filepath.Join(root, "workspaces"))
+		entries, err := os.ReadDir(filepath.Join(root, "notespaces"))
 		if err != nil {
 			continue
 		}
@@ -110,7 +110,7 @@ func notebookEmbeddedConfigs(table coderoot.Table) []string {
 		// filenames only), so a link cannot make the scan recurse, cycle, or walk
 		// arbitrary descendants; broken and cyclic links are simply ignored.
 		for _, entry := range entries {
-			workspace := filepath.Join(root, "workspaces", entry.Name())
+			workspace := filepath.Join(root, "notespaces", entry.Name())
 			info, err := os.Stat(workspace)
 			if err != nil || !info.IsDir() {
 				continue
@@ -174,7 +174,7 @@ func (c *rootsBindingsCheck) Run(ctx context.Context, opts doctor.RunOptions) do
 		res.Status = doctor.StatusWarn
 		res.Message = fmt.Sprintf("%d recorded root binding(s) resolved%s; found %d deprecated project-notebook config fragment(s)", len(bindings), detail, len(embedded))
 		res.Error = strings.Join(embedded, "; ")
-		res.Resolution = "move settings out of notebook workspaces/*/grove.toml (or grove.yml/grove.yaml); that project-notebook layer is deprecated"
+		res.Resolution = "move settings out of notebook notespaces/*/grove.toml (or grove.yml/grove.yaml); that project-notebook layer is deprecated"
 	default:
 		res.Status = doctor.StatusOK
 		if len(bindings) == 0 {

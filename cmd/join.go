@@ -20,8 +20,10 @@ import (
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/devicekey"
 	"github.com/grovetools/core/pkg/machine"
+	"github.com/grovetools/core/pkg/notespace"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/registry"
+	"github.com/grovetools/core/pkg/subject"
 	"github.com/grovetools/core/pkg/syncproto"
 )
 
@@ -724,7 +726,49 @@ func ensureRegistryRoot(rep *joinReporter, workspaceName string) string {
 		rep.fail("registry", root, "not a directory after creation")
 		return ""
 	}
-	rep.ok("registry", root, "ready")
+	// Join is the explicit registry materialization verb. Bind the created root
+	// to immutable identity immediately; a role-bearing display name in
+	// sync.toml is not routing authority.
+	machineCfg, _ := config.LoadMachineConfig()
+	if machineCfg == nil || machineCfg.Sync.Registry == nil {
+		localSubject := subject.MintLocal().String()
+		stamp, stampErr := notespace.MintNotespace(root, notespace.NotespaceMutable{Name: workspaceName, Subject: localSubject, Kind: "registry"})
+		if stampErr != nil {
+			rep.fail("registry", root, "identity stamp failed: "+stampErr.Error())
+			return ""
+		}
+		notebookName := ""
+		if cfg.Notebooks != nil && cfg.Notebooks.Rules != nil {
+			notebookName = cfg.Notebooks.Rules.Default
+		}
+		if notebookName == "" {
+			rep.fail("registry", root, "no explicit default notebook for [sync.registry]")
+			return ""
+		}
+		notebookRoot := filepath.Dir(filepath.Dir(root))
+		if _, stampErr = notespace.MintNotebook(notebookRoot, notebookName); stampErr != nil {
+			rep.fail("registry", notebookRoot, "notebook identity stamp failed: "+stampErr.Error())
+			return ""
+		}
+		known := map[string]struct{}{stamp.ID: {}}
+		_, _, stampErr = config.EditMachineConfig(config.MachineConfigPath(), config.MachineEditOptions{KnownNotespaceIDs: known}, func(machine *config.MachineConfig) error {
+			if machine.Primaries == nil {
+				machine.Primaries = map[string]string{}
+			}
+			if machine.Subjects == nil {
+				machine.Subjects = map[string]string{}
+			}
+			machine.Primaries[stamp.Subject] = stamp.ID
+			machine.Subjects[canonicalPath(root)] = stamp.Subject
+			machine.Sync.Registry = &config.SyncRegistry{Notebook: notebookName, NotespaceID: stamp.ID}
+			return nil
+		})
+		if stampErr != nil {
+			rep.fail("registry", root, "machine binding failed: "+stampErr.Error())
+			return ""
+		}
+	}
+	rep.ok("registry", root, "ready with immutable notespace id and [sync.registry] binding")
 	return root
 }
 

@@ -77,25 +77,9 @@ func runEcosystemAdopt(cmd *cobra.Command, args []string) error {
 	}
 
 	card := deriveEcosystemCard(absPath, existing)
-	if ecosystemAdoptLayout != "" {
-		switch ecosystemAdoptLayout {
-		case config.LayoutSuperrepo, config.LayoutFlat:
-			card.Layout = ecosystemAdoptLayout
-		default:
-			return fmt.Errorf("--layout must be %q or %q, got %q", config.LayoutSuperrepo, config.LayoutFlat, ecosystemAdoptLayout)
-		}
+	if ecosystemAdoptLayout != "" || ecosystemAdoptNotebook != "" {
+		return fmt.Errorf("--layout and --notebook were removed: ecosystem cards now carry identity only; record layout/remotes and notebook routing in the registry and machine config")
 	}
-
-	notebook := ecosystemAdoptNotebook
-	if notebook == "" && card.DefaultNotebookName() == "" {
-		// Only propose one when the card binds none: a card that already names
-		// a default is a declaration, and re-deriving must not quietly move it.
-		cfg, cfgErr := config.LoadDefault()
-		if cfgErr == nil {
-			notebook = proposeEcosystemNotebook(absPath, cfg)
-		}
-	}
-	setEcosystemDefaultNotebook(&card, notebook)
 
 	if existing != nil {
 		fmt.Printf("Updating the ecosystem card in %s:\n", manifest)

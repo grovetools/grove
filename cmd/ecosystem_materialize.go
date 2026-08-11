@@ -205,89 +205,83 @@ func resolveMaterializeDest(name, flag string) (string, error) {
 
 // resolveMaterializeCard implements the three-way resolution and returns the
 // card plus a human label for where it came from.
-func resolveMaterializeCard(ctx context.Context, in io.Reader, out io.Writer, name, dest string, opts materializeOptions) (config.EcosystemCard, string, error) {
-	// (1) --url: clone, then read. The clone is minimal — just enough to get a
-	// manifest on disk — because cloneEcosystem converges the rest and must be
-	// the only thing that knows what a layout means.
+func resolveMaterializeCard(ctx context.Context, in io.Reader, out io.Writer, name, dest string, opts materializeOptions) (registry.PublishedEcosystem, string, error) {
 	if url := strings.TrimSpace(opts.url); url != "" {
 		card, err := cardFromURL(ctx, out, url, dest)
 		return card, "the clone at " + dest, err
 	}
-
-	// (2) an existing checkout. A local card beats a replicated copy of one,
-	// and this is what makes a repair run need no registry at all.
 	if manifest := config.FindEcosystemManifest(dest); manifest != "" {
 		card, err := config.LoadEcosystemCard(manifest)
 		if err != nil {
-			return config.EcosystemCard{}, "", err
+			return registry.PublishedEcosystem{}, "", err
 		}
 		if card != nil {
-			return *card, manifest, nil
+			return publishedFromCheckout(*card, name, dest), manifest, nil
 		}
-		return config.EcosystemCard{}, "", fmt.Errorf("%s exists but its manifest %s carries no [ecosystem] card; run `grove ecosystem adopt` there (or pass --url) so materialize knows how to converge it",
-			dest, manifest)
+		return registry.PublishedEcosystem{}, "", fmt.Errorf("%s exists but its manifest %s carries no ecosystem identity", dest, manifest)
 	}
-
-	// (3) the registry, behind the gate.
 	offers, _, err := registryOffers()
 	if err != nil {
 		if errors.Is(err, registry.ErrNoRegistry) {
-			return config.EcosystemCard{}, "", fmt.Errorf("no card for %q: nothing is at %s, this machine has no registry (run `grove join <server-url>`), and no --url was given",
-				name, dest)
+			return registry.PublishedEcosystem{}, "", fmt.Errorf("no registry publication for %q and no --url was given; run `grove join <server-url>` first", name)
 		}
-		return config.EcosystemCard{}, "", err
+		return registry.PublishedEcosystem{}, "", err
 	}
 	offer, ok := findOfferByName(offers, name)
 	if !ok {
-		return config.EcosystemCard{}, "", fmt.Errorf("no machine in the registry publishes an ecosystem named %q (known: %s); pass --url to clone it directly",
-			name, offerNames(offers))
+		return registry.PublishedEcosystem{}, "", fmt.Errorf("no machine publishes ecosystem %q (known: %s)", name, offerNames(offers))
 	}
-	if err := offer.Card.Validate(); err != nil {
-		return config.EcosystemCard{}, "", fmt.Errorf("the registry's card for %q is not usable: %w", name, err)
+	if offer.Card.ID == "" || len(offer.Card.Members) == 0 {
+		return registry.PublishedEcosystem{}, "", fmt.Errorf("registry publication for %q has no identity or member origins", name)
 	}
-
 	renderOffer(out, offer, dest)
 	if err := confirm(in, out, fmt.Sprintf("Clone %s into %s?", name, dest), opts.assumeYes); err != nil {
-		if errors.Is(err, errNotConfirmed) {
-			return config.EcosystemCard{}, "", fmt.Errorf("materialize refused: %w", err)
-		}
-		return config.EcosystemCard{}, "", err
+		return registry.PublishedEcosystem{}, "", fmt.Errorf("materialize refused: %w", err)
 	}
 	return offer.Card, "the machine registry", nil
 }
 
-// cardFromURL clones url into dest (when dest is not already a checkout) and
-// reads the card the clone carries.
-func cardFromURL(ctx context.Context, out io.Writer, url, dest string) (config.EcosystemCard, error) {
+func cardFromURL(ctx context.Context, out io.Writer, url, dest string) (registry.PublishedEcosystem, error) {
 	isRepo, err := gitRepoRoot(dest)
 	if err != nil {
-		return config.EcosystemCard{}, err
+		return registry.PublishedEcosystem{}, err
 	}
 	if !isRepo {
 		if err := ensureCloneTarget(dest); err != nil {
-			return config.EcosystemCard{}, err
+			return registry.PublishedEcosystem{}, err
 		}
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-			return config.EcosystemCard{}, fmt.Errorf("create %s: %w", filepath.Dir(dest), err)
+			return registry.PublishedEcosystem{}, err
 		}
-		fmt.Fprintf(out, "Cloning %s into %s to read its ecosystem card...\n", url, dest)
+		fmt.Fprintf(out, "Cloning %s into %s to read its ecosystem identity...\n", url, dest)
 		if err := runGit(ctx, "", out, "clone", url, dest); err != nil {
-			return config.EcosystemCard{}, fmt.Errorf("clone %s: %w", url, err)
+			return registry.PublishedEcosystem{}, err
 		}
 	}
-
 	manifest := config.FindEcosystemManifest(dest)
 	if manifest == "" {
-		return config.EcosystemCard{}, fmt.Errorf("%s has no grove manifest — %s does not look like a grove ecosystem", dest, url)
+		return registry.PublishedEcosystem{}, fmt.Errorf("%s has no grove manifest", dest)
 	}
 	card, err := config.LoadEcosystemCard(manifest)
-	if err != nil {
-		return config.EcosystemCard{}, err
+	if err != nil || card == nil {
+		return registry.PublishedEcosystem{}, fmt.Errorf("load ecosystem identity from %s: %w", manifest, err)
 	}
-	if card == nil {
-		return config.EcosystemCard{}, fmt.Errorf("%s carries no [ecosystem] card; run `grove ecosystem adopt` in the source ecosystem so peers know its layout and remotes", manifest)
+	return publishedFromCheckout(*card, filepath.Base(dest), dest), nil
+}
+
+func publishedFromCheckout(card config.EcosystemCard, name, root string) registry.PublishedEcosystem {
+	layout := detectEcosystemLayout(root)
+	remotes := discoverEcosystemRemotes(root)
+	if isRepo, _ := gitRepoRoot(root); isRepo {
+		layout = config.LayoutSuperrepo
+	} else if layout == config.LayoutFlat {
+		remotes = discoverFlatMemberRemotes(root)
 	}
-	return *card, nil
+	published := registry.PublishedEcosystem{ID: card.ID, Name: name, Layout: layout, Remotes: remotes}
+	for _, remote := range remotes {
+		published.Members = append(published.Members, registry.NoteMemberOrigin{Path: remote.Name, Origin: remote.URL})
+	}
+	return published
 }
 
 // subscribeNotebookWorkspace writes the role = "peer" sync entry for this

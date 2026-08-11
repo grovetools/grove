@@ -122,7 +122,7 @@ func resolveAllNotebookWorkspaces(cfg *config.Config) ([]string, error) {
 		if nb == nil || nb.RootDir == "" {
 			continue
 		}
-		entries, err := os.ReadDir(filepath.Join(expandUserPath(nb.RootDir), "workspaces"))
+		entries, err := os.ReadDir(filepath.Join(expandUserPath(nb.RootDir), "notespaces"))
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
