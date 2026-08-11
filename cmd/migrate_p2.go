@@ -64,12 +64,26 @@ type p2NotespacePlan struct {
 	CodeRoot string `json:"code_root,omitempty"`
 }
 
+// p2FileBackup is the inverse record for one mutated path. A canonical config
+// path is commonly a dotfiles symlink, so the record carries BOTH halves of
+// that identity: the link at Path (Symlink/LinkTarget/AfterLinkTarget) and the
+// bytes of the regular file it resolves to (ResolvedPath plus the hashes and
+// payload, which are read and written through the link). Undo guards and
+// restores both — bytes alone would leave a run that lost the link looking
+// correct while the machine is silently detached from its dotfiles.
 type p2FileBackup struct {
 	Path       string `json:"path"`
 	Existed    bool   `json:"existed"`
 	BeforeB64  string `json:"before_b64,omitempty"`
 	BeforeHash string `json:"before_hash,omitempty"`
 	AfterHash  string `json:"after_hash,omitempty"`
+	// Symlink identity of Path itself, captured at plan time.
+	Symlink      bool   `json:"symlink,omitempty"`
+	LinkTarget   string `json:"link_target,omitempty"`
+	ResolvedPath string `json:"resolved_path,omitempty"`
+	// AfterLinkTarget is the link as it stood once the migration applied. It is
+	// asserted equal to LinkTarget at apply time and re-checked before undo.
+	AfterLinkTarget string `json:"after_link_target,omitempty"`
 }
 
 type p2SyncBinding struct {
@@ -298,6 +312,23 @@ func runP2Migration(ctx context.Context, out io.Writer, in io.Reader, opts p2Mig
 			return fail("hash final file", err)
 		}
 		manifest.Files[i].AfterHash = h
+		// A path the migration legitimately consumes (the staged sync input) has
+		// no link left to assert; rollback restores it from LinkTarget instead.
+		if !manifest.Files[i].Symlink || h == "missing" {
+			continue
+		}
+		// Every write above went through the reviewed-target contract, so a
+		// canonical link must still be the same link. Proving it here turns a
+		// regression in any writer into a rolled-back failure instead of a
+		// silently detached dotfiles checkout.
+		link, err := os.Readlink(manifest.Files[i].Path)
+		if err != nil {
+			return fail("verify preserved config symlink", fmt.Errorf("%s is no longer a symlink: %w", manifest.Files[i].Path, err))
+		}
+		if link != manifest.Files[i].LinkTarget {
+			return fail("verify preserved config symlink", fmt.Errorf("%s now points at %s, not %s", manifest.Files[i].Path, link, manifest.Files[i].LinkTarget))
+		}
+		manifest.Files[i].AfterLinkTarget = link
 	}
 	for i := range manifest.Notebooks {
 		if manifest.Notebooks[i].LocalMode {
@@ -332,6 +363,16 @@ func planP2MigrationResolved(opts *p2MigrationOptions, now time.Time) (*p2Migrat
 	}
 	if err := ensureDaemonStopped(); err != nil {
 		return nil, err
+	}
+	// Review the canonical config paths step 2 mutates before any pass reads
+	// them. A dotfiles symlink is expected and is preserved; a dangling, cyclic
+	// or non-regular one is refused here with its reason, instead of surfacing
+	// later as a raw ENOENT/ELOOP from whichever reader happened to reach it
+	// first.
+	for _, path := range []string{config.MachineConfigPath(), config.SyncConfigPath()} {
+		if _, _, err := config.ResolveConfigWriteTarget(path); err != nil {
+			return nil, err
+		}
 	}
 	if err := rejectPinnedTemplates(); err != nil {
 		return nil, err
@@ -815,15 +856,73 @@ func canonicalPath(path string) string {
 }
 
 func backupP2File(path string) (p2FileBackup, error) {
-	data, err := os.ReadFile(path)
+	out := p2FileBackup{Path: path}
+	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
 		return p2FileBackup{Path: path, BeforeHash: "missing"}, nil
 	}
 	if err != nil {
-		return p2FileBackup{}, err
+		return p2FileBackup{}, fmt.Errorf("snapshot %s: %w", path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		// The reviewed-target contract refuses a dangling, cyclic or non-regular
+		// link here, at plan time, rather than letting a "missing" backup record
+		// turn into a link deletion during rollback.
+		resolved, _, resolveErr := config.ResolveConfigWriteTarget(path)
+		if resolveErr != nil {
+			return p2FileBackup{}, resolveErr
+		}
+		link, readErr := os.Readlink(path)
+		if readErr != nil {
+			return p2FileBackup{}, fmt.Errorf("snapshot symlink %s: %w", path, readErr)
+		}
+		out.Symlink = true
+		out.LinkTarget = link
+		out.ResolvedPath = resolved
+	} else if !info.Mode().IsRegular() {
+		return p2FileBackup{}, fmt.Errorf("snapshot %s: expected a regular file or symlink, found %s", path, info.Mode().Type())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return p2FileBackup{}, fmt.Errorf("snapshot %s: %w", path, err)
 	}
 	sum := sha256.Sum256(data)
-	return p2FileBackup{Path: path, Existed: true, BeforeB64: base64.StdEncoding.EncodeToString(data), BeforeHash: fmt.Sprintf("%x", sum)}, nil
+	out.Existed = true
+	out.BeforeB64 = base64.StdEncoding.EncodeToString(data)
+	out.BeforeHash = fmt.Sprintf("%x", sum)
+	return out, nil
+}
+
+// restoreP2File puts one recorded path back the way the plan found it. The link
+// identity is restored before the bytes: if anything replaced the link with a
+// regular file, restoring the link first means the recovered content lands in
+// the dotfiles file the link names, not in a fresh file at the canonical path.
+func restoreP2File(file p2FileBackup, data []byte) error {
+	if !file.Symlink {
+		return atomicMigrationWrite(file.Path, data)
+	}
+	if err := restoreP2Symlink(file); err != nil {
+		return err
+	}
+	return atomicMigrationWrite(file.ResolvedPath, data)
+}
+
+func restoreP2Symlink(file p2FileBackup) error {
+	if current, err := os.Readlink(file.Path); err == nil && current == file.LinkTarget {
+		// An untouched link is left exactly as found; recreating it would lose
+		// filesystem metadata for no gain.
+		return nil
+	}
+	if err := os.Remove(file.Path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove replaced canonical path %s: %w", file.Path, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(file.Path), 0o755); err != nil {
+		return err
+	}
+	if err := os.Symlink(file.LinkTarget, file.Path); err != nil {
+		return fmt.Errorf("restore canonical config symlink %s -> %s: %w", file.Path, file.LinkTarget, err)
+	}
+	return nil
 }
 
 func writeP2Manifest(path string, manifest *p2MigrationManifest) error {
@@ -923,6 +1022,17 @@ func undoP2Migration(out io.Writer, opts p2MigrationOptions) error {
 		if err != nil || got != file.AfterHash {
 			return fmt.Errorf("refusing undo: %s changed after migration (want %s, got %s)", file.Path, file.AfterHash, got)
 		}
+		// The content hash is read through the link, so it cannot see a link that
+		// was repointed at an identical copy. Guard the logical identity too.
+		if file.Symlink && file.AfterLinkTarget != "" {
+			link, err := os.Readlink(file.Path)
+			if err != nil {
+				return fmt.Errorf("refusing undo: %s is no longer a symlink (want -> %s): %w", file.Path, file.AfterLinkTarget, err)
+			}
+			if link != file.AfterLinkTarget {
+				return fmt.Errorf("refusing undo: %s changed after migration (want -> %s, got -> %s)", file.Path, file.AfterLinkTarget, link)
+			}
+		}
 	}
 	if manifest.SyncDBHash != "" {
 		got, _ := hashFileOrMissing(manifest.SyncDB)
@@ -992,7 +1102,7 @@ func rollbackP2Local(manifest *p2MigrationManifest, fromApplied bool) error {
 				errs = append(errs, err.Error())
 				continue
 			}
-			if err := atomicMigrationWrite(file.Path, decoded); err != nil {
+			if err := restoreP2File(file, decoded); err != nil {
 				errs = append(errs, err.Error())
 			}
 		} else {

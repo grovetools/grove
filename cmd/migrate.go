@@ -416,37 +416,13 @@ func resolveCanonicalMigrationTargets(m *legacyMigration) (canonicalMigrationTar
 	return out, nil
 }
 
+// resolveCanonicalMutationTarget is the migration's name for the shared
+// reviewed-target contract. The rule and its refusals live in core so that
+// every writer touching a canonical config path — the recorded-pair writers,
+// machine identity, and both migration steps — agrees on what is safe to write
+// through.
 func resolveCanonicalMutationTarget(logical string) (target string, linked bool, err error) {
-	info, err := os.Lstat(logical)
-	if os.IsNotExist(err) {
-		return logical, false, nil
-	}
-	if err != nil {
-		return "", false, fmt.Errorf("review canonical config path %s: %w", logical, err)
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		if !info.Mode().IsRegular() {
-			return "", false, fmt.Errorf("review canonical config path %s: expected a regular file or symlink, found %s", logical, info.Mode().Type())
-		}
-		return logical, false, nil
-	}
-	resolved, err := filepath.EvalSymlinks(logical)
-	if err != nil {
-		return "", true, fmt.Errorf("refusing unreviewable canonical config symlink %s (dangling, escaping, or cyclic target): %w", logical, err)
-	}
-	resolved, err = filepath.Abs(resolved)
-	if err != nil {
-		return "", true, fmt.Errorf("resolve canonical config symlink %s: %w", logical, err)
-	}
-	resolved = filepath.Clean(resolved)
-	targetInfo, err := os.Stat(resolved)
-	if err != nil {
-		return "", true, fmt.Errorf("review canonical config symlink target %s -> %s: %w", logical, resolved, err)
-	}
-	if !targetInfo.Mode().IsRegular() {
-		return "", true, fmt.Errorf("review canonical config symlink target %s -> %s: target is not a regular file", logical, resolved)
-	}
-	return resolved, true, nil
+	return config.ResolveConfigWriteTarget(logical)
 }
 
 // canonicalEffectiveTopology projects the complete author-visible topology
@@ -737,21 +713,35 @@ func backupMigrationFile(path, stamp string) error {
 }
 
 func atomicMigrationReplace(path string, data []byte) error {
-	info, err := os.Stat(path)
+	target, _, err := resolveCanonicalMutationTarget(path)
 	if err != nil {
 		return err
 	}
-	return atomicMigrationWriteMode(path, data, info.Mode().Perm())
+	info, err := os.Stat(target)
+	if err != nil {
+		return err
+	}
+	return atomicMigrationWriteMode(target, data, info.Mode().Perm())
 }
 
+// atomicMigrationWrite is the migration's symlink-safe entry point: it reviews
+// the destination first, so a canonical path that is a dotfiles symlink keeps
+// its link and has its resolved file rewritten instead of being replaced by a
+// fresh regular file. atomicMigrationWriteMode below is the raw primitive and
+// stays raw — the rollback stack calls it only on paths it has already
+// snapshotted as regular files.
 func atomicMigrationWrite(path string, data []byte) error {
+	target, _, err := resolveCanonicalMutationTarget(path)
+	if err != nil {
+		return err
+	}
 	mode := os.FileMode(0o600)
-	if info, err := os.Stat(path); err == nil {
+	if info, err := os.Stat(target); err == nil {
 		mode = info.Mode().Perm()
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	return atomicMigrationWriteMode(path, data, mode)
+	return atomicMigrationWriteMode(target, data, mode)
 }
 
 func atomicMigrationWriteMode(path string, data []byte, mode os.FileMode) error {
