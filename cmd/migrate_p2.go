@@ -30,6 +30,7 @@ import (
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/subject"
 	"github.com/grovetools/core/pkg/syncproto"
+	"github.com/grovetools/core/pkg/workspace"
 )
 
 const p2ManifestVersion = 1
@@ -381,6 +382,18 @@ func planP2MigrationResolved(opts *p2MigrationOptions, now time.Time) (*p2Migrat
 	if err != nil {
 		return nil, fmt.Errorf("load recorded P1 roots/notebooks: %w", err)
 	}
+	// [subjects] is the machine's record of the local identities a previous run
+	// minted. Reading it here is what makes a reapply after an undo reproduce
+	// the same subject — and therefore the same [primaries] key — instead of
+	// minting a second identity for the same tree.
+	recordedMachine, err := config.LoadMachineConfig()
+	if err != nil {
+		return nil, fmt.Errorf("load recorded machine identity: %w", err)
+	}
+	var recordedSubjects map[string]string
+	if recordedMachine != nil {
+		recordedSubjects = recordedMachine.Subjects
+	}
 	manifest := &p2MigrationManifest{Version: p2ManifestVersion, CreatedAt: now.UTC(), State: "planned", Journal: opts.ManifestPath, SyncDB: opts.SyncDBPath, ServerBackup: opts.ServerBackup, ServerState: "local-only: no server mutation performed or claimed"}
 	pinnedIDs := make(map[string]string, len(opts.NotespaceIDs))
 	for _, raw := range opts.NotespaceIDs {
@@ -490,7 +503,7 @@ func planP2MigrationResolved(opts *p2MigrationOptions, now time.Time) (*p2Migrat
 			}
 			if plan.Subject == "" {
 				plan.CodeRoot = rootForName(table, entry.Name(), nb.Name)
-				value, err := subjectForRoot(plan.CodeRoot)
+				value, err := subjectForRoot(plan.CodeRoot, recordedSubjects)
 				if err != nil {
 					return nil, fmt.Errorf("subject for %s: %w", entry.Name(), err)
 				}
@@ -799,30 +812,25 @@ func consumeP2StagedSync(manifest *p2MigrationManifest) error {
 	return os.Remove(conversion.StagedPath)
 }
 
-func subjectForRoot(root string) (string, error) {
+// subjectForRoot answers with the subject of a matched explicit code root,
+// deferring the whole rule to the shared derivation in core so the migration
+// cannot drift from what the resolver and the rest of the code plane believe.
+// Minting stays here: it is the migration, not derivation, that materializes a
+// local identity for a root nothing yet answers for, and writeP2MachineConfig
+// records that mint in [subjects] so the next run reproduces it instead of
+// minting again.
+func subjectForRoot(root string, recorded map[string]string) (string, error) {
 	if root == "" {
 		return subject.MintLocal().String(), nil
 	}
-	data, err := p2Command(context.Background(), "git", "-C", root, "remote")
-	if err != nil {
-		return subject.MintLocal().String(), nil
-	}
-	var remotes []subject.Remote
-	for _, name := range strings.Fields(string(data)) {
-		url, err := p2Command(context.Background(), "git", "-C", root, "remote", "get-url", name)
-		if err != nil {
-			return "", err
-		}
-		remotes = append(remotes, subject.Remote{Name: name, URL: strings.TrimSpace(string(url))})
-	}
-	value, _, err := subject.FromRemotes(remotes)
+	derived, err := workspace.SubjectForCodeRoot(root, recorded)
 	if err != nil {
 		return "", err
 	}
-	if value == "" {
+	if derived.Source == workspace.CodeRootSubjectNone {
 		return subject.MintLocal().String(), nil
 	}
-	return value.String(), nil
+	return derived.Value.String(), nil
 }
 
 func rootForName(table coderoot.Table, name, notebook string) string {
