@@ -164,6 +164,8 @@ func runP2Migration(ctx context.Context, out io.Writer, in io.Reader, opts p2Mig
 		for _, ns := range manifest.Notespaces {
 			fmt.Fprintf(out, "  stamp       %s id=%s subject=%s\n", ns.Root, ns.ID, ns.Subject)
 		}
+		derived, local := p2SubjectCounts(manifest)
+		fmt.Fprintf(out, "  subjects    derived=%d local=%d (every local subject is a permanent machine-scoped identity)\n", derived, local)
 		for _, binding := range manifest.SyncConversion.Bindings {
 			fmt.Fprintf(out, "  sync compile %s -> id=%s notebook=%s role=%s pull=%t\n", binding.Name, binding.NotespaceID, binding.Notebook, binding.Role, binding.Pull)
 		}
@@ -502,18 +504,41 @@ func planP2MigrationResolved(opts *p2MigrationOptions, now time.Time) (*p2Migrat
 				usedPinnedIDs[pinKey] = true
 			}
 			if plan.Subject == "" {
-				plan.CodeRoot = rootForName(table, entry.Name(), nb.Name)
-				value, err := subjectForRoot(plan.CodeRoot, recordedSubjects)
+				codeRoot, derived, err := deriveNotespaceSubject(table, entry.Name(), nb.Name, recordedSubjects)
 				if err != nil {
 					return nil, fmt.Errorf("subject for %s: %w", entry.Name(), err)
 				}
-				plan.Subject = value
+				plan.CodeRoot = codeRoot
+				plan.Subject = derived
+				if plan.Subject == "" {
+					// Minting stays here: it is the migration, not derivation, that
+					// materializes a local identity for a tree nothing answers for,
+					// and writeP2MachineConfig records the mint in [subjects] so the
+					// next run reproduces it instead of minting again.
+					plan.Subject = subject.MintLocal().String()
+				}
 			}
 			manifest.Notespaces = append(manifest.Notespaces, plan)
 		}
 	}
 	if len(manifest.Notespaces) == 0 && !allLocalMode(manifest.Notebooks) {
 		return nil, fmt.Errorf("preflight found no notespaces; refusing zero-evidence success")
+	}
+	// A machine records exactly one primary per subject, so two planned
+	// notespaces deriving the same non-local subject would collide mid-apply in
+	// writeP2MachineConfig. Refuse at plan time with every claimant named so the
+	// operator decides which notespace answers for the identity.
+	claimants := map[string][]string{}
+	for _, ns := range manifest.Notespaces {
+		if strings.HasPrefix(ns.Subject, subject.LocalPrefix) {
+			continue
+		}
+		claimants[ns.Subject] = append(claimants[ns.Subject], ns.Notebook+"/"+ns.Name)
+	}
+	for _, subj := range sortedMapKeys(claimants) {
+		if len(claimants[subj]) > 1 {
+			return nil, fmt.Errorf("notespaces %s all derive subject %s, but a machine records exactly one primary per subject; deregister or restructure so exactly one notespace answers for it", strings.Join(claimants[subj], ", "), subj)
+		}
 	}
 	stagePath := config.SyncConfigPath() + ".p2-staged"
 	allMigrated := true
@@ -609,7 +634,7 @@ func compileP2StagedSync(manifest *p2MigrationManifest) ([]byte, p2SyncConversio
 	path := config.SyncConfigPath() + ".p2-staged"
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return nil, p2SyncConversion{}, fmt.Errorf("required exact P2 input %s is missing", path)
+		return nil, p2SyncConversion{}, fmt.Errorf("required exact P2 input %s is missing; run `grove migrate --step 1 --stage-sync` to stage it (when no legacy sync.toml exists, that stages explicit empty intent)", path)
 	}
 	if err != nil {
 		return nil, p2SyncConversion{}, err
@@ -812,25 +837,81 @@ func consumeP2StagedSync(manifest *p2MigrationManifest) error {
 	return os.Remove(conversion.StagedPath)
 }
 
-// subjectForRoot answers with the subject of a matched explicit code root,
-// deferring the whole rule to the shared derivation in core so the migration
-// cannot drift from what the resolver and the rest of the code plane believe.
-// Minting stays here: it is the migration, not derivation, that materializes a
-// local identity for a root nothing yet answers for, and writeP2MachineConfig
-// records that mint in [subjects] so the next run reproduces it instead of
-// minting again.
-func subjectForRoot(root string, recorded map[string]string) (string, error) {
-	if root == "" {
-		return subject.MintLocal().String(), nil
+// deriveNotespaceSubject resolves the code root a notespace answers for and
+// derives its subject, deferring the identity rule itself to the shared
+// derivation in core so the migration cannot drift from what the resolver and
+// the rest of the code plane believe. Two shapes resolve:
+//
+//  1. the notespace name matches a recorded root's NAME (P1's name-keyed
+//     shape) — that root is the code root, derived or not;
+//  2. the notespace names a repository directory nested directly under a root
+//     bound to the same notebook — the ecosystem layout, where recorded roots
+//     are collections and notespaces are per-repo. A nested candidate counts
+//     only when it actually derives an identity (card, remote, or recorded
+//     subject); candidates deriving conflicting identities are a refusal, not
+//     a guess.
+//
+// An empty subject with a non-empty root is a real directory nothing answers
+// for: the caller mints and records that. Empty root and subject means the
+// notespace has no code root at all.
+func deriveNotespaceSubject(table coderoot.Table, name, notebook string, recorded map[string]string) (string, string, error) {
+	if root := rootForName(table, name, notebook); root != "" {
+		derived, err := workspace.SubjectForCodeRoot(root, recorded)
+		if err != nil {
+			return "", "", err
+		}
+		if derived.Source == workspace.CodeRootSubjectNone {
+			return root, "", nil
+		}
+		return root, derived.Value.String(), nil
 	}
-	derived, err := workspace.SubjectForCodeRoot(root, recorded)
-	if err != nil {
-		return "", err
+	var dirs []string
+	seen := map[string]bool{}
+	for _, rootName := range table.SortedRootNames() {
+		if table.RootNotebook(rootName) != notebook {
+			continue
+		}
+		candidate := filepath.Join(canonicalPath(table.Roots[rootName].Path), name)
+		if seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			dirs = append(dirs, candidate)
+		}
 	}
-	if derived.Source == workspace.CodeRootSubjectNone {
-		return subject.MintLocal().String(), nil
+	type answer struct{ root, subject string }
+	var answers []answer
+	for _, dir := range dirs {
+		derived, err := workspace.SubjectForCodeRoot(dir, recorded)
+		if err != nil {
+			return "", "", err
+		}
+		if derived.Source != workspace.CodeRootSubjectNone {
+			answers = append(answers, answer{dir, derived.Value.String()})
+		}
 	}
-	return derived.Value.String(), nil
+	switch {
+	case len(answers) > 0:
+		distinct := map[string]bool{}
+		var lines []string
+		for _, a := range answers {
+			distinct[a.subject] = true
+			lines = append(lines, a.root+" -> "+a.subject)
+		}
+		if len(distinct) > 1 {
+			return "", "", fmt.Errorf("resolves under multiple code roots with conflicting identities (%s); refusing to guess", strings.Join(lines, ", "))
+		}
+		return answers[0].root, answers[0].subject, nil
+	case len(dirs) == 1:
+		// Exactly one real directory and nothing answering for it: an honest
+		// local mint, keyed by that directory so a reapply reproduces it.
+		return dirs[0], "", nil
+	default:
+		// Zero directories, or several with no identity to break the tie: the
+		// mint is keyed by the notespace itself.
+		return "", "", nil
+	}
 }
 
 func rootForName(table coderoot.Table, name, notebook string) string {
@@ -965,16 +1046,34 @@ func writeP2Manifest(path string, manifest *p2MigrationManifest) error {
 	return atomicMigrationWrite(path, append(data, '\n'))
 }
 
+// p2SubjectCounts splits the planned notespaces into derived identities and
+// machine-scoped local ones. The split is first-class evidence: a local subject
+// is permanent, so an operator must see how many are about to exist before
+// approving, not count plan lines.
+func p2SubjectCounts(manifest *p2MigrationManifest) (derived, local int) {
+	for _, ns := range manifest.Notespaces {
+		if strings.HasPrefix(ns.Subject, subject.LocalPrefix) {
+			local++
+		} else {
+			derived++
+		}
+	}
+	return derived, local
+}
+
 func renderP2Result(out io.Writer, asJSON bool, action, reason string, manifest *p2MigrationManifest) error {
+	derived, local := p2SubjectCounts(manifest)
 	result := struct {
 		Action, Reason, Manifest, ServerState string
 		Notebooks, Notespaces, Registrations  int
+		SubjectsDerived                       int              `json:"subjects_derived"`
+		SubjectsLocal                         int              `json:"subjects_local"`
 		SyncConversion                        p2SyncConversion `json:"sync_conversion"`
-	}{action, reason, manifest.Journal, manifest.ServerState, len(manifest.Notebooks), len(manifest.Notespaces), len(manifest.Registrations), manifest.SyncConversion}
+	}{action, reason, manifest.Journal, manifest.ServerState, len(manifest.Notebooks), len(manifest.Notespaces), len(manifest.Registrations), derived, local, manifest.SyncConversion}
 	if asJSON {
 		return json.NewEncoder(out).Encode(result)
 	}
-	fmt.Fprintf(out, "\n✓ %s\n  reason: %s\n  evidence: notebooks=%d notespaces=%d registrations=%d sync_bindings=%d\n  sync bytes: staged=%s compiled=%s\n  manifest: %s\n  server: %s\n", action, reason, result.Notebooks, result.Notespaces, result.Registrations, len(result.SyncConversion.Bindings), result.SyncConversion.StagedHash, result.SyncConversion.FinalHash, result.Manifest, result.ServerState)
+	fmt.Fprintf(out, "\n✓ %s\n  reason: %s\n  evidence: notebooks=%d notespaces=%d registrations=%d sync_bindings=%d subjects_derived=%d subjects_local=%d\n  sync bytes: staged=%s compiled=%s\n  manifest: %s\n  server: %s\n", action, reason, result.Notebooks, result.Notespaces, result.Registrations, len(result.SyncConversion.Bindings), derived, local, result.SyncConversion.StagedHash, result.SyncConversion.FinalHash, result.Manifest, result.ServerState)
 	return nil
 }
 

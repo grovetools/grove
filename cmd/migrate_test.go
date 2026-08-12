@@ -617,6 +617,88 @@ func TestMigrateStagesSyncIntentForP2WithoutLoss(t *testing.T) {
 	}
 }
 
+func TestMigrateStageSyncStagesExplicitEmptyIntentWithoutLegacySyncToml(t *testing.T) {
+	dir := migrateSandbox(t)
+	migrateWrite(t, filepath.Join(dir, "grove.toml"), "[notebooks.definitions.nb]\nroot_dir=\"/notes\"\n[notebooks.rules]\ndefault=\"nb\"\n[groves.x]\npath=\"/x\"\nnotebook=\"nb\"\n")
+	var out bytes.Buffer
+	if err := runLegacyMigrateWithOptions(&out, strings.NewReader(""), migrationOptions{Yes: true, StageSync: true}, time.Unix(10, 0)); err != nil {
+		t.Fatalf("migrate: %v\n%s", err, out.String())
+	}
+	staged := migrateRead(t, filepath.Join(dir, "sync.toml.p2-staged"))
+	if staged != emptySyncIntentStage {
+		t.Fatalf("staged content:\n%s", staged)
+	}
+	if !strings.Contains(out.String(), "empty sync intent") {
+		t.Fatalf("staging an empty intent was not announced:\n%s", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "sync.toml")); !os.IsNotExist(err) {
+		t.Fatalf("staging invented a live sync.toml: %v", err)
+	}
+	// A second staging run refuses to clobber the parked input.
+	out.Reset()
+	err := runLegacyMigrateWithOptions(&out, strings.NewReader(""), migrationOptions{Yes: true, StageSync: true}, time.Unix(11, 0))
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("existing staged input was not protected: %v", err)
+	}
+}
+
+func TestMigrateWithoutStageSyncStagesNothing(t *testing.T) {
+	dir := migrateSandbox(t)
+	migrateWrite(t, filepath.Join(dir, "grove.toml"), "[notebooks.definitions.nb]\nroot_dir=\"/notes\"\n[notebooks.rules]\ndefault=\"nb\"\n[groves.x]\npath=\"/x\"\nnotebook=\"nb\"\n")
+	var out bytes.Buffer
+	if err := runLegacyMigrateWithOptions(&out, strings.NewReader(""), migrationOptions{Yes: true}, time.Unix(10, 0)); err != nil {
+		t.Fatalf("migrate: %v\n%s", err, out.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "sync.toml.p2-staged")); !os.IsNotExist(err) {
+		t.Fatalf("staging happened without --stage-sync: %v", err)
+	}
+}
+
+func TestMigrateIgnoresDeadTopLevelNotebookTableInCanonicalLegacyFile(t *testing.T) {
+	dir := migrateSandbox(t)
+	migrateWrite(t, filepath.Join(dir, "notebooks.toml"), "[notebook]\nroot_dir=\"/dead/vault\"\n\n[notebooks.definitions.nb]\nroot_dir=\"/notes/nb\"\n[notebooks.rules]\ndefault=\"nb\"\n")
+	m, err := collectLegacyMigration()
+	if err != nil {
+		t.Fatalf("dead [notebook] table blocked migration: %v", err)
+	}
+	if m.Notebooks["nb"].Root != "/notes/nb" || m.Default != "nb" {
+		t.Fatalf("definitions were not collected: %+v default=%q", m.Notebooks, m.Default)
+	}
+	// A genuinely unknown top-level table still refuses, with remediation.
+	migrateWrite(t, filepath.Join(dir, "notebooks.toml"), "[definitely_not_config]\nx=1\n\n[notebooks.definitions.nb]\nroot_dir=\"/notes/nb\"\n")
+	_, err = collectLegacyMigration()
+	if err == nil || !strings.Contains(err.Error(), "definitely_not_config") || !strings.Contains(err.Error(), "delete the field(s)") {
+		t.Fatalf("unknown field error lost its remediation: %v", err)
+	}
+}
+
+func TestMigrateStripsNotebookDefinitionsFromDeadMachineFilesAndWarnsOnGhostPaths(t *testing.T) {
+	dir := migrateSandbox(t)
+	real := t.TempDir()
+	migrateWrite(t, filepath.Join(dir, "grove.toml"), "[notebooks.definitions.nb]\nroot_dir="+quoteTOML(real)+"\n[notebooks.rules]\ndefault=\"nb\"\n")
+	migrateWrite(t, filepath.Join(dir, "machines", "laptop.toml"), "[agent]\nname=\"keep\"\n\n[notebooks.definitions.ghost]\nroot_dir=\"/missing/ghost\"\n\n[groves.dead]\npath=\"/dead\"\nnotebook=\"nb\"\n")
+	var out bytes.Buffer
+	if err := runLegacyMigrateWithOptions(&out, strings.NewReader(""), migrationOptions{Yes: true}, time.Unix(12, 0)); err != nil {
+		t.Fatalf("migrate: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), `recorded notebook "ghost" root /missing/ghost does not exist`) ||
+		!strings.Contains(out.String(), `recorded code root "dead" path /dead does not exist`) {
+		t.Fatalf("ghost paths were not warned about:\n%s", out.String())
+	}
+	machine := migrateRead(t, filepath.Join(dir, "machines", "laptop.toml"))
+	if strings.Contains(machine, "notebooks") || strings.Contains(machine, "ghost") || strings.Contains(machine, "groves") {
+		t.Fatalf("machine file kept legacy declarations:\n%s", machine)
+	}
+	if !strings.Contains(machine, "keep") {
+		t.Fatalf("machine file lost unrelated declarations:\n%s", machine)
+	}
+	// The recorded pair still carries the merged definition; stripping the dead
+	// file only removes the duplicate declaration site.
+	if nb := migrateRead(t, filepath.Join(dir, "notebooks.toml")); !strings.Contains(nb, "ghost") {
+		t.Fatalf("recorded notebooks lost the merged definition:\n%s", nb)
+	}
+}
+
 func TestMigrateRemovesEveryAcceptedTOMLDeclarationShape(t *testing.T) {
 	cases := map[string]string{
 		"inline":    `groves = { x = { path = "/x", notebook = "nb" } }`,

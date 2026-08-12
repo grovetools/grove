@@ -99,7 +99,12 @@ type legacySource struct {
 	RemoveGlobal          bool
 	RemoveMachine         bool
 	RemoveSync            bool
-	AnnotateCard          bool
+	// RemoveNotebooks strips the whole legacy notebooks table. Set only for
+	// dead machines/ imports: their definitions are merged into the recorded
+	// notebooks.toml, and leaving them behind lets a notebook deregistered in
+	// one file be silently resurrected by the other on a re-run.
+	RemoveNotebooks bool
+	AnnotateCard    bool
 	// ReplaceCanonical marks a legacy fragment which collided with a recorded
 	// filename. Migration backs it up and replaces the whole file with the
 	// modern candidate instead of trying to strip tables in place.
@@ -193,6 +198,14 @@ func classifyCanonicalFile(path, kind string) (canonicalFileShape, *legacyConfig
 	return canonicalLegacy, &legacy, nil
 }
 
+// legacyDeadTopLevelKeys are top-level tables that occur in real pre-cutover
+// configs but have no TOML binding in any schema, frozen or current: the live
+// loader has always silently ignored them. Refusing a canonical-name legacy
+// file over one would abort migration on configuration the runtime never read,
+// so validation skips them and migration drops them. The singleton [notebook]
+// block is bound YAML-only (config.LegacyNotebook) and is dead in TOML.
+var legacyDeadTopLevelKeys = map[string]bool{"notebook": true}
+
 func validateLegacyCanonicalValue(scope string, value any, typ reflect.Type) error {
 	for typ.Kind() == reflect.Pointer {
 		typ = typ.Elem()
@@ -219,6 +232,9 @@ func validateLegacyCanonicalValue(scope string, value any, typ reflect.Type) err
 		for key, child := range entries {
 			fieldType, ok := fields[key]
 			if !ok {
+				if scope == "top level" && legacyDeadTopLevelKeys[key] {
+					continue
+				}
 				unknown = append(unknown, key)
 				continue
 			}
@@ -228,7 +244,7 @@ func validateLegacyCanonicalValue(scope string, value any, typ reflect.Type) err
 		}
 		if len(unknown) > 0 {
 			sort.Strings(unknown)
-			return fmt.Errorf("%s contains unknown field(s): %s", scope, strings.Join(unknown, ", "))
+			return fmt.Errorf("%s contains unknown field(s): %s (fix the spelling, or delete the field(s) if they are dead legacy config; migration refuses to guess)", scope, strings.Join(unknown, ", "))
 		}
 	}
 	return nil
@@ -395,7 +411,7 @@ func legacyDeadMachineFiles(dir string) ([]legacySource, error) {
 		if err := parseLegacyFile(p, &c); err != nil {
 			return nil, fmt.Errorf("legacy machine %s: %w", p, err)
 		}
-		out = append(out, legacySource{Path: p, Resolved: resolvedLegacyPath(p), Label: "machines/", Config: c, TOML: strings.EqualFold(filepath.Ext(p), ".toml"), RemoveGlobal: len(c.Groves) > 0 || len(c.SearchPaths) > 0})
+		out = append(out, legacySource{Path: p, Resolved: resolvedLegacyPath(p), Label: "machines/", Config: c, TOML: strings.EqualFold(filepath.Ext(p), ".toml"), RemoveGlobal: len(c.Groves) > 0 || len(c.SearchPaths) > 0, RemoveNotebooks: legacyNotebooksHaveCompatibility(c.Notebooks)})
 	}
 	return out, nil
 }
@@ -478,7 +494,7 @@ func collectLegacyMigrationWithOptions(stageSync bool) (*legacyMigration, error)
 	if blocked && !stageSync {
 		return nil, fmt.Errorf("%s contains legacy workspace/notebook sync intent; run `grove migrate --stage-sync` to park an exact copy at %s, complete P1, then use that parked file as P2 input", syncPath, syncPath+".p2-staged")
 	}
-	if blocked {
+	if stageSync {
 		if _, err := os.Stat(syncPath + ".p2-staged"); err == nil {
 			return nil, fmt.Errorf("sync staging target %s already exists; preserve or remove it explicitly before retrying", syncPath+".p2-staged")
 		} else if !os.IsNotExist(err) {
@@ -495,9 +511,16 @@ func collectLegacyMigrationWithOptions(stageSync bool) (*legacyMigration, error)
 		return nil, err
 	}
 	m := &legacyMigration{Roots: map[string]legacyRootCandidate{}, Notebooks: map[string]coderoot.Notebook{}, RootsPath: coderoot.RootsPath(), NotebooksPath: coderoot.NotebooksPath(), Compatibility: map[string][]byte{}}
-	if blocked {
+	// --stage-sync always stages: P2 hard-requires the staged file as its exact
+	// input, and a machine that never configured sync must still be able to
+	// state that intent explicitly rather than being deadlocked between the two
+	// steps. Only a sync.toml carrying legacy workspace intent additionally
+	// needs its live file stripped.
+	if stageSync {
 		m.SyncPath, m.SyncStagePath = syncPath, syncPath+".p2-staged"
-		m.Sources = append(m.Sources, legacySource{Path: syncPath, Resolved: resolvedLegacyPath(syncPath), Label: "sync intent (parked for P2)", TOML: true, RemoveSync: true})
+		if blocked {
+			m.Sources = append(m.Sources, legacySource{Path: syncPath, Resolved: resolvedLegacyPath(syncPath), Label: "sync intent (parked for P2)", TOML: true, RemoveSync: true})
+		}
 	}
 	// Dead files are import-only and lowest precedence. The live global cascade follows.
 	all := append(dead, globals...)
@@ -717,7 +740,7 @@ func migrationSourceTargets(sources []legacySource) []string {
 		if s.ReplaceCanonical {
 			continue
 		}
-		if !s.RemoveGlobal && !s.RemoveMachine && !s.RemoveSync && !s.AnnotateCard {
+		if !s.RemoveGlobal && !s.RemoveMachine && !s.RemoveSync && !s.RemoveNotebooks && !s.AnnotateCard {
 			continue
 		}
 		p := s.Resolved
@@ -743,8 +766,15 @@ func removeLegacyDeclarations(source legacySource) ([]byte, error) {
 		return nil, err
 	}
 	if !source.TOML {
-		if source.RemoveGlobal {
-			data, err = removeYAMLTopKeys(data, map[string]bool{"groves": true, "search_paths": true})
+		if source.RemoveGlobal || source.RemoveNotebooks {
+			keys := map[string]bool{}
+			if source.RemoveGlobal {
+				keys["groves"], keys["search_paths"] = true, true
+			}
+			if source.RemoveNotebooks {
+				keys["notebooks"] = true
+			}
+			data, err = removeYAMLTopKeys(data, keys)
 			if err != nil {
 				return nil, err
 			}
@@ -760,6 +790,9 @@ func removeLegacyDeclarations(source legacySource) ([]byte, error) {
 	var prefixes []string
 	if source.RemoveGlobal {
 		prefixes = append(prefixes, "groves", "search_paths")
+	}
+	if source.RemoveNotebooks {
+		prefixes = append(prefixes, "notebooks")
 	}
 	if source.RemoveMachine {
 		prefixes = append(prefixes, "machine.ecosystems", "machine.roots")

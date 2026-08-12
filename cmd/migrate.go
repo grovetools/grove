@@ -133,7 +133,7 @@ func runLegacyMigrateWithOptions(out io.Writer, in io.Reader, opts migrationOpti
 		roots[name] = c.Root
 	}
 	targets := migrationSourceTargets(m.Sources)
-	changed := !reflect.DeepEqual(roots, current.Roots) || !reflect.DeepEqual(m.Notebooks, current.Notebooks) || m.Default != current.Default || len(targets) > 0 || len(m.Compatibility) > 0
+	changed := !reflect.DeepEqual(roots, current.Roots) || !reflect.DeepEqual(m.Notebooks, current.Notebooks) || m.Default != current.Default || len(targets) > 0 || len(m.Compatibility) > 0 || m.SyncStagePath != ""
 	if !changed {
 		evidence := transition.Evidence{Action: "grove migrate step 1", Reason: "legacy configuration is already migrated; effective configuration is unchanged"}
 		return renderMigrationEvidence(out, evidence, opts.JSON)
@@ -162,11 +162,15 @@ func runLegacyMigrateWithOptions(out io.Writer, in io.Reader, opts migrationOpti
 			return err
 		}
 	}
+	stagedEmptyIntent := false
 	if m.SyncStagePath != "" {
-		updates[m.SyncStagePath], err = os.ReadFile(m.SyncPath)
-		if err != nil {
-			return err
+		staged, readErr := os.ReadFile(m.SyncPath)
+		if os.IsNotExist(readErr) {
+			staged, stagedEmptyIntent = []byte(emptySyncIntentStage), true
+		} else if readErr != nil {
+			return readErr
 		}
+		updates[m.SyncStagePath] = staged
 	}
 
 	ordered := migrationWriteOrder(m, targets)
@@ -182,7 +186,14 @@ func runLegacyMigrateWithOptions(out io.Writer, in io.Reader, opts migrationOpti
 			}
 		}
 		if m.SyncStagePath != "" {
-			fmt.Fprintf(out, "\n  sync staging: preserve byte-identical P2 input at %s\n", m.SyncStagePath)
+			if stagedEmptyIntent {
+				fmt.Fprintf(out, "\n  sync staging: no legacy sync.toml exists; stage explicit empty sync intent at %s\n", m.SyncStagePath)
+			} else {
+				fmt.Fprintf(out, "\n  sync staging: preserve byte-identical P2 input at %s\n", m.SyncStagePath)
+			}
+		}
+		for _, warning := range migrationMissingPathWarnings(m) {
+			fmt.Fprintf(out, "  WARNING: %s\n", warning)
 		}
 	}
 	if opts.DryRun {
@@ -303,6 +314,35 @@ func runLegacyMigrateWithOptions(out io.Writer, in io.Reader, opts migrationOpti
 		fmt.Fprintln(out, "\nEffective configuration equivalence: verified (canonical diff empty).")
 	}
 	return renderMigrationEvidence(out, evidence, opts.JSON)
+}
+
+// emptySyncIntentStage is what --stage-sync parks when the machine has no
+// legacy sync.toml at all: an explicit, parseable statement of empty intent,
+// so P2's exact-input contract holds on machines that never configured sync.
+const emptySyncIntentStage = "# Staged by `grove migrate --step 1 --stage-sync`.\n" +
+	"# No legacy sync.toml existed on this machine; step 2 consumes this file as\n" +
+	"# explicit empty sync intent (no server, no workspaces).\n"
+
+// migrationMissingPathWarnings names every notebook or code root about to be
+// recorded whose path does not exist on disk. Recording is still allowed — the
+// declaration may deliberately precede the checkout — but a ghost path baked
+// into roots.toml/notebooks.toml is exactly what a deregistration missed in one
+// of several declaration sites looks like, so the operator sees it in the plan.
+func migrationMissingPathWarnings(m *legacyMigration) []string {
+	var out []string
+	for _, name := range sortedMapKeys(m.Notebooks) {
+		declared := m.Notebooks[name].Root
+		if info, err := os.Stat(expandPath(declared)); err != nil || !info.IsDir() {
+			out = append(out, fmt.Sprintf("recorded notebook %q root %s does not exist on disk", name, declared))
+		}
+	}
+	for _, name := range sortedLegacyRootNames(m.Roots) {
+		declared := m.Roots[name].Root.Path
+		if info, err := os.Stat(expandPath(declared)); err != nil || !info.IsDir() {
+			out = append(out, fmt.Sprintf("recorded code root %q path %s does not exist on disk", name, declared))
+		}
+	}
+	return out
 }
 
 func renderMigrationEvidence(out io.Writer, evidence transition.Evidence, jsonOutput bool) error {
@@ -633,7 +673,7 @@ func sourceForTarget(sources []legacySource, target string) (legacySource, error
 		if p == "" {
 			p = s.Path
 		}
-		if p != target || (!s.RemoveGlobal && !s.RemoveMachine && !s.RemoveSync && !s.AnnotateCard && !s.ReplaceCanonical) {
+		if p != target || (!s.RemoveGlobal && !s.RemoveMachine && !s.RemoveSync && !s.RemoveNotebooks && !s.AnnotateCard && !s.ReplaceCanonical) {
 			continue
 		}
 		if found && out.TOML != s.TOML {
@@ -646,6 +686,7 @@ func sourceForTarget(sources []legacySource, target string) (legacySource, error
 		out.RemoveGlobal = out.RemoveGlobal || s.RemoveGlobal
 		out.RemoveMachine = out.RemoveMachine || s.RemoveMachine
 		out.RemoveSync = out.RemoveSync || s.RemoveSync
+		out.RemoveNotebooks = out.RemoveNotebooks || s.RemoveNotebooks
 		out.AnnotateCard = out.AnnotateCard || s.AnnotateCard
 		out.ReplaceCanonical = out.ReplaceCanonical || s.ReplaceCanonical
 	}

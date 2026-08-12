@@ -49,6 +49,15 @@ func p2BindCodeRoot(t *testing.T, configDir, codeRoot string) {
 func p2GitRoot(t *testing.T, remotes ...[2]string) string {
 	t.Helper()
 	dir := t.TempDir()
+	p2GitInit(t, dir, remotes...)
+	return dir
+}
+
+func p2GitInit(t *testing.T, dir string, remotes ...[2]string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	run := func(args ...string) {
 		t.Helper()
 		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
@@ -59,7 +68,6 @@ func p2GitRoot(t *testing.T, remotes ...[2]string) string {
 	for _, remote := range remotes {
 		run("remote", "add", remote[0], remote[1])
 	}
-	return dir
 }
 
 func p2StubCommands(t *testing.T) {
@@ -73,14 +81,20 @@ func p2StubCommands(t *testing.T) {
 
 func p2PlanSubject(t *testing.T, nb string) string {
 	t.Helper()
-	manifest, err := planP2Migration(p2MigrationOptions{DryRun: true, LocalOnly: true, NotebookRoots: []string{"nb=" + nb}, ManifestPath: filepath.Join(t.TempDir(), "m.json")}, time.Now())
-	if err != nil {
-		t.Fatalf("plan: %v", err)
-	}
+	manifest := p2PlanManifest(t, nb)
 	if len(manifest.Notespaces) != 1 {
 		t.Fatalf("plan produced %d notespaces, want 1", len(manifest.Notespaces))
 	}
 	return manifest.Notespaces[0].Subject
+}
+
+func p2PlanManifest(t *testing.T, nb string) *p2MigrationManifest {
+	t.Helper()
+	manifest, err := planP2Migration(p2MigrationOptions{DryRun: true, LocalOnly: true, NotebookRoots: []string{"nb=" + nb}, ManifestPath: filepath.Join(t.TempDir(), "m.json")}, time.Now())
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	return manifest
 }
 
 func p2LoadMachine(t *testing.T) *config.MachineConfig {
@@ -266,5 +280,113 @@ func TestP2MigrationEcosystemSubjectSurvivesUndoAndPinnedReapply(t *testing.T) {
 	out.Reset()
 	if err := runP2Migration(context.Background(), &out, strings.NewReader(""), reapply, time.Unix(203, 0)); err != nil || !strings.Contains(out.String(), "already consumed") {
 		t.Fatalf("idempotent rerun: %v\n%s", err, out.String())
+	}
+}
+
+// p2BindCollectionRoot records a root named AFTER THE COLLECTION, not the
+// notespace: the ecosystem-style layout machine reports showed, where recorded
+// roots point at directories of repos and notespaces are named per-repo.
+func p2BindCollectionRoot(t *testing.T, configDir string, collections ...[2]string) {
+	t.Helper()
+	var body strings.Builder
+	for _, c := range collections {
+		body.WriteString("[roots." + c[0] + "]\npath = " + quoteTOML(c[1]) + "\nnotebook = \"nb\"\n")
+	}
+	migrateWrite(t, filepath.Join(configDir, "roots.toml"), body.String())
+	config.ResetLoadCache()
+}
+
+func TestP2MigrationDerivesSubjectForRepoNestedUnderCollectionRoot(t *testing.T) {
+	dir, nb := p2Sandbox(t)
+	collection := t.TempDir()
+	p2GitInit(t, filepath.Join(collection, "alpha"), [2]string{"origin", "https://github.com/broadinstitute/gnomad-browser.git"})
+	p2BindCollectionRoot(t, dir, [2]string{"browsers", collection})
+	p2StubCommands(t)
+
+	if got := p2PlanSubject(t, nb); got != "github.com/broadinstitute/gnomad-browser" {
+		t.Fatalf("subject = %q, want the nested repo's remote identity", got)
+	}
+}
+
+func TestP2MigrationRefusesConflictingNestedIdentities(t *testing.T) {
+	dir, nb := p2Sandbox(t)
+	collA, collB := t.TempDir(), t.TempDir()
+	p2GitInit(t, filepath.Join(collA, "alpha"), [2]string{"origin", "https://github.com/one/alpha.git"})
+	p2GitInit(t, filepath.Join(collB, "alpha"), [2]string{"origin", "https://github.com/two/alpha.git"})
+	p2BindCollectionRoot(t, dir, [2]string{"a", collA}, [2]string{"b", collB})
+	p2StubCommands(t)
+
+	_, err := planP2Migration(p2MigrationOptions{DryRun: true, LocalOnly: true, NotebookRoots: []string{"nb=" + nb}, ManifestPath: filepath.Join(t.TempDir(), "m.json")}, time.Now())
+	if err == nil || !strings.Contains(err.Error(), "conflicting identities") || !strings.Contains(err.Error(), "alpha") {
+		t.Fatalf("conflicting nested identities were not refused: %v", err)
+	}
+}
+
+func TestP2MigrationNestedDirectoryWithoutIdentityMintsKeyedByThatDirectory(t *testing.T) {
+	dir, nb := p2Sandbox(t)
+	collection := t.TempDir()
+	p2GitInit(t, filepath.Join(collection, "alpha")) // repo, no remotes, no card
+	p2BindCollectionRoot(t, dir, [2]string{"browsers", collection})
+	p2StubCommands(t)
+
+	manifest := p2PlanManifest(t, nb)
+	ns := manifest.Notespaces[0]
+	if !strings.HasPrefix(ns.Subject, "local:") {
+		t.Fatalf("identityless nested repo derived %q, want a local mint", ns.Subject)
+	}
+	want, err := filepath.EvalSymlinks(filepath.Join(collection, "alpha"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ns.CodeRoot != want {
+		t.Fatalf("mint is keyed by %q, want the nested directory %q", ns.CodeRoot, want)
+	}
+}
+
+func TestP2MigrationRefusesDuplicateDerivedSubjects(t *testing.T) {
+	dir, nb := p2Sandbox(t)
+	if err := os.MkdirAll(filepath.Join(nb, "workspaces", "beta"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	collection := t.TempDir()
+	p2GitInit(t, filepath.Join(collection, "alpha"), [2]string{"origin", "https://github.com/one/same.git"})
+	p2GitInit(t, filepath.Join(collection, "beta"), [2]string{"origin", "https://github.com/one/same.git"})
+	p2BindCollectionRoot(t, dir, [2]string{"coll", collection})
+	p2StubCommands(t)
+
+	_, err := planP2Migration(p2MigrationOptions{DryRun: true, LocalOnly: true, NotebookRoots: []string{"nb=" + nb}, ManifestPath: filepath.Join(t.TempDir(), "m.json")}, time.Now())
+	if err == nil || !strings.Contains(err.Error(), "exactly one primary per subject") || !strings.Contains(err.Error(), "github.com/one/same") {
+		t.Fatalf("duplicate derived subjects were not refused at plan time: %v", err)
+	}
+}
+
+func TestP2MigrationConsumesExplicitEmptyStagedIntent(t *testing.T) {
+	dir, nb := p2Sandbox(t)
+	// A machine that never configured sync: no live sync.toml, and P1 staged
+	// the explicit empty intent instead of an exact copy.
+	if err := os.Remove(filepath.Join(dir, "sync.toml")); err != nil {
+		t.Fatal(err)
+	}
+	migrateWrite(t, filepath.Join(dir, "sync.toml.p2-staged"), emptySyncIntentStage)
+	config.ResetLoadCache()
+	p2StubCommands(t)
+
+	var out bytes.Buffer
+	opts := p2MigrationOptions{Yes: true, LocalOnly: true, NotebookRoots: []string{"nb=" + nb}, ManifestPath: filepath.Join(t.TempDir(), "m.json"), SyncDBPath: filepath.Join(t.TempDir(), "db")}
+	if err := runP2Migration(context.Background(), &out, strings.NewReader(""), opts, time.Unix(300, 0)); err != nil {
+		t.Fatalf("apply: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "sync_bindings=0") {
+		t.Fatalf("empty intent compiled bindings:\n%s", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "sync.toml.p2-staged")); !os.IsNotExist(err) {
+		t.Fatalf("staged empty intent was not consumed: %v", err)
+	}
+	settled, err := config.LoadSyncConfigFrom(config.SyncConfigPath())
+	if err != nil {
+		t.Fatalf("compiled sync config unreadable: %v", err)
+	}
+	if settled != nil && (settled.Server != "" || len(settled.Workspaces) != 0) {
+		t.Fatalf("empty intent compiled to non-empty sync config: %+v", settled)
 	}
 }
