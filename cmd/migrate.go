@@ -25,7 +25,7 @@ import (
 func init() { rootCmd.AddCommand(newMigrateCmd()) }
 
 func newMigrateCmd() *cobra.Command {
-	var dryRun, yes, stageSync, jsonOutput, undo, localOnly bool
+	var dryRun, yes, stageSync, jsonOutput, undo, localOnly, resubject bool
 	var evidenceDir, manifestPath, syncDBPath, grovedBin, syncdBin, serverBackup string
 	var step int
 	var notebookRoots, contentRoots, notespaceIDs []string
@@ -41,6 +41,9 @@ backed up with a UTC timestamp. notebooks.toml is always written before
 roots.toml so a notebook reference is never recorded before its definition.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if resubject {
+				return runResubjectMigration(cmd.OutOrStdout(), cmd.InOrStdin(), resubjectOptions{DryRun: dryRun, Yes: yes, Undo: undo, JSON: jsonOutput, ManifestPath: manifestPath}, time.Now().UTC())
+			}
 			if step == 2 || undo {
 				return runP2Migration(cmd.Context(), cmd.OutOrStdout(), cmd.InOrStdin(), p2MigrationOptions{
 					DryRun: dryRun, Yes: yes, Undo: undo, LocalOnly: localOnly, JSON: jsonOutput,
@@ -67,6 +70,7 @@ roots.toml so a notebook reference is never recorded before its definition.`,
 	cmd.Flags().StringVar(&syncdBin, "syncd-bin", "grove-syncd", "grove-syncd binary used for the pre-migration server backup")
 	cmd.Flags().StringVar(&serverBackup, "server-backup", "", "Destination passed to `grove-syncd backup` before server reconciliation")
 	cmd.Flags().BoolVar(&localOnly, "local-only", false, "Skip server backup/registration with explicit retained-server-state evidence")
+	cmd.Flags().BoolVar(&resubject, "resubject", false, "Re-derive local: subjects of stamped notespaces from current code-root reality (ids preserved; machine-local records only — run before any subject is server-registered)")
 	return cmd
 }
 
