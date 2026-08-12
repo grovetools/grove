@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/coderoot"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/registry"
@@ -79,11 +81,17 @@ func runSyncDoctor(cmd *cobra.Command, args []string) error {
 			if nb.RootDir == "" {
 				continue
 			}
+			// A declared spelling reaching ReadDir is not a loud failure, it is
+			// a silent all-clear: "~/notebooks/x" does not exist, ReadDir
+			// returns ENOENT rather than EPERM, and doctor reports no issues
+			// for a notebook it never actually looked at.
+			rootDir := coderoot.ExpandPath(nb.RootDir)
 
 			// TCC detection: try to read the directory
-			entries, err := os.ReadDir(nb.RootDir)
+			entries, err := os.ReadDir(rootDir)
 			if err != nil {
-				if err.(*os.PathError).Err == syscall.EPERM {
+				var pathErr *os.PathError
+				if errors.As(err, &pathErr) && pathErr.Err == syscall.EPERM {
 					issues = append(issues, fmt.Sprintf(
 						"notebook %q: TCC-protected (macOS privacy control blocks access). "+
 							"Move to a non-protected location or grant Terminal full disk access in System Settings > Privacy & Security > Full Disk Access",
@@ -110,7 +118,7 @@ func runSyncDoctor(cmd *cobra.Command, args []string) error {
 			}
 
 			// Check for dangling notebooks.toml entries in the workspace directory
-			workspacesDir := filepath.Join(nb.RootDir, "notespaces")
+			workspacesDir := filepath.Join(rootDir, "notespaces")
 			if wsEntries, err := os.ReadDir(workspacesDir); err == nil {
 				for _, wsEntry := range wsEntries {
 					if !wsEntry.IsDir() {

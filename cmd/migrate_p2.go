@@ -855,8 +855,29 @@ func allLocalMode(nbs []p2NotebookPlan) bool {
 	return true
 }
 func newP2ID() string { return ulid.MustNew(ulid.Timestamp(time.Now()), rand.Reader).String() }
+
+// canonicalPath resolves any path — declared spelling or already absolute —
+// to its physical location.
+//
+// The coderoot.ExpandPath call is load-bearing, and expanding HERE rather than
+// at each caller is deliberate. roots.toml and notebooks.toml store paths as
+// DECLARED (`~/code/grovetools`); filepath.Abs does not reject a tilde path,
+// it prefixes the process cwd and yields `<cwd>/~/code/grovetools`.
+// EvalSymlinks then fails on the nonexistent result and the Clean fallback
+// returns it anyway — silently, with no error anywhere.
+//
+// Every caller of this function feeds the result to something that cannot tell
+// a ghost path from a real one: rootForName hands it to SubjectForCodeRoot,
+// which finds no grove.toml and no git remotes and mints a throwaway
+// local: subject instead of the canonical one; writeP2MachineConfig keys
+// machine.Subjects by it, so the identity table the whole migration hangs on
+// records a directory that does not exist. A stamp is authoritative forever,
+// so a wrong answer here is not self-correcting.
+//
+// Expansion is idempotent, so the callers that already pass absolute paths
+// (the --notebook-root comparison, the git-toplevel check) are unaffected.
 func canonicalPath(path string) string {
-	abs, _ := filepath.Abs(path)
+	abs, _ := filepath.Abs(coderoot.ExpandPath(path))
 	if real, err := filepath.EvalSymlinks(abs); err == nil {
 		return real
 	}
