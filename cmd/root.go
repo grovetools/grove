@@ -477,6 +477,12 @@ func delegateToTool(toolName string, args []string) error {
 		return err
 	}
 	if !ok {
+		// A registered tool that simply is not installed gets the install
+		// command, not a spelling lecture — that is now the ONLY reason a
+		// known name fails to resolve.
+		if _, _, _, registered := sdk.FindTool(toolName); registered {
+			return fmt.Errorf("%s is not installed — run 'grove install %s'", toolName, toolName)
+		}
 		return fmt.Errorf("unknown tool: %s. Run 'grove install %s', see 'grove plugin list' for plugin-provided commands, or check spelling.", toolName, toolName)
 	}
 
@@ -590,18 +596,18 @@ func resolveTool(toolName string) (toolResolution, bool, error) {
 			// the PATH fallback because a verb can differ from the binary's
 			// name — `grove forge` may run a binary called something else —
 			// and only the lockfile knows the mapping.
+			//
+			// There is deliberately NO further fallback to a same-named
+			// binary on PATH. grove is the only name the install puts in the
+			// user's namespace, so a foreign `nb` or `flow` out there is
+			// somebody else's tool; running it because grove's own is missing
+			// would be a silent substitution. An uninstalled tool says so, and
+			// names the install command, instead.
 			if pluginBinary, err := toolPluginBinary(toolName); err != nil {
 				return res, false, err
 			} else if pluginBinary != "" {
 				toolPath = pluginBinary
 				logger.WithField("path", toolPath).Debug("Using plugin-provided tool binary")
-			} else if fallback := pathFallbackForRegisteredTool(toolName); fallback != "" {
-				// PRIORITY 5: a registered ecosystem tool with no managed
-				// install may still be provided directly on PATH (dev
-				// sandboxes, handoffs like flow routing `grove git-viewer`
-				// through the delegator).
-				toolPath = fallback
-				logger.WithField("path", toolPath).Debug("Using PATH fallback for registered tool")
 			} else {
 				return res, false, nil
 			}
@@ -610,21 +616,4 @@ func resolveTool(toolName string) (toolResolution, bool, error) {
 
 	res.Path = toolPath
 	return res, true, nil
-}
-
-// pathFallbackForRegisteredTool resolves a registered ecosystem tool that has
-// no globally managed binary to a same-named binary on PATH. This keeps
-// delegated handoffs (e.g. flow routing `grove git-viewer view` through the
-// delegator) working in layouts where the tool binaries are provided directly
-// on PATH rather than grove-installed. Unregistered names return "" so
-// delegation never becomes a passthrough to arbitrary PATH commands.
-func pathFallbackForRegisteredTool(toolName string) string {
-	if _, _, _, found := sdk.FindTool(toolName); !found {
-		return ""
-	}
-	binary, err := exec.LookPath(toolName)
-	if err != nil {
-		return ""
-	}
-	return binary
 }

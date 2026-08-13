@@ -157,22 +157,13 @@ func activateDevLink(binaryName, alias string) error {
 		return err
 	}
 
-	// Check if binDir is in PATH
-	if !isDirInPath(binDir) {
-		fmt.Printf("\nWARNING: '%s' is not in your PATH.\n", binDir)
-		fmt.Println("   Please add it to your shell configuration file (e.g., .zshrc, .bash_profile):")
-		fmt.Printf("   export PATH=\"%s:$PATH\"\n", binDir)
+	// No PATH advice: the toolchain dir is not expected on the user's PATH.
+	// The dev link is live through delegation the moment it is written, and a
+	// BARE name is an explicit, separate opt-in.
+	fmt.Printf("\n'grove %s' now runs %s.\n", binaryName, linkInfo.Path)
+	if !nameExposed(binaryName) {
+		fmt.Printf("   For the bare name '%s', run 'grove expose %s'.\n", binaryName, binaryName)
 	}
 
 	return nil
-}
-
-func isDirInPath(dir string) bool {
-	path := os.Getenv("PATH")
-	for _, p := range filepath.SplitList(path) {
-		if p == dir {
-			return true
-		}
-	}
-	return false
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -97,6 +98,118 @@ func exposeLinkTarget() (string, error) {
 		return "", fmt.Errorf("cannot locate the grove binary: %w", err)
 	}
 	return self, nil
+}
+
+// globalGroveLink is the path of the ONE name the install puts in the user's
+// global namespace: ~/.local/bin/grove. Everything else in the toolchain is
+// reached as `grove <tool>`, or opted back in one at a time with `grove expose`.
+func globalGroveLink() (string, error) {
+	dir, err := exposeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "grove"), nil
+}
+
+// ensureGroveLink makes ~/.local/bin/grove resolve to the grove binary, and
+// reports whether it had to change anything.
+//
+// It links at the same stable target exposures use (paths.BinDir()/grove, the
+// path the reconciler maintains), so the hub link survives every update. It is
+// refusal-first for the same reason `grove expose` is: ~/.local/bin is the
+// USER's directory, so anything already sitting at the name that is not our
+// link is reported and left alone, never replaced.
+func ensureGroveLink() (linkPath string, changed bool, err error) {
+	dir, err := exposeDir()
+	if err != nil {
+		return "", false, err
+	}
+	linkPath = filepath.Join(dir, "grove")
+
+	target, err := exposeLinkTarget()
+	if err != nil {
+		return linkPath, false, err
+	}
+	// A grove that IS ~/.local/bin/grove needs no link to itself.
+	if filepath.Clean(linkPath) == filepath.Clean(target) {
+		return linkPath, false, nil
+	}
+
+	if _, statErr := os.Lstat(linkPath); statErr == nil {
+		dest, isGrove := pointsAtGrove(linkPath)
+		if !isGrove {
+			what := "a file"
+			if dest != "" {
+				what = "a symlink to " + dest
+			}
+			return linkPath, false, fmt.Errorf("%s already exists (%s) and does not resolve to grove's managed binary — leave it, or repoint it at %s yourself", linkPath, what, target)
+		}
+		if resolvePath(dest) == resolvePath(target) {
+			return linkPath, false, nil
+		}
+		if err := replaceSymlink(target, linkPath); err != nil {
+			return linkPath, false, err
+		}
+		return linkPath, true, nil
+	}
+
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return linkPath, false, fmt.Errorf("failed to create %s: %w", dir, err)
+	}
+	if err := replaceSymlink(target, linkPath); err != nil {
+		return linkPath, false, err
+	}
+	return linkPath, true, nil
+}
+
+// groveReachable answers the only PATH question the hub model asks: can the
+// user type `grove`? Either the name resolves on PATH, or the hub link exists
+// and points at something runnable (a shell that has not been restarted yet
+// still counts — the setup is correct).
+func groveReachable() (string, bool) {
+	if path, err := exec.LookPath("grove"); err == nil {
+		return path, true
+	}
+	link, err := globalGroveLink()
+	if err != nil {
+		return "", false
+	}
+	// Stat follows the symlink: a link pointing at nothing is not reachable.
+	if info, err := os.Stat(link); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+		return link, true
+	}
+	return "", false
+}
+
+// groveReachableHint is the remedy every "grove is not on your PATH" message
+// prints, so the installer, `grove install`, `grove bootstrap` and the doctor
+// all name the same fix.
+func groveReachableHint() []string {
+	dir := filepath.Join("~", ".local", "bin")
+	if d, err := exposeDir(); err == nil {
+		dir = d
+	}
+	target := "the grove binary"
+	if binDir := paths.BinDir(); binDir != "" {
+		target = filepath.Join(binDir, "grove")
+	}
+	return []string{
+		fmt.Sprintf("  ln -s %s %s", target, filepath.Join(dir, "grove")),
+		fmt.Sprintf("  export PATH=\"%s:$PATH\"   # bash/zsh", dir),
+		fmt.Sprintf("  fish_add_path %s           # fish", dir),
+		"  (or re-run 'grove onboard', which does both)",
+	}
+}
+
+// nameExposed reports whether name currently dispatches through grove from the
+// expose dir — used to avoid telling users to expose something already exposed.
+func nameExposed(name string) bool {
+	dir, err := exposeDir()
+	if err != nil {
+		return false
+	}
+	_, ok := pointsAtGrove(filepath.Join(dir, name))
+	return ok
 }
 
 // groveIdentities are the paths an exposure symlink is allowed to resolve to,

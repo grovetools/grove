@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -76,12 +77,23 @@ type onboardModel struct {
 	shellManager *shell.Manager
 	shellType    shell.ShellType
 	rcFile       string
-	binDir       string
+	// binDir is grove's private toolchain dir — where tools are INSTALLED. It
+	// is not expected on the user's PATH.
+	binDir string
+	// linkDir is the user's own global bin dir (~/.local/bin), the only
+	// directory onboarding cares about PATH-wise, because the only name grove
+	// puts there is `grove` itself.
+	linkDir string
 
 	// PATH step state
 	pathAlreadySet bool
 	pathAdded      bool
 	pathError      error
+
+	// Hub link state: ~/.local/bin/grove -> paths.BinDir()/grove
+	linkPath    string
+	linkCreated bool
+	linkError   error
 
 	// Install step state
 	tools          []toolItem
@@ -111,13 +123,18 @@ func newOnboardModel() *onboardModel {
 	// Initialize shell manager
 	shellMgr, _ := shell.NewManager()
 
-	// Get bin directory
+	// Where tools are installed (private) vs. where the one global name lives.
 	binDir := paths.BinDir()
+	linkDir := filepath.Join("~", ".local", "bin")
+	if dir, err := exposeDir(); err == nil {
+		linkDir = dir
+	}
 
-	// Check if path is already set
+	// The PATH question is about ~/.local/bin, not about grove's toolchain dir:
+	// the toolchain is reached as `grove <tool>` and never needs to be on PATH.
 	var pathAlreadySet bool
 	if shellMgr != nil {
-		pathAlreadySet = shellMgr.PathIncludes(binDir)
+		pathAlreadySet = shellMgr.PathIncludes(linkDir)
 	}
 
 	// Detect shell
@@ -142,6 +159,7 @@ func newOnboardModel() *onboardModel {
 		shellType:      shellType,
 		rcFile:         rcFile,
 		binDir:         binDir,
+		linkDir:        linkDir,
 		pathAlreadySet: pathAlreadySet,
 		tools:          tools,
 		toolCursor:     0,
@@ -226,7 +244,11 @@ func (m *onboardModel) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.step {
 	case onboardStepWelcome:
 		if key.Matches(msg, m.keys.Confirm) {
-			// Move to PATH step or skip if already set
+			// The hub link is not optional and not a question: `grove` is the
+			// one name the install owns, and every other tool is reached
+			// through it. The rc-file edit below is the only part that needs
+			// consent, and only when ~/.local/bin is not already on PATH.
+			m.ensureLink()
 			if m.pathAlreadySet {
 				m.step = onboardStepInstall
 			} else {
@@ -238,9 +260,9 @@ func (m *onboardModel) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case onboardStepPath:
 		switch {
 		case key.Matches(msg, m.keys.Yes), key.Matches(msg, m.keys.Confirm):
-			// Add to PATH
+			// Add ~/.local/bin (NOT grove's toolchain dir) to PATH.
 			if m.shellManager != nil {
-				m.pathError = m.shellManager.AddToPath(m.binDir)
+				m.pathError = m.shellManager.AddToPath(m.linkDir)
 				m.pathAdded = m.pathError == nil
 			}
 			m.step = onboardStepInstall
@@ -302,6 +324,16 @@ func (m *onboardModel) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// ensureLink puts the single global name in place: ~/.local/bin/grove pointing
+// at the managed binary. A refusal (something else already owns that name) is
+// recorded and shown, never fatal — the rest of onboarding is unaffected.
+func (m *onboardModel) ensureLink() {
+	path, created, err := ensureGroveLink()
+	m.linkPath = path
+	m.linkCreated = created
+	m.linkError = err
 }
 
 func (m *onboardModel) runInstallCmd() tea.Cmd {
@@ -403,7 +435,7 @@ func (m *onboardModel) viewWelcome() string {
 	msg := `Grove is a workspace orchestrator and tool manager for software development.
 
 This wizard will help you:
-  1. Add Grove to your PATH
+  1. Put 'grove' on your PATH (the only name Grove claims)
   2. Install all Grove tools
   3. Configure your environment
 
@@ -425,16 +457,33 @@ func (m *onboardModel) viewPath() string {
 	content.WriteString(header)
 	content.WriteString("\n\n")
 
-	// Explain
-	content.WriteString(t.Normal.Render("Grove tools are installed to:"))
+	// Explain the hub: one name in the user's namespace, tools behind it.
+	content.WriteString(t.Normal.Render("Grove puts exactly one name in your PATH:"))
 	content.WriteString("\n")
-	content.WriteString(t.Highlight.Render("  " + m.binDir))
+	content.WriteString(t.Highlight.Render("  " + m.linkPath))
+	content.WriteString("\n")
+	content.WriteString(t.Muted.Render("  every other tool runs as 'grove <tool>' (or 'grove expose <tool>' for a bare name)"))
 	content.WriteString("\n\n")
+
+	switch {
+	case m.linkError != nil:
+		content.WriteString(t.Warning.Render(theme.IconWarning + " " + m.linkError.Error()))
+		content.WriteString("\n\n")
+	case m.linkCreated:
+		content.WriteString(t.Success.Render(theme.IconSuccess) + " Linked " + m.linkPath)
+		content.WriteString("\n\n")
+	case m.linkPath != "":
+		content.WriteString(t.Success.Render(theme.IconSuccess) + " " + m.linkPath + " already points at Grove")
+		content.WriteString("\n\n")
+	}
 
 	if m.shellManager != nil && m.shellType != "" {
 		rcFileName := m.shellManager.GetRcFileName(m.shellType)
 		shellName := m.shellManager.GetShellName(m.shellType)
-		exportLine := m.shellManager.GetPathExportLine(m.binDir, m.shellType)
+		exportLine := m.shellManager.GetPathExportLine(m.linkDir, m.shellType)
+
+		content.WriteString(t.Normal.Render(m.linkDir + " is not on your PATH yet."))
+		content.WriteString("\n\n")
 
 		content.WriteString(t.Normal.Render(fmt.Sprintf("Detected shell: %s", shellName)))
 		content.WriteString("\n\n")
@@ -447,7 +496,7 @@ func (m *onboardModel) viewPath() string {
 		content.WriteString(boxStyle.Render(exportLine))
 		content.WriteString("\n\n")
 	} else {
-		content.WriteString(t.Warning.Render("Could not detect shell. You may need to manually add Grove to your PATH."))
+		content.WriteString(t.Warning.Render("Could not detect your shell — add " + m.linkDir + " to your PATH manually."))
 		content.WriteString("\n\n")
 	}
 
@@ -465,9 +514,19 @@ func (m *onboardModel) viewInstall() string {
 	content.WriteString(header)
 	content.WriteString("\n\n")
 
+	// A refused hub link must not be silent — the PATH step is skipped entirely
+	// when ~/.local/bin is already on PATH, so this is the only place it shows.
+	if m.linkError != nil {
+		content.WriteString(t.Warning.Render(theme.IconWarning+" ") + m.linkError.Error())
+		content.WriteString("\n\n")
+	} else if m.linkCreated {
+		content.WriteString(t.Success.Render(theme.IconSuccess) + " Linked " + m.linkPath)
+		content.WriteString("\n\n")
+	}
+
 	// Show PATH result if we just did that
 	if m.pathAdded {
-		content.WriteString(t.Success.Render(theme.IconSuccess) + " PATH configuration added")
+		content.WriteString(t.Success.Render(theme.IconSuccess) + " Added " + m.linkDir + " to your PATH")
 		content.WriteString("\n\n")
 	} else if m.pathError != nil {
 		content.WriteString(t.Error.Render(theme.IconError) + " Failed to add PATH: " + m.pathError.Error())
@@ -492,6 +551,8 @@ func (m *onboardModel) viewInstall() string {
 		content.WriteString(t.Muted.Render("Tools are downloaded from GitHub releases and installed to:"))
 		content.WriteString("\n")
 		content.WriteString(t.Highlight.Render("  " + m.binDir))
+		content.WriteString("\n")
+		content.WriteString(t.Muted.Render("  (that dir stays out of your PATH — run them as 'grove <tool>')"))
 		content.WriteString("\n\n")
 
 		// Show tool selection list
@@ -602,8 +663,16 @@ func (m *onboardModel) viewDone() string {
 	content.WriteString(t.Bold.Render("Summary:"))
 	content.WriteString("\n\n")
 
+	if m.linkError != nil {
+		content.WriteString(t.Warning.Render(theme.IconWarning+" ") + m.linkError.Error())
+		content.WriteString("\n")
+	} else if m.linkCreated {
+		content.WriteString(t.Success.Render(theme.IconSuccess) + " Linked " + m.linkPath)
+		content.WriteString("\n")
+	}
+
 	if m.pathAdded {
-		content.WriteString(t.Success.Render(theme.IconSuccess) + " PATH configured")
+		content.WriteString(t.Success.Render(theme.IconSuccess) + " PATH configured (" + m.linkDir + ")")
 		content.WriteString("\n")
 	}
 
@@ -647,7 +716,9 @@ func newOnboardCmd() *cobra.Command {
 This command is typically run automatically by the install script to guide
 new users through the initial setup process:
 
-  1. PATH configuration - Adds Grove's bin directory to your shell config
+  1. PATH configuration - Links ~/.local/bin/grove at the managed binary and,
+     if that directory is not on your PATH, offers to add it to your shell
+     config. Grove claims no other name: tools run as 'grove <tool>'.
   2. Tool installation - Installs all Grove tools from GitHub releases
   3. Setup wizard - Runs the interactive setup wizard for configuration
 

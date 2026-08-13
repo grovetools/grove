@@ -10,9 +10,11 @@ Settings are managed through a hierarchy of files.
 | :--------------------------- | :---------------------------------------------------------------------- | :--------------------------------- |
 | `[ECOSYSTEM_ROOT]/grove.yml` | Defines the ecosystem, its workspaces, and global defaults for tools.   | User (manual edit)                 |
 | `[WORKSPACE_DIR]/grove.yml`  | Defines a workspace and can override ecosystem-level settings.          | User (manual edit)                 |
-| `~/.grove/active_versions.json` | Tracks the active released version for each installed tool.             | `grove install`, `grove version use` |
-| `~/.grove/devlinks.json`     | Registers local development binaries from worktrees.                    | `grove dev link`, `grove dev use`    |
-| `~/.grove/aliases.json`      | Stores user-defined custom aliases for tools.                           | `grove alias set`, `grove alias unset` |
+| `~/.config/grove/grove.yml`  | Global defaults for every workspace on this machine.                    | User (manual edit), `grove setup`  |
+| `~/.local/state/grove/active_versions.json` | Tracks the active released version for each installed tool. | `grove install`, `grove version use` |
+| `~/.local/state/grove/devlinks.json` | Registers local development binaries from worktrees.            | `grove dev link`, `grove dev use`    |
+| `~/.local/state/grove/aliases.json` | Stores user-defined custom aliases for tools.                    | `grove alias set`, `grove alias unset` |
+| `~/.local/state/grove/exposures.json` | Records the bare names linked into `~/.local/bin`.             | `grove expose`, `grove hide`       |
 
 ## The `grove.yml` File
 
@@ -147,13 +149,27 @@ In this example:
 - The merged configuration will use the API key and model from `grove.override.yml`
 - The `grove.override.yml` file is never committed to version control
 
-## User-Level Configuration (`~/.grove/`)
+## User-Level Configuration and State (XDG paths)
 
-The `~/.grove` directory stores user-specific configuration and state. These files are generally managed by `grove` commands.
+Grove follows the XDG base directory spec. Every path below is resolved in this order: `$GROVE_HOME/{config,data,state,cache}` (a portable root, if set), then the matching `XDG_*_HOME` variable, then the platform default.
+
+| Directory | Default | Holds |
+| :-------- | :------ | :---- |
+| Config    | `~/.config/grove` | `grove.yml` — global configuration. |
+| Data      | `~/.local/share/grove` | `bin/` (the managed toolchain), versioned binaries, plugins, worktrees. |
+| State     | `~/.local/state/grove` | Runtime state, databases, logs, and the JSON files below. |
+| Cache     | `~/.cache/grove` | Regenerable data. |
+
+State files, generally managed by `grove` commands rather than edited:
 
 -   **`active_versions.json`**: A JSON file mapping each tool's repository name to its active released version tag (e.g., `"grove-context": "v0.5.1"`). Managed by `grove version use`.
 -   **`devlinks.json`**: A registry of locally-built binaries linked using `grove dev link`. It tracks binary paths and the active alias for each tool.
 -   **`aliases.json`**: A map of repository names to custom aliases, which override default tool aliases. Managed by `grove alias`.
+-   **`exposures.json`**: The bare names linked into `~/.local/bin` by `grove expose`, mapped to the tool each one runs.
+
+The managed toolchain directory can be relocated on its own with `GROVE_BIN`, which overrides the data-directory default even when `GROVE_HOME` is set.
+
+`~/.local/bin` is not a Grove directory: it is yours, and the only name Grove puts there on install is `grove` itself.
 
 ## Configuration Precedence
 
@@ -195,6 +211,8 @@ Grove uses several environment variables to control its behavior.
 
 | Variable               | Description                                                                                   |
 | :--------------------- | :-------------------------------------------------------------------------------------------- |
+| `GROVE_HOME`           | A portable root that overrides all four XDG directories at once (`$GROVE_HOME/{config,data,state,cache}`). |
+| `GROVE_BIN`            | Overrides the managed toolchain directory (default `~/.local/share/grove/bin`), independently of `GROVE_HOME`. |
 | `GROVE_PAT`            | A GitHub Personal Access Token used by `grove add-repo` and `release` for private repository operations. |
 | `GROVE_DEBUG`          | If set to `true`, enables verbose debug logging for all Grove tools.                          |
 | `GROVE_WORKSPACE_ROOT` | (Set by `grove activate`) The absolute path to the active development workspace root.           |

@@ -16,7 +16,8 @@ import (
 func init() {
 	doctor.Register(&tmuxCheck{})
 	doctor.Register(&claudeCLICheck{})
-	doctor.Register(&binDirOnPathCheck{})
+	doctor.Register(&groveOnPathCheck{})
+	doctor.Register(&groveGlobalSymlinkCheck{})
 	doctor.Register(&grovedBinaryCheck{})
 }
 
@@ -76,48 +77,142 @@ func (c *claudeCLICheck) AutoFix(ctx context.Context) error {
 	return fmt.Errorf("%w: install the claude CLI manually", doctor.ErrNotFixable)
 }
 
-// binDirOnPathCheck verifies the grove bin dir exists and is on PATH.
-type binDirOnPathCheck struct{}
+// exposeDirEnv mirrors cmd's override so tests (and unusual layouts) can point
+// the global bin dir somewhere disposable. Kept in sync by name, not by import:
+// cmd depends on this package, not the other way round.
+const exposeDirEnv = "GROVE_EXPOSE_DIR"
 
-func (c *binDirOnPathCheck) ID() string   { return "grove_bin_on_path" }
-func (c *binDirOnPathCheck) Name() string { return "grove bin dir present on PATH" }
+// globalBinDir is the USER's global bin dir — ~/.local/bin literally. It is not
+// a grove-owned directory, so it deliberately does not follow GROVE_HOME/XDG.
+func globalBinDir() string {
+	if dir := os.Getenv(exposeDirEnv); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".local", "bin")
+}
 
-func (c *binDirOnPathCheck) Run(ctx context.Context, opts doctor.RunOptions) doctor.CheckResult {
+// groveOnPathCheck verifies the one name the install owns is reachable.
+//
+// grove's toolchain dir is deliberately NOT checked against PATH: tools run as
+// `grove <tool>`, so that directory being absent from PATH is the expected
+// state, not a problem. What matters is that `grove` itself resolves.
+type groveOnPathCheck struct{}
+
+func (c *groveOnPathCheck) ID() string   { return "grove_on_path" }
+func (c *groveOnPathCheck) Name() string { return "grove reachable by name" }
+
+func (c *groveOnPathCheck) Run(ctx context.Context, opts doctor.RunOptions) doctor.CheckResult {
 	res := doctor.CheckResult{ID: c.ID(), Name: c.Name()}
 
-	binDir := paths.BinDir()
-	if binDir == "" {
-		res.Status = doctor.StatusWarn
-		res.Message = "could not resolve the grove bin dir (no home directory?)"
+	if path, err := exec.LookPath("grove"); err == nil {
+		res.Status = doctor.StatusOK
+		res.Message = fmt.Sprintf("grove resolves to %s", path)
 		return res
 	}
 
-	if info, err := os.Stat(binDir); err != nil || !info.IsDir() {
-		res.Status = doctor.StatusFail
-		res.Message = fmt.Sprintf("grove bin dir %s does not exist", binDir)
-		res.Resolution = "re-run the grove installer (or 'grove install') to create and populate it"
-		return res
-	}
-
-	for _, p := range filepath.SplitList(os.Getenv("PATH")) {
-		if p == "" {
-			continue
-		}
-		if samePath(p, binDir) {
+	// Not on THIS process's PATH, but a valid hub link means the setup is
+	// right and only this shell is stale (a fresh install, not yet sourced).
+	dir := globalBinDir()
+	if dir != "" {
+		link := filepath.Join(dir, "grove")
+		if info, err := os.Stat(link); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
 			res.Status = doctor.StatusOK
-			res.Message = fmt.Sprintf("grove bin dir %s is on PATH", binDir)
+			res.Message = fmt.Sprintf("%s exists but %s is not on this shell's PATH", link, dir)
+			res.Resolution = fmt.Sprintf("add 'export PATH=\"%s:$PATH\"' to your shell profile, then restart your shell", dir)
 			return res
 		}
 	}
 
+	if dir == "" {
+		dir = filepath.Join("~", ".local", "bin")
+	}
+	managed := "the grove binary"
+	if binDir := paths.BinDir(); binDir != "" {
+		managed = filepath.Join(binDir, "grove")
+	}
 	res.Status = doctor.StatusFail
-	res.Message = fmt.Sprintf("grove bin dir %s is not on PATH", binDir)
-	res.Resolution = fmt.Sprintf("add 'export PATH=\"%s:$PATH\"' to your shell profile", binDir)
+	res.Message = fmt.Sprintf("grove is not on PATH and %s is not a usable link", filepath.Join(dir, "grove"))
+	res.Resolution = fmt.Sprintf("link it and put the directory on PATH: ln -s %s %s && export PATH=\"%s:$PATH\" (or re-run 'grove onboard')",
+		managed, filepath.Join(dir, "grove"), dir)
 	return res
 }
 
-func (c *binDirOnPathCheck) AutoFix(ctx context.Context) error {
+func (c *groveOnPathCheck) AutoFix(ctx context.Context) error {
 	return fmt.Errorf("%w: PATH changes must be made in your shell profile", doctor.ErrNotFixable)
+}
+
+// groveGlobalSymlinkCheck verifies the hub link ~/.local/bin/grove points at
+// the CURRENT toolchain. A link pinned to an old build (or to some other grove
+// entirely) keeps working while quietly running the wrong binary, which is
+// exactly the failure a version-mismatch hunt never suspects.
+type groveGlobalSymlinkCheck struct{}
+
+func (c *groveGlobalSymlinkCheck) ID() string   { return "grove_global_symlink" }
+func (c *groveGlobalSymlinkCheck) Name() string { return "~/.local/bin/grove links the managed binary" }
+
+func (c *groveGlobalSymlinkCheck) Run(ctx context.Context, opts doctor.RunOptions) doctor.CheckResult {
+	res := doctor.CheckResult{ID: c.ID(), Name: c.Name()}
+
+	dir := globalBinDir()
+	if dir == "" {
+		res.Status = doctor.StatusWarn
+		res.Message = "could not resolve ~/.local/bin (no home directory?)"
+		return res
+	}
+	link := filepath.Join(dir, "grove")
+	managed := ""
+	if binDir := paths.BinDir(); binDir != "" {
+		managed = filepath.Join(binDir, "grove")
+	}
+
+	info, err := os.Lstat(link)
+	if err != nil {
+		res.Status = doctor.StatusWarn
+		res.Message = fmt.Sprintf("no %s — grove is reachable only however you installed it", link)
+		if managed != "" {
+			res.Resolution = fmt.Sprintf("ln -s %s %s (or re-run 'grove onboard')", managed, link)
+		}
+		return res
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		res.Status = doctor.StatusWarn
+		res.Message = fmt.Sprintf("%s is a regular file, not a link to the managed binary — updates will not reach it", link)
+		if managed != "" {
+			res.Resolution = fmt.Sprintf("replace it yourself: ln -sf %s %s", managed, link)
+		}
+		return res
+	}
+
+	dest, err := os.Readlink(link)
+	if err == nil && !filepath.IsAbs(dest) {
+		dest = filepath.Join(dir, dest)
+	}
+	if _, statErr := os.Stat(link); statErr != nil {
+		res.Status = doctor.StatusFail
+		res.Message = fmt.Sprintf("%s is a broken symlink (points at %s)", link, dest)
+		if managed != "" {
+			res.Resolution = fmt.Sprintf("repoint it: ln -sf %s %s", managed, link)
+		}
+		return res
+	}
+	if managed != "" && !samePath(dest, managed) {
+		res.Status = doctor.StatusWarn
+		res.Message = fmt.Sprintf("%s points at %s, not the managed binary %s", link, dest, managed)
+		res.Resolution = fmt.Sprintf("repoint it so updates take effect: ln -sf %s %s", managed, link)
+		return res
+	}
+
+	res.Status = doctor.StatusOK
+	res.Message = fmt.Sprintf("%s -> %s", link, dest)
+	return res
+}
+
+func (c *groveGlobalSymlinkCheck) AutoFix(ctx context.Context) error {
+	return fmt.Errorf("%w: ~/.local/bin is yours — link or repoint grove there yourself", doctor.ErrNotFixable)
 }
 
 // grovedBinaryCheck verifies the groved daemon binary is resolvable and

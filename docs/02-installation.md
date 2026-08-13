@@ -10,8 +10,9 @@ Before installing, ensure the following requirements are met:
 *   **Architecture**: `amd64` (Intel) or `arm64` (Apple Silicon, ARM).
 *   **Dependencies**:
     *   `git`: Required for version control and managing workspaces.
-    *   `curl`: Used by the installation script to download binaries.
-    *   `gh` (GitHub CLI): Used for private repositories. The installer will use it automatically if it is installed and authenticated.
+    *   `curl`: Used by the installation script to download binaries. The script uses `curl` only — there is no `gh` fallback.
+    *   `sha256sum` or `shasum`: Optional. Used to verify the downloaded binary against the release's `checksums.txt`. If neither is present, the script warns and continues.
+    *   `gh` (GitHub CLI): Optional. Used by `grove install --use-gh` for private repositories, not by the install script.
 
 ## Installation Script
 
@@ -25,22 +26,40 @@ curl -sSfL https://raw.githubusercontent.com/grovetools/grove/main/scripts/insta
 
 The script performs the following steps:
 1.  Detects the operating system (macOS or Linux) and architecture (amd64 or arm64).
-2.  Checks for an authenticated GitHub CLI (`gh`). If found, it uses `gh` to download assets. Otherwise, it falls back to `curl`.
-3.  Fetches the latest release from the `grovetools/grove` GitHub repository.
-4.  Downloads the appropriate binary for the system.
+2.  Fetches the latest release from the `grovetools/grove` GitHub repository with `curl`.
+3.  Downloads the appropriate binary for the system, plus the release's `checksums.txt`.
+4.  Verifies the binary's SHA-256 against `checksums.txt`. A mismatch aborts the install; a missing `checksums.txt` (older releases) or a machine with no `sha256sum`/`shasum` warns and continues.
 5.  Installs the binary to `~/.local/share/grove/bin/grove` and makes it executable.
+6.  Symlinks `~/.local/bin/grove` at that binary. An existing symlink there is replaced; a regular file is never clobbered — the script warns and leaves it alone.
+7.  Runs `grove onboard`.
 
 ## Post-Installation Setup
 
-After installation, add the Grove bin directory to the shell's `PATH` environment variable.
+`grove` is the only name the install puts in your global namespace. The toolchain directory (`~/.local/share/grove/bin`) is **not** meant to be on your `PATH`: the other tools are reached through grove.
+
+```bash
+grove mux            # open the treemux cockpit
+grove nb list        # run nb
+grove cx stats       # run cx
+```
+
+If you want a tool under its bare name, opt in one at a time:
+
+```bash
+grove expose cx      # links ~/.local/bin/cx -> the grove binary
+grove hide cx        # undo
+```
 
 #### 1. Configure PATH
 
-Add the following line to the shell's configuration file (e.g., `~/.zshrc`, `~/.bashrc`, or `~/.profile`):
+Most systems already have `~/.local/bin` on `PATH`, and the installer says nothing when that is the case. If it reports that the directory is missing, add it to your shell configuration file (e.g., `~/.zshrc`, `~/.bashrc`, or `~/.profile`):
 
 ```bash
-export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/grove/bin:$PATH"
+export PATH="$HOME/.local/bin:$PATH"   # bash/zsh
+fish_add_path ~/.local/bin             # fish
 ```
+
+`grove onboard` offers to make this edit for you.
 
 #### 2. Apply Changes
 

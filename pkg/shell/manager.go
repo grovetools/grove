@@ -130,7 +130,7 @@ func (m *Manager) AddToPath(dir string) error {
 
 	// Check if the path is already configured in the rc file
 	exportLine := m.GetPathExportLine(dir, shell)
-	if strings.Contains(string(content), dir) {
+	if m.rcConfiguresPath(string(content), dir) {
 		// Already configured
 		return nil
 	}
@@ -161,6 +161,79 @@ func (m *Manager) AddToPath(dir string) error {
 	}
 
 	return nil
+}
+
+// rcConfiguresPath reports whether the rc file content already puts dir on
+// PATH.
+//
+// The test is a PATH-COMPONENT match on a PATH-setting line, not a substring
+// search of the whole file. A substring search says yes to a comment naming the
+// directory, to `alias g=~/.local/bin/grove`, and to any longer path that
+// merely starts with it — and a false yes silently skips the append, leaving
+// the user without the PATH entry the wizard just told them it added.
+//
+// Home-relative spellings count, because that is how these lines are actually
+// written: `export PATH="$HOME/.local/bin:$PATH"` configures ~/.local/bin.
+func (m *Manager) rcConfiguresPath(content, dir string) bool {
+	wanted := m.pathSpellings(dir)
+	if len(wanted) == 0 {
+		return false
+	}
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		// Only lines that could plausibly set PATH are candidates.
+		if !strings.Contains(line, "PATH") && !strings.Contains(line, "fish_add_path") {
+			continue
+		}
+		for _, token := range pathTokens(line) {
+			if wanted[token] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// pathSpellings is the set of strings that all denote dir in an rc file.
+func (m *Manager) pathSpellings(dir string) map[string]bool {
+	if dir == "" {
+		return nil
+	}
+	clean := filepath.Clean(dir)
+	out := map[string]bool{clean: true}
+	if m.homeDir != "" {
+		home := filepath.Clean(m.homeDir)
+		if strings.HasPrefix(clean, home+string(filepath.Separator)) {
+			rel := strings.TrimPrefix(clean, home)
+			out["$HOME"+rel] = true
+			out["${HOME}"+rel] = true
+			out["~"+rel] = true
+		}
+	}
+	return out
+}
+
+// pathTokens splits a shell line into the path-ish words it contains, on the
+// separators that surround a PATH entry (`:`, quotes, whitespace, `=`, `;`).
+// `{` and `}` are deliberately NOT separators, so `${HOME}/.local/bin` survives
+// as one token.
+func pathTokens(line string) []string {
+	tokens := strings.FieldsFunc(line, func(r rune) bool {
+		switch r {
+		case ':', '"', '\'', '=', ';', ' ', '\t':
+			return true
+		}
+		return false
+	})
+	for i, token := range tokens {
+		if len(token) > 1 {
+			tokens[i] = strings.TrimSuffix(token, "/")
+		}
+	}
+	return tokens
 }
 
 // GetShellName returns a human-readable name for the shell type

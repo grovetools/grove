@@ -175,7 +175,7 @@ test_installation() {
       chmod +x "$GROVE_DATA/bin/grove"
     else
       step "Running original install.sh against real GitHub..."
-      # The real install.sh is smart and will use the authenticated 'gh' CLI
+      # install.sh is curl-only: no 'gh' path, authenticated or otherwise.
       bash /app/scripts/install.sh
     fi
   else
@@ -185,12 +185,13 @@ test_installation() {
     sed -i 's|GITHUB_API="https://api.github.com"|GITHUB_API="http://localhost:8000/api"|g' /tmp/install_patched.sh
     sed -i 's|https://github.com|http://localhost:8000/releases|g' /tmp/install_patched.sh
     
-    # Temporarily remove gh from PATH to force curl usage in mock mode
+    # Drop the mock bin dir from PATH so nothing in the installer's environment
+    # can reach the mock 'gh' the other suites use.
     OLD_PATH="$PATH"
     export PATH="/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-    
+
     # Run the installer
-    step "Running patched install.sh (without gh in PATH)..."
+    step "Running patched install.sh..."
     bash /tmp/install_patched.sh
     
     # Restore PATH

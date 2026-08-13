@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/grovetools/core/logging"
-	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/spf13/cobra"
 
@@ -324,19 +323,20 @@ func runInstall(cmd *cobra.Command, args []string, useGH bool) error {
 
 	// No longer need to set a single active version - each tool is activated individually
 
-	// Check if grove bin directory is in PATH
-	groveBin := paths.BinDir()
-	path := os.Getenv("PATH")
-
-	if !strings.Contains(path, groveBin) {
+	// The installed tools live in grove's private toolchain dir and are reached
+	// as `grove <tool>` — that dir is NOT expected on the user's PATH. The only
+	// name that has to be reachable is grove itself.
+	if _, ok := groveReachable(); !ok {
 		logger.Warn("")
-		logger.Warnf("%s IMPORTANT: Add Grove to your PATH", theme.IconWarning)
+		logger.Warnf("%s IMPORTANT: 'grove' is not on your PATH", theme.IconWarning)
 		logger.Warn("")
-		logger.Warnf("Add the following line to your shell profile (~/.zshrc, ~/.bashrc, etc.):")
-		logger.Warnf("  export PATH=\"%s:$PATH\"", groveBin)
+		logger.Warn("The tools just installed run as 'grove <tool>', so grove has to be reachable:")
+		for _, line := range groveReachableHint() {
+			logger.Warn(line)
+		}
 		logger.Warn("")
-		logger.Warn("Then restart your terminal or run:")
-		logger.Warn("  source ~/.zshrc  # or ~/.bashrc")
+		logger.Warn("Then restart your terminal (or source your shell profile).")
+		logger.Warn("Want a tool under its own bare name? Run 'grove expose <tool>'.")
 	}
 
 	return nil

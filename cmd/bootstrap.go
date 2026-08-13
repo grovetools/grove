@@ -111,12 +111,13 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Subscription: %s\n", rootsPath)
 	fmt.Println()
 
-	// Check if PATH already includes the Grove bin directory
-	pathEnv := os.Getenv("PATH")
-	if !containsPath(pathEnv, groveBinDir) {
-		fmt.Println("Add to PATH:")
-		fmt.Printf("  export PATH=\"%s:$PATH\"   # bash/zsh\n", groveBinDir)
-		fmt.Printf("  fish_add_path %s             # fish\n", groveBinDir)
+	// grove is the only name that needs to be reachable: the tools it builds
+	// stay in the toolchain dir and run as `grove <tool>`.
+	if _, ok := groveReachable(); !ok {
+		fmt.Println("'grove' is not on your PATH yet:")
+		for _, line := range groveReachableHint() {
+			fmt.Println(line)
+		}
 		fmt.Println()
 	}
 
@@ -125,15 +126,4 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 	fmt.Println("  grove dev cwd    # Activate local dev binaries")
 
 	return nil
-}
-
-// containsPath checks if a path is already in the PATH environment variable
-func containsPath(pathEnv, dir string) bool {
-	paths := filepath.SplitList(pathEnv)
-	for _, p := range paths {
-		if p == dir {
-			return true
-		}
-	}
-	return false
 }
