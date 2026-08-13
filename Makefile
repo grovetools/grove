@@ -33,7 +33,7 @@ ifneq ($(strip $(GROVE_TARGET_GOOS)),)
 GO_CROSS_ENV = GOOS=$(GROVE_TARGET_GOOS) GOARCH=$(GROVE_TARGET_GOARCH) CGO_ENABLED=0
 endif
 
-.PHONY: all build test clean fmt fmt-check vet lint run check dev build-all schema registry config-schema config-schema-check keys-registry keys-registry-check keys-audit apidiff help
+.PHONY: all build test clean fmt fmt-check vet lint run check dev build-all schema registry registry-check config-schema config-schema-check keys-registry keys-registry-check keys-audit apidiff help
 
 all: build
 
@@ -53,10 +53,11 @@ keys-registry:
 	@echo "Generating keys registry..."
 	@go run ./tools/keys-registry-generator
 
-# The staleness gates over the two generated files, both wired into `check`.
+# The staleness gates over the generated files, all wired into `check`.
 #
-# They exist because a change to core/config's schema or to treemux's
-# keyspec.go lands in ANOTHER repo, and the file it invalidates is here. Three
+# They exist because a change to core/config's schema, to treemux's
+# keyspec.go, or to any sibling's grove.toml `managed`/`[binary]` block lands
+# in ANOTHER repo, and the file it invalidates is here. Three
 # times running (`[tui] drawer_size`, the `hush` key, `[tui.drawer] responsive`)
 # the authoring agent shipped the source change without the regeneration, and
 # every one was caught by a build gate rather than by whoever wrote it. So:
@@ -81,6 +82,13 @@ keys-registry-check: keys-registry
 # keys-registry-check, over the other generated file.
 config-schema-check: config-schema
 	@git diff --exit-code -- pkg/configui/schema_generated.go
+
+# Fail if the committed tool registry is stale. Same bargain again, over the
+# file composed from every sibling's grove.toml: a repo that flips
+# `managed = true` or adds a `[binary] name` is only reachable through
+# `grove <alias>` once this file is regenerated HERE.
+registry-check: registry
+	@git diff --exit-code -- pkg/sdk/registry_generated.go
 
 # Structural + semantic gate over the generated registry (see cmd/keys_audit.go).
 keys-audit:
@@ -140,7 +148,7 @@ run: build
 	@$(BIN_DIR)/$(BINARY_NAME) $(ARGS)
 
 # Run all checks
-check: schema fmt-check vet lint test config-schema-check keys-registry-check keys-audit
+check: schema fmt-check vet lint test registry-check config-schema-check keys-registry-check keys-audit
 
 # Development build with race detector
 dev:
