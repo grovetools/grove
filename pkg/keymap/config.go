@@ -29,6 +29,18 @@ type ConfigKeyMap struct {
 	MaturityFilterBack key.Binding // Cycle maturity filter backward (M)
 	SortMode           key.Binding // Cycle sort mode forward
 	SortModeBack       key.Binding // Cycle sort mode backward (S)
+
+	// Notebook scope (P3 W3.7). The Notes and Join pages act through the
+	// `grove notebook share|pull` / `grove notespace move` verbs, so their
+	// keys are DECLARED here rather than matched as raw strings in the page:
+	// a key the registry cannot see is a key `?` help cannot list, the
+	// cross-TUI audit cannot compare, and `[keymaps.grove.config]` cannot
+	// rebind. grove-config's registry entry is built from THIS struct
+	// (ConfigKeymapInfo → MakeTUIInfo), so declaring them needs no other repo.
+	MoveNotespace  key.Binding // m — move a notespace into another notebook (Notes)
+	ShareNotebook  key.Binding // s — share the notebook under the cursor (Join)
+	PullNotebook   key.Binding // p — pull the notebook under the cursor (Join)
+	FetchJoinDelta key.Binding // r — ask the recorded sync server for its inventory (Join)
 }
 
 // NewConfigKeyMap creates a new ConfigKeyMap with user configuration applied.
@@ -134,6 +146,27 @@ func NewConfigKeyMap(cfg *config.Config) ConfigKeyMap {
 			key.WithKeys("tS"),
 			key.WithHelp("tS", "cycle sort back"),
 		),
+		// Flat keys, deliberately: each is one act on the row under the
+		// cursor, and none of m/s/p/r is a reserved Base key or a namespace
+		// prefix (pkg/keys.FreeKeys). They are page-scoped — the Notes page
+		// matches MoveNotespace, the Join page the other three — but the
+		// registry is per-TUI, so they are declared once here.
+		MoveNotespace: key.NewBinding(
+			key.WithKeys("m"),
+			key.WithHelp("m", "move notespace"),
+		),
+		ShareNotebook: key.NewBinding(
+			key.WithKeys("s"),
+			key.WithHelp("s", "share notebook"),
+		),
+		PullNotebook: key.NewBinding(
+			key.WithKeys("p"),
+			key.WithHelp("p", "pull notebook"),
+		),
+		FetchJoinDelta: key.NewBinding(
+			key.WithKeys("r"),
+			key.WithHelp("r", "fetch join delta"),
+		),
 	}
 
 	// Truthfulness: the config TUI is a tabbed tree editor. Disable the whole
@@ -194,6 +227,8 @@ func (k ConfigKeyMap) FullHelp() [][]key.Binding {
 		{k.Base.FoldOpenAll, k.Base.FoldCloseAll, k.Base.FoldOpen, k.Base.FoldClose, k.Base.FoldToggle},
 		// Actions
 		{k.Edit, k.Delete},
+		// Notebook scope (Notes / Join pages)
+		{k.MoveNotespace, k.ShareNotebook, k.PullNotebook, k.FetchJoinDelta},
 		// View (v…) chords
 		{k.ViewMode, k.Preview, k.Sources, k.Info},
 		// Toggle (t…) chords
@@ -233,6 +268,11 @@ func (k ConfigKeyMap) Sections() []keymap.Section {
 		// override identities unambiguous.
 		keymap.NewSection("Edit Dialog",
 			k.Confirm, k.Cancel, k.SwitchLayer,
+		),
+		// P3 notebook scope. These four run verbs rather than editing config,
+		// so they get their own section instead of joining "Tree Actions".
+		keymap.NewSection("Notebook Scope",
+			k.MoveNotespace, k.ShareNotebook, k.PullNotebook, k.FetchJoinDelta,
 		),
 		k.Base.SystemSection(),
 	}

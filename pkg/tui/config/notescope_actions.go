@@ -17,6 +17,12 @@ import (
 // several seconds and a TUI that blocks its update loop on that looks hung —
 // and because a Cmd is what a test can invoke deliberately, one step at a time.
 
+// scopeBusyStatus is what a second intent gets while the first is in flight.
+// It names the state rather than failing silently: the operator pressed a key
+// and is owed an answer for it, and "nothing happened" is the one answer a
+// page that runs verbs must never give.
+const scopeBusyStatus = "a notebook-scope act is already running; wait for it to report"
+
 type (
 	// joinDeltaLoadedMsg carries one answered inventory back to the page.
 	joinDeltaLoadedMsg struct {

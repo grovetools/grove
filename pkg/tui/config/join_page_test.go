@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -107,7 +108,26 @@ func joinModel(t *testing.T, fake *fakeScope) (Model, *JoinPage) {
 	t.Helper()
 	page := NewJoinPage(nil, grovekeymap.NewConfigKeyMap(nil), 120, 40)
 	page.active = true
+	// See notesPage: this package registers no service, so a page built here
+	// defaults to the acts-less host. The fake service IS the acts.
+	page.acts = func() bool { return true }
 	return Model{joinPage: page, scopeService: fake.provider}, page
+}
+
+// settleScope feeds msg to the Model and keeps running whatever it returns
+// until the loop goes quiet. A completed act chains a delta refresh behind
+// itself, so "the act is done" is two messages, not one.
+func settleScope(t *testing.T, m Model, msg tea.Msg) Model {
+	t.Helper()
+	for i := 0; msg != nil && i < 8; i++ {
+		updated, cmd := m.Update(msg)
+		m = updated.(Model)
+		if cmd == nil {
+			return m
+		}
+		msg = cmd()
+	}
+	return m
 }
 
 // The load-bearing rule of this page: it talks to nothing until a key is
@@ -224,6 +244,10 @@ func TestJoinPagePullAndShareActOnlyOnTheirOwnRows(t *testing.T) {
 	if len(fake.calls) != 1 || fake.calls[0] != "share:here" {
 		t.Fatalf("calls = %v, want share:here", fake.calls)
 	}
+	// Land the result before the next act: one scope act runs at a time, and
+	// the gate does not lift until its report — and the refresh a completed act
+	// chains behind it — have both landed.
+	m = settleScope(t, m, done)
 
 	page.cursor = pullIdx
 	_, cmd = page.Update(runeKey('p'))
@@ -236,8 +260,9 @@ func TestJoinPagePullAndShareActOnlyOnTheirOwnRows(t *testing.T) {
 	} else if _, ok := pullRun().(scopeActionDoneMsg); !ok {
 		t.Fatalf("pull run = %#v", pullRun())
 	}
-	if len(fake.calls) != 2 || fake.calls[1] != "pull:remote" {
-		t.Fatalf("calls = %v, want pull:remote second", fake.calls)
+	// share, then the refresh a completed act chains behind it, then pull.
+	if want := []string{"share:here", "inventory", "pull:remote"}; !slices.Equal(fake.calls, want) {
+		t.Fatalf("calls = %v, want %v", fake.calls, want)
 	}
 }
 

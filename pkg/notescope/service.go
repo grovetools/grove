@@ -81,6 +81,21 @@ func RegisterService(provider func() (Service, error)) {
 	serviceProvider = provider
 }
 
+// ServiceRegistered reports whether this binary carries the acts at all,
+// without building anything.
+//
+// It exists so a page can say so BEFORE the keypress. A host that links the
+// pages but not the verbs — treemux's embedded config panel is the one in the
+// tree today — otherwise renders `p pulls · s shares` exactly like the host
+// where those keys work, and the operator learns the difference only by
+// pressing. Advertising an act a binary cannot perform is the same defect as
+// performing one nobody asked for, read from the other end.
+func ServiceRegistered() bool {
+	serviceMu.RLock()
+	defer serviceMu.RUnlock()
+	return serviceProvider != nil
+}
+
 // ResolveService builds the registered Service, or returns ErrNoService.
 func ResolveService() (Service, error) {
 	serviceMu.RLock()

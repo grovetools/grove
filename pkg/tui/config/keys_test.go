@@ -40,6 +40,12 @@ func runeKey(r rune) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
 }
 
+// expandKey presses the config TUI's DECLARED expand key. It is `right`, not
+// `l`: canon 60 §4.4 dropped l/h from this keymap because they mean left/right
+// in nine other TUIs, and a test that pressed `l` would let an undeclared
+// rebinding of them back onto fold pass unnoticed.
+func expandKey() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRight} }
+
 // pressChord types a which-key chord one rune at a time (e.g. "tl" = cycle
 // layer, "vs" = config sources), returning the Model after the last keystroke.
 // The intermediate presses arm the namespace and return a popup tick, which

@@ -58,6 +58,10 @@ type NotesPage struct {
 	moving     bool
 	moveSource notescope.NotesRow
 	moveInput  textinput.Model
+
+	// acts reports whether this BINARY carries the move verb — see JoinPage.
+	// It gates what the page says, not what it does.
+	acts func() bool
 }
 
 var (
@@ -72,12 +76,15 @@ func NewNotesPage(layered *coreconfig.LayeredConfig, keys grovekeymap.ConfigKeyM
 	ti.Prompt = "> "
 	ti.CharLimit = 200
 	ti.Width = 40
-	p := &NotesPage{layered: layered, keys: keys, width: w, height: h, expanded: map[string]bool{}, counts: map[string]noteCounts{}, moveInput: ti}
+	p := &NotesPage{layered: layered, keys: keys, width: w, height: h, expanded: map[string]bool{}, counts: map[string]noteCounts{}, moveInput: ti, acts: notescope.ServiceRegistered}
 	p.Refresh(layered)
 	return p
 }
-func (p *NotesPage) Name() string  { return "Notes" }
-func (p *NotesPage) TabID() string { return "notes" }
+
+// hostCarriesTheActs reports whether this binary can run `notespace move`.
+func (p *NotesPage) hostCarriesTheActs() bool { return p.acts == nil || p.acts() }
+func (p *NotesPage) Name() string             { return "Notes" }
+func (p *NotesPage) TabID() string            { return "notes" }
 func (p *NotesPage) Title() string {
 	return theme.DefaultTheme.Muted.Render("  reads " + setup.AbbreviatePath(coderoot.NotebooksPath()))
 }
@@ -184,29 +191,33 @@ func (p *NotesPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 		return p, cmd
 	}
 
-	switch km.String() {
-	case "up", "k":
+	// Every branch matches a DECLARED binding. Raw strings here would be keys
+	// the registry cannot see — which is how `l`/`h` came back as fold keys in
+	// a TUI that dropped them on purpose (canon 60 §4.4: they mean left/right
+	// in nine other TUIs). Expand/Collapse are `right`/`left`, Toggle is space.
+	switch {
+	case key.Matches(km, p.keys.Up):
 		p.notice = ""
 		if p.cursor > 0 {
 			p.cursor--
 		}
-	case "down", "j":
+	case key.Matches(km, p.keys.Down):
 		p.notice = ""
 		if p.cursor+1 < len(p.rows) {
 			p.cursor++
 		}
-	case "enter", " ", "l", "right":
+	case key.Matches(km, p.keys.Toggle), key.Matches(km, p.keys.Expand), key.Matches(km, p.keys.Edit):
 		p.notice = ""
 		if row, ok := p.current(); ok && row.Kind == notescope.NotesRowNotebook {
 			p.expanded[row.Key] = !p.expanded[row.Key]
 			p.rebuild()
 		}
-	case "h", "left":
+	case key.Matches(km, p.keys.Collapse):
 		if row, ok := p.current(); ok && row.Kind == notescope.NotesRowNotebook && p.expanded[row.Key] {
 			p.expanded[row.Key] = false
 			p.rebuild()
 		}
-	case "m":
+	case key.Matches(km, p.keys.MoveNotespace):
 		return p, p.armMove()
 	}
 	return p, nil
@@ -224,6 +235,13 @@ func (p *NotesPage) current() (notescope.NotesRow, bool) {
 func (p *NotesPage) armMove() tea.Cmd {
 	row, ok := p.current()
 	if !ok {
+		return nil
+	}
+	// Refuse at the FIRST keypress in a host that carries no verbs, not after
+	// the destination has been typed and confirmed: a prompt that collects an
+	// answer it cannot use has already wasted the operator's decision.
+	if !p.hostCarriesTheActs() {
+		p.notice = "this build carries no move verb; run `grove notespace move " + row.Dir + " --to <notebook>`"
 		return nil
 	}
 	if row.Kind != notescope.NotesRowNotespace {

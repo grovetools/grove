@@ -9,10 +9,15 @@ import (
 	"github.com/grovetools/grove/pkg/notescope"
 )
 
+// notesPage builds the page as a host that CARRIES the verbs would. The acts
+// override is explicit because this package does not import grove/cmd, so
+// nothing registers a service here and the real default is "no acts" — which
+// is the treemux case, pinned separately below.
 func notesPage(t *testing.T) *NotesPage {
 	t.Helper()
 	p := NewNotesPage(nil, grovekeymap.NewConfigKeyMap(nil), 120, 40)
 	p.active = true
+	p.acts = func() bool { return true }
 	return p
 }
 
@@ -48,7 +53,7 @@ func TestNotesPageSyncColumnIsDerivedAndHasNoPerRowToggle(t *testing.T) {
 	// sync state of their own, and that the space key — the checkbox key on the
 	// Code page — writes nothing here.
 	p.cursor = rowIndex(t, p, notescope.NotesRowNotebook, "shared")
-	if _, cmd := p.Update(runeKey('l')); cmd != nil {
+	if _, cmd := p.Update(expandKey()); cmd != nil {
 		t.Fatalf("expanding emitted %#v", cmd())
 	}
 	alpha := rowIndex(t, p, notescope.NotesRowNotespace, "shared/alpha")
@@ -92,7 +97,7 @@ func TestNotesPageMoveTakesTwoKeypressesAndRunsTheVerb(t *testing.T) {
 	m := Model{notesPage: p, scopeService: fake.provider}
 
 	p.cursor = rowIndex(t, p, notescope.NotesRowNotebook, "here")
-	_, _ = p.Update(runeKey('l'))
+	_, _ = p.Update(expandKey())
 	alpha := rowIndex(t, p, notescope.NotesRowNotespace, "here/alpha")
 	p.cursor = alpha
 	id := p.rows[alpha].ID
@@ -161,7 +166,7 @@ func TestNotesPageMoveRefusesAnUnmintedNotespace(t *testing.T) {
 	p := notesPage(t)
 	p.Refresh(nil)
 	p.cursor = rowIndex(t, p, notescope.NotesRowNotebook, "here")
-	_, _ = p.Update(runeKey('l'))
+	_, _ = p.Update(expandKey())
 	p.cursor = rowIndex(t, p, notescope.NotesRowNotespace, "here/bare")
 	if _, cmd := p.Update(runeKey('m')); cmd != nil {
 		t.Fatalf("m on an unminted notespace emitted %#v", cmd())

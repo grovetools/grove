@@ -222,6 +222,14 @@ var IntentionalDeviations = []Deviation{
 	{TUI: "git-viewer-changes", Key: "vf", Action: "diff full", Reason: "vf=frontmatter in flow-status; git-viewer-local full-diff view"},
 	{TUI: "grove-config", Key: "vm", Action: "view mode", Reason: "vm=memory in flow-status; config-local view-mode cycle"},
 	{TUI: "grove-release", Key: "vs", Action: "view docs", Reason: "vs=skill-pane in flow-status (and sources in grove-config); release-local docs sections"},
+	// P3 W3.7 notebook scope (grove-config Notes/Join pages). Each of m/p/r is
+	// a FreeKey, so none is a reserved-key violation; these record the
+	// cross-TUI semantic collisions the flat spellings carry. They are
+	// page-local acts on the row under the cursor and have no canonical
+	// ecosystem meaning to inherit.
+	{TUI: "grove-config", Key: "m", Action: "move notespace", Reason: "m=move mode in nav-manage/nav-windows; same verb family, config-local object (a notespace, not the pane layout)"},
+	{TUI: "grove-config", Key: "p", Action: "pull notebook", Reason: "p=paste in nb-browser, toggle-paths in nav-manage; the join-delta page's pull direction, per spec §10"},
+	{TUI: "grove-config", Key: "r", Action: "fetch join delta", Reason: "r=run/confirm in flow-status and tend-runner, refresh in tend-sessions; the ONLY key on this page that opens a device session, so it stays the one flat ask"},
 }
 
 // isIntentional reports whether (tui, key, normAction) is an allowlisted

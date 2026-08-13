@@ -156,6 +156,19 @@ type Model struct {
 	// Production leaves it nil (notescope.ResolveService); tests inject a fake
 	// so no keypath here can reach a real server or a live config.
 	scopeService func() (notescope.Service, error)
+
+	// scopeBusy is true from the moment a notebook-scope intent is dispatched
+	// until its result lands. Exactly one act runs at a time.
+	//
+	// Bubbletea runs every returned Cmd in its own goroutine, so without this
+	// a held-down `s` (or an impatient second press) starts a second
+	// `grove notebook share` while the first is mid-flight: two read-modify-write
+	// cycles over notebooks.toml, and two id mints racing into the same root —
+	// which is the duplicate-stamp state (D8) this phase exists to repair, minted
+	// by the page that reports it. The verbs are not re-entrant and nothing
+	// downstream locks, so the gate belongs here, at the one place every intent
+	// passes through.
+	scopeBusy bool
 }
 
 // New creates a new config TUI Model.
@@ -342,9 +355,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// terminal is the refusal this TUI shows.
 
 	case fetchJoinDeltaMsg:
+		if m.scopeBusy {
+			// The page armed its spinner on the keypress; disarm it, because
+			// the fetch it was waiting for is not going to happen.
+			if m.joinPage != nil {
+				m.joinPage.SetLoading(false)
+			}
+			m.statusMsg = scopeBusyStatus
+			return m, nil
+		}
+		m.scopeBusy = true
 		return m, m.fetchJoinDelta()
 
 	case joinDeltaLoadedMsg:
+		m.scopeBusy = false
 		if m.joinPage == nil {
 			return m, nil
 		}
@@ -358,21 +382,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case shareNotebookMsg:
+		if m.scopeBusy {
+			m.statusMsg = scopeBusyStatus
+			return m, nil
+		}
+		m.scopeBusy = true
 		return m, m.runScopeAction(func(ctx context.Context, svc notescope.Service) (notescope.ActionResult, error) {
 			return svc.Share(ctx, msg.notebook)
 		})
 
 	case pullNotebookMsg:
+		if m.scopeBusy {
+			m.statusMsg = scopeBusyStatus
+			return m, nil
+		}
+		m.scopeBusy = true
 		return m, m.runScopeAction(func(ctx context.Context, svc notescope.Service) (notescope.ActionResult, error) {
 			return svc.Pull(ctx, msg.notebook)
 		})
 
 	case moveNotespaceMsg:
+		if m.scopeBusy {
+			m.statusMsg = scopeBusyStatus
+			return m, nil
+		}
+		m.scopeBusy = true
 		return m, m.runScopeAction(func(ctx context.Context, svc notescope.Service) (notescope.ActionResult, error) {
 			return svc.Move(ctx, msg.notespace, msg.to)
 		})
 
 	case scopeActionDoneMsg:
+		m.scopeBusy = false
 		// The verb's own evidence is the status, refused or not: it names the
 		// file, the root and the server's answer, and paraphrasing it here
 		// would drop exactly the part that explains what to do next.
@@ -389,6 +429,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// delta is now stale. Re-deriving it needs the server again — but only
 		// for a page that had already asked.
 		if msg.err == nil && m.joinPage != nil && m.joinPage.Fetched() {
+			m.scopeBusy = true
 			m.joinPage.SetLoading(true)
 			return m, m.fetchJoinDelta()
 		}

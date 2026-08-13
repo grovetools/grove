@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	coreconfig "github.com/grovetools/core/config"
@@ -55,8 +56,21 @@ type JoinPage struct {
 	loading   bool
 
 	scanned []notescope.Notebook
-	err     error
-	notice  string
+	// err is the LOCAL half's error — the scan. fetchErr is the server half's.
+	// They are separate because Refresh re-runs on every config reload and
+	// clears what it re-derives: folded together, an unrelated config write
+	// would erase the reason the last fetch failed while the page still shows
+	// no comparison, leaving the operator with a blank page and no cause.
+	err      error
+	fetchErr error
+	notice   string
+
+	// acts reports whether this BINARY carries the verbs. Production reads the
+	// registration; a test sets it to pin either host. It gates what the page
+	// SAYS, never what it does — an act that got past this still goes through
+	// the Model and gets ErrNoService, because the page is not the authority on
+	// whether a verb can run.
+	acts func() bool
 }
 
 var (
@@ -66,10 +80,13 @@ var (
 )
 
 func NewJoinPage(layered *coreconfig.LayeredConfig, keys grovekeymap.ConfigKeyMap, w, h int) *JoinPage {
-	p := &JoinPage{layered: layered, keys: keys, width: w, height: h, expanded: map[string]bool{}}
+	p := &JoinPage{layered: layered, keys: keys, width: w, height: h, expanded: map[string]bool{}, acts: notescope.ServiceRegistered}
 	p.Refresh(layered)
 	return p
 }
+
+// hostCarriesTheActs reports whether this binary can run share/pull at all.
+func (p *JoinPage) hostCarriesTheActs() bool { return p.acts == nil || p.acts() }
 
 func (p *JoinPage) Name() string  { return "Join" }
 func (p *JoinPage) TabID() string { return "join" }
@@ -104,17 +121,18 @@ func (p *JoinPage) SetInventory(inventory syncproto.InventoryResponse, scanned [
 	p.inventory = inventory
 	p.fetched = true
 	p.loading = false
-	p.err = nil
+	p.fetchErr = nil
 	if scanned != nil {
 		p.scanned = scanned
 	}
 	p.rebuild()
 }
 
-// SetError records why the last fetch produced no comparison.
+// SetError records why the last fetch produced no comparison. It survives the
+// config reloads that re-derive the local half.
 func (p *JoinPage) SetError(err error) {
 	p.loading = false
-	p.err = err
+	p.fetchErr = err
 }
 
 func (p *JoinPage) rebuild() {
@@ -143,8 +161,11 @@ func (p *JoinPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 	if !ok {
 		return p, nil
 	}
-	switch km.String() {
-	case "r":
+	// Declared bindings only — see the note on NotesPage.Update. The two acting
+	// keys are matched through the keymap AND checked against the row's own
+	// Action, so a rebind moves the key without moving which rows it acts on.
+	switch {
+	case key.Matches(km, p.keys.FetchJoinDelta):
 		if p.loading {
 			p.notice = "already asking the server"
 			return p, nil
@@ -152,30 +173,30 @@ func (p *JoinPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
 		p.notice = ""
 		p.loading = true
 		return p, func() tea.Msg { return fetchJoinDeltaMsg{} }
-	case "up", "k":
+	case key.Matches(km, p.keys.Up):
 		p.notice = ""
 		if p.cursor > 0 {
 			p.cursor--
 		}
-	case "down", "j":
+	case key.Matches(km, p.keys.Down):
 		p.notice = ""
 		if p.cursor+1 < len(p.rows) {
 			p.cursor++
 		}
-	case "enter", " ", "l", "right":
+	case key.Matches(km, p.keys.Toggle), key.Matches(km, p.keys.Expand), key.Matches(km, p.keys.Edit):
 		p.notice = ""
 		if row, ok := p.current(); ok && row.Expandable {
 			p.expanded[row.Key] = !p.expanded[row.Key]
 			p.rebuild()
 		}
-	case "h", "left":
+	case key.Matches(km, p.keys.Collapse):
 		if row, ok := p.current(); ok && row.Expandable && p.expanded[row.Key] {
 			p.expanded[row.Key] = false
 			p.rebuild()
 		}
-	case notescope.JoinActionPull:
+	case key.Matches(km, p.keys.PullNotebook):
 		return p, p.act(notescope.JoinActionPull, func(name string) tea.Msg { return pullNotebookMsg{notebook: name} })
-	case notescope.JoinActionShare:
+	case key.Matches(km, p.keys.ShareNotebook):
 		return p, p.act(notescope.JoinActionShare, func(name string) tea.Msg { return shareNotebookMsg{notebook: name} })
 	}
 	return p, nil
@@ -210,9 +231,19 @@ func (p *JoinPage) View() string {
 	if p.err != nil {
 		lines = append(lines, t.Error.Render(p.err.Error()), "")
 	}
+	if p.fetchErr != nil {
+		lines = append(lines, t.Error.Render(p.fetchErr.Error()), "")
+	}
+	acts := p.hostCarriesTheActs()
 	switch {
 	case p.loading:
 		lines = append(lines, t.Muted.Render("asking the server for its inventory…"))
+	case !p.fetched && !acts:
+		lines = append(lines,
+			t.Bold.Render("No comparison yet"),
+			t.Warning.Render("This build carries the pages but not the acts, so r, p and s cannot run here."),
+			t.Muted.Render("Run them as `grove sync join`, `grove notebook pull <name>` and `grove notebook share <name>`,"),
+			t.Muted.Render("or open the same page in the grove binary with `grove config`."))
 	case !p.fetched:
 		lines = append(lines,
 			t.Bold.Render("No comparison yet"),
@@ -261,7 +292,11 @@ func (p *JoinPage) View() string {
 	}
 
 	if p.fetched {
-		lines = append(lines, "", t.Muted.Render("Nothing above moved. p pulls · s shares · m moves a notespace on the Notes page."))
+		footer := "Nothing above moved. p pulls · s shares · m moves a notespace on the Notes page."
+		if !acts {
+			footer = "Nothing above moved, and nothing here can: this build carries no acts. Run `grove notebook pull|share <name>`."
+		}
+		lines = append(lines, "", t.Muted.Render(footer))
 	}
 	if p.notice != "" {
 		lines = append(lines, "", t.Muted.Render(p.notice))

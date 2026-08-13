@@ -923,6 +923,15 @@ var TUIRegistry = []TUIRegistryEntry{
 				},
 			},
 			{
+				Name: "Notebook Scope",
+				Bindings: []BindingEntry{
+					{Name: "MoveNotespace", Keys: []string{"m"}, Description: "move notespace", Enabled: true, ConfigKey: "move_notespace"},
+					{Name: "ShareNotebook", Keys: []string{"s"}, Description: "share notebook", Enabled: true, ConfigKey: "share_notebook"},
+					{Name: "PullNotebook", Keys: []string{"p"}, Description: "pull notebook", Enabled: true, ConfigKey: "pull_notebook"},
+					{Name: "FetchJoinDelta", Keys: []string{"r"}, Description: "fetch join delta", Enabled: true, ConfigKey: "fetch_join_delta"},
+				},
+			},
+			{
 				Name: "System",
 				Bindings: []BindingEntry{
 					{Name: "Help", Keys: []string{"?"}, Description: "help", Enabled: true, ConfigKey: "help"},
