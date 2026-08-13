@@ -306,11 +306,89 @@ func TestNotebookPullBindsServerNotebookAtRecordedRoot(t *testing.T) {
 	requireContains(t, got, "awaiting     "+fixtureNotespace2, "notespaces the server still owes")
 	requireContains(t, got, "this verb wrote none", "pull writes no documents")
 	requireContains(t, got, `"notespaces-awaiting-delivery": 1`, "evidence counts")
+	requireContains(t, got, `"notespaces-bound": 1`, "the members it gave a local identity")
 	requireContains(t, got, `transition: "notebook pull"`, "transition evidence")
 
-	// Pull materializes nothing itself: the awaited notespace has no directory.
+	// The awaited notespace is BOUND — an empty directory carrying the server's
+	// stamp — because containment is what syncs it and containment recognizes a
+	// notespace by its stamp. Delivery is still the daemon's.
+	betaRoot := box.notespaceRoot("team", "beta")
+	betaStamp, err := notespace.LoadNotespace(betaRoot)
+	if err != nil || betaStamp == nil || betaStamp.ID != fixtureNotespace2 {
+		t.Fatalf("pull did not bind the awaited notespace to the server's id: %v %+v", err, betaStamp)
+	}
+	if betaStamp.Subject != "local:"+fixtureNotespace2 || betaStamp.Kind != "notes" {
+		t.Fatalf("the bound stamp did not carry the server's subject and kind: %+v", betaStamp)
+	}
+	requireContains(t, got, "bound        "+fixtureNotespace2, "the binding is printed per member")
+	entries, err := os.ReadDir(betaRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() != ".notespace.toml" {
+			t.Fatalf("pull wrote %q into a bound notespace; documents are the daemon's", entry.Name())
+		}
+	}
+	// The identity is RECORDED, not only stamped: a stamp with no [subjects]
+	// entry is a notespace nothing resolves by identity.
+	machine, err := config.LoadMachineConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if machine.Primaries["local:"+fixtureNotespace2] != fixtureNotespace2 {
+		t.Fatalf("pull bound a notespace without recording its primary: %+v", machine.Primaries)
+	}
+}
+
+// Binding is the one act in pull that could CREATE the duplicate-stamp
+// condition its own preflight refuses to act on, so a member whose id is
+// already stamped on this machine is reported and skipped.
+func TestNotebookPullWillNotBindADuplicateNotespaceID(t *testing.T) {
+	box := sandboxNotebookScope(t)
+	server := newFakeSync(t)
+	server.addNotebook(fixtureNotebookC, "team", "shared", 4)
+	server.addNotespace(fixtureNotespace2, "beta", fixtureNotebookC, 1, 3)
+	// The same id is already stamped in another recorded notebook.
+	box.recordNotebooks(t, "team", map[string]notebookFixture{
+		"team":     {},
+		"personal": {Notespaces: []notespaceFixture{{Dir: "beta-elsewhere", ID: fixtureNotespace2}}},
+	})
+	box.recordSyncServer(t, server.URL)
+
+	var out bytes.Buffer
+	if err := runNotebookPull(context.Background(), &out, "team", false); err != nil {
+		t.Fatalf("notebook pull: %v", err)
+	}
+	got := out.String()
+	requireContains(t, got, "not bound    "+fixtureNotespace2, "the skip is reported per member")
+	requireContains(t, got, "would record one notespace id twice", "the skip says why")
+	requireContains(t, got, `"notespaces-not-bound": 1`, "evidence counts the skip")
 	if _, statErr := os.Stat(box.notespaceRoot("team", "beta")); statErr == nil {
-		t.Fatal("pull created a notespace directory; delivery is the daemon's")
+		t.Fatal("pull bound an id this machine already stamps elsewhere")
+	}
+}
+
+// A directory already sitting at that name under a different id is left
+// exactly as it is: a stamp is immutable, and the operator has notes there.
+func TestNotebookPullWillNotReKeyAnExistingNotespace(t *testing.T) {
+	box := sandboxNotebookScope(t)
+	server := newFakeSync(t)
+	server.addNotebook(fixtureNotebookC, "team", "shared", 4)
+	server.addNotespace(fixtureNotespace2, "beta", fixtureNotebookC, 1, 3)
+	box.recordNotebooks(t, "team", map[string]notebookFixture{
+		"team": {Notespaces: []notespaceFixture{{Dir: "beta", ID: fixtureNotespace3}}},
+	})
+	box.recordSyncServer(t, server.URL)
+
+	var out bytes.Buffer
+	if err := runNotebookPull(context.Background(), &out, "team", false); err != nil {
+		t.Fatalf("notebook pull: %v", err)
+	}
+	requireContains(t, out.String(), "a stamp is immutable", "the skip says why")
+	stamp, err := notespace.LoadNotespace(box.notespaceRoot("team", "beta"))
+	if err != nil || stamp == nil || stamp.ID != fixtureNotespace3 {
+		t.Fatalf("pull re-keyed an existing notespace: %v %+v", err, stamp)
 	}
 }
 

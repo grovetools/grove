@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -313,13 +315,7 @@ func mintNotebookIdentity(out io.Writer, nb *recordedNotebook, scanned []recorde
 		fmt.Fprintf(out, "  minted       %s  notebook %s\n", stamp.ID, nb.Name)
 	}
 
-	type identity struct {
-		id      string
-		subject string
-		root    string
-		minted  bool
-	}
-	identities := make([]identity, 0, len(nb.Notespaces))
+	identities := make([]notespaceIdentity, 0, len(nb.Notespaces))
 	for i := range nb.Notespaces {
 		ns := &nb.Notespaces[i]
 		if ns.Stamp == nil {
@@ -331,16 +327,44 @@ func mintNotebookIdentity(out io.Writer, nb *recordedNotebook, scanned []recorde
 			ns.Stamp = stamp
 			result.minted++
 			fmt.Fprintf(out, "  minted       %s  notespace %s (subject %s)\n", stamp.ID, ns.Dir, stamp.Subject)
-			identities = append(identities, identity{id: stamp.ID, subject: stamp.Subject, root: ns.Root, minted: true})
+			identities = append(identities, notespaceIdentity{id: stamp.ID, subject: stamp.Subject, root: ns.Root, minted: true})
 			continue
 		}
 		if strings.TrimSpace(ns.Stamp.Subject) == "" {
 			continue
 		}
-		identities = append(identities, identity{id: ns.Stamp.ID, subject: ns.Stamp.Subject, root: ns.Root})
+		identities = append(identities, notespaceIdentity{id: ns.Stamp.ID, subject: ns.Stamp.Subject, root: ns.Root})
 	}
+	recorded, err := recordNotespaceIdentities(identities, scanned)
+	if err != nil {
+		return result, err
+	}
+	result.recorded = recorded
+	return result, nil
+}
+
+// notespaceIdentity is one (id, subject, root) triple on its way into
+// machine.toml. minted distinguishes an id this run created from one it merely
+// found — a subject collision means different things for the two.
+type notespaceIdentity struct {
+	id      string
+	subject string
+	root    string
+	minted  bool
+}
+
+// recordNotespaceIdentities fills the machine.toml half of P2 identity —
+// [primaries] per subject, [subjects] per root — for identities that have one
+// and do not have a record yet.
+//
+// It is shared by share (which mints local ids) and pull (which installs the
+// server's), because the invariant is about the RECORD, not about where the id
+// came from: a stamp on disk with no [primaries]/[subjects] entry is a
+// notespace nothing can resolve by identity, and both verbs are capable of
+// producing one.
+func recordNotespaceIdentities(identities []notespaceIdentity, scanned []recordedNotebook) (int64, error) {
 	if len(identities) == 0 {
-		return result, nil
+		return 0, nil
 	}
 
 	// Nothing is written unless something is missing, so a re-shared notebook
@@ -351,7 +375,7 @@ func mintNotebookIdentity(out io.Writer, nb *recordedNotebook, scanned []recorde
 	if loadErr == nil && machineCfg != nil {
 		recordedPrimaries, recordedSubjects = machineCfg.Primaries, machineCfg.Subjects
 	}
-	var missing []identity
+	var missing []notespaceIdentity
 	for _, candidate := range identities {
 		_, hasPrimary := recordedPrimaries[candidate.subject]
 		_, hasSubject := recordedSubjects[canonicalPath(candidate.root)]
@@ -360,7 +384,7 @@ func mintNotebookIdentity(out io.Writer, nb *recordedNotebook, scanned []recorde
 		}
 	}
 	if len(missing) == 0 {
-		return result, nil
+		return 0, nil
 	}
 
 	// The stamp index this transaction is checked against covers what is on
@@ -420,11 +444,10 @@ func mintNotebookIdentity(out io.Writer, nb *recordedNotebook, scanned []recorde
 		}
 		return nil
 	}); err != nil {
-		return result, fmt.Errorf("record notespace identities in machine.toml: %w", err)
+		return 0, fmt.Errorf("record notespace identities in machine.toml: %w", err)
 	}
-	result.recorded = recorded
 	config.ResetLoadCache()
-	return result, nil
+	return recorded, nil
 }
 
 // localStateAfterRefusal says what a refused share leaves behind.
@@ -494,9 +517,16 @@ What pull does: reads the server's inventory, binds this root to the server's
 notebook id (installing .notebook.toml when the root carries none, refusing when
 it carries a DIFFERENT id — a stamp is immutable, and refusing too when another
 recorded root already carries that id, because binding it twice would record one
-notebook id twice), and records
-[notebooks.<name>.sync] share = true so the notebook is in scope for sync in
-both directions.
+notebook id twice), binds every notespace the server holds in that notebook the
+same way (an empty directory under notespaces/ carrying the SERVER's stamp, so
+the daemon has something to replicate into and recognizes it by identity), and
+records [notebooks.<name>.sync] share = true so the notebook is in scope for
+sync in both directions.
+
+A notespace whose id is already stamped elsewhere on this machine, or whose
+name is taken by a directory stamped differently, is reported and skipped
+rather than bound: binding it twice would create the duplicate-stamp condition
+this verb's own preflight refuses to act on.
 
 What pull does NOT do: write documents. The daemon replicates into the recorded
 root; this verb reports which notespaces the server holds and which of them are
@@ -608,6 +638,10 @@ func runNotebookPull(ctx context.Context, out io.Writer, name string, asJSON boo
 	for _, id := range here {
 		fmt.Fprintf(out, "  here         %s  %s\n", id, describeInventoryNotespace(inventory, id))
 	}
+	bound, refused, err := bindServerNotespaces(out, nb, scanned, inventory, awaiting)
+	if err != nil {
+		return err
+	}
 	for _, id := range awaiting {
 		fmt.Fprintf(out, "  awaiting     %s  %s\n", id, describeInventoryNotespace(inventory, id))
 	}
@@ -628,6 +662,8 @@ func runNotebookPull(ctx context.Context, out io.Writer, name string, asJSON boo
 			{Name: "notespaces-on-server", Value: int64(len(target.NotespaceIDs))},
 			{Name: "notespaces-already-here", Value: int64(len(here))},
 			{Name: "notespaces-awaiting-delivery", Value: int64(len(awaiting))},
+			{Name: "notespaces-bound", Value: bound},
+			{Name: "notespaces-not-bound", Value: refused},
 		},
 		ResolvedRoots: []transition.ResolvedRoot{{Name: nb.Name, Declared: nb.Declared, Resolved: nb.Root}},
 		ServerReceipt: receipt,
@@ -642,6 +678,100 @@ func runNotebookPull(ctx context.Context, out io.Writer, name string, asJSON boo
 		return transition.RenderJSON(out, evidence)
 	}
 	return transition.RenderHuman(out, evidence)
+}
+
+// bindServerNotespaces gives every notespace the server holds in this notebook
+// a local identity: the directory under <root>/notespaces/, carrying the
+// SERVER's stamp.
+//
+// This is the other half of "containment is consent". The daemon syncs a
+// notespace because its notebook is shared, and it recognizes a notespace by
+// the stamp at its root — so on the receiving machine the whole promise ("share
+// a notebook on A and its notes appear on B") hangs on those stamps existing.
+// Nothing else was going to write them: share mints local ids on the machine
+// that publishes, and the daemon refuses to invent an identity for a tree it
+// found, which is exactly the discipline that makes ids trustworthy.
+//
+// It still writes no documents. A bound notespace is an empty stamped
+// directory; the daemon replicates into it, which is what pull has always said
+// happens next.
+//
+// Every refusal here is per member and printed, never fatal, and never a
+// re-key:
+//
+//   - an id already stamped somewhere else on this machine is skipped, because
+//     binding it a second time would CREATE the duplicate-stamp condition (D8)
+//     that pull's own notebook-level preflight refuses to act on;
+//   - a directory already sitting at that name under a different id is left
+//     alone — a stamp is immutable, and the operator has notes there;
+//   - a server name that is not a single path component is refused rather than
+//     joined, because a name is a directory here and the server's is not a
+//     path this machine agreed to.
+func bindServerNotespaces(out io.Writer, nb recordedNotebook, scanned []recordedNotebook, inventory serverInventory, awaiting []string) (int64, int64, error) {
+	if len(awaiting) == 0 {
+		return 0, 0, nil
+	}
+	// Where every id on this machine already lives, so a second binding of one
+	// is refused rather than produced.
+	stampedAt := map[string]string{}
+	for _, entry := range scanned {
+		for _, ns := range entry.Notespaces {
+			if ns.ID() != "" {
+				stampedAt[ns.ID()] = ns.Root
+			}
+		}
+	}
+
+	var bound, refused int64
+	identities := make([]notespaceIdentity, 0, len(awaiting))
+	for _, id := range awaiting {
+		ns, ok := inventory.notespaceByID(syncproto.NotespaceID(id))
+		if !ok {
+			fmt.Fprintf(out, "  not bound    %s  the server lists it in this notebook but returned no notespace row\n", id)
+			refused++
+			continue
+		}
+		name := strings.TrimSpace(ns.Name.String())
+		if name == "" || name != filepath.Base(name) || name == "." || name == ".." {
+			fmt.Fprintf(out, "  not bound    %s  the server calls it %q, which is not a directory name this machine can bind\n", id, ns.Name.String())
+			refused++
+			continue
+		}
+		if other, clash := stampedAt[id]; clash {
+			fmt.Fprintf(out, "  not bound    %s  already stamped at %s; binding it twice would record one notespace id twice\n", id, other)
+			refused++
+			continue
+		}
+		root := filepath.Join(nb.Root, notespaceContainerDir, name)
+		existing, err := notespace.LoadNotespace(root)
+		if err != nil {
+			return bound, refused, fmt.Errorf("read the notespace stamp at %s: %w", root, err)
+		}
+		if existing != nil {
+			fmt.Fprintf(out, "  not bound    %s  %s is stamped %s; a stamp is immutable, so this is a different notespace\n", id, root, existing.ID)
+			refused++
+			continue
+		}
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			return bound, refused, fmt.Errorf("create the notespace root %s: %w", root, err)
+		}
+		stamp, err := notespace.InstallNotespace(root, notespace.NotespaceStamp{
+			ID: id, Name: name, Subject: ns.Subject, Kind: ns.Kind,
+		})
+		if err != nil {
+			return bound, refused, fmt.Errorf("bind %s to notespace %s: %w", root, id, err)
+		}
+		stampedAt[id] = root
+		bound++
+		fmt.Fprintf(out, "  bound        %s  %s\n", id, root)
+		if strings.TrimSpace(stamp.Subject) != "" {
+			identities = append(identities, notespaceIdentity{id: stamp.ID, subject: stamp.Subject, root: root})
+		}
+	}
+	if _, err := recordNotespaceIdentities(identities, scanned); err != nil {
+		return bound, refused, err
+	}
+	return bound, refused, nil
 }
 
 func describeInventoryNotespace(inventory serverInventory, id string) string {
