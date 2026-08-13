@@ -223,6 +223,25 @@ func refuseDuplicateNotebookIDs(scanned []recordedNotebook) error {
 	return syncproto.BuildInventoryDelta(deltaLocalNotebooks(scanned), syncproto.InventoryResponse{}).Conflicts()
 }
 
+// notebookStampedElsewhere reports another recorded notebook already carrying
+// this notebook id.
+//
+// It exists for the one verb that can CREATE a duplicate rather than merely
+// meet one: `notebook pull` installs a server-supplied id into a root that
+// carried none, and doing that while a second recorded root already holds it
+// would mint the exact D8 state every other verb here refuses to act on.
+func notebookStampedElsewhere(scanned []recordedNotebook, exclude string, id syncproto.NotebookID) (recordedNotebook, bool) {
+	for _, entry := range scanned {
+		if entry.Name == exclude {
+			continue
+		}
+		if entry.ID() != "" && syncproto.NotebookID(entry.ID()) == id {
+			return entry, true
+		}
+	}
+	return recordedNotebook{}, false
+}
+
 // ---- server inventory --------------------------------------------------------
 
 // serverInventory is one answered GET /sync/inventory: the decoded response
@@ -323,6 +342,23 @@ func (s serverInventory) notespaceByID(id syncproto.NotespaceID) (syncproto.Inve
 // inventoryReceipt seals the inventory exchange as transition evidence.
 func (s serverInventory) receipt(requestID string) (*transition.ServerReceipt, error) {
 	return transition.NewServerReceipt(s.RequestJSON, s.ReplyJSON, requestID)
+}
+
+// refuseUnexplainedStatus turns a non-2xx the server did not explain into an
+// error.
+//
+// doJSONStatus deliberately returns a nil error whenever the body decodes,
+// because on these surfaces a typed ProtocolError IS the answer — a 409 naming
+// the notebook a member already belongs to is evidence, not a transport
+// failure. The gap that leaves is a non-2xx whose body decodes into a response
+// carrying NO error at all: nothing in the v3 protocol produces one, but a
+// proxy, a future server, or a route that changed shape can, and reading it as
+// success would let a verb record a share the server never granted.
+func refuseUnexplainedStatus(status int, wire *syncproto.ProtocolError, requestID string) error {
+	if (status >= 200 && status < 300) || wire != nil {
+		return nil
+	}
+	return fmt.Errorf("%s returned HTTP %d with a body that names no protocol error; refusing to read an unexplained refusal as success", requestID, status)
 }
 
 // ---- idempotency --------------------------------------------------------------

@@ -371,6 +371,11 @@ func joinDeltaCounts(delta syncproto.InventoryDelta) []transition.Count {
 		{Name: "notespaces-here-only", Value: localOnly},
 		{Name: "notespaces-server-only", Value: serverOnly},
 		{Name: "notespaces-unparented-on-server", Value: int64(len(delta.UnparentedServerNotespaces))},
+		// The duplicate count travels in the evidence, not only in the rendered
+		// table: `--json` is what a script reads, and the D8 condition that
+		// makes every acting verb refuse must not be visible in one rendering
+		// and absent from the other.
+		{Name: "notebooks-with-duplicate-ids", Value: int64(len(delta.DuplicateLocalNotebooks))},
 	}
 }
 

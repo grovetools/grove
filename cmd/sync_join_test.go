@@ -116,6 +116,16 @@ func TestSyncJoinRendersADuplicateNotebookIDInsteadOfHidingIt(t *testing.T) {
 	requireContains(t, out.String(), "duplicate notebook id", "the duplicate is reported")
 	requireContains(t, out.String(), "(duplicate id)", "the row is marked")
 	requireContains(t, out.String(), `transition: "sync join"`, "the delta still renders")
+
+	// The same fact has to survive the machine-readable rendering: `--json` is
+	// what a script reads, and a condition that makes every acting verb refuse
+	// must not be visible in one rendering and absent from the other.
+	var asJSON bytes.Buffer
+	if err := runSyncJoin(context.Background(), &asJSON, syncJoinOptions{server: server.URL, asJSON: true}); err != nil {
+		t.Fatalf("sync join --json: %v", err)
+	}
+	requireContains(t, asJSON.String(), `"notebooks-with-duplicate-ids"`, "the duplicate count travels in the evidence")
+	requireNotContains(t, asJSON.String(), `"notebooks-with-duplicate-ids": 0`, "and carries the real count")
 }
 
 func TestSyncJoinReportsRecordedRegistryBindingWithoutCreatingOne(t *testing.T) {

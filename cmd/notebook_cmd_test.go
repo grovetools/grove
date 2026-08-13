@@ -113,27 +113,120 @@ func TestNotebookShareRefusesMissingRoot(t *testing.T) {
 	}
 }
 
-func TestNotebookShareRefusalRecordsNothingLocally(t *testing.T) {
+// TestNotebookShareRefusalSaysWhatItLeftBehind pins what a rejected share is
+// allowed to claim. notebooks.toml is never written — that is the whole point
+// of writing it last — but "nothing was recorded locally" is a sentence about
+// the DISK, and minting runs before the server is asked. So the refusal states
+// whichever of the two is true, and the identity work that had already landed
+// is named rather than denied.
+func TestNotebookShareRefusalSaysWhatItLeftBehind(t *testing.T) {
+	newRefusedShare := func(t *testing.T) (scopeSandbox, *fakeSync) {
+		t.Helper()
+		box := sandboxNotebookScope(t)
+		server := newFakeSync(t)
+		// The notespace already belongs to another notebook on the server,
+		// which is a move, not a share — the server refuses the whole request.
+		server.addNotebook(fixtureNotebookB, "other", "shared", 1)
+		server.addNotespace(fixtureNotespace1, "alpha", fixtureNotebookB, 1, 0)
+		box.recordNotebooks(t, "research", map[string]notebookFixture{
+			"research": {Stamp: fixtureNotebookA, Notespaces: []notespaceFixture{
+				{Dir: "alpha", ID: fixtureNotespace1, Subject: "local:" + fixtureNotespace1},
+			}},
+		})
+		box.recordSyncServer(t, server.URL)
+		return box, server
+	}
+
+	t.Run("nothing was written", func(t *testing.T) {
+		box, _ := newRefusedShare(t)
+		// The identity is already recorded, so this run writes nothing at all
+		// before the server refuses.
+		writeMachineIdentity(t, map[string]string{"local:" + fixtureNotespace1: fixtureNotespace1},
+			map[string]string{canonicalPath(box.notespaceRoot("research", "alpha")): "local:" + fixtureNotespace1})
+
+		var out bytes.Buffer
+		err := runNotebookShare(context.Background(), &out, "research", false)
+		if err == nil {
+			t.Fatal("share succeeded although the server rejected a member")
+		}
+		requireContains(t, out.String(), "rejected", "per-member rejection evidence")
+		requireContains(t, err.Error(), "nothing was recorded locally", "the refusal says what was not written")
+		if strings.Contains(box.readNotebooksTOML(t), "share = true") {
+			t.Fatalf("a rejected share was recorded in notebooks.toml:\n%s", box.readNotebooksTOML(t))
+		}
+	})
+
+	t.Run("identity records were written first", func(t *testing.T) {
+		box, _ := newRefusedShare(t)
+
+		err := runNotebookShare(context.Background(), &bytes.Buffer{}, "research", false)
+		if err == nil {
+			t.Fatal("share succeeded although the server rejected a member")
+		}
+		requireContains(t, err.Error(), "notebooks.toml records no share", "the write that comes last did not happen")
+		requireContains(t, err.Error(), "machine.toml identity record", "and the writes that come first are named")
+		requireNotContains(t, err.Error(), "nothing was recorded locally", "a refusal must not deny writes it made")
+		if strings.Contains(box.readNotebooksTOML(t), "share = true") {
+			t.Fatalf("a rejected share was recorded in notebooks.toml:\n%s", box.readNotebooksTOML(t))
+		}
+		// The records it did write are the ones it says it wrote.
+		machineCfg, cfgErr := config.LoadMachineConfig()
+		if cfgErr != nil || machineCfg == nil {
+			t.Fatalf("machine.toml: %v", cfgErr)
+		}
+		if machineCfg.Primaries["local:"+fixtureNotespace1] != fixtureNotespace1 {
+			t.Fatalf("[primaries] was not recorded: %+v", machineCfg.Primaries)
+		}
+	})
+}
+
+// TestNotebookShareRecordsIdentityForAlreadyStampedNotespaces closes the hole a
+// mint-only transaction left. A stamp is written to disk before the machine.toml
+// record, so a failure between the two produced an id that exists forever and a
+// [primaries] entry nothing would ever write: the next run sees the stamp and
+// mints nothing. Share therefore records what is ABSENT rather than only what it
+// just minted, and converges on a re-run.
+func TestNotebookShareRecordsIdentityForAlreadyStampedNotespaces(t *testing.T) {
 	box := sandboxNotebookScope(t)
 	server := newFakeSync(t)
-	// The notespace already belongs to another notebook on the server, which is
-	// a move, not a share — the server refuses the whole request.
-	server.addNotebook(fixtureNotebookB, "other", "shared", 1)
-	server.addNotespace(fixtureNotespace1, "alpha", fixtureNotebookB, 1, 0)
 	box.recordNotebooks(t, "research", map[string]notebookFixture{
-		"research": {Stamp: fixtureNotebookA, Notespaces: []notespaceFixture{{Dir: "alpha", ID: fixtureNotespace1}}},
+		"research": {Stamp: fixtureNotebookA, Notespaces: []notespaceFixture{
+			{Dir: "alpha", ID: fixtureNotespace1, Subject: "local:" + fixtureNotespace1},
+		}},
 	})
 	box.recordSyncServer(t, server.URL)
+	// machine.toml already records a DIFFERENT notespace, so the file exists and
+	// the missing entry is a hole rather than an empty file.
+	writeMachineIdentity(t, map[string]string{"local:" + fixtureNotespace2: fixtureNotespace2}, map[string]string{})
 
 	var out bytes.Buffer
-	err := runNotebookShare(context.Background(), &out, "research", false)
-	if err == nil {
-		t.Fatal("share succeeded although the server rejected a member")
+	if err := runNotebookShare(context.Background(), &out, "research", false); err != nil {
+		t.Fatalf("notebook share: %v", err)
 	}
-	requireContains(t, out.String(), "rejected", "per-member rejection evidence")
-	requireContains(t, err.Error(), "nothing was recorded locally", "the refusal says what was not written")
-	if strings.Contains(box.readNotebooksTOML(t), "share = true") {
-		t.Fatalf("a rejected share was recorded in notebooks.toml:\n%s", box.readNotebooksTOML(t))
+	machineCfg, err := config.LoadMachineConfig()
+	if err != nil || machineCfg == nil {
+		t.Fatalf("machine.toml: %v", err)
+	}
+	if machineCfg.Primaries["local:"+fixtureNotespace1] != fixtureNotespace1 {
+		t.Fatalf("[primaries] does not record the stamped notespace: %+v", machineCfg.Primaries)
+	}
+	if machineCfg.Subjects[canonicalPath(box.notespaceRoot("research", "alpha"))] != "local:"+fixtureNotespace1 {
+		t.Fatalf("[subjects] does not record the stamped notespace path: %+v", machineCfg.Subjects)
+	}
+	if machineCfg.Primaries["local:"+fixtureNotespace2] != fixtureNotespace2 {
+		t.Fatalf("share disturbed an unrelated [primaries] entry: %+v", machineCfg.Primaries)
+	}
+	requireContains(t, out.String(), `"notespaces-minted": 0`, "nothing was minted; the record was repaired")
+	requireContains(t, out.String(), `"machine-identity-records-written": 2`, "the repair is counted as evidence")
+
+	// Converged: a second share writes nothing further.
+	before := machineCfg.Primaries["local:"+fixtureNotespace1]
+	if err := runNotebookShare(context.Background(), &bytes.Buffer{}, "research", false); err != nil {
+		t.Fatalf("second share: %v", err)
+	}
+	after, cfgErr := config.LoadMachineConfig()
+	if cfgErr != nil || after == nil || after.Primaries["local:"+fixtureNotespace1] != before {
+		t.Fatalf("a second share changed a recorded primary: %v %+v", cfgErr, after)
 	}
 }
 
@@ -290,5 +383,35 @@ func TestNotebookPullRefusesToReKeyAStampedRoot(t *testing.T) {
 	stamp, _ := notespace.LoadNotebook(filepath.Join(box.notebooks, "team"))
 	if stamp == nil || stamp.ID != fixtureNotebookA {
 		t.Fatalf("the stamp changed: %+v", stamp)
+	}
+}
+
+// TestNotebookPullRefusesToMintADuplicateNotebookID closes the one way this
+// package could CREATE the state it refuses everywhere else. Binding installs a
+// server-supplied id into an unstamped root; doing that while another recorded
+// root already carries that id would record one notebook id twice (D8), and the
+// verb that produced it would be the same one whose preflight rejects it.
+func TestNotebookPullRefusesToMintADuplicateNotebookID(t *testing.T) {
+	box := sandboxNotebookScope(t)
+	server := newFakeSync(t)
+	server.addNotebook(fixtureNotebookA, "team", "shared", 1)
+	box.recordNotebooks(t, "team", map[string]notebookFixture{
+		// `mirror` already holds the id the server would hand `team`.
+		"mirror": {Stamp: fixtureNotebookA},
+		"team":   {},
+	})
+	box.recordSyncServer(t, server.URL)
+
+	err := runNotebookPull(context.Background(), &bytes.Buffer{}, "team", false)
+	if err == nil {
+		t.Fatal("pull bound an id this machine already records elsewhere")
+	}
+	requireContains(t, err.Error(), "would record one notebook id twice", "the refusal names the duplicate it would create")
+	requireContains(t, err.Error(), filepath.Join(box.notebooks, "mirror"), "and where the id already lives")
+	if stamp, _ := notespace.LoadNotebook(filepath.Join(box.notebooks, "team")); stamp != nil {
+		t.Fatalf("the refused pull stamped the root anyway: %+v", stamp)
+	}
+	if strings.Contains(box.readNotebooksTOML(t), "share = true") {
+		t.Fatalf("a refused pull recorded a share:\n%s", box.readNotebooksTOML(t))
 	}
 }

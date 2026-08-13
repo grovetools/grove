@@ -196,6 +196,15 @@ type fakeSync struct {
 	// ShareError, when set, makes every share fail with this code, which is how
 	// the rollback path is exercised.
 	ShareError string
+	// SuppressDetachRetention drops the retention sentence from a detach
+	// response, so the client's fallback can be pinned: it must label the
+	// protocol's sentence as the protocol's rather than pass it off as this
+	// server's words.
+	SuppressDetachRetention bool
+	// UnexplainedRefusalPath answers this path with a non-2xx whose body
+	// decodes but names no protocol error — the one shape doJSONStatus cannot
+	// tell from success on its own.
+	UnexplainedRefusalPath string
 
 	URL string
 }
@@ -219,6 +228,8 @@ func (f *fakeSync) addNotespace(id, name, notebookID string, membershipVersion, 
 
 func (f *fakeSync) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
+	case f.UnexplainedRefusalPath != "" && r.URL.Path == f.UnexplainedRefusalPath:
+		writeFakeJSON(w, http.StatusConflict, map[string]string{"detail": "a refusal this protocol cannot read"})
 	case r.URL.Path == "/sync/identity":
 		writeFakeJSON(w, http.StatusOK, syncproto.IdentityResponse{ServerEpoch: "epoch", ProtocolVersions: []int{syncproto.ProtocolVersionDeviceSession, syncproto.ProtocolVersionNotespaceID}})
 	case r.URL.Path == "/sync/capabilities":
@@ -406,13 +417,19 @@ func (f *fakeSync) handleReparent(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	target, ok := f.Notebooks[req.ToNotebookID.String()]
-	if !ok || target.ShareState == syncproto.NotebookShareStateUnshared {
-		writeFakeJSON(w, http.StatusConflict, syncproto.NotespaceReparentResponse{
-			NotespaceID: req.NotespaceID,
-			Error:       &syncproto.ProtocolError{Code: syncproto.ErrorNotebookUnshared, Message: "destination is not a shared notebook"},
-		})
-		return
+	// A detach has no destination to qualify — leaving is always allowed — so
+	// the destination is only judged for a move INTO a notebook. The fixture
+	// mirrors the real store here because the client's whole out-of-shared leg
+	// depends on that asymmetry.
+	if !req.Detaching() {
+		target, ok := f.Notebooks[req.ToNotebookID.String()]
+		if !ok || target.ShareState == syncproto.NotebookShareStateUnshared {
+			writeFakeJSON(w, http.StatusConflict, syncproto.NotespaceReparentResponse{
+				NotespaceID: req.NotespaceID,
+				Error:       &syncproto.ProtocolError{Code: syncproto.ErrorNotebookUnshared, Message: "destination is not a shared notebook"},
+			})
+			return
+		}
 	}
 	if ns.NotebookID != req.FromNotebookID.String() || ns.MembershipVersion != req.ExpectedVersion {
 		writeFakeJSON(w, http.StatusPreconditionFailed, syncproto.NotespaceReparentResponse{
@@ -423,10 +440,18 @@ func (f *fakeSync) handleReparent(w http.ResponseWriter, r *http.Request) {
 	}
 	ns.NotebookID = req.ToNotebookID.String()
 	ns.MembershipVersion++
-	writeFakeJSON(w, http.StatusOK, syncproto.NotespaceReparentResponse{
+	response := syncproto.NotespaceReparentResponse{
 		NotespaceID: req.NotespaceID, FromNotebookID: req.FromNotebookID, ToNotebookID: req.ToNotebookID,
 		Version: ns.MembershipVersion, Cursor: ns.Cursor, HistoryPreserved: true,
-	})
+	}
+	if req.Detaching() {
+		response.Detached = true
+		response.Retention = syncproto.DetachRetentionStatement
+		if f.SuppressDetachRetention {
+			response.Retention = ""
+		}
+	}
+	writeFakeJSON(w, http.StatusOK, response)
 }
 
 func writeFakeJSON(w http.ResponseWriter, status int, body any) {

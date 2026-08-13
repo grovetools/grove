@@ -80,8 +80,10 @@ In order, and each step is reported per notespace rather than as a total:
 
   1. mint what is unminted — the notebook's .notebook.toml id, and a
      .notespace.toml id (with a machine-local subject) for every notespace
-     directory that has none. Minting a subject is recorded in machine.toml
-     [primaries]/[subjects] in the same transaction, never left to be re-derived;
+     directory that has none. Every stamped notespace's subject is then recorded
+     in machine.toml [primaries]/[subjects], never left to be re-derived. Absent
+     keys are filled and present ones are left alone, so an id whose stamp was
+     written before a crash gets its record on the next run instead of never;
   2. register every contained notespace with the server (v3 reconcile, proposing
      the id the stamp already holds);
   3. POST the notebook share. The server attaches unparented members and REFUSES
@@ -123,7 +125,7 @@ func runNotebookShare(ctx context.Context, out io.Writer, name string, asJSON bo
 			nb.Name, nb.Root, nb.Name, displayRecordedPath(table.NotebooksFilePath, coderoot.NotebooksFileName))
 	}
 
-	minted, err := mintNotebookIdentity(out, &nb, scanned)
+	identity, err := mintNotebookIdentity(out, &nb, scanned)
 	if err != nil {
 		return err
 	}
@@ -176,11 +178,15 @@ func runNotebookShare(ctx context.Context, out io.Writer, name string, asJSON bo
 			return fmt.Errorf("notespace %s cannot be registered: %s", ns.Dir, wire.Message)
 		}
 		var response syncproto.RegisterResponse
-		if _, err := client.doJSONStatus(ctx, http.MethodPost, "/sync/register", req, &response); err != nil && response.Error == nil {
-			return fmt.Errorf("register %s (%s): %w", ns.Dir, ns.Stamp.ID, err)
+		status, registerErr := client.doJSONStatus(ctx, http.MethodPost, "/sync/register", req, &response)
+		if registerErr != nil && response.Error == nil {
+			return fmt.Errorf("register %s (%s): %w", ns.Dir, ns.Stamp.ID, registerErr)
 		}
 		if response.Error != nil {
 			return fmt.Errorf("register %s (%s) rejected: %s: %s", ns.Dir, ns.Stamp.ID, response.Error.Code, response.Error.Message)
+		}
+		if err := refuseUnexplainedStatus(status, response.Error, "POST /sync/register"); err != nil {
+			return fmt.Errorf("register %s (%s): %w", ns.Dir, ns.Stamp.ID, err)
 		}
 		if response.NotespaceID.String() != ns.Stamp.ID {
 			return fmt.Errorf("register %s: the server bound id %s, not the stamped %s", ns.Dir, response.NotespaceID, ns.Stamp.ID)
@@ -209,13 +215,17 @@ func runNotebookShare(ctx context.Context, out io.Writer, name string, asJSON bo
 	if err != nil {
 		return err
 	}
-	if _, err := client.doJSONStatus(ctx, http.MethodPost, "/sync/notebooks/share", shareReq, &shareResp); err != nil {
+	shareStatus, err := client.doJSONStatus(ctx, http.MethodPost, "/sync/notebooks/share", shareReq, &shareResp)
+	if err != nil {
 		renderMemberEvidence(out, shareResp.Members)
 		return err
 	}
 	renderMemberEvidence(out, shareResp.Members)
 	if shareResp.Error != nil {
-		return fmt.Errorf("share rejected: %s: %s (nothing was recorded locally)", shareResp.Error.Code, shareResp.Error.Message)
+		return fmt.Errorf("share rejected: %s: %s; %s", shareResp.Error.Code, shareResp.Error.Message, localStateAfterRefusal(identity))
+	}
+	if err := refuseUnexplainedStatus(shareStatus, shareResp.Error, "POST /sync/notebooks/share"); err != nil {
+		return err
 	}
 	replyJSON, err := json.Marshal(shareResp)
 	if err != nil {
@@ -240,7 +250,8 @@ func runNotebookShare(ctx context.Context, out io.Writer, name string, asJSON bo
 		Action: "notebook share",
 		Counts: []transition.Count{
 			{Name: "notespaces-in-notebook", Value: int64(len(nb.Notespaces))},
-			{Name: "notespaces-minted", Value: minted},
+			{Name: "notespaces-minted", Value: identity.minted},
+			{Name: "machine-identity-records-written", Value: identity.recorded},
 			{Name: "notespaces-registered", Value: registered},
 			{Name: "notespaces-attached", Value: countDisposition(shareResp.Members, syncproto.MemberDispositionAttached)},
 			{Name: "notespaces-already-member", Value: countDisposition(shareResp.Members, syncproto.MemberDispositionAlreadyMember)},
@@ -262,46 +273,94 @@ func runNotebookShare(ctx context.Context, out io.Writer, name string, asJSON bo
 	return transition.RenderHuman(out, evidence)
 }
 
+// notebookIdentityResult reports what share had to write before it could talk
+// to a server: how many ids it minted, and how many machine.toml records it
+// filled in.
+type notebookIdentityResult struct {
+	minted   int64
+	recorded int64
+}
+
+// wroteSomething reports whether this run has already changed local state, so a
+// later refusal can say what stands instead of claiming nothing does.
+func (r notebookIdentityResult) wroteSomething() bool { return r.minted > 0 || r.recorded > 0 }
+
 // mintNotebookIdentity gives the notebook and every notespace under it a
-// durable id, and records the machine-local half of any subject it had to mint.
+// durable id, and records the machine-local half of every subject it finds.
 //
 // Minting belongs to share because share is the explicit materialization act:
 // D4 says the verb that materializes the FIRST notespace for a subject records
 // the primary, and there is no descriptive default to re-derive later. A
 // notespace directory that already carries a stamp is left exactly as it is —
 // stamps are authoritative forever.
-func mintNotebookIdentity(out io.Writer, nb *recordedNotebook, scanned []recordedNotebook) (int64, error) {
+//
+// The machine.toml half covers EVERY stamped notespace in the notebook, not
+// only the ones this run minted, and it fills absent keys without touching
+// present ones. Recording only fresh mints looked equivalent and was not: a
+// mint writes the stamp to disk first and the machine.toml transaction second,
+// so a failure between them left an id that exists forever and a [primaries]
+// entry that nothing would ever write, because the next run sees the stamp and
+// mints nothing. Filling what is absent makes the pair converge on a re-run,
+// which is what "recorded, never inferred" needs in order to survive a crash.
+func mintNotebookIdentity(out io.Writer, nb *recordedNotebook, scanned []recordedNotebook) (notebookIdentityResult, error) {
+	var result notebookIdentityResult
 	if nb.Stamp == nil {
 		stamp, err := notespace.MintNotebook(nb.Root, nb.Name)
 		if err != nil {
-			return 0, fmt.Errorf("mint notebook identity for %s: %w", nb.Root, err)
+			return result, fmt.Errorf("mint notebook identity for %s: %w", nb.Root, err)
 		}
 		nb.Stamp = stamp
 		fmt.Fprintf(out, "  minted       %s  notebook %s\n", stamp.ID, nb.Name)
 	}
 
-	type mint struct {
+	type identity struct {
 		id      string
 		subject string
 		root    string
+		minted  bool
 	}
-	var mints []mint
+	identities := make([]identity, 0, len(nb.Notespaces))
 	for i := range nb.Notespaces {
 		ns := &nb.Notespaces[i]
-		if ns.Stamp != nil {
+		if ns.Stamp == nil {
+			local := subject.MintLocal().String()
+			stamp, err := notespace.MintNotespace(ns.Root, notespace.NotespaceMutable{Name: ns.Dir, Subject: local, Kind: "notes"})
+			if err != nil {
+				return result, fmt.Errorf("mint notespace identity for %s: %w", ns.Root, err)
+			}
+			ns.Stamp = stamp
+			result.minted++
+			fmt.Fprintf(out, "  minted       %s  notespace %s (subject %s)\n", stamp.ID, ns.Dir, stamp.Subject)
+			identities = append(identities, identity{id: stamp.ID, subject: stamp.Subject, root: ns.Root, minted: true})
 			continue
 		}
-		local := subject.MintLocal().String()
-		stamp, err := notespace.MintNotespace(ns.Root, notespace.NotespaceMutable{Name: ns.Dir, Subject: local, Kind: "notes"})
-		if err != nil {
-			return 0, fmt.Errorf("mint notespace identity for %s: %w", ns.Root, err)
+		if strings.TrimSpace(ns.Stamp.Subject) == "" {
+			continue
 		}
-		ns.Stamp = stamp
-		mints = append(mints, mint{id: stamp.ID, subject: stamp.Subject, root: ns.Root})
-		fmt.Fprintf(out, "  minted       %s  notespace %s (subject %s)\n", stamp.ID, ns.Dir, stamp.Subject)
+		identities = append(identities, identity{id: ns.Stamp.ID, subject: ns.Stamp.Subject, root: ns.Root})
 	}
-	if len(mints) == 0 {
-		return 0, nil
+	if len(identities) == 0 {
+		return result, nil
+	}
+
+	// Nothing is written unless something is missing, so a re-shared notebook
+	// leaves machine.toml byte-identical.
+	machineCfg, loadErr := config.LoadMachineConfig()
+	recordedPrimaries := map[string]string{}
+	recordedSubjects := map[string]string{}
+	if loadErr == nil && machineCfg != nil {
+		recordedPrimaries, recordedSubjects = machineCfg.Primaries, machineCfg.Subjects
+	}
+	var missing []identity
+	for _, candidate := range identities {
+		_, hasPrimary := recordedPrimaries[candidate.subject]
+		_, hasSubject := recordedSubjects[canonicalPath(candidate.root)]
+		if !hasPrimary || !hasSubject {
+			missing = append(missing, candidate)
+		}
+	}
+	if len(missing) == 0 {
+		return result, nil
 	}
 
 	// The stamp index this transaction is checked against covers what is on
@@ -317,18 +376,19 @@ func mintNotebookIdentity(out io.Writer, nb *recordedNotebook, scanned []recorde
 			}
 		}
 	}
-	for _, m := range mints {
-		known[m.id] = struct{}{}
+	for _, candidate := range identities {
+		known[candidate.id] = struct{}{}
 	}
-	if existing, err := config.LoadMachineConfig(); err == nil && existing != nil {
-		for _, id := range existing.Primaries {
+	if machineCfg != nil && loadErr == nil {
+		for _, id := range machineCfg.Primaries {
 			known[id] = struct{}{}
 		}
-		if existing.Sync.Registry != nil {
-			known[existing.Sync.Registry.NotespaceID] = struct{}{}
+		if machineCfg.Sync.Registry != nil {
+			known[machineCfg.Sync.Registry.NotespaceID] = struct{}{}
 		}
 	}
 
+	var recorded int64
 	if _, _, err := config.EditMachineConfig(config.MachineConfigPath(), config.MachineEditOptions{KnownNotespaceIDs: known}, func(machine *config.MachineConfig) error {
 		if machine.Primaries == nil {
 			machine.Primaries = map[string]string{}
@@ -336,19 +396,49 @@ func mintNotebookIdentity(out io.Writer, nb *recordedNotebook, scanned []recorde
 		if machine.Subjects == nil {
 			machine.Subjects = map[string]string{}
 		}
-		for _, m := range mints {
-			if recorded, ok := machine.Primaries[m.subject]; ok && recorded != m.id {
-				return fmt.Errorf("[primaries] already records %q as %s", m.subject, recorded)
+		for _, candidate := range missing {
+			switch existing, ok := machine.Primaries[candidate.subject]; {
+			case ok && existing == candidate.id:
+				// Already recorded, and recorded as this one.
+			case ok && candidate.minted:
+				// A freshly minted subject that something else already claims
+				// is a collision in the id space, not a sibling.
+				return fmt.Errorf("[primaries] already records %q as %s", candidate.subject, existing)
+			case ok:
+				// A pre-existing stamp whose subject already names another
+				// notespace is a sibling (D2). Which one is primary is the
+				// operator's call and never share's to change.
+			default:
+				machine.Primaries[candidate.subject] = candidate.id
+				recorded++
 			}
-			machine.Primaries[m.subject] = m.id
-			machine.Subjects[canonicalPath(m.root)] = m.subject
+			key := canonicalPath(candidate.root)
+			if _, ok := machine.Subjects[key]; !ok {
+				machine.Subjects[key] = candidate.subject
+				recorded++
+			}
 		}
 		return nil
 	}); err != nil {
-		return 0, fmt.Errorf("record minted identities in machine.toml: %w", err)
+		return result, fmt.Errorf("record notespace identities in machine.toml: %w", err)
 	}
+	result.recorded = recorded
 	config.ResetLoadCache()
-	return int64(len(mints)), nil
+	return result, nil
+}
+
+// localStateAfterRefusal says what a refused share leaves behind.
+//
+// "nothing was recorded locally" is true of notebooks.toml and false of the
+// disk: minting runs before the server is asked, and a stamp is immutable once
+// written. A refusal that claimed otherwise would send an operator looking for
+// a rollback that neither exists nor should.
+func localStateAfterRefusal(identity notebookIdentityResult) string {
+	if !identity.wroteSomething() {
+		return "nothing was recorded locally"
+	}
+	return fmt.Sprintf("notebooks.toml records no share (that write comes last and did not happen), but this run had already minted %d notespace id(s) and written %d machine.toml identity record(s) — stamps are immutable, so a re-run reuses them rather than minting again",
+		identity.minted, identity.recorded)
 }
 
 func renderMemberEvidence(out io.Writer, members []syncproto.NotebookMemberResult) {
@@ -402,7 +492,9 @@ The root must be RECORDED and it must EXIST. Both are refusals, not defaults:
 
 What pull does: reads the server's inventory, binds this root to the server's
 notebook id (installing .notebook.toml when the root carries none, refusing when
-it carries a DIFFERENT id — a stamp is immutable), and records
+it carries a DIFFERENT id — a stamp is immutable, and refusing too when another
+recorded root already carries that id, because binding it twice would record one
+notebook id twice), and records
 [notebooks.<name>.sync] share = true so the notebook is in scope for sync in
 both directions.
 
@@ -477,6 +569,15 @@ func runNotebookPull(ctx context.Context, out io.Writer, name string, asJSON boo
 	}
 
 	if nb.Stamp == nil {
+		// Binding is the one act here that can CREATE a duplicate id rather
+		// than merely meet one. Every other verb refuses to act on a machine
+		// that records a notebook id twice (D8); pull must therefore refuse to
+		// produce that state, or it would be the source of the condition its
+		// own preflight rejects.
+		if other, clash := notebookStampedElsewhere(scanned, nb.Name, target.ID); clash {
+			return fmt.Errorf("notebook %s is already stamped on this machine at %s (recorded as %q); binding it to %s as well would record one notebook id twice — pull into that root instead, or re-mint one of them first",
+				target.ID, other.Root, other.Name, nb.Root)
+		}
 		stamp, installErr := notespace.InstallNotebook(nb.Root, notespace.NotebookStamp{ID: target.ID.String(), Name: nb.Name})
 		if installErr != nil {
 			return fmt.Errorf("bind %s to notebook %s: %w", nb.Root, target.ID, installErr)

@@ -60,29 +60,153 @@ func TestNotespaceMoveLocalPreservesIdentityAndPrimary(t *testing.T) {
 	}
 
 	got := out.String()
-	requireContains(t, got, "server       none (the destination notebook is not shared)", "no server call for a local move")
+	requireContains(t, got, "server       none (neither notebook is recorded as shared)", "no server call for a local move")
 	requireContains(t, got, "Reversible: grove notespace move "+fixtureNotespace1+" --to research", "the inverse invocation")
 	requireContains(t, got, `transition: "notespace move"`, "transition evidence")
 }
 
-func TestNotespaceMoveOutOfSharedStatesForwardOnlyRetention(t *testing.T) {
+// TestNotespaceMoveOutOfSharedDetachesOnTheServer is the correction the whole
+// out-of-shared leg turns on. A local-only move-out left the notespace in the
+// notebook's server-side roll, so every later join delta offered to pull it
+// back onto the machine that had just moved it out. The protocol's answer is a
+// re-parent to no notebook, and this pins the whole sentence: the server is
+// asked, its own retention statement is what the operator reads, and the join
+// delta afterwards no longer offers the notespace back.
+func TestNotespaceMoveOutOfSharedDetachesOnTheServer(t *testing.T) {
 	box := sandboxNotebookScope(t)
+	server := newFakeSync(t)
+	server.addNotebook(fixtureNotebookA, "research", "shared", 2)
+	// Membership version 6 is a value the inventory does not carry, so the
+	// detach has to learn it from the server's own precondition refusal exactly
+	// as a re-parent does.
+	server.addNotespace(fixtureNotespace1, "alpha", fixtureNotebookA, 6, 42)
 	box.recordNotebooks(t, "research", map[string]notebookFixture{
 		"research": {Stamp: fixtureNotebookA, Share: boolPtr(true), Notespaces: []notespaceFixture{{Dir: "alpha", ID: fixtureNotespace1}}},
 		"private":  {Share: boolPtr(false)},
 	})
+	box.recordSyncServer(t, server.URL)
 
 	var out bytes.Buffer
 	if err := runNotespaceMove(context.Background(), &out, notespaceMoveOptions{notespace: fixtureNotespace1, to: "private"}); err != nil {
 		t.Fatalf("notespace move: %v", err)
 	}
 	got := out.String()
-	requireContains(t, got, "has left a shared notebook", "the state change is named")
-	requireContains(t, got, syncproto.UnshareRetentionStatement, "D9's retention sentence, in the server's own words")
+
+	if len(server.Reparents) != 2 {
+		t.Fatalf("detach attempts = %d, want a probe and its corrected retry: %+v", len(server.Reparents), server.Reparents)
+	}
+	final := server.Reparents[len(server.Reparents)-1]
+	if !final.Detaching() {
+		t.Fatalf("the out-of-shared leg must ask for a detach (empty to_notebook_id): %+v", final)
+	}
+	if final.FromNotebookID.String() != fixtureNotebookA || final.ExpectedVersion != 6 {
+		t.Fatalf("detach named the wrong membership: %+v", final)
+	}
+	if held := server.Notespaces[fixtureNotespace1].NotebookID; held != "" {
+		t.Fatalf("the server still parents the notespace under %q; a move out that leaves membership behind stays on offer", held)
+	}
+
+	requireContains(t, got, "detached from notebook "+fixtureNotebookA, "the server action")
+	requireContains(t, got, syncproto.DetachRetentionStatement, "D9's retention sentence, in the server's own words")
+	requireContains(t, got, "here AND on the server", "the change is named on both sides")
+	requireContains(t, got, "a join delta will not offer it back", "the reason the server was asked at all")
 	requireContains(t, got, "nothing was deleted anywhere", "forward-only means retained")
+	requireContains(t, got, "cursor       42", "the event-log head, as evidence the stream was untouched")
+	requireNotContains(t, got, syncproto.UnshareRetentionStatement, "a detach is per-notespace; the notebook-grained sentence would overstate it")
 	if _, err := notespace.LoadNotespace(box.notespaceRoot("private", "alpha")); err != nil {
 		t.Fatalf("the notespace did not arrive: %v", err)
 	}
+
+	// D9, end to end: what the server retains is not what it offers. After the
+	// detach the notespace is unparented rather than a member, so the join
+	// delta reports it as retained-and-unparented instead of listing it as a
+	// notespace `research` still holds there.
+	var delta bytes.Buffer
+	if err := runSyncJoin(context.Background(), &delta, syncJoinOptions{server: server.URL, deltaOnly: true, expand: true}); err != nil {
+		t.Fatalf("sync join: %v", err)
+	}
+	joined := delta.String()
+	requireContains(t, joined, "unparented on the server: 1 notespace", "the detached notespace is still held, and said to be")
+	requireNotContains(t, joined, "server only  "+fixtureNotespace1, "a detached notespace must not be offered back to the machine that moved it out")
+}
+
+// TestNotespaceMoveOutOfSharedWithNothingToDetach covers the honest no-op: the
+// server holds no membership to withdraw, which is a different fact from "the
+// server was never asked" and is reported as such.
+func TestNotespaceMoveOutOfSharedWithNothingToDetach(t *testing.T) {
+	box := sandboxNotebookScope(t)
+	server := newFakeSync(t)
+	server.addNotebook(fixtureNotebookA, "research", "shared", 2)
+	box.recordNotebooks(t, "research", map[string]notebookFixture{
+		"research": {Stamp: fixtureNotebookA, Share: boolPtr(true), Notespaces: []notespaceFixture{{Dir: "alpha", ID: fixtureNotespace1}}},
+		"private":  {Share: boolPtr(false)},
+	})
+	box.recordSyncServer(t, server.URL)
+
+	var out bytes.Buffer
+	if err := runNotespaceMove(context.Background(), &out, notespaceMoveOptions{notespace: fixtureNotespace1, to: "private"}); err != nil {
+		t.Fatalf("notespace move: %v", err)
+	}
+	if len(server.Reparents) != 0 {
+		t.Fatalf("nothing was registered, so nothing should have been detached: %+v", server.Reparents)
+	}
+	got := out.String()
+	requireContains(t, got, "No membership was withdrawn because", "the no-op is explained, not silent")
+	requireContains(t, got, "does not hold notespace "+fixtureNotespace1, "in the server's terms")
+	requireContains(t, got, syncproto.DetachRetentionStatement, "D9 still applies to what the server does hold")
+	if _, err := notespace.LoadNotespace(box.notespaceRoot("private", "alpha")); err != nil {
+		t.Fatalf("the local move did not happen: %v", err)
+	}
+}
+
+// TestNotespaceMoveOutOfSharedRefusalsProtectMembership pins the two states in
+// which a move out of a shared notebook must not proceed at all: the server
+// cannot be reached (so the membership could not be withdrawn), and the server
+// parents the notespace somewhere this move was not asked to touch.
+func TestNotespaceMoveOutOfSharedRefusalsProtectMembership(t *testing.T) {
+	t.Run("no server recorded", func(t *testing.T) {
+		box := sandboxNotebookScope(t)
+		box.recordNotebooks(t, "research", map[string]notebookFixture{
+			"research": {Stamp: fixtureNotebookA, Share: boolPtr(true), Notespaces: []notespaceFixture{{Dir: "alpha", ID: fixtureNotespace1}}},
+			"private":  {Share: boolPtr(false)},
+		})
+		err := runNotespaceMove(context.Background(), &bytes.Buffer{}, notespaceMoveOptions{notespace: fixtureNotespace1, to: "private"})
+		if err == nil {
+			t.Fatal("a move out of a shared notebook succeeded without withdrawing anything")
+		}
+		requireContains(t, err.Error(), "would leave the server offering it back", "the refusal says what a local-only move-out would cost")
+		if _, statErr := os.Stat(box.notespaceRoot("private", "alpha")); !os.IsNotExist(statErr) {
+			t.Fatalf("the refused move still moved the tree: %v", statErr)
+		}
+		if _, loadErr := notespace.LoadNotespace(box.notespaceRoot("research", "alpha")); loadErr != nil {
+			t.Fatalf("the source was disturbed by a refusal: %v", loadErr)
+		}
+	})
+
+	t.Run("server parents it elsewhere", func(t *testing.T) {
+		box := sandboxNotebookScope(t)
+		server := newFakeSync(t)
+		server.addNotebook(fixtureNotebookA, "research", "shared", 2)
+		server.addNotebook(fixtureNotebookC, "elsewhere", "shared", 1)
+		server.addNotespace(fixtureNotespace1, "alpha", fixtureNotebookC, 1, 3)
+		box.recordNotebooks(t, "research", map[string]notebookFixture{
+			"research": {Stamp: fixtureNotebookA, Share: boolPtr(true), Notespaces: []notespaceFixture{{Dir: "alpha", ID: fixtureNotespace1}}},
+			"private":  {Share: boolPtr(false)},
+		})
+		box.recordSyncServer(t, server.URL)
+
+		err := runNotespaceMove(context.Background(), &bytes.Buffer{}, notespaceMoveOptions{notespace: fixtureNotespace1, to: "private"})
+		if err == nil {
+			t.Fatal("the move detached a membership the operator never named")
+		}
+		requireContains(t, err.Error(), "the server holds it in notebook "+fixtureNotebookC, "the disagreement names both sides")
+		if len(server.Reparents) != 0 {
+			t.Fatalf("a refused move still asked the server to change membership: %+v", server.Reparents)
+		}
+		if server.Notespaces[fixtureNotespace1].NotebookID != fixtureNotebookC {
+			t.Fatalf("membership changed on a refusal: %+v", server.Notespaces[fixtureNotespace1])
+		}
+	})
 }
 
 func TestNotespaceMoveBetweenSharedNotebooksReparents(t *testing.T) {
@@ -101,7 +225,7 @@ func TestNotespaceMoveBetweenSharedNotebooksReparents(t *testing.T) {
 	box.recordSyncServer(t, server.URL)
 
 	var out bytes.Buffer
-	if err := runNotespaceMove(context.Background(), &out, notespaceMoveOptions{notespace: "alpha", to: "team", expectedVersion: -1}); err != nil {
+	if err := runNotespaceMove(context.Background(), &out, notespaceMoveOptions{notespace: "alpha", to: "team"}); err != nil {
 		t.Fatalf("notespace move: %v", err)
 	}
 	got := out.String()
@@ -170,6 +294,8 @@ func TestNotespaceMoveRollsBackWhenTheServerRefuses(t *testing.T) {
 		t.Fatal("the move reported success although the server refused it")
 	}
 	requireContains(t, err.Error(), "the local move was rolled back", "the failure says what was undone")
+	requireContains(t, err.Error(), "is now registered on this server but belongs to no notebook",
+		"and does not imply the server is untouched when a registration landed first")
 	if _, statErr := os.Stat(box.notespaceRoot("team", "alpha")); !os.IsNotExist(statErr) {
 		t.Fatalf("the destination survived a rolled-back move: %v", statErr)
 	}
@@ -177,6 +303,101 @@ func TestNotespaceMoveRollsBackWhenTheServerRefuses(t *testing.T) {
 	if loadErr != nil || stamp == nil || stamp.ID != fixtureNotespace1 {
 		t.Fatalf("the source was not restored: %v %+v", loadErr, stamp)
 	}
+	// A refused share changes no membership, which is what makes rolling the
+	// local move back the honest answer here.
+	if held := server.Notespaces[fixtureNotespace1]; held != nil && held.NotebookID != "" {
+		t.Fatalf("the server attached a member it said it refused: %+v", held)
+	}
+}
+
+// TestNotespaceMoveDoesNotRollBackAnAppliedServerChange is the other half of
+// the rollback contract. Rolling the tree back is honest only while the server
+// still holds the old membership; once it has accepted the new one, undoing the
+// move locally produces the same disagreement in the other direction. So a
+// failure after the server has applied its change reports rather than reverses.
+func TestNotespaceMoveDoesNotRollBackAnAppliedServerChange(t *testing.T) {
+	box := sandboxNotebookScope(t)
+	server := newFakeSync(t)
+	server.addNotebook(fixtureNotebookA, "research", "shared", 2)
+	server.addNotespace(fixtureNotespace1, "alpha", fixtureNotebookA, 0, 9)
+	box.recordNotebooks(t, "research", map[string]notebookFixture{
+		"research": {Stamp: fixtureNotebookA, Share: boolPtr(true), Notespaces: []notespaceFixture{{Dir: "alpha", ID: fixtureNotespace1}}},
+		"private":  {Share: boolPtr(false)},
+	})
+	box.recordSyncServer(t, server.URL)
+	// machine.toml is the last thing the move touches, and an unreadable one
+	// fails only AFTER the server has detached the notespace.
+	if err := os.WriteFile(filepath.Join(box.configDir, "machine.toml"), []byte("[primaries\nbroken = "), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config.ResetLoadCache()
+
+	err := runNotespaceMove(context.Background(), &bytes.Buffer{}, notespaceMoveOptions{notespace: fixtureNotespace1, to: "private"})
+	if err == nil {
+		t.Fatal("the move reported success although machine.toml could not be re-keyed")
+	}
+	requireContains(t, err.Error(), "the move completed", "the failure says what stands")
+	requireContains(t, err.Error(), "the server change stands", "and that the server half stands too")
+
+	if server.Notespaces[fixtureNotespace1].NotebookID != "" {
+		t.Fatalf("the applied detach was undone: %+v", server.Notespaces[fixtureNotespace1])
+	}
+	if _, statErr := os.Stat(box.notespaceRoot("research", "alpha")); !os.IsNotExist(statErr) {
+		t.Fatalf("the tree was rolled back under an applied server change: %v", statErr)
+	}
+	moved, loadErr := notespace.LoadNotespace(box.notespaceRoot("private", "alpha"))
+	if loadErr != nil || moved == nil || moved.ID != fixtureNotespace1 {
+		t.Fatalf("the destination does not hold the notespace: %v %+v", loadErr, moved)
+	}
+}
+
+// TestNotespaceMoveRefusesAnUnexplainedServerRefusal pins the one shape
+// doJSONStatus cannot judge alone: a non-2xx whose body decodes but names no
+// protocol error. Reading it as success would record a membership the server
+// never granted.
+func TestNotespaceMoveRefusesAnUnexplainedServerRefusal(t *testing.T) {
+	box := sandboxNotebookScope(t)
+	server := newFakeSync(t)
+	server.addNotebook(fixtureNotebookB, "team", "shared", 1)
+	server.UnexplainedRefusalPath = "/sync/register"
+	box.recordNotebooks(t, "research", map[string]notebookFixture{
+		"research": {Notespaces: []notespaceFixture{{Dir: "alpha", ID: fixtureNotespace1}}},
+		"team":     {Stamp: fixtureNotebookB, Share: boolPtr(true)},
+	})
+	box.recordSyncServer(t, server.URL)
+
+	err := runNotespaceMove(context.Background(), &bytes.Buffer{}, notespaceMoveOptions{notespace: "alpha", to: "team"})
+	if err == nil {
+		t.Fatal("an unexplained HTTP 409 was read as success")
+	}
+	requireContains(t, err.Error(), "names no protocol error", "the refusal explains why it cannot be read")
+	requireContains(t, err.Error(), "the local move was rolled back", "nothing was applied, so the move is undone")
+	if _, loadErr := notespace.LoadNotespace(box.notespaceRoot("research", "alpha")); loadErr != nil {
+		t.Fatalf("the source was not restored: %v", loadErr)
+	}
+}
+
+// TestNotespaceMoveDetachFallsBackToTheProtocolRetention pins the labelling: a
+// server that sends no retention sentence gets the protocol's, and the operator
+// is told that is where it came from.
+func TestNotespaceMoveDetachFallsBackToTheProtocolRetention(t *testing.T) {
+	box := sandboxNotebookScope(t)
+	server := newFakeSync(t)
+	server.SuppressDetachRetention = true
+	server.addNotebook(fixtureNotebookA, "research", "shared", 2)
+	server.addNotespace(fixtureNotespace1, "alpha", fixtureNotebookA, 0, 4)
+	box.recordNotebooks(t, "research", map[string]notebookFixture{
+		"research": {Stamp: fixtureNotebookA, Share: boolPtr(true), Notespaces: []notespaceFixture{{Dir: "alpha", ID: fixtureNotespace1}}},
+		"private":  {Share: boolPtr(false)},
+	})
+	box.recordSyncServer(t, server.URL)
+
+	var out bytes.Buffer
+	if err := runNotespaceMove(context.Background(), &out, notespaceMoveOptions{notespace: fixtureNotespace1, to: "private"}); err != nil {
+		t.Fatalf("notespace move: %v", err)
+	}
+	requireContains(t, out.String(), "this server sent no retention statement; that is the protocol's",
+		"a borrowed sentence is labelled as borrowed")
 }
 
 func TestNotespaceMoveRefusals(t *testing.T) {
