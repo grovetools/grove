@@ -1,12 +1,15 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/grovetools/core/pkg/syncproto"
 	grovekeymap "github.com/grovetools/grove/pkg/keymap"
 	"github.com/grovetools/grove/pkg/notescope"
 )
@@ -66,6 +69,148 @@ func TestScopeActsDoNotRunConcurrently(t *testing.T) {
 	if _, cmd := m.Update(pullNotebookMsg{notebook: "remote"}); cmd == nil {
 		t.Fatal("a settled Model still refuses the next act")
 	}
+}
+
+// Every act runs under a deadline.
+//
+// The regression: both entry points used context.Background(), and `scopeBusy`
+// was cleared only by the completion message — so a server that accepted the
+// connection and never answered left the Notes/Join page busy for the life of
+// the process, with every further m/s/p/r answered "already running". The CLI
+// verbs are exempt because ^C ends them; the TUI has to carry its own bound.
+func TestScopeActsRunUnderADeadline(t *testing.T) {
+	scopeHome(t)
+	fake := &fakeScope{}
+	m, _ := joinModel(t, fake)
+
+	for _, tc := range []struct {
+		name   string
+		intent tea.Msg
+		max    time.Duration
+	}{
+		{"share", shareNotebookMsg{notebook: "here"}, scopeActTimeout},
+		{"pull", pullNotebookMsg{notebook: "remote"}, scopeActTimeout},
+		{"move", moveNotespaceMsg{notespace: "NS-A", to: "there"}, scopeActTimeout},
+		{"fetch", fetchJoinDeltaMsg{}, scopeFetchTimeout},
+	} {
+		before := len(fake.budgets)
+		dispatched, cmd := m.Update(tc.intent)
+		m = dispatched.(Model)
+		if cmd == nil {
+			t.Fatalf("%s produced no command", tc.name)
+		}
+		m = settleScope(t, m, cmd())
+		if len(fake.budgets) <= before {
+			t.Fatalf("%s never reached the service", tc.name)
+		}
+		budget := fake.budgets[before]
+		if budget <= 0 {
+			t.Errorf("%s ran with no deadline; only the server can end it", tc.name)
+			continue
+		}
+		if budget > tc.max {
+			t.Errorf("%s budget = %s, want at most %s", tc.name, budget, tc.max)
+		}
+	}
+}
+
+// esc is this page's ^C.
+//
+// A deadline alone is not enough: it only ends an act whose service honors the
+// context, and two minutes is a long time to hold a config editor hostage. So
+// esc cuts the act, hands the page straight back, and voids the dispatch — the
+// abandoned act's answer still arrives, and must land on nothing.
+func TestEscCancelsAnInFlightScopeAct(t *testing.T) {
+	m, _ := newTestModel(t)
+	held := &hangingScope{started: make(chan struct{}, 1), observed: make(chan error, 1)}
+	m.scopeService = held.provider
+
+	dispatched, cmd := m.Update(shareNotebookMsg{notebook: "here"})
+	m = dispatched.(Model)
+	if !m.scopeBusy {
+		t.Fatal("the share never took the gate")
+	}
+	answers := make(chan tea.Msg, 1)
+	go func() { answers <- cmd() }()
+	<-held.started
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(Model)
+	if m.scopeBusy {
+		t.Fatal("esc left the page busy; there is still no way out of a hung act")
+	}
+	if !strings.Contains(m.statusMsg, "canceled") {
+		t.Errorf("status = %q, want it to say the act was canceled", m.statusMsg)
+	}
+
+	// The act's own context was cut, not merely forgotten: a verb mid-flight
+	// stops talking to the server rather than finishing in the background.
+	select {
+	case err := <-held.observed:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("the act saw %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("esc did not cancel the act's context")
+	}
+
+	// Its answer lands on a page that has moved on.
+	late := <-answers
+	settled, _ := m.Update(late)
+	m = settled.(Model)
+	if !strings.Contains(m.statusMsg, "canceled") {
+		t.Errorf("the abandoned act repainted the page it was canceled from: %q", m.statusMsg)
+	}
+
+	// And the page takes the next act.
+	if _, cmd := m.Update(pullNotebookMsg{notebook: "remote"}); cmd == nil {
+		t.Fatal("a canceled Model still refuses the next act")
+	}
+}
+
+// esc keeps its page-level meaning when nothing is in flight — the cancel is
+// matched only against the busy state, so it cannot shadow the prompt-dismiss
+// and preview-revert bindings the other pages own.
+func TestEscIsOnlyACancelWhileAnActIsInFlight(t *testing.T) {
+	m, _ := newTestModel(t)
+	m.scopeService = (&fakeScope{}).provider
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if status := next.(Model).statusMsg; strings.Contains(status, "canceled") {
+		t.Errorf("esc reported a cancel with nothing running: %q", status)
+	}
+}
+
+// hangingScope is the server that accepts and never answers: every act blocks
+// until its context ends, and reports which way it ended.
+type hangingScope struct {
+	started  chan struct{}
+	observed chan error
+}
+
+func (h *hangingScope) provider() (notescope.Service, error) { return h, nil }
+
+func (h *hangingScope) hang(ctx context.Context) error {
+	h.started <- struct{}{}
+	<-ctx.Done()
+	h.observed <- ctx.Err()
+	return ctx.Err()
+}
+
+func (h *hangingScope) Inventory(ctx context.Context) (syncproto.InventoryResponse, error) {
+	return syncproto.InventoryResponse{}, h.hang(ctx)
+}
+
+func (h *hangingScope) Share(ctx context.Context, notebook string) (notescope.ActionResult, error) {
+	return notescope.ActionResult{Action: "notebook share " + notebook}, h.hang(ctx)
+}
+
+func (h *hangingScope) Pull(ctx context.Context, notebook string) (notescope.ActionResult, error) {
+	return notescope.ActionResult{Action: "notebook pull " + notebook}, h.hang(ctx)
+}
+
+func (h *hangingScope) Move(ctx context.Context, ns, to string) (notescope.ActionResult, error) {
+	return notescope.ActionResult{Action: "notespace move " + ns}, h.hang(ctx)
 }
 
 // A refused fetch must not leave the page spinning: the page armed its own

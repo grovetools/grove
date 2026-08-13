@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	coreconfig "github.com/grovetools/core/config"
@@ -26,25 +27,44 @@ type fakeScope struct {
 	invErr    error
 	calls     []string
 	err       error
+	// budgets records how long each call was given before its context would
+	// have been cut — negative for a call handed an unbounded context.
+	budgets []time.Duration
 }
 
-func (f *fakeScope) Inventory(context.Context) (syncproto.InventoryResponse, error) {
+// record notes the bound the caller put on this call. A negative entry is the
+// regression this exists for: an act with no deadline can only be ended by the
+// server it is waiting on.
+func (f *fakeScope) record(ctx context.Context) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		f.budgets = append(f.budgets, -1)
+		return
+	}
+	f.budgets = append(f.budgets, time.Until(deadline))
+}
+
+func (f *fakeScope) Inventory(ctx context.Context) (syncproto.InventoryResponse, error) {
 	f.calls = append(f.calls, "inventory")
+	f.record(ctx)
 	return f.inventory, f.invErr
 }
 
-func (f *fakeScope) Share(_ context.Context, notebook string) (notescope.ActionResult, error) {
+func (f *fakeScope) Share(ctx context.Context, notebook string) (notescope.ActionResult, error) {
 	f.calls = append(f.calls, "share:"+notebook)
+	f.record(ctx)
 	return notescope.ActionResult{Action: "notebook share " + notebook, Output: "  registered   NS-A  alpha\n\n  " + notebook + " is shared at version 4.\n"}, f.err
 }
 
-func (f *fakeScope) Pull(_ context.Context, notebook string) (notescope.ActionResult, error) {
+func (f *fakeScope) Pull(ctx context.Context, notebook string) (notescope.ActionResult, error) {
 	f.calls = append(f.calls, "pull:"+notebook)
+	f.record(ctx)
 	return notescope.ActionResult{Action: "notebook pull " + notebook, Output: "  bound        NB-X  /tmp/" + notebook + "\n"}, f.err
 }
 
-func (f *fakeScope) Move(_ context.Context, ns, to string) (notescope.ActionResult, error) {
+func (f *fakeScope) Move(ctx context.Context, ns, to string) (notescope.ActionResult, error) {
 	f.calls = append(f.calls, "move:"+ns+"->"+to)
+	f.record(ctx)
 	return notescope.ActionResult{Action: "notespace move", Output: "  moved " + ns + " into " + to + "\n"}, f.err
 }
 
@@ -273,7 +293,11 @@ func TestJoinPageSurfacesAVerbRefusal(t *testing.T) {
 	fake := &fakeScope{err: errors.New("notebook \"remote\" records root /gone, which does not exist")}
 	m, _ := joinModel(t, fake)
 
-	_, cmd := m.Update(pullNotebookMsg{notebook: "remote"})
+	// The dispatched model is the one that must receive the answer: an act is
+	// stamped with the dispatch it belongs to, and a Model that never
+	// dispatched has no act for this evidence to be about.
+	dispatched, cmd := m.Update(pullNotebookMsg{notebook: "remote"})
+	m = dispatched.(Model)
 	done, ok := cmd().(scopeActionDoneMsg)
 	if !ok {
 		t.Fatalf("pull produced %T", cmd())

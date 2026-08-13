@@ -169,6 +169,15 @@ type Model struct {
 	// downstream locks, so the gate belongs here, at the one place every intent
 	// passes through.
 	scopeBusy bool
+
+	// scopeCancel cuts the in-flight act's context — from esc, and from the
+	// completion path so the deadline timer is released. nil when idle.
+	scopeCancel context.CancelFunc
+
+	// scopeGen stamps each dispatch so a canceled or timed-out act's answer,
+	// which still arrives, is discarded instead of landing on the page that
+	// replaced it. See beginScopeAct.
+	scopeGen uint64
 }
 
 // New creates a new config TUI Model.
@@ -364,11 +373,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = scopeBusyStatus
 			return m, nil
 		}
-		m.scopeBusy = true
-		return m, m.fetchJoinDelta()
+		ctx, gen := m.beginScopeAct(scopeFetchTimeout)
+		return m, m.fetchJoinDelta(ctx, gen)
 
 	case joinDeltaLoadedMsg:
-		m.scopeBusy = false
+		// A fetch the operator canceled (or one the deadline cut) still answers.
+		// It answers about a page state that no longer exists, so it is dropped
+		// here rather than repainting over whatever replaced it.
+		if msg.gen != m.scopeGen {
+			return m, nil
+		}
+		m.releaseScopeAct()
 		if m.joinPage == nil {
 			return m, nil
 		}
@@ -386,8 +401,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = scopeBusyStatus
 			return m, nil
 		}
-		m.scopeBusy = true
-		return m, m.runScopeAction(func(ctx context.Context, svc notescope.Service) (notescope.ActionResult, error) {
+		actCtx, gen := m.beginScopeAct(scopeActTimeout)
+		return m, m.runScopeAction(actCtx, gen, func(ctx context.Context, svc notescope.Service) (notescope.ActionResult, error) {
 			return svc.Share(ctx, msg.notebook)
 		})
 
@@ -396,8 +411,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = scopeBusyStatus
 			return m, nil
 		}
-		m.scopeBusy = true
-		return m, m.runScopeAction(func(ctx context.Context, svc notescope.Service) (notescope.ActionResult, error) {
+		actCtx, gen := m.beginScopeAct(scopeActTimeout)
+		return m, m.runScopeAction(actCtx, gen, func(ctx context.Context, svc notescope.Service) (notescope.ActionResult, error) {
 			return svc.Pull(ctx, msg.notebook)
 		})
 
@@ -406,13 +421,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = scopeBusyStatus
 			return m, nil
 		}
-		m.scopeBusy = true
-		return m, m.runScopeAction(func(ctx context.Context, svc notescope.Service) (notescope.ActionResult, error) {
+		actCtx, gen := m.beginScopeAct(scopeActTimeout)
+		return m, m.runScopeAction(actCtx, gen, func(ctx context.Context, svc notescope.Service) (notescope.ActionResult, error) {
 			return svc.Move(ctx, msg.notespace, msg.to)
 		})
 
 	case scopeActionDoneMsg:
-		m.scopeBusy = false
+		// Dropped for the same reason a stale joinDeltaLoadedMsg is: a canceled
+		// act's evidence describes a run the operator already walked away from.
+		if msg.gen != m.scopeGen {
+			return m, nil
+		}
+		m.releaseScopeAct()
 		// The verb's own evidence is the status, refused or not: it names the
 		// file, the root and the server's answer, and paraphrasing it here
 		// would drop exactly the part that explains what to do next.
@@ -429,9 +449,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// delta is now stale. Re-deriving it needs the server again — but only
 		// for a page that had already asked.
 		if msg.err == nil && m.joinPage != nil && m.joinPage.Fetched() {
-			m.scopeBusy = true
+			ctx, gen := m.beginScopeAct(scopeFetchTimeout)
 			m.joinPage.SetLoading(true)
-			return m, m.fetchJoinDelta()
+			return m, m.fetchJoinDelta(ctx, gen)
 		}
 		return m, nil
 
@@ -553,6 +573,17 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case corekeymap.ChordNone:
 		// Not a chord — fall through to the flat dispatch + pager delegation.
+	}
+
+	// esc while a notebook-scope act is in flight cancels it. This is the TUI's
+	// ^C: the CLI verbs are interruptible and these are the same verbs, so
+	// without it the one path with no way out is the one running inside the
+	// editor. It is matched ahead of the page delegation and only while busy,
+	// so esc keeps its page-level meaning (dismiss a prompt, revert a theme
+	// preview) at every other moment.
+	if m.scopeBusy && key.Matches(msg, m.keys.Cancel) {
+		m.cancelScopeAct()
+		return m, nil
 	}
 
 	// Quit -> emit CloseRequestMsg instead of tea.Quit. When embedded the
