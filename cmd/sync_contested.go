@@ -5,9 +5,10 @@ package cmd
 //
 // Pulling a shared notebook onto a machine that already had notes of its own
 // can find the same paths on both sides with different content. The daemon
-// refuses that batch and marks the notespace contested — it keeps pushing local
-// work and takes no incoming writes — and records the evidence on the conflicts
-// feed. These two verbs are how that state is read and resolved:
+// refuses that batch and marks the notespace contested — the gate is two-sided
+// (daemon `ccd0d55`), so nothing enters the notespace and nothing leaves it:
+// local edits queue rather than push — and records the evidence on the
+// conflicts feed. These two verbs are how that state is read and resolved:
 //
 //	contested         — what is withheld, and the evidence for each case:
 //	                    hash overlap (how much already agrees) and subject match
@@ -51,13 +52,14 @@ func newSyncContestedCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "contested",
-		Short: "List notespaces withheld from incoming writes, with their adoption evidence",
+		Short: "List notespaces whose sync is held in both directions, with their adoption evidence",
 		Long: `Report every notespace this machine is refusing incoming writes into.
 
 A notespace becomes contested when an incoming batch would have written over
-notes this machine has never synced. Nothing is lost and nothing is merged:
-local work keeps pushing, the incoming batch stays owed by the server, and the
-notespace waits for a decision.
+notes this machine has never synced. Nothing is lost and nothing is merged: no
+writes enter the notespace and none leave it, local edits keep queuing, the
+incoming batch stays owed by the server, and the notespace waits for a decision.
+Adopting it releases both directions.
 
 Each case carries the evidence that decision is made from:
 
@@ -126,7 +128,7 @@ func newSyncAdoptNotespaceCmd() *cobra.Command {
 	var confirm bool
 	cmd := &cobra.Command{
 		Use:   "adopt-notespace <notespace-id>",
-		Short: "Adopt a contested notespace so incoming writes resume",
+		Short: "Adopt a contested notespace so sync resumes in both directions",
 		Long: `Record that a contested notespace and the server's are the same notes.
 
 Adoption is deliberate and per-notespace. It is never inferred — not even when
@@ -180,7 +182,7 @@ func runSyncAdoptNotespace(ctx context.Context, out io.Writer, notespaceID strin
 
 	renderContested(out, target)
 	if !confirm {
-		fmt.Fprintf(out, "  Nothing changed. Re-run with --confirm to adopt %s and let incoming writes resume.\n", notespaceID)
+		fmt.Fprintf(out, "  Nothing changed. Re-run with --confirm to adopt %s and let sync resume in both directions.\n", notespaceID)
 		return nil
 	}
 
@@ -190,8 +192,16 @@ func runSyncAdoptNotespace(ctx context.Context, out io.Writer, notespaceID strin
 	}
 	fmt.Fprintf(out, "  adopted      %s  %s\n", adopted.NotespaceID, adopted.Root)
 	fmt.Fprintf(out, "  receipt      %s\n", receipt)
-	fmt.Fprintf(out, "\n  Incoming writes resume into %s. The batch the daemon withheld replays from the\n", adopted.Root)
-	fmt.Fprintf(out, "  server's cursor, so nothing that was owed to this machine was lost.\n")
+	// Both directions, because the gate withheld both. `pushDesired` is
+	// `pullDesired`'s twin (daemon `ccd0d55`), so a contested notespace moved
+	// neither way and its outbox was parked rather than drained — and adopting
+	// releases the queue as well as the batch. This line said "Incoming writes
+	// resume" alone, which is understated in exactly the direction that
+	// matters: an operator reading it cannot tell whether the local edits they
+	// were deciding about are still only on this machine.
+	fmt.Fprintf(out, "\n  Sync resumes in both directions for %s. The batch the daemon withheld replays\n", adopted.Root)
+	fmt.Fprintf(out, "  from the server's cursor, so nothing that was owed to this machine was lost, and\n")
+	fmt.Fprintf(out, "  the local edits that queued while it was contested now push.\n")
 	return nil
 }
 
