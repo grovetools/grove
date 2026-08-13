@@ -15,6 +15,7 @@ import (
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/syncproto"
 	"github.com/grovetools/core/pkg/transition"
+	"github.com/grovetools/grove/pkg/notescope"
 )
 
 // `grove sync join <url>` — the relationship verb (P3 W3.1).
@@ -245,7 +246,7 @@ func renderJoinDelta(out io.Writer, delta syncproto.InventoryDelta, scanned []re
 		if strings.TrimSpace(name) == "" {
 			name = "(unnamed)"
 		}
-		fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\n", name, nb.ID, joinLocalState(nb), joinServerState(nb), joinDeltaSummary(nb))
+		fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\n", name, nb.ID, notescope.LocalStateColumn(nb), notescope.ServerStateColumn(nb), notescope.DeltaSummary(nb))
 	}
 	w.Flush()
 
@@ -301,48 +302,9 @@ func renderJoinDelta(out io.Writer, delta syncproto.InventoryDelta, scanned []re
 	fmt.Fprintf(out, "\nNothing above moved. `grove notebook pull <name>` / `grove notebook share <name>` act.\n")
 }
 
-// joinLocalState renders the recorded tri-state symmetrically with the
-// server's. "unshared" is not the same as "—": the first is D9's recorded
-// decision to stop, the second is a notebook nobody ever answered for.
-func joinLocalState(nb syncproto.NotebookDelta) string {
-	state := nb.LocalShareState
-	if nb.Direction == syncproto.DeltaDirectionPull {
-		return "—"
-	}
-	if state == "" {
-		state = "recorded"
-	}
-	if nb.LocalDuplicate {
-		return state + " (duplicate id)"
-	}
-	return state
-}
-
-func joinServerState(nb syncproto.NotebookDelta) string {
-	if nb.ServerShareState == "" {
-		return "—"
-	}
-	return nb.ServerShareState
-}
-
-func joinDeltaSummary(nb syncproto.NotebookDelta) string {
-	switch nb.Direction {
-	case syncproto.DeltaDirectionShare:
-		return "share: this server does not hold it"
-	case syncproto.DeltaDirectionPull:
-		if !nb.PullEligible {
-			return "retained after an unshare; not on offer (D9)"
-		}
-		return "pull: this machine does not record it"
-	}
-	switch {
-	case len(nb.LocalOnlyNotespaces) == 0 && len(nb.ServerOnlyNotespaces) == 0:
-		return "same membership on both sides"
-	default:
-		return fmt.Sprintf("%d notespace%s here only, %d there only",
-			len(nb.LocalOnlyNotespaces), plural(len(nb.LocalOnlyNotespaces)), len(nb.ServerOnlyNotespaces))
-	}
-}
+// The three delta columns moved to grove/pkg/notescope alongside the row model
+// the config TUI's join-delta page renders, so the table and the page say the
+// same words about the same row.
 
 // joinDeltaCounts is the evidence half of the same comparison. Zero-valued
 // counts are kept: "0 notebooks only on the server" is the answer to a question

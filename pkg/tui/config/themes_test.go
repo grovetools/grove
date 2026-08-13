@@ -89,12 +89,13 @@ func TestThemesPageRegistration(t *testing.T) {
 	m, _ := newTestModel(t)
 
 	pages := m.pager.Pages()
-	if len(pages) != 7 {
-		t.Fatalf("expected 7 pages (appearance, layout, keys, themes, code, notes, data), got %d", len(pages))
+	if len(pages) != 8 {
+		t.Fatalf("expected 8 pages (appearance, layout, keys, themes, code, notes, join, data), got %d", len(pages))
 	}
-	tp, ok := pages[3].(*ThemesPage)
+	themes := tabIndex(t, m, "themes")
+	tp, ok := pages[themes].(*ThemesPage)
 	if !ok {
-		t.Fatalf("expected page 4 to be *ThemesPage, got %T", pages[3])
+		t.Fatalf("expected the themes tab to be *ThemesPage, got %T", pages[themes])
 	}
 	if tp.TabID() != "themes" {
 		t.Errorf("TabID = %q, want %q", tp.TabID(), "themes")
@@ -110,16 +111,22 @@ func TestThemesPageRegistration(t *testing.T) {
 func TestActiveLayerPageIndexSafety(t *testing.T) {
 	m, _ := newTestModel(t)
 
-	// Curated tabs, the Themes tab, and the Ecosystem tab have no layer page.
-	for _, idx := range []int{0, 1, 2, 3, 4, 5} {
+	// Every tab but Data — curated, Themes, Code, Notes, Join — has no layer
+	// page. Enumerating the pager rather than a literal index list keeps this
+	// honest as tabs are added.
+	data := tabIndex(t, m, "data")
+	for idx := range m.pager.Pages() {
+		if idx == data {
+			continue
+		}
 		m.pager.SetActive(idx)
 		if got := m.activeLayerPage(); got != nil {
 			t.Errorf("tab %d: activeLayerPage = %v, want nil", idx, got)
 		}
 	}
 
-	// The Data tab (index 6) resolves to the DataPage's inner LayerPage.
-	m.pager.SetActive(6)
+	// The Data tab resolves to the DataPage's inner LayerPage.
+	m.pager.SetActive(data)
 	if got := m.activeLayerPage(); got != m.dataPage.inner {
 		t.Errorf("activeLayerPage on Data tab = %p, want %p", got, m.dataPage.inner)
 	}

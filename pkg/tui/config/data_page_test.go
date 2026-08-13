@@ -54,7 +54,7 @@ func newDataModel(t *testing.T, layered *config.LayeredConfig, workspace string)
 	svc := setup.NewService(false)
 	m := New(layered, setup.NewYAMLHandler(svc), setup.NewTOMLHandler(svc), grovekeymap.NewConfigKeyMap(nil))
 	m.workspacePath = workspace
-	m.pager.SetActive(6) // Data tab (last)
+	m.pager.SetActive(tabIndex(t, m, "data"))
 	return m
 }
 
@@ -62,7 +62,7 @@ func TestPagerPageOrder(t *testing.T) {
 	m, _ := newTestModel(t)
 
 	pages := m.pager.Pages()
-	wantNames := []string{"Appearance", "Layout", "Keys", "Themes", "Code", "Notes", "Data"}
+	wantNames := []string{"Appearance", "Layout", "Keys", "Themes", "Code", "Notes", "Join", "Data"}
 	if len(pages) != len(wantNames) {
 		t.Fatalf("expected %d pages, got %d", len(wantNames), len(pages))
 	}
@@ -71,8 +71,8 @@ func TestPagerPageOrder(t *testing.T) {
 			t.Errorf("page %d name = %q, want %q", i, got, want)
 		}
 	}
-	if _, ok := pages[6].(*DataPage); !ok {
-		t.Fatalf("expected last page to be *DataPage, got %T", pages[6])
+	if _, ok := pages[len(pages)-1].(*DataPage); !ok {
+		t.Fatalf("expected last page to be *DataPage, got %T", pages[len(pages)-1])
 	}
 }
 
@@ -246,7 +246,7 @@ func TestDataPageEditAndDeleteRouting(t *testing.T) {
 // page as its return value or the layer cycler is permanently lost.
 func TestDataPageSurvivesPagerReassignment(t *testing.T) {
 	m, _ := newTestModel(t)
-	m.pager.SetActive(6)
+	m.pager.SetActive(tabIndex(t, m, "data"))
 
 	// Direct contract: Update returns the DataPage itself.
 	page, _ := m.dataPage.Update(runeKey('j'))
@@ -254,12 +254,13 @@ func TestDataPageSurvivesPagerReassignment(t *testing.T) {
 		t.Fatalf("DataPage.Update returned %T (%p), want the DataPage itself (%p)", page, page, m.dataPage)
 	}
 
-	// Through the pager: after a delegated keystroke, slot 5 must still
+	// Through the pager: after a delegated keystroke, the Data slot must still
 	// hold the *DataPage.
+	slot := tabIndex(t, m, "data")
 	updated, _ := m.Update(runeKey('j'))
 	m = updated.(Model)
-	if _, ok := m.pager.Pages()[6].(*DataPage); !ok {
-		t.Fatalf("pager slot 6 holds %T after keystroke — DataPage was replaced by its inner page", m.pager.Pages()[6])
+	if _, ok := m.pager.Pages()[slot].(*DataPage); !ok {
+		t.Fatalf("pager slot %d holds %T after keystroke — DataPage was replaced by its inner page", slot, m.pager.Pages()[slot])
 	}
 
 	// And the cycler still works afterwards.

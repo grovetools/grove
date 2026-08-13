@@ -7,15 +7,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/grovetools/core/pkg/coderoot"
-	"github.com/grovetools/core/pkg/notespace"
 	"github.com/grovetools/core/pkg/syncproto"
 	"github.com/grovetools/core/pkg/transition"
+	"github.com/grovetools/grove/pkg/notescope"
 )
 
 // The client half of the P3 notebook scope model, shared by `grove sync join`,
@@ -29,217 +27,47 @@ import (
 // disagrees with a stamp is an error naming both ids. The verbs differ only in
 // what they do after the reading.
 
-// recordedNotespace is one notespace directory beneath a recorded notebook.
-// Stamp is nil when the directory carries no .notespace.toml — a real state
-// (created before P2, or by hand) that share mints and every other verb names.
-type recordedNotespace struct {
-	Dir   string
-	Root  string
-	Stamp *notespace.NotespaceStamp
-}
-
-// ID is the notespace's immutable id, or "" when it is unminted.
-func (n recordedNotespace) ID() string {
-	if n.Stamp == nil {
-		return ""
-	}
-	return n.Stamp.ID
-}
-
-// recordedNotebook is one [notebooks.<name>] table as this machine holds it:
-// the recorded declaration, the directory it resolves to, whether that
-// directory exists, the recorded share state, and what is inside it.
-type recordedNotebook struct {
-	Name string
-	// Declared is the notebooks.toml spelling; Root is the expanded path. Both
-	// are kept because the transition printer reports both.
-	Declared string
-	Root     string
-	Exists   bool
-	// Shared is `share = true`; SyncRecorded distinguishes an explicit
-	// `share = false` (D9's recorded-as-unshared) from "never recorded".
-	Shared       bool
-	SyncRecorded bool
-	Stamp        *notespace.NotebookStamp
-	Notespaces   []recordedNotespace
-}
-
-// ID is the notebook's immutable id, or "" when the root carries no stamp.
-func (n recordedNotebook) ID() string {
-	if n.Stamp == nil {
-		return ""
-	}
-	return n.Stamp.ID
-}
-
-// loadRecordedNotebooks reads the recorded routing pair and scans every
-// notebook it names. A machine with no notebooks.toml is refused by name: the
-// notebook scope model has nothing to talk about before the config collapse
-// has landed on this machine.
-func loadRecordedNotebooks() (coderoot.Table, []recordedNotebook, error) {
-	table, err := coderoot.Load()
-	if err != nil {
-		return coderoot.Table{}, nil, err
-	}
-	if table.NotebooksFilePath == "" {
-		return coderoot.Table{}, nil, fmt.Errorf("this machine records no %s; the notebook scope model reads recorded notebooks only — run `grove migrate` first", coderoot.NotebooksFileName)
-	}
-	scanned, err := scanRecordedNotebooks(table)
-	if err != nil {
-		return coderoot.Table{}, nil, err
-	}
-	return table, scanned, nil
-}
-
-// scanRecordedNotebooks walks the recorded notebooks in deterministic order. A
-// missing root is recorded as Exists=false rather than an error: only the verbs
-// that need the directory decide that its absence is fatal, and `sync join`
-// deliberately still reports it.
-func scanRecordedNotebooks(table coderoot.Table) ([]recordedNotebook, error) {
-	out := make([]recordedNotebook, 0, len(table.Notebooks))
-	for _, name := range table.SortedNotebookNames() {
-		definition := table.Notebooks[name]
-		root := table.NotebookRoot(name)
-		entry := recordedNotebook{
-			Name:         name,
-			Declared:     definition.Root,
-			Root:         root,
-			Shared:       definition.Shared(),
-			SyncRecorded: definition.SyncRecorded(),
-		}
-		info, err := os.Stat(root)
-		entry.Exists = err == nil && info.IsDir()
-		if !entry.Exists {
-			out = append(out, entry)
-			continue
-		}
-		stamp, err := notespace.LoadNotebook(root)
-		if err != nil {
-			return nil, err
-		}
-		entry.Stamp = stamp
-		contained, err := scanContainedNotespaces(root)
-		if err != nil {
-			return nil, err
-		}
-		entry.Notespaces = contained
-		out = append(out, entry)
-	}
-	return out, nil
-}
-
-// scanContainedNotespaces lists the notespaces of one notebook root. The
-// notespaces/ directory being absent is not an error — an empty notebook is a
-// notebook.
-func scanContainedNotespaces(notebookRoot string) ([]recordedNotespace, error) {
-	dir := filepath.Join(notebookRoot, notespaceContainerDir)
-	entries, err := os.ReadDir(dir)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read notespaces in %s: %w", notebookRoot, err)
-	}
-	out := make([]recordedNotespace, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		root := filepath.Join(dir, entry.Name())
-		stamp, err := notespace.LoadNotespace(root)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, recordedNotespace{Dir: entry.Name(), Root: root, Stamp: stamp})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Dir < out[j].Dir })
-	return out, nil
-}
+// The scan and the pure comparison it feeds now live in grove/pkg/notescope,
+// because the P3 config TUI reads exactly the same three facts and a second
+// implementation of "what is recorded here" would be a second thing to keep
+// true. The verbs keep their own vocabulary through these aliases: nothing
+// below this line changed shape, only where it is defined.
+type (
+	recordedNotespace = notescope.Notespace
+	recordedNotebook  = notescope.Notebook
+)
 
 // notespaceContainerDir is the notebook-relative directory notespaces live in.
-// It mirrors core/pkg/workspace.NotespaceDirectory, quoted here rather than
-// imported so this file depends only on the identity and routing packages.
-const notespaceContainerDir = "notespaces"
+const notespaceContainerDir = notescope.ContainerDir
 
-// findRecordedNotebook resolves a notebook NAME against the recorded table. An
-// unknown name is a hard error naming the file and every name it does record —
-// the alternative is a verb that invents a notebook the operator never wrote
-// down.
+func loadRecordedNotebooks() (coderoot.Table, []recordedNotebook, error) { return notescope.Load() }
+
+func scanRecordedNotebooks(table coderoot.Table) ([]recordedNotebook, error) {
+	return notescope.Scan(table)
+}
+
+func scanContainedNotespaces(notebookRoot string) ([]recordedNotespace, error) {
+	return notescope.ScanContained(notebookRoot)
+}
+
 func findRecordedNotebook(table coderoot.Table, scanned []recordedNotebook, name string) (recordedNotebook, error) {
-	for _, entry := range scanned {
-		if entry.Name == name {
-			return entry, nil
-		}
-	}
-	return recordedNotebook{}, fmt.Errorf("%s records no notebook %q (it records: %s)",
-		displayRecordedPath(table.NotebooksFilePath, coderoot.NotebooksFileName), name,
-		strings.Join(table.SortedNotebookNames(), ", "))
+	return notescope.Find(table, scanned, name)
 }
 
 func displayRecordedPath(path, fallback string) string {
-	if strings.TrimSpace(path) == "" {
-		return fallback
-	}
-	return path
+	return notescope.DisplayRecordedPath(path, fallback)
 }
 
-// deltaLocalNotebooks projects the scan into the pure delta function's input.
-// Only stamped notebooks carry an id, and only an id compares against a server
-// — unstamped notebooks are reported separately by the caller rather than
-// folded in as "absent from the server", which they are not.
 func deltaLocalNotebooks(scanned []recordedNotebook) []syncproto.LocalNotebook {
-	out := make([]syncproto.LocalNotebook, 0, len(scanned))
-	for _, entry := range scanned {
-		if entry.ID() == "" {
-			continue
-		}
-		local := syncproto.LocalNotebook{
-			ID:   syncproto.NotebookID(entry.ID()),
-			Name: entry.Name,
-			// Both halves of the recorded tri-state travel: `share = false` is
-			// D9's recorded-as-unshared and must not read as "never considered".
-			Shared:   entry.Shared,
-			Recorded: entry.SyncRecorded,
-		}
-		for _, ns := range entry.Notespaces {
-			if ns.ID() != "" {
-				local.Notespaces = append(local.Notespaces, syncproto.NotespaceID(ns.ID()))
-			}
-		}
-		out = append(out, local)
-	}
-	return out
+	return notescope.LocalNotebooks(scanned)
 }
 
-// refuseDuplicateNotebookIDs stops a verb that would ACT on a machine
-// recording one notebook id twice — the copied-stamp state of D8.
-//
-// The check needs no server: duplication is entirely a local fact, and
-// BuildInventoryDelta reports it against an empty inventory just as well as
-// against a real one. `sync join` deliberately does not call this — the delta
-// is where an operator meets the duplicate first, and refusing to render it
-// would hide the thing that needs fixing.
 func refuseDuplicateNotebookIDs(scanned []recordedNotebook) error {
-	return syncproto.BuildInventoryDelta(deltaLocalNotebooks(scanned), syncproto.InventoryResponse{}).Conflicts()
+	return notescope.RefuseDuplicateNotebookIDs(scanned)
 }
 
-// notebookStampedElsewhere reports another recorded notebook already carrying
-// this notebook id.
-//
-// It exists for the one verb that can CREATE a duplicate rather than merely
-// meet one: `notebook pull` installs a server-supplied id into a root that
-// carried none, and doing that while a second recorded root already holds it
-// would mint the exact D8 state every other verb here refuses to act on.
 func notebookStampedElsewhere(scanned []recordedNotebook, exclude string, id syncproto.NotebookID) (recordedNotebook, bool) {
-	for _, entry := range scanned {
-		if entry.Name == exclude {
-			continue
-		}
-		if entry.ID() != "" && syncproto.NotebookID(entry.ID()) == id {
-			return entry, true
-		}
-	}
-	return recordedNotebook{}, false
+	return notescope.StampedElsewhere(scanned, exclude, id)
 }
 
 // ---- server inventory --------------------------------------------------------

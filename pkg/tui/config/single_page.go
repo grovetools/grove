@@ -21,7 +21,8 @@ type SinglePageOpts struct {
 }
 
 // NewSinglePage builds a config Model hosting exactly ONE page, identified
-// by its tab ID ("themes", "appearance", "layout", "keys", "code", "notes"). The onboarding
+// by its tab ID ("themes", "appearance", "layout", "keys", "code", "notes",
+// "join"). The onboarding
 // steps embed these so the Theme/Keys steps ARE the real config machinery:
 // the full commit path (setSettingMsg → TypedValue → WriteTransform →
 // SaveGlobalSetting → reloadConfig → SettingAppliedMsg) lives in the Model
@@ -77,6 +78,9 @@ func NewSinglePage(pageID string, layered *config.LayeredConfig, yamlHandler *se
 	case "notes":
 		m.notesPage = NewNotesPage(layered, keys, width, height)
 		page = m.notesPage
+	case "join":
+		m.joinPage = NewJoinPage(layered, keys, width, height)
+		page = m.joinPage
 	default:
 		return Model{}, fmt.Errorf("unknown config page %q", pageID)
 	}

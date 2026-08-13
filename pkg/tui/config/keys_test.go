@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/grovetools/core/tui/components/pager"
 
 	"github.com/grovetools/grove/pkg/configui"
 	grovekeymap "github.com/grovetools/grove/pkg/keymap"
@@ -55,13 +56,28 @@ func pressChord(t *testing.T, m Model, chord string) Model {
 // newConfigModel builds a config Model with the given keymap over a temp
 // project layer, with the Data tab active on its Global layer (the
 // schema-driven tree the layer-page key tests exercise).
+// tabIndex resolves a page by its TabID rather than by position. The pager's
+// page list grows — the P3 Join tab landed between Notes and Data — and a
+// hard-coded index silently retargets every test that used it at whichever tab
+// moved into that slot.
+func tabIndex(t *testing.T, m Model, id string) int {
+	t.Helper()
+	for i, p := range m.pager.Pages() {
+		if pid, ok := p.(pager.PageWithID); ok && pid.TabID() == id {
+			return i
+		}
+	}
+	t.Fatalf("no page with TabID %q", id)
+	return -1
+}
+
 func newConfigModel(t *testing.T, keys grovekeymap.ConfigKeyMap) Model {
 	t.Helper()
 	layered, path := writeProjectLayer(t)
 	svc := setup.NewService(false)
 	m := New(layered, setup.NewYAMLHandler(svc), setup.NewTOMLHandler(svc), keys)
 	m.workspacePath = filepath.Dir(path)
-	m.pager.SetActive(6) // Data tab
+	m.pager.SetActive(tabIndex(t, m, "data"))
 
 	// New() seeds the filters from the on-disk UI state, and any sibling test
 	// that fires a preview/view-mode/sort/maturity toggle writes that file back

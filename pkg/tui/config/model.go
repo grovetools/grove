@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/grovetools/grove/pkg/configui"
 	grovekeymap "github.com/grovetools/grove/pkg/keymap"
+	"github.com/grovetools/grove/pkg/notescope"
 	"github.com/grovetools/grove/pkg/setup"
 )
 
@@ -93,9 +95,11 @@ type Model struct {
 	// themesPage is the bespoke theme-gallery page (4th tab).
 	themesPage *ThemesPage
 
-	// Code and Notes are the recorded roots/notebooks surfaces.
+	// Code and Notes are the recorded roots/notebooks surfaces; Join is the
+	// P3 comparison against the recorded sync server.
 	codePage  *CodePage
 	notesPage *NotesPage
+	joinPage  *JoinPage
 
 	// curatedPages tracks the CuratedPage tabs so refreshAllPages can
 	// re-point them at a reloaded config.
@@ -147,6 +151,11 @@ type Model struct {
 	// rather than the host process's launch directory. Empty falls
 	// back to os.Getwd() — the standalone `grove config` CLI path.
 	workspacePath string
+
+	// scopeService overrides how the P3 Notes/Join acts reach the verbs.
+	// Production leaves it nil (notescope.ResolveService); tests inject a fake
+	// so no keypath here can reach a real server or a live config.
+	scopeService func() (notescope.Service, error)
 }
 
 // New creates a new config TUI Model.
@@ -175,9 +184,10 @@ func New(
 	themesPage := NewThemesPage(layered, keys, width, height)
 	codePage := NewCodePage(layered, keys, width, height)
 	notesPage := NewNotesPage(layered, keys, width, height)
+	joinPage := NewJoinPage(layered, keys, width, height)
 	dataPage := NewDataPage(layered, filters, keys, width, height)
 
-	pages := []pager.Page{appearancePage, layoutPage, keysPage, themesPage, codePage, notesPage, dataPage}
+	pages := []pager.Page{appearancePage, layoutPage, keysPage, themesPage, codePage, notesPage, joinPage, dataPage}
 
 	pagerKeys := newPagerKeyMap(keys)
 
@@ -207,6 +217,7 @@ func New(
 		themesPage:   themesPage,
 		codePage:     codePage,
 		notesPage:    notesPage,
+		joinPage:     joinPage,
 		curatedPages: []*CuratedPage{appearancePage, layoutPage, keysPage},
 		keysPage:     keysPage,
 		input:        ti,
@@ -320,6 +331,66 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if err := m.reloadConfig(); err != nil {
 			m.statusMsg = fmt.Sprintf("Error reloading: %v", err)
+		}
+		return m, nil
+
+	// ---- P3 notebook scope --------------------------------------------------
+	//
+	// Each of these arrives from exactly one keypress on the Notes or Join
+	// page, and each runs the SAME verb the CLI runs — in this process, through
+	// notescope.Service — so a refusal an operator would have read on a
+	// terminal is the refusal this TUI shows.
+
+	case fetchJoinDeltaMsg:
+		return m, m.fetchJoinDelta()
+
+	case joinDeltaLoadedMsg:
+		if m.joinPage == nil {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.joinPage.SetError(msg.err)
+			m.statusMsg = fmt.Sprintf("Inventory: %v", msg.err)
+			return m, nil
+		}
+		m.joinPage.SetInventory(msg.inventory, msg.scanned)
+		m.statusMsg = "Delta fetched. Nothing moved."
+		return m, nil
+
+	case shareNotebookMsg:
+		return m, m.runScopeAction(func(ctx context.Context, svc notescope.Service) (notescope.ActionResult, error) {
+			return svc.Share(ctx, msg.notebook)
+		})
+
+	case pullNotebookMsg:
+		return m, m.runScopeAction(func(ctx context.Context, svc notescope.Service) (notescope.ActionResult, error) {
+			return svc.Pull(ctx, msg.notebook)
+		})
+
+	case moveNotespaceMsg:
+		return m, m.runScopeAction(func(ctx context.Context, svc notescope.Service) (notescope.ActionResult, error) {
+			return svc.Move(ctx, msg.notespace, msg.to)
+		})
+
+	case scopeActionDoneMsg:
+		// The verb's own evidence is the status, refused or not: it names the
+		// file, the root and the server's answer, and paraphrasing it here
+		// would drop exactly the part that explains what to do next.
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("%s: %v", msg.result.Action, msg.err)
+		} else {
+			m.statusMsg = msg.result.Summary()
+		}
+		if err := m.reloadConfig(); err != nil {
+			m.statusMsg = fmt.Sprintf("Error reloading: %v", err)
+			return m, nil
+		}
+		// A completed act changed one side of the comparison, so a fetched
+		// delta is now stale. Re-deriving it needs the server again — but only
+		// for a page that had already asked.
+		if msg.err == nil && m.joinPage != nil && m.joinPage.Fetched() {
+			m.joinPage.SetLoading(true)
+			return m, m.fetchJoinDelta()
 		}
 		return m, nil
 
@@ -1095,6 +1166,9 @@ func (m *Model) refreshAllPages() {
 	}
 	if m.notesPage != nil {
 		m.notesPage.Refresh(m.layered)
+	}
+	if m.joinPage != nil {
+		m.joinPage.Refresh(m.layered)
 	}
 	for _, cp := range m.curatedPages {
 		cp.Refresh(m.layered)
