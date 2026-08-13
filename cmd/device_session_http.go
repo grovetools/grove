@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,25 +60,47 @@ func syncHTTPClient(tlsConfig *tls.Config) *http.Client {
 	return &http.Client{Transport: transport, Timeout: syncCapabilitiesTimeout}
 }
 
+// Identity discovery is the first call of every device-session verb, so a
+// refusal here fails a verb that has not yet asked the server for anything.
+// These bound the one refusal that is not final — a rate limit, which is a
+// request to come back rather than a no.
+const (
+	identityRetryAttempts = 3
+	identityRetryCap      = 30 * time.Second
+)
+
 func discoverSyncIdentity(ctx context.Context, client *http.Client, serverURL string) (*syncproto.IdentityResponse, error) {
 	if client == nil {
 		client = &http.Client{Timeout: syncCapabilitiesTimeout}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(serverURL, "/")+"/sync/identity", nil)
-	if err != nil {
-		return nil, err
+	var (
+		status int
+		body   []byte
+		wait   time.Duration
+	)
+	for attempt := 1; ; attempt++ {
+		var err error
+		status, body, wait, err = getSyncIdentity(ctx, client, serverURL)
+		if err != nil {
+			return nil, err
+		}
+		if status != http.StatusTooManyRequests || attempt >= identityRetryAttempts {
+			break
+		}
+		// The server states the wait; waiting it out is the whole remedy, and
+		// discovery is a read, so retrying it cannot repeat a side effect.
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(wait):
+		}
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("sync identity discovery failed: %w", err)
+	if status == http.StatusTooManyRequests {
+		return nil, fmt.Errorf("sync identity discovery is rate limited by %s (HTTP 429, %d attempts): %s — wait %s and re-run",
+			strings.TrimRight(serverURL, "/"), identityRetryAttempts, rateLimitDetail(body), wait)
 	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDeviceHTTPResponse))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("sync identity discovery returned HTTP %d", resp.StatusCode)
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("sync identity discovery returned HTTP %d", status)
 	}
 	var identity syncproto.IdentityResponse
 	if err := json.Unmarshal(body, &identity); err != nil {
@@ -87,6 +110,59 @@ func discoverSyncIdentity(ctx context.Context, client *http.Client, serverURL st
 		return nil, fmt.Errorf("sync server does not advertise device-session protocol v%d", syncproto.ProtocolVersionDeviceSession)
 	}
 	return &identity, nil
+}
+
+// getSyncIdentity performs one GET /sync/identity, returning the status, the
+// bounded body, and the wait the server asked for (already clamped to
+// something a CLI may sit through). A transport failure is an error; a status
+// is not, because the caller decides which statuses are worth another try.
+func getSyncIdentity(ctx context.Context, client *http.Client, serverURL string) (int, []byte, time.Duration, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(serverURL, "/")+"/sync/identity", nil)
+	if err != nil {
+		return 0, nil, 0, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, nil, 0, fmt.Errorf("sync identity discovery failed: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDeviceHTTPResponse))
+	if err != nil {
+		return resp.StatusCode, nil, 0, err
+	}
+	return resp.StatusCode, body, retryAfterWait(resp.Header.Get("Retry-After")), nil
+}
+
+// retryAfterWait reads the standard header. A server that sends nothing usable
+// still gets a second's grace rather than an instant retry, and no server gets
+// to park a CLI for longer than identityRetryCap.
+func retryAfterWait(header string) time.Duration {
+	seconds, err := strconv.Atoi(strings.TrimSpace(header))
+	if err != nil || seconds < 1 {
+		return time.Second
+	}
+	wait := time.Duration(seconds) * time.Second
+	if wait > identityRetryCap {
+		return identityRetryCap
+	}
+	return wait
+}
+
+// rateLimitDetail is the server's own sentence about the refusal, so the error
+// an operator reads is the reason rather than the status code. Falls back to
+// the raw body, then to a bare description.
+func rateLimitDetail(body []byte) string {
+	var wire struct {
+		Error string `json:"error"`
+	}
+	_ = json.Unmarshal(body, &wire)
+	if message := strings.TrimSpace(wire.Error); message != "" {
+		return message
+	}
+	if message := strings.TrimSpace(string(body)); message != "" {
+		return message
+	}
+	return "the server gave no reason"
 }
 
 func establishDeviceSession(ctx context.Context, client *http.Client, serverURL string, key *devicekey.Key) (*syncproto.CapabilitiesResponse, error) {
