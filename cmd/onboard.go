@@ -629,6 +629,14 @@ func (m *onboardModel) viewDone() string {
 		content.WriteString("\n")
 	}
 
+	// Every tool is reachable as 'grove <tool>'; bare names are opt-in, one at
+	// a time, so onboarding never quietly claims names in the user's namespace.
+	content.WriteString("\n")
+	content.WriteString(t.Muted.Render("Tools run as 'grove <tool>' (e.g. 'grove nb list', 'grove mux')."))
+	content.WriteString("\n")
+	content.WriteString(t.Muted.Render("Want a bare name? 'grove expose cx' links it into ~/.local/bin ('grove hide cx' undoes it)."))
+	content.WriteString("\n")
+
 	return content.String()
 }
 

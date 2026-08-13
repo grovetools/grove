@@ -47,7 +47,9 @@ func init() {
 	rootCmd.AddCommand(newBuildCmd())
 	rootCmd.AddCommand(newCheckCmd())
 	rootCmd.AddCommand(newDepsCmd())
+	rootCmd.AddCommand(newExposeCmd())
 	rootCmd.AddCommand(newFmtCmd())
+	rootCmd.AddCommand(newHideCmd())
 	// No newForgeCmd(): `grove forge` is no longer compiled in. Provisioning a
 	// forge is a REFERENCE DEPLOYMENT (GCP + WireGuard + Forgejo/syncd), not
 	// the product, so it ships as the grove-plugin-forge-gcp recipe building a
@@ -162,6 +164,20 @@ func printAvailableTools(t *theme.Theme) {
 
 // Execute runs the root command
 func Execute() error {
+	// argv[0] dispatch, ahead of everything: this process may BE a tool. `grove
+	// expose cx` symlinks ~/.local/bin/cx at the grove binary, so an invocation
+	// arriving as `cx stats` is a request for cx, not for grove. Deciding it
+	// here — before cobra sees a flag, before the registry short-circuit below —
+	// is what lets an exposed name behave exactly like the tool it names,
+	// including `cx --help` and `nb -v`.
+	if tool, ok := argv0Delegation(os.Args[0]); ok {
+		if err := delegateToTool(tool, os.Args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, "Error:", err)
+			os.Exit(1)
+		}
+		return nil
+	}
+
 	// Check if the first argument is a known tool - delegate BEFORE cobra parses flags
 	if len(os.Args) > 1 {
 		potentialTool := os.Args[1]
@@ -192,6 +208,59 @@ func Execute() error {
 	}
 
 	return rootCmd.Execute()
+}
+
+// argv0Delegation is the impure wrapper around argv0Tool: it supplies the
+// exposure ledger and the tool registry. The ledger is read only on the path
+// where argv[0] is not grove, so a normal `grove ...` invocation pays nothing.
+func argv0Delegation(argv0 string) (string, bool) {
+	base := strings.TrimSuffix(filepath.Base(argv0), ".exe")
+	if base == "grove" || base == "." || base == string(os.PathSeparator) || base == "" {
+		return "", false
+	}
+	return argv0Tool(base, loadExposures(), registryBinary)
+}
+
+// argv0Tool decides whether an invocation arriving under the name argv0 should
+// be delegated to a tool, and to which binary. It is pure — the exposure ledger
+// and the registry come in as arguments — so the decision is testable without
+// a filesystem, an exec, or a real ~/.local/bin.
+//
+// Two ways a name can dispatch, and no third:
+//
+//   - the ledger maps it (this is how `grove expose nb --as gnb` works; nothing
+//     about the name `gnb` says nb), but only if the tool it names is STILL
+//     registered — a stale ledger must not become a passthrough;
+//   - the name is itself a registered repo name or binary alias.
+//
+// Everything else returns false and gets grove's own behavior. That is the
+// whole safety property: an unrecognized argv[0] never turns grove into a
+// launcher for arbitrary binaries.
+func argv0Tool(argv0 string, exposures map[string]string, registry func(string) (string, bool)) (string, bool) {
+	base := strings.TrimSuffix(filepath.Base(argv0), ".exe")
+	if base == "" || base == "grove" || base == "." || base == ".." || base == string(os.PathSeparator) {
+		return "", false
+	}
+	if tool, ok := exposures[base]; ok && tool != "" {
+		if binary, known := registry(tool); known {
+			return binary, true
+		}
+		return "", false
+	}
+	return registry(base)
+}
+
+// registryBinary resolves a registered repo name or alias to the binary name
+// that actually answers for it (`daemon` → `groved`).
+func registryBinary(name string) (string, bool) {
+	repoName, _, alias, found := sdk.FindTool(name)
+	if !found {
+		return "", false
+	}
+	if alias != "" {
+		return alias, true
+	}
+	return repoName, true
 }
 
 // builtinClaimsArgs reports whether grove's OWN command tree handles
