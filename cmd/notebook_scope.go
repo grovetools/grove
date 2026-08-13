@@ -10,7 +10,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/coderoot"
+	"github.com/grovetools/core/pkg/notespace"
 	"github.com/grovetools/core/pkg/syncproto"
 	"github.com/grovetools/core/pkg/transition"
 	"github.com/grovetools/grove/pkg/notescope"
@@ -201,4 +203,48 @@ func refuseUnexplainedStatus(status int, wire *syncproto.ProtocolError, requestI
 func idempotencyKey(prefix string, parts ...string) string {
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return fmt.Sprintf("%s-%x", prefix, sum[:8])
+}
+
+// ---- registration intent ------------------------------------------------------
+
+// registrationIntentFor says which registration a stamped notespace is asking
+// the server for.
+//
+// The two intents answer different questions, and the server enforces the
+// difference: `reconcile` means "this notespace IS the subject's", so the
+// server refuses it when its subject claim already names a different one
+// (`registration_conflict: subject already has a different inherited
+// notespace`). `create-sibling` means "this is one more notespace for a subject
+// that already has one", which is exactly what P4 (W4.1) made legal.
+//
+// Before P4 every notespace was its subject's only one, so registering
+// everything as `reconcile` was right by construction. It stopped being right
+// the moment `grove notespace new` could put a second notespace for one subject
+// inside a notebook: `grove notebook share` registers every member and would
+// fail on the sibling — and fail the WHOLE share, leaving the notebook's
+// membership unwritten — and `grove notespace move` would refuse to move a
+// sibling into a shared notebook at all.
+//
+// The test is this machine's recorded [primaries] pointer, which is the same
+// test the daemon's own registrationIntent applies, so the two writers cannot
+// disagree about what a given notespace is: the recorded primary reconciles the
+// subject, and anything else is a sibling of it. A machine with nothing
+// recorded reconciles, which is the pre-P4 answer for a pre-P4 machine.
+func registrationIntentFor(stamp notespace.NotespaceStamp, primaries map[string]string) string {
+	if primary := primaries[stamp.Subject]; primary != "" && primary != stamp.ID {
+		return syncproto.RegistrationIntentCreateSibling
+	}
+	return syncproto.RegistrationIntentReconcile
+}
+
+// recordedPrimaries reads machine.toml's [primaries] table for the intent
+// decision above. It is best-effort on purpose: a machine whose machine.toml
+// cannot be read still registers, with the pre-P4 answer, rather than being
+// unable to share at all.
+func recordedPrimaries() map[string]string {
+	machineCfg, err := config.LoadMachineConfig()
+	if err != nil || machineCfg == nil {
+		return nil
+	}
+	return machineCfg.Primaries
 }

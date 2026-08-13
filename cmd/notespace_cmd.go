@@ -582,14 +582,23 @@ func applyServerMove(ctx context.Context, client *deviceSessionHTTP, deviceID st
 	return serverMoveResult{}, fmt.Errorf("no server action was planned for this move")
 }
 
+// registerNotespaceStamp gives the server a notespace's identity before its
+// membership is moved.
+//
+// The intent is the same per-notespace decision `notebook share` makes: a
+// notespace that is not this machine's recorded primary for its subject is a
+// SIBLING, and asking the server to reconcile it against a subject that already
+// names another notespace is refused — which, before P4, could not happen, and
+// after P4 meant a sibling could not be moved into a shared notebook at all.
 func registerNotespaceStamp(ctx context.Context, client *deviceSessionHTTP, deviceID string, stamp notespace.NotespaceStamp) error {
+	intent := registrationIntentFor(stamp, recordedPrimaries())
 	req := syncproto.RegisterRequest{
 		RequestIdentity: syncproto.RequestIdentity{
 			ProtocolVersion: syncproto.ProtocolVersionNotespaceID,
-			IdempotencyKey:  idempotencyKey("notespace-move-register", stamp.ID, stamp.Subject, stamp.Name, stamp.Kind),
+			IdempotencyKey:  idempotencyKey("notespace-move-register", stamp.ID, stamp.Subject, stamp.Name, stamp.Kind, intent),
 			DeviceID:        deviceID,
 		},
-		Intent:              syncproto.RegistrationIntentReconcile,
+		Intent:              intent,
 		Subject:             stamp.Subject,
 		NotespaceName:       syncproto.NotespaceName(stamp.Name),
 		Kind:                stamp.Kind,

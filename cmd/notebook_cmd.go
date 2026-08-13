@@ -158,19 +158,27 @@ func runNotebookShare(ctx context.Context, out io.Writer, name string, asJSON bo
 	// Members must already be registered: the server rejects an unregistered
 	// notespace by name and fails the whole share, so registration happens here
 	// first, one notespace at a time, with its own evidence line.
+	//
+	// The intent is decided PER notespace (registrationIntentFor), because a
+	// notebook may legally hold two notespaces for one subject since P4. A flat
+	// `reconcile` for all of them made the server refuse the sibling and fail
+	// the whole share, so a notebook was un-shareable from the moment an
+	// operator created a second notespace for a subject inside it.
+	primaries := recordedPrimaries()
 	registered := int64(0)
 	members := make([]syncproto.NotespaceID, 0, len(nb.Notespaces))
 	for _, ns := range nb.Notespaces {
 		if ns.Stamp == nil {
 			continue
 		}
+		intent := registrationIntentFor(*ns.Stamp, primaries)
 		req := syncproto.RegisterRequest{
 			RequestIdentity: syncproto.RequestIdentity{
 				ProtocolVersion: syncproto.ProtocolVersionNotespaceID,
-				IdempotencyKey:  idempotencyKey("notebook-share-register", ns.Stamp.ID, ns.Stamp.Subject, ns.Stamp.Name, ns.Stamp.Kind),
+				IdempotencyKey:  idempotencyKey("notebook-share-register", ns.Stamp.ID, ns.Stamp.Subject, ns.Stamp.Name, ns.Stamp.Kind, intent),
 				DeviceID:        key.DeviceID(),
 			},
-			Intent:              syncproto.RegistrationIntentReconcile,
+			Intent:              intent,
 			Subject:             ns.Stamp.Subject,
 			NotespaceName:       syncproto.NotespaceName(ns.Stamp.Name),
 			Kind:                ns.Stamp.Kind,
