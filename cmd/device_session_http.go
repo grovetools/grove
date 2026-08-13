@@ -164,44 +164,12 @@ func containsProtocol(versions []int, want int) bool {
 }
 
 func (c *deviceSessionHTTP) doJSON(ctx context.Context, method, path string, requestBody, responseBody any) error {
-	var body io.Reader
-	if requestBody != nil {
-		encoded, err := json.Marshal(requestBody)
-		if err != nil {
-			return err
-		}
-		body = bytes.NewReader(encoded)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+	status, data, err := c.do(ctx, method, path, requestBody)
 	if err != nil {
 		return err
 	}
-	if requestBody != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	req.Header.Set("Authorization", "Bearer "+c.bearer)
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxDeviceHTTPResponse))
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		var wireError struct {
-			Error string `json:"error"`
-		}
-		_ = json.Unmarshal(data, &wireError)
-		message := strings.TrimSpace(wireError.Error)
-		if message == "" {
-			message = strings.TrimSpace(string(data))
-		}
-		if message == "" {
-			message = http.StatusText(resp.StatusCode)
-		}
-		return fmt.Errorf("sync server returned HTTP %d: %s", resp.StatusCode, message)
+	if status < 200 || status >= 300 {
+		return statusError(status, data)
 	}
 	if responseBody != nil && len(data) > 0 {
 		if err := json.Unmarshal(data, responseBody); err != nil {
@@ -209,6 +177,80 @@ func (c *deviceSessionHTTP) doJSON(ctx context.Context, method, path string, req
 		}
 	}
 	return nil
+}
+
+// doJSONStatus is doJSON for the surfaces whose REFUSALS are structured: the
+// v3 protocol answers a rejected share, a stale re-parent or an unregistered
+// notespace with a typed ProtocolError body and a 4xx, and that body is the
+// evidence a verb has to print (or, for a precondition, the current version it
+// has to retry with). Collapsing it into a bare "HTTP 409" the way doJSON does
+// would throw away the only per-member detail the server sends.
+//
+// It returns the status and decodes the body whatever the status is; a non-2xx
+// with no decodable body still becomes an error, because a caller must never
+// read an unpopulated response as success.
+func (c *deviceSessionHTTP) doJSONStatus(ctx context.Context, method, path string, requestBody, responseBody any) (int, error) {
+	status, data, err := c.do(ctx, method, path, requestBody)
+	if err != nil {
+		return 0, err
+	}
+	if responseBody != nil && len(data) > 0 {
+		if uerr := json.Unmarshal(data, responseBody); uerr != nil {
+			if status < 200 || status >= 300 {
+				return status, statusError(status, data)
+			}
+			return status, fmt.Errorf("decode sync server response: %w", uerr)
+		}
+		return status, nil
+	}
+	if status < 200 || status >= 300 {
+		return status, statusError(status, data)
+	}
+	return status, nil
+}
+
+func (c *deviceSessionHTTP) do(ctx context.Context, method, path string, requestBody any) (int, []byte, error) {
+	var body io.Reader
+	if requestBody != nil {
+		encoded, err := json.Marshal(requestBody)
+		if err != nil {
+			return 0, nil, err
+		}
+		body = bytes.NewReader(encoded)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+	if err != nil {
+		return 0, nil, err
+	}
+	if requestBody != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("Authorization", "Bearer "+c.bearer)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxDeviceHTTPResponse))
+	if err != nil {
+		return resp.StatusCode, nil, err
+	}
+	return resp.StatusCode, data, nil
+}
+
+func statusError(status int, data []byte) error {
+	var wireError struct {
+		Error string `json:"error"`
+	}
+	_ = json.Unmarshal(data, &wireError)
+	message := strings.TrimSpace(wireError.Error)
+	if message == "" {
+		message = strings.TrimSpace(string(data))
+	}
+	if message == "" {
+		message = http.StatusText(status)
+	}
+	return fmt.Errorf("sync server returned HTTP %d: %s", status, message)
 }
 
 func devicePath(deviceID, action string) string {

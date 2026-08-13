@@ -31,8 +31,15 @@ func newSyncCmd() *cobra.Command {
 		Long: `Manage this machine's notebook synchronization with a grove-syncd server.
 
 Subcommands:
+  join   — record the relationship with a server and show the notebook delta
   doctor — diagnose sync configuration and notebook health
   adopt  — bring an existing notebook workspace under replication
+
+` + "`grove sync join`" + ` and the top-level ` + "`grove join`" + ` are ordered, not
+alternative: the top-level one ENROLLS this machine (device approval,
+credentials, the registry subscription and its root) and is run once per
+machine; this one records which server the machine talks to and reports the
+notebook delta, and needs the enrollment to have happened first.
 
 These are CLIENT-side verbs. Anything else after ` + "`grove sync`" + ` is passed
 through to the grove-syncd SERVER binary, so ` + "`grove sync serve`" + ` and
@@ -41,6 +48,7 @@ through to the grove-syncd SERVER binary, so ` + "`grove sync serve`" + ` and
 			return cmd.Help()
 		},
 	}
+	cmd.AddCommand(newSyncJoinCmd())
 	cmd.AddCommand(newSyncDoctorCmd())
 	cmd.AddCommand(newSyncAdoptCmd())
 	cmd.AddCommand(newSyncConflictsCmd())

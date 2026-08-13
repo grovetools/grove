@@ -113,7 +113,11 @@ func TestConfigLayersCheck_UsesStrictRecordedParsers(t *testing.T) {
 	for _, tc := range []struct{ name, file, content, want string }{
 		{name: "roots unknown field", file: "roots.toml", content: "[roots.alpha]\npath = \"/tmp/a\"\ntyop = true\n", want: "strict mode"},
 		{name: "roots missing path", file: "roots.toml", content: "[roots.alpha]\nenabled = true\nnotebook = \"main\"\n", want: "[roots.alpha] has no path"},
-		{name: "notebooks reserved sync", file: "notebooks.toml", content: "[notebooks.main]\nroot = \"/tmp/n\"\n[notebooks.main.sync]\nmode = \"x\"\n", want: "reserved"},
+		// [notebooks.<n>.sync] stopped being a reserved empty table in P3 (core
+		// c2ef2f2): it is typed now, with `share` as its one key, so the strict
+		// diagnostic names the closed key set instead of the reservation.
+		{name: "notebooks unknown sync key", file: "notebooks.toml", content: "[notebooks.main]\nroot = \"/tmp/n\"\n[notebooks.main.sync]\nmode = \"x\"\n", want: "accepts only share"},
+		{name: "notebooks non-boolean share", file: "notebooks.toml", content: "[notebooks.main]\nroot = \"/tmp/n\"\n[notebooks.main.sync]\nshare = \"yes\"\n", want: "share must be a boolean"},
 		{name: "duplicate notebook table", file: "notebooks.toml", content: "[notebooks.main]\nroot = \"/tmp/a\"\n[notebooks.main]\nroot = \"/tmp/b\"\n", want: "table main already exists"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

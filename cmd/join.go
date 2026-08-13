@@ -103,7 +103,14 @@ Common shapes:
 Nothing here is destructive. sync.toml is converged, never rewritten: absent
 keys are filled, declared keys are left exactly as you wrote them, and an
 existing sync.token whose contents differ is refused rather than replaced
-unless you pass --force.`,
+unless you pass --force.
+
+This is the ENROLLMENT verb and it stays that: device approval, the credential,
+the registry subscription and the registry root. Its P3 sibling
+` + "`grove sync join`" + ` is the RELATIONSHIP verb — it records which server this
+machine talks to and reports the notebook delta, and mutates nothing else. Run
+this one once per machine; run that one whenever you want to see what the server
+holds that this machine does not.`,
 		Args:         cobra.MaximumNArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
