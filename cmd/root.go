@@ -58,6 +58,7 @@ func init() {
 	// and every read surface over it.
 	rootCmd.AddCommand(newKeysCmd())
 	rootCmd.AddCommand(newLintCmd())
+	rootCmd.AddCommand(newMuxCmd())
 	rootCmd.AddCommand(newPluginCmd())
 	rootCmd.AddCommand(newRecordCmd())
 	rootCmd.AddCommand(newSatelliteCmd())
@@ -149,6 +150,7 @@ func printAvailableTools(t *theme.Theme) {
 	// Examples
 	cyan := t.Bold.Foreground(t.Colors.Cyan)
 	fmt.Println("\n " + t.Muted.Render("Command examples:"))
+	fmt.Printf("   %s %s  %s\n", cyan.Render("grove"), blue.Render(pad("mux", 16)), t.Muted.Render("# Open the treemux cockpit"))
 	fmt.Printf("   %s %s  %s\n", cyan.Render("grove"), blue.Render(pad("install cx", 16)), t.Muted.Render("# Install a tool"))
 	fmt.Printf("   %s %s  %s\n", cyan.Render("grove"), blue.Render(pad("setup", 16)), t.Muted.Render("# Run setup wizard"))
 	fmt.Println("\n " + t.Muted.Render("Tool examples:"))
@@ -313,15 +315,132 @@ func findWorkspaceRoot() string {
 	return node.Path
 }
 
+// toolResolution is where a delegated tool's binary was found, plus what the
+// child's environment has to say about finding OTHER grove tools. Resolution
+// and execution are separate so `grove mux` can reuse the exact same lookup
+// (and the same PATH capsule) while replacing the process instead of forking.
+type toolResolution struct {
+	// Path is the binary to run.
+	Path string
+	// pathPrepend are directories that go in front of the inherited PATH, in
+	// order. Workspace bin dirs land here so a workspace build shadows the
+	// managed toolchain; the toolchain dir itself is appended by Env().
+	pathPrepend []string
+	// extraEnv are additional KEY=VALUE entries for the child.
+	extraEnv []string
+}
+
+// Env builds the child environment: this process's environment with the PATH
+// capsule applied.
+//
+// The capsule is the reason grove can be the only name on the user's global
+// PATH. paths.BinDir() (the private toolchain dir) is prepended for every
+// delegated child, so everything grove spawns — and everything THOSE processes
+// spawn, since env is inherited verbatim — still resolves bare `nb`, `flow`,
+// `cx`, `groved` even when the user's own shell has never heard of them.
+func (r toolResolution) Env() []string {
+	prepend := r.pathPrepend
+	if binDir := paths.BinDir(); binDir != "" {
+		prepend = append(append([]string{}, prepend...), binDir)
+	}
+	if len(prepend) == 0 && len(r.extraEnv) == 0 {
+		return nil
+	}
+
+	env := os.Environ()
+	if len(prepend) > 0 {
+		newPath := capsulePATH(os.Getenv("PATH"), prepend)
+		pathSet := false
+		for i, entry := range env {
+			if strings.HasPrefix(entry, "PATH=") {
+				env[i] = "PATH=" + newPath
+				pathSet = true
+				break
+			}
+		}
+		if !pathSet {
+			env = append(env, "PATH="+newPath)
+		}
+	}
+	return append(env, r.extraEnv...)
+}
+
+// capsulePATH returns current with prepend in front of it, in order, and every
+// prepended dir removed from the rest so repeated delegation (grove → tool →
+// grove) can't grow PATH without bound. A PATH that already leads with exactly
+// these dirs is returned unchanged.
+func capsulePATH(current string, prepend []string) string {
+	if len(prepend) == 0 {
+		return current
+	}
+	existing := filepath.SplitList(current)
+
+	seen := make(map[string]bool, len(prepend))
+	head := make([]string, 0, len(prepend))
+	for _, dir := range prepend {
+		if dir == "" || seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		head = append(head, dir)
+	}
+	if len(head) == 0 {
+		return current
+	}
+
+	out := make([]string, 0, len(head)+len(existing))
+	out = append(out, head...)
+	for _, dir := range existing {
+		if seen[dir] {
+			continue
+		}
+		out = append(out, dir)
+	}
+	return strings.Join(out, string(os.PathListSeparator))
+}
+
 // delegateToTool attempts to run an installed Grove tool.
 // By default, it uses globally managed binaries (global-first).
 // Set GROVE_DELEGATION_MODE=workspace to opt-in to workspace-aware delegation.
 func delegateToTool(toolName string, args []string) error {
+	res, ok, err := resolveTool(toolName)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("unknown tool: %s. Run 'grove install %s', see 'grove plugin list' for plugin-provided commands, or check spelling.", toolName, toolName)
+	}
+
+	// Execute the binary
+	cmd := exec.Command(res.Path, args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = res.Env()
+
+	if err := cmd.Run(); err != nil {
+		// Propagate the child's exit code so callers (including Claude Code's
+		// asyncRewake at exit 2) see the real status. Without this, Cobra
+		// rewrites every non-zero exit to 1.
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		}
+		return err
+	}
+	return nil
+}
+
+// resolveTool locates the binary that answers `grove <toolName>`, without
+// running it. ok=false means nothing provides the tool at all — the CALLER
+// words that, because `grove nb` and `grove mux` want different remedies.
+// A non-nil error means a provider was found but is unusable (e.g. a plugin
+// whose binary has gone missing), which is never a fall-through.
+func resolveTool(toolName string) (toolResolution, bool, error) {
 	logger := logging.NewLogger("grove-meta")
 	logger.WithField("tool", toolName).Debug("Delegating to tool")
 
+	var res toolResolution
 	var toolPath string
-	var cmdEnv []string // Environment for the command
 	delegationMode := delegation.GetMode()
 
 	// Check if we're in a workspace for potential overrides
@@ -374,23 +493,13 @@ func delegateToTool(toolName string, args []string) error {
 						}
 					}
 					if len(binDirs) > 0 {
-						currentPath := os.Getenv("PATH")
-						newPath := strings.Join(binDirs, string(os.PathListSeparator)) + string(os.PathListSeparator) + currentPath
-
-						cmdEnv = os.Environ()
-						// Update PATH in the environment
-						pathSet := false
-						for i, env := range cmdEnv {
-							if strings.HasPrefix(env, "PATH=") {
-								cmdEnv[i] = "PATH=" + newPath
-								pathSet = true
-								break
-							}
-						}
-						if !pathSet {
-							cmdEnv = append(cmdEnv, "PATH="+newPath)
-						}
-						cmdEnv = append(cmdEnv, "GROVE_WORKSPACE_ROOT="+workspaceRoot)
+						// Workspace bins go in FRONT of the capsule's
+						// toolchain dir (Env() appends that one), so a
+						// locally built tool still wins over its released
+						// twin while the rest of the toolchain stays
+						// reachable by bare name.
+						res.pathPrepend = binDirs
+						res.extraEnv = append(res.extraEnv, "GROVE_WORKSPACE_ROOT="+workspaceRoot)
 					}
 				}
 			}
@@ -413,7 +522,7 @@ func delegateToTool(toolName string, args []string) error {
 			// name — `grove forge` may run a binary called something else —
 			// and only the lockfile knows the mapping.
 			if pluginBinary, err := toolPluginBinary(toolName); err != nil {
-				return err
+				return res, false, err
 			} else if pluginBinary != "" {
 				toolPath = pluginBinary
 				logger.WithField("path", toolPath).Debug("Using plugin-provided tool binary")
@@ -425,30 +534,13 @@ func delegateToTool(toolName string, args []string) error {
 				toolPath = fallback
 				logger.WithField("path", toolPath).Debug("Using PATH fallback for registered tool")
 			} else {
-				return fmt.Errorf("unknown tool: %s. Run 'grove install %s', see 'grove plugin list' for plugin-provided commands, or check spelling.", toolName, toolName)
+				return res, false, nil
 			}
 		}
 	}
 
-	// Execute the binary
-	cmd := exec.Command(toolPath, args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if len(cmdEnv) > 0 {
-		cmd.Env = cmdEnv
-	}
-
-	if err := cmd.Run(); err != nil {
-		// Propagate the child's exit code so callers (including Claude Code's
-		// asyncRewake at exit 2) see the real status. Without this, Cobra
-		// rewrites every non-zero exit to 1.
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			os.Exit(exitErr.ExitCode())
-		}
-		return err
-	}
-	return nil
+	res.Path = toolPath
+	return res, true, nil
 }
 
 // pathFallbackForRegisteredTool resolves a registered ecosystem tool that has
