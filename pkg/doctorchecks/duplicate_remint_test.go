@@ -55,6 +55,45 @@ func duplicateMachine(t *testing.T, machineTOML string) (configDir, keeper, lose
 	return configDir, filepath.Join(nb, "notespaces", "one"), filepath.Join(nb, "notespaces", "two")
 }
 
+// duplicateAcrossNotebooks builds the same duplicate, but with the two roots in
+// two different recorded notebooks — the shape where a notebook name DOES
+// disambiguate which copy a binding followed.
+func duplicateAcrossNotebooks(t *testing.T, machineTOML string) (configDir, keeper, loser string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("GROVE_HOME", home)
+	configDir = filepath.Join(home, "config", "grove")
+	nb, nb2 := filepath.Join(home, "notebook"), filepath.Join(home, "notebook2")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	notebooks := "default=\"nb\"\n[notebooks.nb]\nroot=\"" + nb + "\"\n[notebooks.nb2]\nroot=\"" + nb2 + "\"\n"
+	if err := os.WriteFile(filepath.Join(configDir, "notebooks.toml"), []byte(notebooks), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "roots.toml"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for i, root := range []string{nb, nb2} {
+		if _, err := notespace.InstallNotebook(root, notespace.NotebookStamp{ID: "01ABCDEFGHJKMNPQRSTVWXYZ0" + string(rune('1'+i)), Name: filepath.Base(root)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keeper = filepath.Join(nb, "notespaces", "one")
+	loser = filepath.Join(nb2, "notespaces", "two")
+	for name, root := range map[string]string{"one": keeper, "two": loser} {
+		if _, err := notespace.InstallNotespace(root, notespace.NotespaceStamp{ID: dupID, Name: name, Subject: dupSubject, Kind: "notes"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "machine.toml"), []byte(machineTOML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config.ResetLoadCache()
+	t.Cleanup(config.ResetLoadCache)
+	return configDir, keeper, loser
+}
+
 func primariesOnly() string {
 	return "[primaries]\n\"" + dupSubject + "\"=\"" + dupID + "\"\n"
 }
@@ -126,11 +165,51 @@ func TestRemintLeavesAPrimaryThatStillResolves(t *testing.T) {
 	}
 }
 
-// The registry binding names a NOTEBOOK as well as an id, so it can be checked
-// against the re-minted root — and when it followed that root, it is repaired.
-func TestRemintRewritesTheRegistryBindingThatFollowedTheRoot(t *testing.T) {
+// F2 of the W3.6 review: when BOTH copies live in one notebook — the `cp -R`
+// inside notespaces/ that is the D8 case, and the only duplicate shape the
+// daemon detects — the notebook comparison is satisfied by both roots, so it
+// says nothing about which copy the binding meant. The binding is left, and the
+// ambiguity is named. Rewriting it would point the machine at an id the server
+// has never seen, at the copy the operator just designated as the loser.
+func TestRemintLeavesTheRegistryBindingWhenBothCopiesShareANotebook(t *testing.T) {
 	configDir, _, loser := duplicateMachine(t, primariesOnly()+
 		"[sync.registry]\nnotebook = \"nb\"\nnotespace_id = \""+dupID+"\"\n")
+
+	var out bytes.Buffer
+	result, err := RemintDesignatedDuplicate(loser, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(configDir, "machine.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), result.NewID) {
+		t.Fatalf("[sync.registry] was re-pointed at the designated LOSER by a notebook-name guess:\n%s", data)
+	}
+	if len(result.Rewritten) != 0 {
+		t.Fatalf("Rewritten = %+v, want nothing rewritten on an ambiguous binding", result.Rewritten)
+	}
+	joined := strings.Join(result.Left, " ")
+	if !strings.Contains(joined, "[sync.registry]") || !strings.Contains(joined, "both copies are in notebook") {
+		t.Fatalf("the ambiguity was not named in the evidence: %+v", result.Left)
+	}
+	// And the binding still resolves: the id survives at the keeper.
+	config.ResetLoadCache()
+	cfg, err := config.LoadMachineConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Sync.Registry.NotespaceID != dupID {
+		t.Fatalf("[sync.registry] = %+v, want the surviving id %s", cfg.Sync.Registry, dupID)
+	}
+}
+
+// The other half of the same rule: a notebook whose ONLY claimant of the id is
+// the re-minted root does say which copy the binding meant, so it is repaired.
+func TestRemintRewritesTheRegistryBindingOfTheSoleClaimantNotebook(t *testing.T) {
+	configDir, _, loser := duplicateAcrossNotebooks(t, primariesOnly()+
+		"[sync.registry]\nnotebook = \"nb2\"\nnotespace_id = \""+dupID+"\"\n")
 
 	var out bytes.Buffer
 	result, err := RemintDesignatedDuplicate(loser, &out)
@@ -155,6 +234,27 @@ func TestRemintRewritesTheRegistryBindingThatFollowedTheRoot(t *testing.T) {
 	}
 	if cfg.Sync.Registry.NotespaceID != result.NewID || cfg.Primaries[dupSubject] != dupID {
 		t.Fatalf("bindings after repair = %+v / %+v", cfg.Sync.Registry, cfg.Primaries)
+	}
+}
+
+// F9 of the same review: the machine.toml writer validates the WHOLE table, so
+// an unrelated unreachable binding fails the repair — and discovering that
+// after the mint leaves the stamp rewritten and the bindings not. The run is
+// refused before a byte of the stamp is written.
+func TestRemintPreflightsBindingValidationBeforeRewritingTheStamp(t *testing.T) {
+	_, _, loser := duplicateAcrossNotebooks(t, primariesOnly()+
+		"\"local:01ABCDEFGHJKMNPQRSTVWXYZ07\"=\"01ABCDEFGHJKMNPQRSTVWXYZ09\"\n"+
+		"[sync.registry]\nnotebook = \"nb2\"\nnotespace_id = \""+dupID+"\"\n")
+
+	var out bytes.Buffer
+	if _, err := RemintDesignatedDuplicate(loser, &out); err == nil {
+		t.Fatal("a re-mint whose binding repair could not succeed was allowed to rewrite the stamp")
+	} else if !strings.Contains(err.Error(), "01ABCDEFGHJKMNPQRSTVWXYZ09") {
+		t.Fatalf("the refusal does not name the binding that blocks it: %v", err)
+	}
+	stamp, err := notespace.LoadNotespace(loser)
+	if err != nil || stamp.ID != dupID {
+		t.Fatalf("the refused run left a re-minted stamp behind: %+v, %v", stamp, err)
 	}
 }
 

@@ -154,6 +154,15 @@ func RemintDesignatedDuplicate(designated string, out io.Writer) (*RemintResult,
 	}
 	fmt.Fprintf(out, "  re-minting   %s\n", target.Root)
 
+	// The binding half is DECIDED, and its preconditions checked, before the
+	// stamp half is written. Everything from here to the mint is refusable; a
+	// re-mint that lands and then discovers it cannot repair the bindings is a
+	// torn transaction this flow has no way to undo.
+	plan, err := planBindingRepair(table, records, target, keepers)
+	if err != nil {
+		return nil, err
+	}
+
 	minted, err := notespace.RemintNotespace(target.Root, target.Stamp.ID)
 	if err != nil {
 		return nil, err
@@ -161,7 +170,7 @@ func RemintDesignatedDuplicate(designated string, out io.Writer) (*RemintResult,
 	result := &RemintResult{Root: target.Root, OldID: minted.OldID, NewID: minted.NewID, Keepers: keepers}
 	fmt.Fprintf(out, "  new id       %s  (was %s, name %q, subject %s)\n", minted.NewID, minted.OldID, minted.Stamp.Name, minted.Stamp.Subject)
 
-	if err := repairBindings(target, result); err != nil {
+	if err := plan.apply(result); err != nil {
 		// The stamp is already rewritten; say so plainly rather than implying
 		// the machine is untouched.
 		return result, fmt.Errorf("%s now carries %s, but its machine bindings could not be repaired: %w", target.Root, minted.NewID, err)
@@ -177,60 +186,100 @@ func RemintDesignatedDuplicate(designated string, out io.Writer) (*RemintResult,
 	return result, nil
 }
 
-// repairBindings rewrites the machine.toml records that FOLLOWED the re-minted
-// root, and records why each one it left alone was left alone.
+// bindingRepair is the machine.toml half of a re-mint, decided BEFORE the stamp
+// half is written: which binding will be rewritten, why every other one is
+// being left alone, and whether the write can succeed at all.
+type bindingRepair struct {
+	// registryNotebook is the notebook the registry binding names, and is
+	// non-empty exactly when the binding is to be rewritten.
+	registryNotebook string
+	// left is the evidence for the bindings deliberately not touched.
+	left []string
+}
+
+// planBindingRepair decides which machine.toml records FOLLOWED the re-minted
+// root, and refuses the whole run when the write it plans cannot succeed.
 //
 // The governing fact: the old id still exists, at the copy that was not
 // designated. A binding that names it is therefore still true unless the
-// binding also names a LOCATION that resolves to the re-minted root — which is
-// what makes [sync.registry] different from [primaries]. The registry binding
-// carries a notebook, so it can be checked against the root; a primary carries
-// only subject → id, so nothing in it points at one copy rather than the other,
-// and rewriting it would be a guess dressed as a repair.
-func repairBindings(target *notespaceRecord, result *RemintResult) error {
-	machinePath := config.MachineConfigPath()
+// binding also names a LOCATION that resolves to the re-minted root AND ONLY to
+// it — which is what makes [sync.registry] different from [primaries]. A
+// primary carries only subject → id, so nothing in it points at one copy rather
+// than the other, and rewriting it would be a guess dressed as a repair.
+//
+// The registry binding carries a NOTEBOOK, but a notebook only disambiguates
+// when it holds exactly one root claiming the id. When both copies live in one
+// notebook — a `cp -R` inside notespaces/, which is the D8 case and the only
+// duplicate shape the daemon's sweep detects at all — the notebook comparison
+// is satisfied trivially by both, so it says nothing about which copy the
+// binding meant. Rewriting there is the same guess the primaries are spared,
+// and it guesses the copy the operator just designated as the LOSER: the
+// machine would name an id the server has never seen while the daemon kept
+// syncing the keeper under the old one. So it is left, with the ambiguity named.
+func planBindingRepair(table coderoot.Table, records []notespaceRecord, target *notespaceRecord, keepers []string) (*bindingRepair, error) {
+	plan := &bindingRepair{}
 	current, err := config.LoadMachineConfig()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if current == nil {
-		result.Left = append(result.Left, "machine.toml records no bindings")
-		return nil
+		plan.left = append(plan.left, "machine.toml records no bindings")
+		return plan, nil
 	}
+	oldID := target.Stamp.ID
 
-	registryFollows := false
-	if current.Sync.Registry != nil && current.Sync.Registry.NotespaceID == result.OldID {
-		table, loadErr := coderoot.Load()
-		if loadErr != nil {
-			return loadErr
-		}
-		recordedRoot := table.NotebookRoot(current.Sync.Registry.Notebook)
-		registryFollows = recordedRoot != "" &&
-			inspectPath(recordedRoot).Canonical == inspectPath(target.NotebookRoot).Canonical
-		if !registryFollows {
-			result.Left = append(result.Left, fmt.Sprintf("[sync.registry] notespace_id = %s (its notebook %q is not the one holding the re-minted root; the id still resolves, at %s)",
-				result.OldID, current.Sync.Registry.Notebook, strings.Join(result.Keepers, ", ")))
+	if current.Sync.Registry != nil && current.Sync.Registry.NotespaceID == oldID {
+		notebook := current.Sync.Registry.Notebook
+		recordedRoot := table.NotebookRoot(notebook)
+		switch {
+		case recordedRoot == "" || inspectPath(recordedRoot).Canonical != inspectPath(target.NotebookRoot).Canonical:
+			plan.left = append(plan.left, fmt.Sprintf("[sync.registry] notespace_id = %s (its notebook %q is not the one holding the re-minted root; the id still resolves, at %s)",
+				oldID, notebook, strings.Join(keepers, ", ")))
+		case len(claimantsInNotebook(records, recordedRoot, oldID)) > 1:
+			plan.left = append(plan.left, fmt.Sprintf("[sync.registry] notespace_id = %s (both copies are in notebook %q; the binding names an id, not a root, so nothing in it points at one copy rather than the other — re-point it by hand once you know which one it meant)",
+				oldID, notebook))
+		default:
+			plan.registryNotebook = notebook
 		}
 	}
 	for subject, id := range current.Primaries {
-		if id == result.OldID {
-			result.Left = append(result.Left, fmt.Sprintf("[primaries] %q = %s (the id survives at %s, so the primary still names one root)",
-				subject, result.OldID, strings.Join(result.Keepers, ", ")))
+		if id == oldID {
+			plan.left = append(plan.left, fmt.Sprintf("[primaries] %q = %s (the id survives at %s, so the primary still names one root)",
+				subject, oldID, strings.Join(keepers, ", ")))
 		}
 	}
-
-	if !registryFollows {
-		return nil
+	if plan.registryNotebook == "" {
+		// Nothing will be written, so nothing can fail; a machine with an
+		// unrelated broken binding is still allowed to separate its duplicate.
+		return plan, nil
 	}
 
-	// Validate against the stamp index the re-mint produced, so a rewrite that
-	// would leave a binding pointing at an id no root carries is refused by the
-	// writer rather than discovered by the next doctor run.
+	// EditMachineConfig validates the WHOLE file — every [primaries] entry and
+	// the registry binding — against the stamp index, not just the key being
+	// changed. A recorded primary whose notespace is not directly under a
+	// recorded notebook's notespaces/ (a moved root, a deleted one, a
+	// non-standard layout) therefore fails the edit, and discovering that after
+	// the mint leaves the stamp rewritten and the bindings unrepaired. Run the
+	// same rule here, where refusing still costs nothing.
+	if err := config.ValidateMachineBindings(current, notespaceIDIndex(records)); err != nil {
+		return nil, fmt.Errorf("machine bindings do not validate against recorded topology, and repairing [sync.registry] would rewrite the whole table: %w; fix the binding above (`grove doctor`), then re-run the re-mint", err)
+	}
+	return plan, nil
+}
+
+// apply performs the planned rewrite, after the stamp has been re-minted.
+func (p *bindingRepair) apply(result *RemintResult) error {
+	result.Left = append(result.Left, p.left...)
+	if p.registryNotebook == "" {
+		return nil
+	}
+	// Re-read the stamp index from disk: the mint has just changed it, and the
+	// writer's validation must see the id it is about to bind.
 	known, err := knownNotespaceIDs()
 	if err != nil {
 		return err
 	}
-	_, changed, err := config.EditMachineConfig(machinePath, config.MachineEditOptions{KnownNotespaceIDs: known}, func(cfg *config.MachineConfig) error {
+	_, changed, err := config.EditMachineConfig(config.MachineConfigPath(), config.MachineEditOptions{KnownNotespaceIDs: known}, func(cfg *config.MachineConfig) error {
 		if cfg.Sync.Registry == nil || cfg.Sync.Registry.NotespaceID != result.OldID {
 			return fmt.Errorf("[sync.registry] changed underneath this repair; re-run `grove doctor`")
 		}
@@ -241,14 +290,42 @@ func repairBindings(target *notespaceRecord, result *RemintResult) error {
 		return err
 	}
 	if changed {
-		result.Rewritten = append(result.Rewritten, fmt.Sprintf("[sync.registry] notespace_id %s → %s (it names notebook %q, which holds the re-minted root)",
-			result.OldID, result.NewID, current.Sync.Registry.Notebook))
+		result.Rewritten = append(result.Rewritten, fmt.Sprintf("[sync.registry] notespace_id %s → %s (it names notebook %q, whose only claimant of %s was the re-minted root)",
+			result.OldID, result.NewID, p.registryNotebook, result.OldID))
 	}
 	return nil
 }
 
-// knownNotespaceIDs is the stamp index EditMachineConfig validates bindings
-// against: every id recorded topology can actually reach.
+// claimantsInNotebook is every recorded root beneath one notebook that carries
+// the given stamp id. It is what makes "this binding followed that root"
+// answerable: a notebook with two claimants cannot say which one it meant.
+func claimantsInNotebook(records []notespaceRecord, notebookRoot, id string) []string {
+	canonicalNotebook := inspectPath(notebookRoot).Canonical
+	var out []string
+	for i := range records {
+		if records[i].Stamp.ID != id {
+			continue
+		}
+		if inspectPath(records[i].NotebookRoot).Canonical == canonicalNotebook {
+			out = append(out, inspectPath(records[i].Root).Canonical)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// notespaceIDIndex is the stamp index bindings are validated against: every id
+// recorded topology can actually reach.
+func notespaceIDIndex(records []notespaceRecord) map[string]struct{} {
+	known := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		known[record.Stamp.ID] = struct{}{}
+	}
+	return known
+}
+
+// knownNotespaceIDs re-reads recorded topology and indexes it. The re-mint uses
+// it AFTER the stamp write, when the index on disk has changed.
 func knownNotespaceIDs() (map[string]struct{}, error) {
 	table, err := coderoot.Load()
 	if err != nil {
@@ -258,9 +335,5 @@ func knownNotespaceIDs() (map[string]struct{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	known := make(map[string]struct{}, len(records))
-	for _, record := range records {
-		known[record.Stamp.ID] = struct{}{}
-	}
-	return known, nil
+	return notespaceIDIndex(records), nil
 }
