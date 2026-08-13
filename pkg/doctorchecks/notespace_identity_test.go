@@ -57,6 +57,48 @@ func TestNotespaceIdentityCheckRejectsDuplicatePhysicalID(t *testing.T) {
 	if got.Status != doctor.StatusFail || !strings.Contains(got.Error, "2 physical roots") {
 		t.Fatalf("result=%+v", got)
 	}
+	// One physical condition, reported once. The duplicated id is also the
+	// recorded primary, so the primary audit meets the same fact from the
+	// binding table's side; restating it there would show the operator one
+	// broken machine as two failures with two different repairs.
+	if n := strings.Count(got.Error, shared.ID); n != 1 {
+		t.Fatalf("the duplicated id is named %d times in %q, want once", n, got.Error)
+	}
+	if strings.Contains(got.Error, "primary for subject") {
+		t.Fatalf("the primary audit restated the physical duplicate: %q", got.Error)
+	}
+	requireResolution(t, got, "--fix --remint")
+}
+
+// TestNotespaceIdentityCheckFailsOnAPrimaryWithNoLocalNotes pins the widening
+// the P4 audit introduced, which the P4 gate depends on: a recorded primary is
+// judged against the whole [primaries] table rather than only against subjects
+// that happen to have a stamp here. Deleting a primary's root — or dropping the
+// notebook that held it — is therefore a HARD failure naming the repair, not
+// silence.
+func TestNotespaceIdentityCheckFailsOnAPrimaryWithNoLocalNotes(t *testing.T) {
+	subject := "local:01ABCDEFGHJKMNPQRSTVWXYZ03"
+	orphaned := "local:01ABCDEFGHJKMNPQRSTVWXYZ06"
+	primary := notespace.NotespaceStamp{ID: "01ABCDEFGHJKMNPQRSTVWXYZ02", Name: "one", Subject: subject, Kind: "notes"}
+	identitySandbox(t,
+		"[primaries]\n\""+subject+"\"=\""+primary.ID+"\"\n\""+orphaned+"\"=\"01ABCDEFGHJKMNPQRSTVWXYZ09\"\n",
+		primary)
+
+	got := (&notespaceIdentityCheck{}).Run(context.Background(), doctor.RunOptions{})
+	if got.Status != doctor.StatusFail {
+		t.Fatalf("status=%s, want a hard failure (%+v)", got.Status, got)
+	}
+	if !strings.Contains(got.Error, "dangling primary for subject "+orphaned) {
+		t.Fatalf("the orphaned routing pointer is not named: %q", got.Error)
+	}
+	requireResolution(t, got, "grove notespace primary <notespace>")
+}
+
+func requireResolution(t *testing.T, got doctor.CheckResult, want string) {
+	t.Helper()
+	if !strings.Contains(got.Resolution, want) {
+		t.Fatalf("resolution %q does not name %q", got.Resolution, want)
+	}
 }
 
 // TestNotespaceIdentityCheckPrimaryInvariants pins the P4 half: siblings are

@@ -230,6 +230,59 @@ func TestNotebookShareRecordsIdentityForAlreadyStampedNotespaces(t *testing.T) {
 	}
 }
 
+// TestNotebookShareRecordsARepoSubjectWithoutWritingSubjects pins the split
+// between the two machine.toml tables against the realistic case: a notebook
+// holding notes about a repository.
+//
+// [primaries] routes every subject family. [subjects] is the machine's LOCAL
+// subject registry, and MachineConfig.Validate refuses any value there that is
+// not `local:` — so a share that recorded `example.com/org/core` against the
+// notespace's path would not merely write a redundant entry, it would fail the
+// whole transaction and leave the notebook unshared. The absence of a
+// [subjects] row for a repo notespace is its correct steady state, which is why
+// the second share below has to be a no-op rather than a retry.
+func TestNotebookShareRecordsARepoSubjectWithoutWritingSubjects(t *testing.T) {
+	box := sandboxNotebookScope(t)
+	server := newFakeSync(t)
+	const repoSubject = "example.com/org/core"
+	box.recordNotebooks(t, "research", map[string]notebookFixture{
+		"research": {Stamp: fixtureNotebookA, Notespaces: []notespaceFixture{
+			{Dir: "core", ID: fixtureNotespace1, Subject: repoSubject, Kind: "repo"},
+			{Dir: "alpha", ID: fixtureNotespace2, Subject: "local:" + fixtureNotespace2},
+		}},
+	})
+	box.recordSyncServer(t, server.URL)
+
+	if err := runNotebookShare(context.Background(), &bytes.Buffer{}, "research", false); err != nil {
+		t.Fatalf("sharing a notebook that holds a repo-subject notespace: %v", err)
+	}
+	machineCfg, err := config.LoadMachineConfig()
+	if err != nil || machineCfg == nil {
+		t.Fatalf("machine.toml: %v", err)
+	}
+	if machineCfg.Primaries[repoSubject] != fixtureNotespace1 {
+		t.Fatalf("[primaries] does not route the repo subject: %+v", machineCfg.Primaries)
+	}
+	if got, ok := machineCfg.Subjects[canonicalPath(box.notespaceRoot("research", "core"))]; ok {
+		t.Fatalf("[subjects] recorded the repo subject %q; that table is local paths to local subjects", got)
+	}
+	// The local notespace in the same notebook still gets both records, so the
+	// guard is about the subject family and not about skipping the table.
+	if machineCfg.Subjects[canonicalPath(box.notespaceRoot("research", "alpha"))] != "local:"+fixtureNotespace2 {
+		t.Fatalf("[subjects] dropped the local notespace: %+v", machineCfg.Subjects)
+	}
+
+	// Converged: the missing repo row is not a hole, so a second share writes
+	// nothing and machine.toml is byte-identical.
+	before := machineTOML(t, box)
+	if err := runNotebookShare(context.Background(), &bytes.Buffer{}, "research", false); err != nil {
+		t.Fatalf("second share: %v", err)
+	}
+	if after := machineTOML(t, box); after != before {
+		t.Fatalf("a second share rewrote machine.toml:\n--- before\n%s\n--- after\n%s", before, after)
+	}
+}
+
 func TestNotebookShareDecidesAgainstTheVersionItRead(t *testing.T) {
 	box := sandboxNotebookScope(t)
 	server := newFakeSync(t)

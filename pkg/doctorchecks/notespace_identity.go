@@ -112,6 +112,14 @@ func (c *notespaceIdentityCheck) Run(ctx context.Context, opts doctor.RunOptions
 		failures = append(failures, err.Error())
 	} else {
 		for _, problem := range index.AuditPrimaries(machine.Primaries) {
+			// One physical condition, reported once. A duplicated id was already
+			// named by the idRoots loop above, in the words that carry its repair
+			// (`--fix --remint <losing-root>`); the audit meets the same fact from
+			// the binding table's side and would restate it with a second, weaker
+			// framing. The operator would then see one broken machine as two.
+			if problem.Kind == notespace.PrimaryUnresolvable && len(idRoots[problem.NotespaceID]) > 1 {
+				continue
+			}
 			failures = append(failures, problem.String())
 		}
 	}

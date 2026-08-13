@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -65,12 +66,19 @@ same subject, a NEW immutable id, and machine.toml is left byte-identical.
   · --in names the destination notebook, which must be recorded and must exist.
     A sibling in the SAME notebook as the primary is legal;
   · --name is optional. Without it the primary's name is reused, and a numeric
-    suffix is added only if that directory name is already taken in the
-    destination. An explicit --name that is taken is refused rather than
-    silently renamed.
+    suffix is added if that name is already taken — either as a directory in
+    the destination, or by any sibling of this subject in any recorded
+    notebook, because a name shared by two siblings is one ` + "`grove notespace`" + `
+    verbs must then refuse to resolve. An explicit --name that is taken in the
+    destination is refused rather than silently renamed.
 
 Nothing routes to the new notespace until you say so: unqualified writes keep
-landing in the primary until ` + "`grove notespace primary`" + ` moves it.`,
+landing in the primary until ` + "`grove notespace primary`" + ` moves it.
+
+If the destination notebook is recorded as shared, this notespace is published:
+containment is consent, so the daemon registers it with the sync server on its
+next reconcile. That happens after this verb returns, which is why it is stated
+here rather than receipted.`,
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -127,7 +135,26 @@ func runNotespaceNew(out io.Writer, opts notespaceNewOptions) error {
 	for _, ns := range destination.Notespaces {
 		taken[ns.Dir] = true
 	}
-	name, derived, err := siblingName(opts.name, primary, taken)
+	// A DERIVED name is held off more than the destination's directory names:
+	// it is also held off every name a sibling of this subject already carries,
+	// wherever that sibling lives. `notespace primary` and `notespace move`
+	// resolve a name across every recorded notebook, so two siblings sharing
+	// one name make that rung ambiguous the moment the second one exists —
+	// both verbs then refuse and tell the operator to name the notespace by its
+	// immutable id. A default that costs two verbs the moment it is taken is
+	// not a default worth having.
+	//
+	// An EXPLICIT name is still judged against the destination alone: what an
+	// operator names, they get, and the cross-notebook consequence is theirs to
+	// accept.
+	reserved := map[string]bool{}
+	for dir := range taken {
+		reserved[dir] = true
+	}
+	for _, record := range scope.index.SiblingsFor(opts.subject, scope.primaries) {
+		reserved[record.Stamp.Name] = true
+	}
+	name, derived, err := siblingName(opts.name, primary, taken, reserved)
 	if err != nil {
 		return err
 	}
@@ -137,12 +164,20 @@ func runNotespaceNew(out io.Writer, opts notespaceNewOptions) error {
 	}
 
 	root := filepath.Join(destination.Root, notespaceContainerDir, name)
-	if _, statErr := os.Lstat(root); statErr == nil {
-		return fmt.Errorf("%s already exists; a new notespace is a new directory, never an adoption of one that is already there", root)
-	} else if !os.IsNotExist(statErr) {
-		return statErr
+	// The create IS the check. An Lstat followed by MkdirAll is two acts with a
+	// window between them, and neither half refuses what is already there:
+	// MkdirAll succeeds on an existing directory and MintNotespace is
+	// load-first, so it RETURNS an existing stamp rather than refusing one. Two
+	// runs deriving the same name would both pass the Lstat and one would
+	// report creating what it in fact adopted — which is exactly what this
+	// verb's own refusal text forbids. os.Mkdir refuses instead, in one act.
+	if err := os.MkdirAll(filepath.Dir(root), 0o755); err != nil {
+		return fmt.Errorf("create the notespace container %s: %w", filepath.Dir(root), err)
 	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	if err := os.Mkdir(root, 0o755); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("%s already exists; a new notespace is a new directory, never an adoption of one that is already there", root)
+		}
 		return fmt.Errorf("create the notespace root %s: %w", root, err)
 	}
 	stamp, err := notespace.MintNotespace(root, notespace.NotespaceMutable{Name: name, Subject: opts.subject, Kind: kind})
@@ -156,8 +191,19 @@ func runNotespaceNew(out io.Writer, opts notespaceNewOptions) error {
 	// Two roots claiming one id is the state every verb here refuses to act on
 	// (D8), so the verb that MINTS one checks it did not just create it.
 	if existing, dupErr := scope.index.ByID(stamp.ID); dupErr != nil || len(existing) > 0 {
-		return fmt.Errorf("the freshly minted id %s is already stamped at %s; nothing was recorded — re-mint the duplicate with `grove doctor --fix --remint` before creating siblings",
-			stamp.ID, existing[0].Root)
+		return fmt.Errorf("the freshly minted id %s is already stamped at %s; %s — re-mint the duplicate with `grove doctor --fix --remint` before creating siblings",
+			stamp.ID, existing[0].Root, rollbackMintedNotespace(root))
+	}
+
+	// Containment is consent (P3 W3.2): a stamped notespace inside a notebook
+	// recorded `share = true` is registered and enrolled into sync by the
+	// daemon on its next reconcile, with no subscription of its own. So in a
+	// shared notebook this verb's real effect is to PUBLISH a notespace. That
+	// happens after the verb returns, so there is no receipt to print — which
+	// makes saying it in prose the only way to say it at all.
+	publication := fmt.Sprintf("notebook %s is not recorded as shared, so nothing is published and no sync server learns of this notespace", destination.Name)
+	if destination.Shared {
+		publication = fmt.Sprintf("notebook %s is recorded as shared, so the daemon registers this notespace with the sync server on its next reconcile; containment is consent and there is no separate subscription to make", destination.Name)
 	}
 
 	fmt.Fprintf(out, "  created      %s  %s\n", stamp.ID, root)
@@ -167,6 +213,7 @@ func runNotespaceNew(out io.Writer, opts notespaceNewOptions) error {
 		fmt.Fprintf(out, "    name       %s  (%s)\n", name, derived)
 	}
 	fmt.Fprintf(out, "  primary      %s  %s  — unchanged; machine.toml was not written\n", primary.Stamp.ID, primary.Root)
+	fmt.Fprintf(out, "  sync         %s\n", publication)
 	fmt.Fprintf(out, "\n  Unqualified writes for this subject still land in the primary. `grove notespace primary %s` moves them here.\n\n", stamp.ID)
 
 	evidence := transition.Evidence{
@@ -176,6 +223,9 @@ func runNotespaceNew(out io.Writer, opts notespaceNewOptions) error {
 			{Name: "siblings-for-subject", Value: int64(len(scope.index.SiblingsFor(opts.subject, scope.primaries)) + 1)},
 		},
 		ResolvedRoots: []transition.ResolvedRoot{{Name: destination.Name, Declared: destination.Declared, Resolved: root}},
+		// The server leg is deferred rather than absent, so the reason carries
+		// what no receipt can: whether this creation will become a publication.
+		Reason: transition.Reason(publication),
 	}
 	if opts.asJSON {
 		return transition.RenderJSON(out, evidence)
@@ -190,7 +240,14 @@ func runNotespaceNew(out io.Writer, opts notespaceNewOptions) error {
 // gets a differently-named one has been given something they did not ask for.
 // A DERIVED name is uniquified, because "same subject, same notebook" is a
 // legal arrangement whose whole point is more than one directory.
-func siblingName(explicit string, primary notespace.Record, taken map[string]bool) (string, string, error) {
+//
+// The two sets are deliberately different. taken is what the DESTINATION holds,
+// and it is what an explicit name is judged against, because that is the only
+// collision that would make the directory impossible. reserved widens it with
+// every name this subject's siblings already carry anywhere, and it governs the
+// derived name alone: a default that duplicates a sibling's name would leave
+// the machine in a state where naming that notespace is ambiguous.
+func siblingName(explicit string, primary notespace.Record, taken, reserved map[string]bool) (string, string, error) {
 	if name := strings.TrimSpace(explicit); name != "" {
 		if err := validateNotespaceName(name); err != nil {
 			return "", "", err
@@ -207,16 +264,45 @@ func siblingName(explicit string, primary notespace.Record, taken map[string]boo
 	if err := validateNotespaceName(base); err != nil {
 		return "", "", fmt.Errorf("the primary's name cannot be reused (%w); pass --name", err)
 	}
-	if !taken[base] {
+	if !reserved[base] {
 		return base, "", nil
 	}
 	for suffix := 2; suffix < 1000; suffix++ {
 		candidate := fmt.Sprintf("%s-%d", base, suffix)
-		if !taken[candidate] {
-			return candidate, fmt.Sprintf("%q is taken in this notebook, so the name was uniquified", base), nil
+		if !reserved[candidate] {
+			return candidate, derivedNameNote(base, taken[base]), nil
 		}
 	}
 	return "", "", fmt.Errorf("every uniquified name derived from %q is taken; pass --name", base)
+}
+
+// derivedNameNote says which of the two collisions moved the name, because the
+// repairs differ: a directory clash is about this notebook, and a sibling clash
+// is about how the subject is addressed everywhere.
+func derivedNameNote(base string, inDestination bool) string {
+	if inDestination {
+		return fmt.Sprintf("%q is taken in this notebook, so the name was uniquified", base)
+	}
+	return fmt.Sprintf("%q is already carried by a sibling of this subject, so the name was uniquified — one name per subject keeps `grove notespace primary <name>` and `grove notespace move <name>` able to resolve it", base)
+}
+
+// rollbackMintedNotespace undoes a mint this verb has just refused, and states
+// what stands when it cannot.
+//
+// The duplicate-id refusal is issued AFTER the stamp is on disk, so "nothing
+// was recorded" is a claim about the world that has to be made true rather than
+// merely asserted: a freshly stamped root carrying a duplicated id is precisely
+// the D8 state every verb here refuses to act on, and if that notebook were
+// shared, containment would enrol it. The removal is non-recursive for the same
+// reason the mint-failure path's is — the directory was created empty moments
+// ago, so anything else in it is a surprise worth leaving alone.
+func rollbackMintedNotespace(root string) string {
+	stampErr := os.Remove(notespace.NotespaceStampPath(root))
+	dirErr := os.Remove(root)
+	if stampErr == nil && dirErr == nil {
+		return "nothing was recorded and the directory this run created was removed"
+	}
+	return fmt.Sprintf("nothing was recorded in machine.toml, but %s still stands and carries that duplicated id (%v) — remove it by hand", root, errors.Join(stampErr, dirErr))
 }
 
 // validateNotespaceName holds a name to what a notespace directory can be: one
@@ -461,7 +547,18 @@ func runNotespaceList(out io.Writer, asJSON bool) error {
 			}
 		}
 	}
+	// A duplicated id is one condition on disk, so it is reported once. The
+	// audit meets it from the binding table's side and cannot say more about it
+	// than the D8 line below already says — and that line is the one carrying
+	// the repair, so it is the one that is kept.
+	duplicated := map[string]bool{}
+	for _, id := range scope.duplicateIDs() {
+		duplicated[id] = true
+	}
 	for _, problem := range scope.index.AuditPrimaries(scope.primaries) {
+		if problem.Kind == notespace.PrimaryUnresolvable && duplicated[problem.NotespaceID] {
+			continue
+		}
 		listing.Problems = append(listing.Problems, problem.String())
 	}
 	for _, id := range scope.duplicateIDs() {

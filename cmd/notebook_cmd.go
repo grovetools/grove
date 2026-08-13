@@ -353,6 +353,15 @@ type notespaceIdentity struct {
 	minted  bool
 }
 
+// recordsLocalSubject reports whether a subject belongs in machine [subjects].
+//
+// The test is the same one `MachineConfig.Validate` applies, deliberately: a
+// writer that decided this differently from the validator would write files
+// that cannot be read back.
+func recordsLocalSubject(value string) bool {
+	return strings.HasPrefix(value, subject.LocalPrefix)
+}
+
 // recordNotespaceIdentities fills the machine.toml half of P2 identity —
 // [primaries] per subject, [subjects] per root — for identities that have one
 // and do not have a record yet.
@@ -362,6 +371,15 @@ type notespaceIdentity struct {
 // came from: a stamp on disk with no [primaries]/[subjects] entry is a
 // notespace nothing can resolve by identity, and both verbs are capable of
 // producing one.
+//
+// The two tables do NOT take the same subjects. [primaries] routes every
+// subject family; [subjects] is the machine's local-subject registry and
+// `MachineConfig.Validate` rejects any value there that is not `local:` —
+// which is right, because a repository subject is derived from the repo's
+// remote wherever it is cloned, so recording one against one machine's path
+// would state as a machine fact something no machine owns. A notespace stamped
+// for a repo therefore gets its [primaries] entry and no [subjects] entry, and
+// that absence is its correct steady state rather than a gap to fill.
 func recordNotespaceIdentities(identities []notespaceIdentity, scanned []recordedNotebook) (int64, error) {
 	if len(identities) == 0 {
 		return 0, nil
@@ -379,7 +397,11 @@ func recordNotespaceIdentities(identities []notespaceIdentity, scanned []recorde
 	for _, candidate := range identities {
 		_, hasPrimary := recordedPrimaries[candidate.subject]
 		_, hasSubject := recordedSubjects[canonicalPath(candidate.root)]
-		if !hasPrimary || !hasSubject {
+		// A remote subject is complete with its [primaries] entry alone, so it
+		// must not be counted as missing on the strength of a [subjects] entry
+		// it is never going to get — that would make every share of a repo
+		// notebook open a transaction that then writes nothing.
+		if !hasPrimary || (!hasSubject && recordsLocalSubject(candidate.subject)) {
 			missing = append(missing, candidate)
 		}
 	}
@@ -435,6 +457,15 @@ func recordNotespaceIdentities(identities []notespaceIdentity, scanned []recorde
 			default:
 				machine.Primaries[candidate.subject] = candidate.id
 				recorded++
+			}
+			// [subjects] maps a local path to a LOCAL subject and nothing else.
+			// Writing a repository or ecosystem subject here would produce a
+			// machine.toml that MachineConfig.Validate refuses to load — the
+			// verb would appear to succeed and every later config read on this
+			// machine would fail, which is a worse outcome than the missing
+			// entry it was trying to avoid.
+			if !recordsLocalSubject(candidate.subject) {
+				continue
 			}
 			key := canonicalPath(candidate.root)
 			if _, ok := machine.Subjects[key]; !ok {
