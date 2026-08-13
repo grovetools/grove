@@ -46,6 +46,11 @@ func (c *notespaceIdentityCheck) Run(ctx context.Context, opts doctor.RunOptions
 	idRoots := map[string][]string{}
 	subjectRoots := map[string][]string{}
 	ids := map[string]bool{}
+	// stampedRoots is the exact root list the primary invariants are judged
+	// against. It carries only roots whose stamp loaded, so a malformed stamp is
+	// reported once — by the loop that met it — rather than a second time as an
+	// index failure.
+	var stampedRoots []string
 	localModes := 0
 	for _, name := range table.SortedNotebookNames() {
 		root := table.NotebookRoot(name)
@@ -84,6 +89,7 @@ func (c *notespaceIdentityCheck) Run(ctx context.Context, opts doctor.RunOptions
 				continue
 			}
 			ids[stamp.ID] = true
+			stampedRoots = append(stampedRoots, spaceRoot)
 			idRoots[stamp.ID] = append(idRoots[stamp.ID], spaceRoot)
 			subjectRoots[stamp.Subject] = append(subjectRoots[stamp.Subject], spaceRoot)
 		}
@@ -94,24 +100,19 @@ func (c *notespaceIdentityCheck) Run(ctx context.Context, opts doctor.RunOptions
 			failures = append(failures, fmt.Sprintf("notespace id %s has %d physical roots: %s", id, len(roots), strings.Join(roots, ", ")))
 		}
 	}
-	for subj, roots := range subjectRoots {
-		primary := machine.Primaries[subj]
-		if primary == "" {
-			failures = append(failures, fmt.Sprintf("subject %s has local notes but no [primaries] entry", subj))
-			continue
-		}
-		if !ids[primary] {
-			failures = append(failures, fmt.Sprintf("subject %s primary %s has no local stamp", subj, primary))
-		}
-		count := 0
-		for _, root := range roots {
-			stamp, _ := notespace.LoadNotespace(root)
-			if stamp != nil && stamp.ID == primary {
-				count++
-			}
-		}
-		if count != 1 {
-			failures = append(failures, fmt.Sprintf("subject %s primary %s resolves to %d local roots", subj, primary, count))
+
+	// The exactly-one-primary rule (D4, re-checked here for P4's siblings) is
+	// core's, not doctor's: `grove notespace new` and `grove notespace primary`
+	// enforce the same audit at the moment they act, and a second copy of the
+	// rule here would be a second definition of it that could drift. Siblings
+	// are LEGAL, so what is checked is the binding table, not the count of
+	// notespaces a subject has.
+	index, err := notespace.BuildIndex(stampedRoots)
+	if err != nil {
+		failures = append(failures, err.Error())
+	} else {
+		for _, problem := range index.AuditPrimaries(machine.Primaries) {
+			failures = append(failures, problem.String())
 		}
 	}
 	for path, subj := range machine.Subjects {
@@ -152,7 +153,7 @@ func (c *notespaceIdentityCheck) Run(ctx context.Context, opts doctor.RunOptions
 		res.Status = doctor.StatusFail
 		res.Message = fmt.Sprintf("%d notespace identity/layout invariant(s) failed", len(failures))
 		res.Error = strings.Join(failures, "; ")
-		res.Resolution = "run `grove migrate --step 2 --dry-run` with explicit roots; do not hand-edit ids. A duplicate id is repaired by designating the losing root: `grove doctor --fix --remint <notespace-root>`."
+		res.Resolution = "run `grove migrate --step 2 --dry-run` with explicit roots; do not hand-edit ids. A duplicate id is repaired by designating the losing root: `grove doctor --fix --remint <notespace-root>`. A missing or dangling primary is repaired by naming the notespace that should hold it: `grove notespace primary <notespace>` (`grove notespace list` shows the siblings)."
 		return res
 	}
 	if len(warnings) > 0 {
@@ -163,7 +164,8 @@ func (c *notespaceIdentityCheck) Run(ctx context.Context, opts doctor.RunOptions
 		return res
 	}
 	res.Status = doctor.StatusOK
-	res.Message = fmt.Sprintf("%d unique notespace id(s), primaries and registry bindings are consistent (%d local-mode notebooks)", len(ids), localModes)
+	res.Message = fmt.Sprintf("%d unique notespace id(s) across %d subject(s); exactly one primary each, and registry bindings are consistent (%d local-mode notebooks)",
+		len(ids), len(subjectRoots), localModes)
 	return res
 }
 

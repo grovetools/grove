@@ -64,11 +64,21 @@ func init() {
 func newNotespaceCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "notespace",
-		Short: "Notespace-grained operations (move)",
+		Short: "Notespace-grained operations (new, primary, list, move)",
 		Long: `Operate on a single notespace.
 
+  new <subject> --in <nb>     create an additional notespace for a subject that
+                              already has a primary — new id, [primaries] untouched
+  primary <ns>                record which notespace this machine writes into
+                              for that notespace's subject
+  list                        list notespaces grouped by subject, primary first
   move <ns> --to <notebook>   move a notespace into another recorded notebook,
                               preserving its immutable id
+
+The primary is this machine's default target notespace for a subject — a
+machine-local routing pointer recorded in config, never a synced property of the
+notespace. Additional notespaces for one subject are siblings; they are explicit
+only, and creating one never changes where unqualified writes land.
 
 Moving is how sharing changes: the notebook is the only sync knob, so a
 notespace is shared because the notebook containing it is shared. Moving out of
@@ -76,6 +86,9 @@ a shared notebook stops sync forward-only (D9) — the server retains everything
 and copies pulled elsewhere are not retracted.`,
 		RunE: func(cmd *cobra.Command, args []string) error { return cmd.Help() },
 	}
+	cmd.AddCommand(newNotespaceNewCmd())
+	cmd.AddCommand(newNotespacePrimaryCmd())
+	cmd.AddCommand(newNotespaceListCmd())
 	cmd.AddCommand(newNotespaceMoveCmd())
 	return cmd
 }
