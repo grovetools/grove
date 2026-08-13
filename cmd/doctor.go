@@ -49,7 +49,13 @@ operator's call. Designate the loser explicitly:
 That re-mints the named root (new id; name, subject and kind unchanged), repairs
 the machine bindings that followed it, prints both halves, and then runs the
 normal diagnostics over the repaired state. The daemon's parking verdict is
-rebuilt from the stamps on disk each pass, so the park clears without a restart.`,
+rebuilt from the stamps on disk each pass, so the park clears without a restart.
+
+With --remint, the exit status answers for the REPAIR: zero when the re-mint
+succeeded, non-zero when it did not. The diagnostics that follow are evidence of
+the repaired state and are reported in full, but an unrelated check failing does
+not make a successful repair look like a failed one. Run plain 'grove doctor'
+when you want the exit code to answer for the checks.`,
 		RunE:          runDoctor,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -71,6 +77,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	// prompted the run. It is gated on --fix because it writes: a designation
 	// without the flag that means "apply things" would be a mutation nobody
 	// asked for.
+	reminted := false
 	if doctorRemint != "" {
 		if !doctorFix {
 			return fmt.Errorf("--remint re-mints a stamp on disk; pass --fix as well to say so explicitly")
@@ -81,6 +88,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		if _, err := doctorchecks.RemintDesignatedDuplicate(doctorRemint, cmd.OutOrStdout()); err != nil {
 			return err
 		}
+		reminted = true
 	}
 
 	// Config loading is a top-level health signal, not a prerequisite for the
@@ -131,7 +139,24 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		renderDoctorResults(cmd.OutOrStdout(), results)
 	}
 
+	// A --remint run is a REPAIR invocation, and its exit status answers the
+	// question the operator asked: did the repair succeed? The diagnostics that
+	// follow it are evidence of the repaired state, printed on purpose — but
+	// they run every unrelated check on the machine, so letting one of them
+	// decide the exit code made a successful re-mint indistinguishable from a
+	// failed one to anything reading $?. A repair verb that reports failure
+	// after repairing is a verb no script can use, and the lab had to judge it
+	// on printed text instead.
+	//
+	// The failure is not swallowed: it is rendered above like any other, and
+	// named here with the command whose exit code does answer for it. A
+	// --remint that fails still returns its own error, before this point.
 	if hasFailure(results) {
+		if reminted {
+			fmt.Fprintf(cmd.OutOrStdout(),
+				"\nThe re-mint succeeded. The check failures above are unrelated to it and are\nnot reflected in this command's exit status — run `grove doctor` for that.\n")
+			return nil
+		}
 		return errDoctorFailed
 	}
 	return nil
