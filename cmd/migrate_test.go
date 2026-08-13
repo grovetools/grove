@@ -1091,3 +1091,52 @@ func TestWriteMigrationEquivalenceEvidence(t *testing.T) {
 }
 
 func quoteTOML(s string) string { return "\"" + strings.ReplaceAll(s, "\\", "\\\\") + "\"" }
+
+// F9 regression (machine C, report wm6ba-2b5 §2b): a machine migrated by an
+// older P1 carries the recorded pair, a notebooks.legacy-compat.toml holding
+// the displaced note types, and duplicate machine-file definitions the old
+// binary never stripped. A re-run must succeed — the modern loader merges the
+// compat fragment's types into the recorded definitions, so the frozen
+// equivalence replay must project the same merge instead of failing its own
+// migration-window artifact.
+func TestMigrateRerunAfterOlderBinaryP1PassesEquivalenceAndStagesSync(t *testing.T) {
+	dir := migrateSandbox(t)
+	nbRoot := t.TempDir()
+	migrateWrite(t, filepath.Join(dir, "notebooks.toml"), "# Recorded notebook roots. Written by `grove migrate`.\n\ndefault = \"nb\"\n\n[notebooks.nb]\nroot = "+quoteTOML(nbRoot)+"\n")
+	migrateWrite(t, filepath.Join(dir, "roots.toml"), "# Recorded code roots. Written by `grove migrate`.\n")
+	migrateWrite(t, filepath.Join(dir, "notebooks.legacy-compat.toml"),
+		"# Migration-window notebook behavior; notebooks.toml remains authoritative for names, roots, and default.\n"+
+			"[_grove]\npriority = 50\n"+
+			"[notebooks.definitions.nb]\nroot_dir = "+quoteTOML(nbRoot)+"\n"+
+			"[notebooks.definitions.nb.types.inbox]\ndescription = \"quick capture\"\n"+
+			"[notebooks.rules]\ndefault = \"nb\"\n")
+	machinesPath := filepath.Join(dir, "machines", "wm-test.toml")
+	migrateWrite(t, machinesPath, "[notebooks.definitions.nb]\nroot_dir = "+quoteTOML(nbRoot)+"\n")
+	config.ResetLoadCache()
+
+	var out bytes.Buffer
+	if err := runLegacyMigrateWithOptions(&out, strings.NewReader(""), migrationOptions{StageSync: true, Yes: true}, time.Unix(500, 0)); err != nil {
+		t.Fatalf("P1 re-run on an already-migrated machine: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "equivalence: verified") {
+		t.Fatalf("missing equivalence proof:\n%s", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "sync.toml.p2-staged")); err != nil {
+		t.Fatalf("re-run did not stage sync intent: %v", err)
+	}
+	if body := migrateRead(t, machinesPath); strings.Contains(body, "definitions") {
+		t.Fatalf("duplicate machine-file definitions were not stripped:\n%s", body)
+	}
+	// The compat fragment's displaced behavior must still be live afterwards.
+	config.ResetLoadCache()
+	envelope, err := loadEffectiveConfig(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	notebooks := envelope.Effective["notebooks"].(map[string]interface{})
+	definitions := notebooks["definitions"].(map[string]interface{})
+	nb, _ := definitions["nb"].(map[string]interface{})
+	if nb == nil || nb["types"] == nil {
+		t.Fatalf("compat-fragment types lost after re-run: %+v", definitions)
+	}
+}

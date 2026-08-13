@@ -1102,12 +1102,43 @@ func hashTree(root string) (string, error) {
 		if entry.IsDir() {
 			return nil
 		}
-		data, err := os.ReadFile(path)
+		// WalkDir never follows symlinks, so a link is its own entry here no
+		// matter what it points at. Reading THROUGH it would abort on a
+		// symlink-to-directory ("is a directory" — grove's own worktree layout
+		// plants thousands of node_modules links inside notebooks) or a dangling
+		// link, and would tie the guard to bytes outside the guarded tree. A
+		// symlink's identity is its target string, so that is what is hashed;
+		// the literal "L" marker cannot collide with a decimal size field.
+		if entry.Type()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(h, "%s\x00L\x00%s\x00", filepath.ToSlash(rel), target)
+			return nil
+		}
+		// Streamed, not buffered: notebooks measured in gigabytes must not be
+		// held in memory file-by-file. The preimage is unchanged from the
+		// buffered implementation (path, size, bytes), so AfterHash values in
+		// manifests written by earlier builds still verify for symlink-free
+		// trees.
+		f, err := os.Open(path)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(h, "%s\x00%d\x00", filepath.ToSlash(rel), len(data))
-		_, _ = h.Write(data)
+		info, err := f.Stat()
+		if err != nil {
+			f.Close()
+			return err
+		}
+		fmt.Fprintf(h, "%s\x00%d\x00", filepath.ToSlash(rel), info.Size())
+		if _, err := io.Copy(h, f); err != nil {
+			f.Close()
+			return err
+		}
+		if err := f.Close(); err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {

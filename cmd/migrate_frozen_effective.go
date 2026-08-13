@@ -97,10 +97,27 @@ func loadFrozenLegacyEffectiveConfig() (*config.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	for name, nb := range recorded.Notebooks {
-		cfg.Notebooks.Definitions[name] = &config.Notebook{RootDir: nb.Root}
-	}
-	if recorded.Default != "" {
+	// Mirror compileCodeRootTable's recorded-notebook semantics exactly: an
+	// existing notebooks.toml owns membership, routing roots and the default,
+	// while same-name displaced declarations — a previous P1's
+	// notebooks.legacy-compat.toml, folded in as a fragment above — keep owning
+	// the orthogonal notebook behavior (types, templates, sync settings). This
+	// is what makes P1 idempotent on a machine an older binary already
+	// migrated: the modern loader merges the compat fragment's types into the
+	// recorded definitions, so replacing them here with root-only definitions
+	// would make a re-run non-equivalent to its own migration-window artifact.
+	if recorded.NotebooksFilePath != "" {
+		merged := make(map[string]*config.Notebook, len(recorded.Notebooks))
+		for name, nb := range recorded.Notebooks {
+			def := &config.Notebook{}
+			if prior := cfg.Notebooks.Definitions[name]; prior != nil {
+				copy := *prior
+				def = &copy
+			}
+			def.RootDir = nb.Root
+			merged[name] = def
+		}
+		cfg.Notebooks.Definitions = merged
 		cfg.Notebooks.Rules.Default = recorded.Default
 	}
 	for name, r := range recorded.Roots {

@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -429,5 +430,123 @@ func TestAtomicMigrationWriteIsSymlinkSafe(t *testing.T) {
 	}
 	if info, err := os.Lstat(dangling); err != nil || info.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("refusal replaced the dangling link: %v %v", info.Mode(), err)
+	}
+}
+
+// F10/F11 regression (machine C, report wm6ba-2b5 §2b): hashTree must treat a
+// symlink as its own entry — identity = target string — instead of reading
+// through it, which aborts on a symlink-to-directory ("is a directory") and
+// ties the guard to bytes outside the guarded tree. Grove's own worktree
+// tooling plants thousands of node_modules symlinks inside notebooks.
+func TestHashTreeHashesSymlinksByTargetWithoutReadingThroughThem(t *testing.T) {
+	outside := t.TempDir()
+	migrateWrite(t, filepath.Join(outside, "file.txt"), "external\n")
+	tree := t.TempDir()
+	migrateWrite(t, filepath.Join(tree, "notes", "a.md"), "alpha\n")
+	if err := os.Symlink(outside, filepath.Join(tree, "linkdir")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "file.txt"), filepath.Join(tree, "linkfile")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("no/such/target", filepath.Join(tree, "dangling")); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := hashTree(tree)
+	if err != nil {
+		t.Fatalf("hashTree over symlink-to-dir/file/dangling: %v", err)
+	}
+	if second, err := hashTree(tree); err != nil || second != first {
+		t.Fatalf("hashTree is not deterministic: %s then %s (%v)", first, second, err)
+	}
+
+	// Bytes BEHIND a link are not the tree's bytes: mutating the external
+	// target must not change the guarded identity.
+	migrateWrite(t, filepath.Join(outside, "file.txt"), "external CHANGED\n")
+	if got, err := hashTree(tree); err != nil || got != first {
+		t.Fatalf("hash follows content through links: %s vs %s (%v)", got, first, err)
+	}
+
+	// Repointing a link IS an identity change.
+	migrateWrite(t, filepath.Join(outside, "other.txt"), "other\n")
+	if err := os.Remove(filepath.Join(tree, "linkfile")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "other.txt"), filepath.Join(tree, "linkfile")); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := hashTree(tree); err != nil || got == first {
+		t.Fatalf("repointed link kept hash %s (%v)", got, err)
+	}
+}
+
+// The streaming rewrite (F11) must not change the digest for symlink-free
+// trees: AfterHash values in manifests applied by earlier builds remain
+// verifiable by --undo under this one.
+func TestHashTreePreservesPreStreamingDigestForRegularFiles(t *testing.T) {
+	tree := t.TempDir()
+	migrateWrite(t, filepath.Join(tree, "b", "two.md"), "two\n")
+	migrateWrite(t, filepath.Join(tree, "one.md"), "one\n")
+
+	h := sha256.New()
+	for _, f := range []struct{ rel, body string }{{"b/two.md", "two\n"}, {"one.md", "one\n"}} {
+		fmt.Fprintf(h, "%s\x00%d\x00", f.rel, len(f.body))
+		h.Write([]byte(f.body))
+	}
+	want := fmt.Sprintf("%x", h.Sum(nil))
+
+	got, err := hashTree(tree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("hashTree digest drifted from the pre-streaming preimage: got %s want %s", got, want)
+	}
+}
+
+// End-to-end F10: dry-run, apply and undo across a notebook whose migrated
+// tree contains a symlink-to-directory and a symlink-to-file.
+func TestP2MigrationSurvivesSymlinksInsideMigratedNotebook(t *testing.T) {
+	_, nb := p2Sandbox(t)
+	stubP2Command(t)
+	outside := t.TempDir()
+	migrateWrite(t, filepath.Join(outside, "dep.js"), "module.exports = 1\n")
+	alpha := filepath.Join(nb, "workspaces", "alpha")
+	if err := os.Symlink(outside, filepath.Join(alpha, "node_modules")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "dep.js"), filepath.Join(alpha, "dep-link.js")); err != nil {
+		t.Fatal(err)
+	}
+
+	manifest := filepath.Join(t.TempDir(), "manifest.json")
+	opts := p2MigrationOptions{DryRun: true, Yes: true, LocalOnly: true, NotebookRoots: []string{"nb=" + nb}, ContentRoots: []string{nb}, ManifestPath: manifest, SyncDBPath: filepath.Join(t.TempDir(), "sync.db")}
+	var out bytes.Buffer
+	if err := runP2Migration(context.Background(), &out, strings.NewReader(""), opts, time.Unix(300, 0)); err != nil {
+		t.Fatalf("dry-run with symlinked dirs: %v\n%s", err, out.String())
+	}
+
+	opts.DryRun = false
+	out.Reset()
+	if err := runP2Migration(context.Background(), &out, strings.NewReader(""), opts, time.Unix(301, 0)); err != nil {
+		t.Fatalf("apply with symlinked dirs: %v\n%s", err, out.String())
+	}
+	moved := filepath.Join(nb, "notespaces", "alpha", "node_modules")
+	if info, err := os.Lstat(moved); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("symlink did not survive the layout transition: %v %v", info, err)
+	}
+	if entry := p2ManifestEntry(t, manifest, nb); entry.AfterHash == "" {
+		t.Fatalf("notebook tree was not hash-guarded: %+v", entry)
+	}
+
+	undo := p2MigrationOptions{Undo: true, ManifestPath: manifest}
+	out.Reset()
+	if err := runP2Migration(context.Background(), &out, strings.NewReader(""), undo, time.Unix(302, 0)); err != nil {
+		t.Fatalf("undo with symlinked dirs: %v\n%s", err, out.String())
+	}
+	restored := filepath.Join(alpha, "node_modules")
+	if info, err := os.Lstat(restored); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("undo did not restore the symlinked layout: %v %v", info, err)
 	}
 }
