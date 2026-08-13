@@ -46,6 +46,11 @@ func AllScenarios() []*harness.Scenario {
 		// Notebook TOML / grove init scenarios (discovery tests are in core)
 		GroveInitNotebookScenario(),
 
+		// Notespace siblings: `notespace new`, `primary` and `list` against a
+		// sandboxed recorded machine. V2 for P4 W4.1/W4.4, and the P3 V2 gap in
+		// grove closed with it.
+		NotespaceSiblingVerbsScenario(),
+
 		// Explicit real-binary V2/V3 configuration cutover acceptance gate.
 		ConfigCutoverV2V3Scenario(),
 
