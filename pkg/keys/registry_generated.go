@@ -1641,6 +1641,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "JumpToArtifacts", Keys: []string{"ga"}, Description: "goto job artifacts", Enabled: true, ConfigKey: "jump_to_artifacts"},
 					{Name: "FocusArchive", Keys: []string{"gv"}, Description: "goto archive view", Enabled: true, ConfigKey: "focus_archive"},
+					{Name: "GotoSiblings", Keys: []string{"gs"}, Description: "goto subject / next sibling", Enabled: true, ConfigKey: "goto_siblings"},
 				},
 			},
 			{
