@@ -13,7 +13,7 @@ import (
 	"github.com/grovetools/core/tui/theme"
 	"github.com/spf13/cobra"
 
-	_ "github.com/grovetools/grove/pkg/doctorchecks" // register grove-specific checks
+	"github.com/grovetools/grove/pkg/doctorchecks" // registers grove-specific checks; also owns the D8 re-mint repair
 )
 
 func init() {
@@ -27,6 +27,7 @@ var (
 	doctorCheckID string
 	doctorJSON    bool
 	doctorVerbose bool
+	doctorRemint  string
 )
 
 func newDoctorCmd() *cobra.Command {
@@ -37,12 +38,24 @@ func newDoctorCmd() *cobra.Command {
 orphan sockets, GROVE_SCOPE vs cwd mismatch, etc.) and reports their status.
 
 Use --fix to apply safe auto-fixes, --check <id> to run a single diagnostic,
-and --json for machine-readable output.`,
+and --json for machine-readable output.
+
+Two notespace roots carrying one stamp id (D8: a copied notespace) is the one
+repair no auto-fix may choose for you — which copy keeps the history is the
+operator's call. Designate the loser explicitly:
+
+    grove doctor --fix --remint <notespace-root>
+
+That re-mints the named root (new id; name, subject and kind unchanged), repairs
+the machine bindings that followed it, prints both halves, and then runs the
+normal diagnostics over the repaired state. The daemon's parking verdict is
+rebuilt from the stamps on disk each pass, so the park clears without a restart.`,
 		RunE:          runDoctor,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
 	cmd.Flags().BoolVar(&doctorFix, "fix", false, "apply safe auto-fixes for failing checks")
+	cmd.Flags().StringVar(&doctorRemint, "remint", "", "re-mint the duplicate notespace at this root (requires --fix)")
 	cmd.Flags().StringVar(&doctorCheckID, "check", "", "run only the check with this ID")
 	cmd.Flags().BoolVar(&doctorJSON, "json", false, "emit JSON output")
 	cmd.Flags().BoolVarP(&doctorVerbose, "verbose", "v", false, "verbose diagnostics output")
@@ -52,6 +65,23 @@ and --json for machine-readable output.`,
 func runDoctor(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	opts := doctor.RunOptions{Verbose: doctorVerbose}
+
+	// The designated duplicate repair runs BEFORE the diagnostics, so what the
+	// checks then report is the repaired state rather than the state that
+	// prompted the run. It is gated on --fix because it writes: a designation
+	// without the flag that means "apply things" would be a mutation nobody
+	// asked for.
+	if doctorRemint != "" {
+		if !doctorFix {
+			return fmt.Errorf("--remint re-mints a stamp on disk; pass --fix as well to say so explicitly")
+		}
+		if doctorJSON {
+			return fmt.Errorf("--remint prints the repair as evidence and is not available with --json")
+		}
+		if _, err := doctorchecks.RemintDesignatedDuplicate(doctorRemint, cmd.OutOrStdout()); err != nil {
+			return err
+		}
+	}
 
 	// Config loading is a top-level health signal, not a prerequisite for the
 	// check runner. Capture it first, then always run the requested independent

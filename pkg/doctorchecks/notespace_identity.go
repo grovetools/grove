@@ -152,7 +152,7 @@ func (c *notespaceIdentityCheck) Run(ctx context.Context, opts doctor.RunOptions
 		res.Status = doctor.StatusFail
 		res.Message = fmt.Sprintf("%d notespace identity/layout invariant(s) failed", len(failures))
 		res.Error = strings.Join(failures, "; ")
-		res.Resolution = "run `grove migrate --step 2 --dry-run` with explicit roots; do not hand-edit ids. Duplicate-id remint requires an explicit chosen losing root."
+		res.Resolution = "run `grove migrate --step 2 --dry-run` with explicit roots; do not hand-edit ids. A duplicate id is repaired by designating the losing root: `grove doctor --fix --remint <notespace-root>`."
 		return res
 	}
 	if len(warnings) > 0 {

@@ -53,6 +53,8 @@ through to the grove-syncd SERVER binary, so ` + "`grove sync serve`" + ` and
 	cmd.AddCommand(newSyncAdoptCmd())
 	cmd.AddCommand(newSyncConflictsCmd())
 	cmd.AddCommand(newSyncAdoptIDCmd())
+	cmd.AddCommand(newSyncContestedCmd())
+	cmd.AddCommand(newSyncAdoptNotespaceCmd())
 	return cmd
 }
 
