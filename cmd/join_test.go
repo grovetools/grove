@@ -16,6 +16,7 @@ import (
 	"github.com/grovetools/core/pkg/coderoot"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/devicekey"
+	"github.com/grovetools/core/pkg/notespace"
 	"github.com/grovetools/core/pkg/syncproto"
 )
 
@@ -317,6 +318,51 @@ func TestJoinWritesRegistrySubscription(t *testing.T) {
 	root := filepath.Join(notebookRoot, "notespaces", defaultRegistryWorkspace, "machines")
 	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
 		t.Errorf("registry workspace not created at %s: %v", root, err)
+	}
+}
+
+// TestJoinDoesNotStampTheNotebookItEnrollsInto: enrollment is a relationship,
+// not a topology change. Join materializes the registry NOTESPACE and records
+// which notebook holds it, but writing that notebook's own identity stamp is a
+// claim only the notebook's own verbs may make.
+//
+// The concrete damage when it does: a machine joining a fleet to adopt a shared
+// notebook has its default notebook root stamped during enrollment, and the
+// `notebook pull` it joined in order to run then refuses that root as already
+// claimed by a different notebook identity. Every check is behaving; the state
+// they check was manufactured by the step before.
+func TestJoinDoesNotStampTheNotebookItEnrollsInto(t *testing.T) {
+	_, configDir, notebookRoot := sandboxAdoption(t)
+	srv := capabilitiesServer(t, func(string) int { return http.StatusOK })
+
+	var out bytes.Buffer
+	if err := runJoin(context.Background(), strings.NewReader(""), &out, joinOpts(srv.URL, configDir)); err != nil {
+		t.Fatalf("join: %v\n%s", err, out.String())
+	}
+
+	stampPath := filepath.Join(notebookRoot, notespace.NotebookStampName)
+	if _, err := os.Stat(stampPath); err == nil {
+		t.Errorf("join claimed the notebook root by writing %s; pull into this root is now refused", stampPath)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat %s: %v", stampPath, err)
+	}
+
+	// What join DOES own is still written: the registry notespace carries an
+	// immutable id, and machine.toml records the notebook that holds it by the
+	// name routing actually chose.
+	spaceStamp, err := notespace.LoadNotespace(filepath.Join(notebookRoot, "notespaces", defaultRegistryWorkspace))
+	if err != nil || spaceStamp == nil {
+		t.Fatalf("registry notespace stamp not written: %v (%v)", spaceStamp, err)
+	}
+	machineCfg, err := config.LoadMachineConfig()
+	if err != nil || machineCfg == nil || machineCfg.Sync.Registry == nil {
+		t.Fatalf("[sync.registry] binding not recorded: %+v (%v)", machineCfg, err)
+	}
+	if machineCfg.Sync.Registry.Notebook != "nb" {
+		t.Errorf("[sync.registry] notebook = %q, want %q", machineCfg.Sync.Registry.Notebook, "nb")
+	}
+	if machineCfg.Sync.Registry.NotespaceID != spaceStamp.ID {
+		t.Errorf("[sync.registry] notespace_id = %q, want the stamped id %q", machineCfg.Sync.Registry.NotespaceID, spaceStamp.ID)
 	}
 }
 

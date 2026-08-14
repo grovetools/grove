@@ -709,20 +709,25 @@ func declaresWorkspace(cfg *config.SyncConfig, name string) bool {
 // locator's `~/.grove/notebooks/nb` fallback. Creating a notebook tree at a
 // path the user never configured is not a helpful default: the registry would
 // replicate into a directory no other grove surface reads.
+//
+// What it creates is the registry notespace and nothing above it. The holding
+// notebook's own identity stamp is not join's to write — see the note at the
+// binding below.
 func ensureRegistryRoot(rep *joinReporter, workspaceName string) string {
 	cfg, err := config.LoadDefault()
 	if err != nil {
 		rep.fail("registry", "grove config", "unreadable: "+err.Error())
 		return ""
 	}
-	root := registry.PlannedRoot(cfg, workspaceName)
-	if root == "" {
+	binding, bindErr := registry.ResolvePlannedBinding(cfg, workspaceName)
+	if bindErr != nil || binding.Root == "" {
 		rep.fail("registry", "workspace "+workspaceName, "this machine declares no notebooks",
 			"declare one, then re-run `grove join --repair`:",
 			"  [notebooks.definitions.<name>]",
 			"  root_dir = \"~/notebooks/<name>\"")
 		return ""
 	}
+	root := binding.Root
 	if mkErr := os.MkdirAll(filepath.Join(root, "machines"), 0o755); mkErr != nil {
 		rep.fail("registry", root, "could not be created: "+mkErr.Error())
 		return ""
@@ -744,19 +749,13 @@ func ensureRegistryRoot(rep *joinReporter, workspaceName string) string {
 			rep.fail("registry", root, "identity stamp failed: "+stampErr.Error())
 			return ""
 		}
-		notebookName := ""
-		if cfg.Notebooks != nil && cfg.Notebooks.Rules != nil {
-			notebookName = cfg.Notebooks.Rules.Default
-		}
-		if notebookName == "" {
-			rep.fail("registry", root, "no explicit default notebook for [sync.registry]")
-			return ""
-		}
-		notebookRoot := filepath.Dir(filepath.Dir(root))
-		if _, stampErr = notespace.MintNotebook(notebookRoot, notebookName); stampErr != nil {
-			rep.fail("registry", notebookRoot, "notebook identity stamp failed: "+stampErr.Error())
-			return ""
-		}
+		// The notebook holding the registry is RECORDED here, never STAMPED.
+		// Enrollment is a relationship; deciding this machine's notebook
+		// identity is a topology change join was not asked to make, and a
+		// notebook root join stamped is a root `notebook pull` must then refuse
+		// as already claimed. The stamp is minted by whatever first acts on the
+		// notebook's own identity — materializing it locally, or pulling a
+		// shared one into it.
 		known := map[string]struct{}{stamp.ID: {}}
 		_, _, stampErr = config.EditMachineConfig(config.MachineConfigPath(), config.MachineEditOptions{KnownNotespaceIDs: known}, func(machine *config.MachineConfig) error {
 			if machine.Primaries == nil {
@@ -767,7 +766,7 @@ func ensureRegistryRoot(rep *joinReporter, workspaceName string) string {
 			}
 			machine.Primaries[stamp.Subject] = stamp.ID
 			machine.Subjects[canonicalPath(root)] = stamp.Subject
-			machine.Sync.Registry = &config.SyncRegistry{Notebook: notebookName, NotespaceID: stamp.ID}
+			machine.Sync.Registry = &config.SyncRegistry{Notebook: binding.Notebook, NotespaceID: stamp.ID}
 			return nil
 		})
 		if stampErr != nil {
