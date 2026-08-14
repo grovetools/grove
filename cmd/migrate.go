@@ -25,10 +25,10 @@ import (
 func init() { rootCmd.AddCommand(newMigrateCmd()) }
 
 func newMigrateCmd() *cobra.Command {
-	var dryRun, yes, stageSync, jsonOutput, undo, localOnly, resubject bool
+	var dryRun, yes, stageSync, jsonOutput, undo, localOnly, resubject, retire, allowContent bool
 	var evidenceDir, manifestPath, syncDBPath, grovedBin, syncdBin, serverBackup string
 	var step int
-	var notebookRoots, contentRoots, notespaceIDs []string
+	var notebookRoots, contentRoots, notespaceIDs, retireTargets []string
 	cmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "Migrate frozen legacy configuration to recorded roots and notebooks",
@@ -41,6 +41,9 @@ backed up with a UTC timestamp. notebooks.toml is always written before
 roots.toml so a notebook reference is never recorded before its definition.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if retire {
+				return runRetireMigration(cmd.OutOrStdout(), cmd.InOrStdin(), retireOptions{DryRun: dryRun, Yes: yes, Undo: undo, JSON: jsonOutput, AllowContent: allowContent, ManifestPath: manifestPath, Targets: retireTargets}, time.Now().UTC())
+			}
 			if resubject {
 				return runResubjectMigration(cmd.OutOrStdout(), cmd.InOrStdin(), resubjectOptions{DryRun: dryRun, Yes: yes, Undo: undo, JSON: jsonOutput, ManifestPath: manifestPath}, time.Now().UTC())
 			}
@@ -71,6 +74,9 @@ roots.toml so a notebook reference is never recorded before its definition.`,
 	cmd.Flags().StringVar(&serverBackup, "server-backup", "", "Destination passed to `grove-syncd backup` before server reconciliation")
 	cmd.Flags().BoolVar(&localOnly, "local-only", false, "Skip server backup/registration with explicit retained-server-state evidence")
 	cmd.Flags().BoolVar(&resubject, "resubject", false, "Re-derive local: subjects of stamped notespaces from current code-root reality (ids preserved; machine-local records only — run before any subject is server-registered)")
+	cmd.Flags().BoolVar(&retire, "retire", false, "Retire named notespaces: remove the directory and its [primaries]/[subjects] records together (dry-run plan, inlined undo manifest)")
+	cmd.Flags().StringSliceVar(&retireTargets, "notespace", nil, "Retire target as notebook/name (repeatable; used with --retire)")
+	cmd.Flags().BoolVar(&allowContent, "allow-content", false, "Allow --retire to remove a notespace holding content beyond the plan scaffold")
 	return cmd
 }
 
