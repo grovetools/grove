@@ -311,7 +311,7 @@ func runSyncAdopt(ctx context.Context, out io.Writer, opts syncAdoptOptions) err
 	}
 
 	if !opts.noKick {
-		if _, err := daemon.New().SyncRepush(ctx, workspaceName); err != nil {
+		if _, err := daemon.New().SyncRepush(ctx, repushTarget(status, workspaceName)); err != nil {
 			fmt.Fprintf(out, "· could not kick an immediate pass (%v); the scheduled one will cover it.\n", err)
 		} else {
 			fmt.Fprintf(out, "✓ anti-entropy pass kicked\n")
@@ -336,7 +336,7 @@ func pollAdoptionProgress(ctx context.Context, out io.Writer, workspace string, 
 		status := syncStatusSoft(ctx)
 		if status != nil {
 			last = status
-			ws := workspaceStatus(status, workspace)
+			ws := notespaceStatus(status, workspace)
 			switch {
 			case ws == nil:
 				// The daemon dropped it again — nothing more to poll.
@@ -371,7 +371,7 @@ func reportAdoptionResult(out io.Writer, workspace string, status *models.SyncSt
 		fmt.Fprintf(out, "  <the daemon stopped answering; run `grove status` to check>\n")
 		return
 	}
-	ws := workspaceStatus(status, workspace)
+	ws := notespaceStatus(status, workspace)
 	if ws == nil {
 		fmt.Fprintf(out, "  <the daemon is no longer tracking this workspace>\n")
 		return

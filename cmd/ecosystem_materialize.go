@@ -340,7 +340,7 @@ func subscribeNotebookWorkspace(ctx context.Context, out io.Writer, name string,
 		}
 		return nil
 	}
-	if _, err := daemon.New().SyncRepush(ctx, workspace); err != nil {
+	if _, err := daemon.New().SyncRepush(ctx, repushTarget(status, workspace)); err != nil {
 		// A failed kick costs a delay, never correctness: the hourly
 		// anti-entropy pass covers the same ground.
 		fmt.Fprintf(out, "· could not kick an immediate sync pass (%v); the next scheduled pass will pick it up.\n", err)

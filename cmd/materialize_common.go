@@ -246,17 +246,37 @@ func syncStatusSoft(ctx context.Context) *models.SyncStatus {
 	return status
 }
 
-// workspaceStatus finds one workspace's row in a sync status snapshot.
-func workspaceStatus(status *models.SyncStatus, name string) *models.SyncWorkspaceStatus {
-	if status == nil {
+// notespaceStatus finds one notespace's row in a sync status snapshot.
+//
+// The daemon reports each row by its immutable stamp id with the display name
+// beside it, so both are accepted: callers here pass whatever the user typed,
+// which is a name, while anything derived from an earlier status row is an id.
+func notespaceStatus(status *models.SyncStatus, nameOrID string) *models.SyncNotespaceStatus {
+	if status == nil || nameOrID == "" {
 		return nil
 	}
-	for i := range status.Workspaces {
-		if status.Workspaces[i].Name == name {
-			return &status.Workspaces[i]
+	for i := range status.Notespaces {
+		if status.Notespaces[i].NotespaceName == nameOrID || status.Notespaces[i].NotespaceID == nameOrID {
+			return &status.Notespaces[i]
 		}
 	}
 	return nil
+}
+
+// repushTarget resolves the name a user typed to the notespace id POST
+// /api/sync/repush selects on.
+//
+// Never fall back to the empty string: empty means EVERY notespace there, and
+// a repush is not a read — it voids server-confirmed state and clears outboxes
+// before re-pushing. Sending the unresolved name instead scopes the blast
+// radius to nothing, which is the right way to fail. (The daemon used to be
+// handed a `workspace` key it stopped reading, so every adopt of one workspace
+// quietly reset all of them.)
+func repushTarget(status *models.SyncStatus, name string) string {
+	if ws := notespaceStatus(status, name); ws != nil && ws.NotespaceID != "" {
+		return ws.NotespaceID
+	}
+	return name
 }
 
 // waitForWorkspacePickup polls until the daemon reports the named workspace,
@@ -274,7 +294,7 @@ func waitForWorkspacePickup(ctx context.Context, out io.Writer, name string, tim
 		status := syncStatusSoft(ctx)
 		if status != nil {
 			last = status
-			if workspaceStatus(status, name) != nil {
+			if notespaceStatus(status, name) != nil {
 				return status, true
 			}
 		}

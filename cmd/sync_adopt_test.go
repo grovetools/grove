@@ -173,10 +173,15 @@ func TestAdoptionResultReportsRealCounters(t *testing.T) {
 		DocumentsDiverged: 2,
 		OutboxPending:     7,
 		OutboxParked:      1,
-		Workspaces: []models.SyncWorkspaceStatus{{
-			Name:      "grovetools",
-			Cursor:    19,
-			Hydration: &models.SyncHydrationProgress{Workspace: "grovetools", Scanned: 100, Enqueued: 42, Quarantined: 3},
+		Notespaces: []models.SyncNotespaceStatus{{
+			NotespaceID:   "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+			NotespaceName: "grovetools",
+			Cursor:        19,
+			Hydration: &models.SyncHydrationProgress{
+				Notespace: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+				Root:      "/Users/x/notebooks/nb/notespaces/grovetools",
+				Scanned:   100, Enqueued: 42, Quarantined: 3,
+			},
 		}},
 	})
 	text := out.String()
@@ -190,12 +195,46 @@ func TestAdoptionResultReportsRealCounters(t *testing.T) {
 	}
 }
 
+// TestRepushTargetResolvesTheIDAndNeverWidens pins the blast radius of the
+// adopt kick. POST /api/sync/repush selects by notespace id and treats an
+// EMPTY selection as every notespace — and a repush is not a read: it voids
+// server-confirmed state and clears outboxes. So the name a user typed must
+// resolve to that notespace's id, and an unresolvable name must degrade to a
+// kick that matches nothing rather than to one that matches everything.
+func TestRepushTargetResolvesTheIDAndNeverWidens(t *testing.T) {
+	status := &models.SyncStatus{Notespaces: []models.SyncNotespaceStatus{
+		{NotespaceID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", NotespaceName: "grovetools"},
+		{NotespaceID: "01ARZ3NDEKTSV4RRFFQ69G5FAW", NotespaceName: "wiki"},
+	}}
+	if got := repushTarget(status, "grovetools"); got != "01ARZ3NDEKTSV4RRFFQ69G5FAV" {
+		t.Errorf("repushTarget by name = %q, want the notespace id", got)
+	}
+	// An id the caller already holds passes straight through.
+	if got := repushTarget(status, "01ARZ3NDEKTSV4RRFFQ69G5FAW"); got != "01ARZ3NDEKTSV4RRFFQ69G5FAW" {
+		t.Errorf("repushTarget by id = %q, want it unchanged", got)
+	}
+	for _, tc := range []struct {
+		name   string
+		status *models.SyncStatus
+		arg    string
+	}{
+		{"unknown name", status, "absent"},
+		{"no status at all", nil, "grovetools"},
+	} {
+		if got := repushTarget(tc.status, tc.arg); got == "" {
+			t.Errorf("%s: repushTarget resolved to the empty selection, which is EVERY notespace", tc.name)
+		}
+	}
+}
+
 // TestAdoptionResultReportsConvergence: an empty outbox is the "done" signal.
 func TestAdoptionResultReportsConvergence(t *testing.T) {
 	var out bytes.Buffer
 	reportAdoptionResult(&out, "grovetools", &models.SyncStatus{
-		Documents:  42,
-		Workspaces: []models.SyncWorkspaceStatus{{Name: "grovetools", Cursor: 19}},
+		Documents: 42,
+		Notespaces: []models.SyncNotespaceStatus{{
+			NotespaceID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", NotespaceName: "grovetools", Cursor: 19,
+		}},
 	})
 	if !strings.Contains(out.String(), "adopted and converged") {
 		t.Errorf("a drained workspace was not reported as converged:\n%s", out.String())
