@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -83,11 +85,63 @@ func (o *Orchestrator) isCacheHitForVerb(job TaskJob, verb string, states map[st
 	if !ok || s.IsDirty || s.TaskResults == nil {
 		return false
 	}
+	// A dirty go.work sibling has no identity a hash can capture, so nothing
+	// downstream of it can be proven current — same reasoning as own IsDirty.
+	for _, dep := range o.DepGraph.Closure(job.Name) {
+		if ds, ok := states[dep]; ok && ds.IsDirty {
+			return false
+		}
+	}
 	tr, ok := s.TaskResults[o.verbKey(verb)]
 	if !ok || tr == nil {
 		return false
 	}
-	return tr.ExitCode == 0 && tr.CommitHash == s.CommitHash
+	return tr.ExitCode == 0 && tr.CommitHash == o.cacheToken(s.CommitHash, job, states)
+}
+
+// cacheToken is the cache-validity token stored in (and compared against) a
+// task result's CommitHash: the job's own HEAD commit, plus a fingerprint of
+// the state of its go.work-linked dependency closure.
+//
+// go.work compiles siblings from source, so a repo's build output depends on
+// its siblings' contents as much as on its own — a new commit in core makes
+// every flow binary built before it stale. Keying on the job's own commit
+// alone let that stale binary report "cached".
+//
+// A job with no known dependencies (a leaf, a non-Go member, or any run where
+// the dep graph is unavailable) keeps recording a bare commit hash, so existing
+// cached results stay valid and the token stays readable.
+func (o *Orchestrator) cacheToken(commitHash string, job TaskJob, states map[string]WorkspaceState) string {
+	fp := o.depFingerprint(job, states)
+	if fp == "" {
+		return commitHash
+	}
+	return commitHash + "+" + fp
+}
+
+// depFingerprint hashes the name, HEAD commit and dirtiness of every dependency
+// in the job's transitive workspace closure whose state is known, returning ""
+// when there is nothing to fingerprint. Dirty deps are marked so a result
+// recorded against a dirty sibling can never match that sibling once clean.
+func (o *Orchestrator) depFingerprint(job TaskJob, states map[string]WorkspaceState) string {
+	h := sha256.New()
+	known := false
+	for _, dep := range o.DepGraph.Closure(job.Name) {
+		ds, ok := states[dep]
+		if !ok {
+			continue
+		}
+		known = true
+		fmt.Fprintf(h, "%s=%s", dep, ds.CommitHash)
+		if ds.IsDirty {
+			h.Write([]byte("+dirty"))
+		}
+		h.Write([]byte{0})
+	}
+	if !known {
+		return ""
+	}
+	return hex.EncodeToString(h.Sum(nil))[:12]
 }
 
 // RunWithResults runs tasks and returns all results. Convenience wrapper for non-TUI callers.
@@ -371,11 +425,13 @@ func (o *Orchestrator) executeJobVerbs(ctx context.Context, job TaskJob, verbs [
 			}
 		}
 
-		commitHash := ""
+		// Record the composite cache token, not the bare commit: what this run
+		// was built against includes its go.work siblings (see cacheToken).
+		token := ""
 		if s, ok := states[job.Name]; ok {
-			commitHash = s.CommitHash
+			token = o.cacheToken(s.CommitHash, job, states)
 		}
-		o.reportTaskVerb(ctx, job, verb, exitCode, commitHash, duration.Milliseconds(), errSummary)
+		o.reportTaskVerb(ctx, job, verb, exitCode, token, duration.Milliseconds(), errSummary)
 
 		if err != nil && isPipeline {
 			o.emitSkippedVerbs(job, verbs[vi+1:], verb, eventsChan)
@@ -398,13 +454,17 @@ func (o *Orchestrator) emitSkippedVerbs(job TaskJob, remaining []string, failedV
 	}
 }
 
-func (o *Orchestrator) reportTaskVerb(ctx context.Context, job TaskJob, verb string, exitCode int, commitHash string, durationMs int64, errorSummary string) {
+// reportTaskVerb stores one verb's outcome on the daemon. cacheToken travels in
+// the TaskResult's CommitHash field — it starts with the job's own commit but
+// may carry a dependency-closure suffix (see cacheToken), and only
+// isCacheHitForVerb interprets it.
+func (o *Orchestrator) reportTaskVerb(ctx context.Context, job TaskJob, verb string, exitCode int, cacheToken string, durationMs int64, errorSummary string) {
 	if o.DaemonClient == nil || !o.DaemonClient.IsRunning() {
 		return
 	}
 	// Stored under verbKey so a cross-targeted result never masquerades as
 	// (or clobbers) the native one — lookup (isCacheHitForVerb) matches.
-	_ = o.DaemonClient.ReportTask(ctx, job.Path, o.verbKey(verb), exitCode, commitHash, durationMs, errorSummary)
+	_ = o.DaemonClient.ReportTask(ctx, job.Path, o.verbKey(verb), exitCode, cacheToken, durationMs, errorSummary)
 }
 
 // runProcess executes a single verb for a job, preferring the daemon's
