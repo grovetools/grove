@@ -521,7 +521,7 @@ trades it for a cheap, replaceable node.`
 			if sourceAbs, err = filepath.Abs(sourceDir); err != nil {
 				return fmt.Errorf("resolve --source-dir: %w", err)
 			}
-			if err := validateSatellitePrebuiltStack(sourceAbs); err != nil {
+			if err := validateSatellitePrebuiltStack(sourceAbs, prebuiltXTarget); err != nil {
 				return err
 			}
 		} else {
@@ -697,7 +697,7 @@ trades it for a cheap, replaceable node.`
 			}
 			// Cross-build + package + scp + install the fixed prebuilt stack,
 			// reusing the exact machinery `satellite upgrade --prebuilt` uses.
-			updates, dirty, dErr := satellitePrebuiltStackDeltas(sourceAbs)
+			updates, dirty, dErr := satellitePrebuiltStackDeltas(sourceAbs, prebuiltXTarget)
 			if dErr != nil {
 				return dErr
 			}

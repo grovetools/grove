@@ -926,9 +926,29 @@ func tailLines(s string, n int) string {
 // Per-repo isolation mirrors source mode: a repo that fails to build locally
 // (or whose Makefile ignores GROVE_BUILD_OUT) is reported and dropped, not
 // fatal — but if NOTHING survives, it returns a fatal error before touching
-// the VM. The returned deployErr aggregates dropped repos and remote install
-// failures; fatal aborts the upgrade.
+// the VM. Repos whose Makefile cannot target the VM's arch at all
+// (prebuiltRepoLimits) are excluded before the build wave rather than burned
+// on a build that is guaranteed to fail. The returned deployErr aggregates
+// remote install failures and dropped REQUIRED repos; drops of optional repos
+// warn only, so a satellite still gets everything it needs to run. fatal
+// aborts the upgrade.
 func deploySatellitePrebuilt(ssh *satelliteSSH, satName, sourceAbs string, target orch.Target, updates []repoDelta, dirty map[string]bool) (shipped []string, deployErr error, fatal error) {
+	// Drop what this arch provably cannot build before spending a build wave
+	// on it. `up` already filtered its fixed stack; `upgrade`'s ship set is a
+	// live diff, so it can still carry such a repo.
+	if _, unsupported := splitPrebuiltReposForTarget(deltaRepoNames(updates), target); len(unsupported) > 0 {
+		fmt.Fprintf(os.Stderr, "warning: %s — excluded from this prebuilt deploy\n", unsupportedPrebuiltReposMessage(unsupported, target))
+		kept := updates[:0:0]
+		for _, d := range updates {
+			if prebuiltRepoSupportsTarget(d.Repo, target) {
+				kept = append(kept, d)
+			}
+		}
+		updates = kept
+		if len(updates) == 0 {
+			return nil, nil, fmt.Errorf("no repos in the ship set can be cross-built for %s — VM untouched", target)
+		}
+	}
 	fmt.Printf("\nCross-building %d repo(s) for %s (grove build --target %s, wave-ordered)...\n", len(updates), target, target)
 	results, err := BuildReposForTargetLocal(context.Background(), sourceAbs, deltaRepoNames(updates), target, 0)
 	if err != nil {
@@ -1009,8 +1029,16 @@ func deploySatellitePrebuilt(ssh *satelliteSSH, satName, sourceAbs string, targe
 	if deployErr != nil {
 		fmt.Fprintln(os.Stderr, "\nwarning: install failed for some repos (per-repo summary above) — proceeding to restart so the repos that did install go live.")
 	}
-	if len(dropped) > 0 {
-		dropErr := fmt.Errorf("%d repo(s) never shipped (local build/collect failures): %s", len(dropped), strings.Join(dropped, ", "))
+	// Only drops of repos the satellite NEEDS make the deploy an error. An
+	// optional repo (grove-agent) that failed to build leaves a satellite that
+	// still syncs, federates and runs jobs — say so loudly and keep going,
+	// rather than aborting `up` after the VM is already billable.
+	droppedRequired, droppedOptional := partitionOptionalRepos(dropped)
+	if len(droppedOptional) > 0 {
+		fmt.Fprintf(os.Stderr, "warning: %s never shipped — the satellite runs without them (not required by bootstrap)\n", strings.Join(droppedOptional, ", "))
+	}
+	if len(droppedRequired) > 0 {
+		dropErr := fmt.Errorf("%d repo(s) never shipped (local build/collect failures): %s", len(droppedRequired), strings.Join(droppedRequired, ", "))
 		if deployErr != nil {
 			deployErr = fmt.Errorf("%v; %w", dropErr, deployErr)
 		} else {

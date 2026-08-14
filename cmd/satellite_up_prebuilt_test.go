@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/grovetools/grove/cmd/satelliteassets"
+	orch "github.com/grovetools/grove/pkg/orchestrator"
 )
 
 // gitInitStackRepo makes a one-commit git repo at dir on the poc branch, the
@@ -36,7 +37,7 @@ func gitInitStackRepo(t *testing.T, dir string) string {
 	return run("rev-parse", "HEAD")
 }
 
-// TestSatellitePrebuiltStackReposCoverRequiredBinaries pins the fixed ship set:
+// TestSatellitePrebuiltStackReposCoverRequiredBinaries pins the full stack:
 // it must map to every binary the source bootstrap guarantees (grove, groved,
 // flow, nb, treemux, tuimux from step 4; grove-syncd from step 6) plus the
 // explicit grove-agent product runtime. groved comes from daemon, syncd from sync.
@@ -56,9 +57,10 @@ func TestSatellitePrebuiltStackReposCoverRequiredBinaries(t *testing.T) {
 // present. Fake .git dirs + a unit file suffice (validate only stats them).
 func TestValidateSatellitePrebuiltStack(t *testing.T) {
 	root := t.TempDir()
+	target := orch.Target{GOOS: "linux", GOARCH: "arm64"}
 
 	// Nothing present → error naming the first missing repo.
-	if err := validateSatellitePrebuiltStack(root); err == nil {
+	if err := validateSatellitePrebuiltStack(root, target); err == nil {
 		t.Fatalf("expected error for an empty ecosystem dir")
 	}
 
@@ -70,7 +72,7 @@ func TestValidateSatellitePrebuiltStack(t *testing.T) {
 		}
 	}
 	// Repos present but the unit is still missing → error mentions grove-syncd.
-	err := validateSatellitePrebuiltStack(root)
+	err := validateSatellitePrebuiltStack(root, target)
 	if err == nil || !strings.Contains(err.Error(), "grove-syncd") {
 		t.Fatalf("expected grove-syncd unit error, got %v", err)
 	}
@@ -83,7 +85,7 @@ func TestValidateSatellitePrebuiltStack(t *testing.T) {
 	if err := os.WriteFile(unit, []byte("[Unit]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateSatellitePrebuiltStack(root); err != nil {
+	if err := validateSatellitePrebuiltStack(root, target); err != nil {
 		t.Fatalf("validate with all repos + unit: %v", err)
 	}
 
@@ -91,8 +93,39 @@ func TestValidateSatellitePrebuiltStack(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(root, "sync", ".git")); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateSatellitePrebuiltStack(root); err == nil {
+	if err := validateSatellitePrebuiltStack(root, target); err == nil {
 		t.Fatalf("expected error after removing sync/.git")
+	}
+}
+
+// TestValidateSatellitePrebuiltStackIgnoresArchExcludedRepos pins the
+// pre-terraform gate to the TARGET's ship set: a repo excluded because it
+// cannot cross-build for this VM arch is not shipped, so its absence from the
+// worktree must not abort the provision.
+func TestValidateSatellitePrebuiltStackIgnoresArchExcludedRepos(t *testing.T) {
+	withPrebuiltRepoLimit(t, "agent", prebuiltRepoLimit{Targets: []string{"linux/arm64"}, Optional: true})
+	root := t.TempDir()
+	ship, excluded, err := satellitePrebuiltShipSet(orch.Target{GOOS: "linux", GOARCH: "amd64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsString(excluded, "agent") {
+		t.Fatalf("expected agent to be arch-excluded, got %v", excluded)
+	}
+	for _, r := range append([]string{"compositor"}, ship...) {
+		if err := os.MkdirAll(filepath.Join(root, r, ".git"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unit := filepath.Join(root, filepath.FromSlash(satelliteSyncdUnitRel))
+	if err := os.MkdirAll(filepath.Dir(unit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(unit, []byte("[Unit]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateSatellitePrebuiltStack(root, orch.Target{GOOS: "linux", GOARCH: "amd64"}); err != nil {
+		t.Fatalf("validate for linux/amd64 without the excluded repo(s) %v: %v", excluded, err)
 	}
 }
 
@@ -103,6 +136,8 @@ func TestSatellitePrebuiltStackDeltas(t *testing.T) {
 		t.Skip("git not on PATH")
 	}
 	root := t.TempDir()
+	// linux/arm64 ships the whole stack (nothing is arch-excluded there).
+	target := orch.Target{GOOS: "linux", GOARCH: "arm64"}
 	shas := map[string]string{}
 	for _, r := range satellitePrebuiltStackRepos {
 		shas[r] = gitInitStackRepo(t, filepath.Join(root, r))
@@ -112,7 +147,7 @@ func TestSatellitePrebuiltStackDeltas(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	updates, dirty, err := satellitePrebuiltStackDeltas(root)
+	updates, dirty, err := satellitePrebuiltStackDeltas(root, target)
 	if err != nil {
 		t.Fatalf("satellitePrebuiltStackDeltas: %v", err)
 	}
@@ -137,6 +172,24 @@ func TestSatellitePrebuiltStackDeltas(t *testing.T) {
 	}
 	if dirty["grove"] {
 		t.Errorf("grove should be clean")
+	}
+
+	// Deltas follow the TARGET's ship set: a repo that cannot cross-build for
+	// the VM arch never becomes a delta, so the deploy does not burn a build
+	// wave on it and then fail. Exercised against a synthetic limit so the
+	// coverage survives agent learning new arches.
+	withPrebuiltRepoLimit(t, "agent", prebuiltRepoLimit{Targets: []string{"linux/arm64"}, Optional: true})
+	amdUpdates, _, err := satellitePrebuiltStackDeltas(root, orch.Target{GOOS: "linux", GOARCH: "amd64"})
+	if err != nil {
+		t.Fatalf("satellitePrebuiltStackDeltas(linux/amd64): %v", err)
+	}
+	if len(amdUpdates) != len(satellitePrebuiltStackRepos)-1 {
+		t.Fatalf("linux/amd64: got %d deltas, want %d", len(amdUpdates), len(satellitePrebuiltStackRepos)-1)
+	}
+	for _, d := range amdUpdates {
+		if d.Repo == "agent" {
+			t.Errorf("linux/amd64 deltas still contain agent, which cannot be cross-built for it")
+		}
 	}
 }
 

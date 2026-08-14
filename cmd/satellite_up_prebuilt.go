@@ -14,19 +14,41 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+
+	orch "github.com/grovetools/grove/pkg/orchestrator"
 )
 
-// satellitePrebuiltStackRepos is the FIXED set of repos a prebuilt `up` ships
+// satellitePrebuiltStackRepos is the FULL set of repos a prebuilt `up` ships
 // to make a healthy sync+federation satellite. It is exactly the binaries the
 // source bootstrap guarantees — grove/groved/flow/nb/treemux/tuimux (step 4's
 // required set) plus grove-syncd (step 6) — mapped to the repos that produce
 // them: groved comes from the daemon repo, grove-syncd from the sync repo, the
-// rest are same-named. compositor is a library (no binaries) and is never
-// shipped; its zig static libs are consumed at cross-build time by the repos
-// that link it (grove/flow/nb/treemux/tuimux), which `grove build --target`
-// builds in an earlier wave.
+// rest are same-named, plus the optional grove-agent runtime. compositor is a
+// library (no binaries) and is never shipped; its zig static libs are consumed
+// at cross-build time by the repos that link it (grove/flow/nb/treemux/tuimux),
+// which `grove build --target` builds in an earlier wave.
+//
+// It is NOT the ship set: what actually ships depends on the VM's arch —
+// satellitePrebuiltShipSet filters out repos whose Makefile cannot target it
+// (see prebuiltRepoLimits).
 var satellitePrebuiltStackRepos = []string{"grove", "daemon", "flow", "nb", "treemux", "tuimux", "sync", "agent"}
+
+// satellitePrebuiltShipSet resolves the stack down to the repos that can
+// actually be cross-built for the VM's arch, plus the optional ones excluded
+// because they cannot. An excluded REQUIRED repo is an error: a satellite
+// missing one of bootstrap's required binaries is not worth provisioning, and
+// the caller runs this before terraform so the abort is still free.
+func satellitePrebuiltShipSet(target orch.Target) (ship []string, excluded []string, err error) {
+	ship, unsupported := splitPrebuiltReposForTarget(satellitePrebuiltStackRepos, target)
+	required, optional := partitionOptionalRepos(unsupported)
+	if len(required) > 0 {
+		return nil, nil, fmt.Errorf("--prebuilt-target %s: %s — and the satellite cannot boot without %s; use a supported target or teach those Makefiles the arch",
+			target, unsupportedPrebuiltReposMessage(required, target), strings.Join(required, ", "))
+	}
+	return ship, optional, nil
+}
 
 // satelliteSyncdUnitRel is the grove-syncd systemd unit's path relative to the
 // ecosystem worktree root. `up --prebuilt` ships THIS real file to the VM
@@ -41,14 +63,23 @@ const satelliteSyncdUnitRel = "sync/systemd/grove-syncd.service"
 var satelliteUpAssetsDir = satelliteStageBase() + "/grove-satellite-up"
 
 // validateSatellitePrebuiltStack fails fast (before terraform) when the
-// ecosystem worktree can't supply what a prebuilt `up` needs: every stack repo
-// must be a git checkout, and the grove-syncd systemd unit must be present to
-// ship. Runs while the provision is still free — a wrong --source-dir aborts
-// with no orphaned VM.
-func validateSatellitePrebuiltStack(sourceAbs string) error {
+// ecosystem worktree can't supply what a prebuilt `up` needs for THIS VM arch:
+// every repo in the target's ship set must be a git checkout, and the
+// grove-syncd systemd unit must be present to ship. Runs while the provision
+// is still free — a wrong --source-dir, or a target no required repo can build
+// for, aborts with no orphaned VM.
+func validateSatellitePrebuiltStack(sourceAbs string, target orch.Target) error {
+	ship, excluded, err := satellitePrebuiltShipSet(target)
+	if err != nil {
+		return err
+	}
+	if len(excluded) > 0 {
+		fmt.Fprintf(os.Stderr, "warning: %s — the satellite will come up WITHOUT them (not required by bootstrap)\n",
+			unsupportedPrebuiltReposMessage(excluded, target))
+	}
 	// compositor is not shipped (a library) but its per-target zig static libs
 	// are linked by the stack, so it is cross-built first — it must be present.
-	for _, r := range append([]string{"compositor"}, satellitePrebuiltStackRepos...) {
+	for _, r := range append([]string{"compositor"}, ship...) {
 		if _, err := os.Stat(filepath.Join(sourceAbs, r, ".git")); err != nil {
 			return fmt.Errorf("--prebuilt: %s is not a git repo under %s (the prebuilt stack needs it) — is --source-dir the ecosystem worktree root?", r, sourceAbs)
 		}
@@ -61,13 +92,18 @@ func validateSatellitePrebuiltStack(sourceAbs string) error {
 }
 
 // satellitePrebuiltStackDeltas builds the repoDelta ship set for a FRESH VM:
-// every stack repo at its local tip, forced (there is no VM checkout to diff
-// against). It mirrors the local-tip/dirty probing `satellite upgrade` does so
-// the shared deploySatellitePrebuilt can consume the result unchanged — a dirty
-// tree ships as <sha>-dirty exactly as in upgrade.
-func satellitePrebuiltStackDeltas(sourceAbs string) (updates []repoDelta, dirty map[string]bool, err error) {
+// every stack repo that can target the VM's arch, at its local tip, forced
+// (there is no VM checkout to diff against). It mirrors the local-tip/dirty
+// probing `satellite upgrade` does so the shared deploySatellitePrebuilt can
+// consume the result unchanged — a dirty tree ships as <sha>-dirty exactly as
+// in upgrade.
+func satellitePrebuiltStackDeltas(sourceAbs string, target orch.Target) (updates []repoDelta, dirty map[string]bool, err error) {
+	ship, _, err := satellitePrebuiltShipSet(target)
+	if err != nil {
+		return nil, nil, err
+	}
 	dirty = map[string]bool{}
-	for _, r := range satellitePrebuiltStackRepos {
+	for _, r := range ship {
 		dir := filepath.Join(sourceAbs, r)
 		tip, terr := localRepoTip(dir)
 		if terr != nil {
