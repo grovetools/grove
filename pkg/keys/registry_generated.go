@@ -1632,6 +1632,7 @@ var TUIRegistry = []TUIRegistryEntry{
 				Bindings: []BindingEntry{
 					{Name: "FocusEcosystem", Keys: []string{"@"}, Description: "focus ecosystem", Enabled: true, ConfigKey: "focus_ecosystem"},
 					{Name: "ClearFocus", Keys: []string{"ctrl+g"}, Description: "clear focus", Enabled: true, ConfigKey: "clear_focus"},
+					{Name: "FocusParent", Keys: []string{"0"}, Description: "go up a scope level", Enabled: true, ConfigKey: "focus_parent"},
 					{Name: "FocusSelected", Keys: []string{"."}, Description: "focus selected", Enabled: true, ConfigKey: "focus_selected"},
 					{Name: "FocusRecent", Keys: []string{"f"}, Description: "focus recent", Enabled: true, ConfigKey: "focus_recent"},
 				},
