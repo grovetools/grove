@@ -421,6 +421,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "ViewSkillPane", Keys: []string{"vs"}, Description: "skills", Enabled: true, ConfigKey: "view_skill_pane"},
 					{Name: "ViewAccessedFiles", Keys: []string{"vy"}, Description: "accessed files", Enabled: true, ConfigKey: "view_accessed_files"},
 					{Name: "ViewArtifacts", Keys: []string{"vj"}, Description: "job artifacts", Enabled: true, ConfigKey: "view_artifacts"},
+					{Name: "ViewOutline", Keys: []string{"vo"}, Description: "view outline", Enabled: true, ConfigKey: "view_outline"},
 				},
 			},
 			{
@@ -1867,6 +1868,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "Hush", Keys: []string{"<action> x"}, Description: "hush: collapse drawer + rail (again restores)", Enabled: true, ConfigKey: "hush"},
 					{Name: "ToggleFollowerControl", Keys: []string{"<action> t"}, Description: "toggle follower control mode", Enabled: true, ConfigKey: "toggle_follower_control"},
 					{Name: "GotoLogs", Keys: []string{"<action> g"}, Description: "jump to logs panel", Enabled: true, ConfigKey: "goto_logs"},
+					{Name: "ToggleOutlinePopup", Keys: []string{"<action> O"}, Description: "toggle outline popup over the agent pane", Enabled: true, ConfigKey: "toggle_outline_popup"},
 					{Name: "ToggleSplitOrientation", Keys: []string{"<action> |", "<leader> |"}, Description: "toggle split orientation", Enabled: true, ConfigKey: "toggle_split_orientation"},
 					{Name: "DrawerPageSessions", Keys: []string{"<action> S"}, Description: "drawer: sessions page", Enabled: true, ConfigKey: "drawer_page_sessions"},
 					{Name: "DrawerPageAgent", Keys: []string{"<action> B"}, Description: "drawer: agent page", Enabled: true, ConfigKey: "drawer_page_agent"},
