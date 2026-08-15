@@ -19,6 +19,7 @@ func NewInternalCmd() *cobra.Command {
 	cmd.AddCommand(newTaskReportCmd())
 	cmd.AddCommand(newTestSmartCmd())
 	cmd.AddCommand(newWorktreePathCmd())
+	cmd.AddCommand(newThemeCmd())
 	return cmd
 }
 
