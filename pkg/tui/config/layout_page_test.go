@@ -38,6 +38,9 @@ func TestLayoutSettingsRows(t *testing.T) {
 	}{
 		{"drawer_orientation", "Drawer position", []string{"tui", "drawer_orientation"}, ControlSelect, []string{"right", "bottom"}, embed.SettingDomainDrawerOrientation},
 		{"drawer_expanded", "Drawer expanded on start", []string{"tui", "drawer_expanded"}, ControlBool, nil, embed.SettingDomainDrawerExpanded},
+		{"drawer_page_map_long_form", "Drawer tabs show names", []string{"tui", "drawer", "page_map_long_form"}, ControlBool, nil, embed.SettingDomainDrawerViews},
+		{"drawer_hide_inapplicable_pages", "Hide unusable drawer pages", []string{"tui", "drawer", "hide_inapplicable_pages"}, ControlBool, nil, embed.SettingDomainDrawerViews},
+		{"drawer_responsive", "Drawer panes yield empty rows", []string{"tui", "drawer", "responsive"}, ControlBool, nil, embed.SettingDomainDrawerViews},
 		{"sidebar_expanded", "Rail expanded on start", []string{"tui", "sidebar_expanded"}, ControlBool, nil, embed.SettingDomainSidebarExpanded},
 		{"rail_shortcuts", "Rail workspace shortcuts", []string{"tui", "rail", "shortcuts"}, ControlSelect, []string{"auto", "always", "never"}, embed.SettingDomainRail},
 		{"rail_max_shortcuts", "Rail shortcut limit", []string{"tui", "rail", "max_shortcuts"}, ControlInt, nil, embed.SettingDomainRail},
@@ -86,10 +89,16 @@ func TestLayoutSettingsRows(t *testing.T) {
 // shipped defaults (drawer right/collapsed, rail collapsed, Home shown).
 func TestLayoutDefaultsWhenUnset(t *testing.T) {
 	reads := map[string]string{
-		"drawer_orientation":   "right",
-		"drawer_expanded":      "false",
-		"sidebar_expanded":     "false",
-		"show_home_on_startup": "true", // hide_splash defaults false → Home shows
+		"drawer_orientation": "right",
+		"drawer_expanded":    "false",
+		"sidebar_expanded":   "false",
+		// The [tui.drawer] booleans read through the config accessors, so an
+		// unset key shows what the drawer actually does: responsive is on by
+		// default, the other two off.
+		"drawer_page_map_long_form":      "false",
+		"drawer_hide_inapplicable_pages": "false",
+		"drawer_responsive":              "true",
+		"show_home_on_startup":           "true", // hide_splash defaults false → Home shows
 	}
 	for id, wantVal := range reads {
 		s := layoutSettingByID(t, id)
@@ -130,6 +139,29 @@ func TestLayoutLiveRowsWriteThrough(t *testing.T) {
 			wantFinal: func(t *testing.T, final *config.Config) {
 				if final.TUI == nil || !final.TUI.SidebarExpanded {
 					t.Error("tui.sidebar_expanded not true in reloaded Final")
+				}
+			},
+		},
+		{
+			// A NESTED path under a block the seeded file does not declare at
+			// all: the write has to create [tui.drawer] as a table rather than
+			// a "drawer" key beside the [tui] scalars, or the strict loader
+			// drops the whole file on the next read.
+			id: "drawer_page_map_long_form", value: "true",
+			wantFinal: func(t *testing.T, final *config.Config) {
+				if final.TUI == nil || !final.TUI.Drawer.LongFormPageMap() {
+					t.Error("tui.drawer.page_map_long_form not true in reloaded Final")
+				}
+			},
+		},
+		{
+			// The one row whose DEFAULT is true, so writing false is the write
+			// that has to survive: an accessor treating "absent" and "false"
+			// alike would read back true and hide the failure.
+			id: "drawer_responsive", value: "false",
+			wantFinal: func(t *testing.T, final *config.Config) {
+				if final.TUI == nil || final.TUI.Drawer.ResponsiveDrawer() {
+					t.Error("tui.drawer.responsive not false in reloaded Final")
 				}
 			},
 		},
@@ -189,7 +221,7 @@ func TestShowHomeOnStartupInverted(t *testing.T) {
 	// direction: off ("false") toggles to on ("true").
 	page := NewCuratedPage("Layout", LayoutSettings(), m.layered, grovekeymap.NewConfigKeyMap(nil), 80, 24, CuratedOpts{})
 	page.Focus()
-	for i := 0; i < 5; i++ { // cursor to the last row (show_home_on_startup)
+	for i := 0; i < len(LayoutSettings()); i++ { // cursor to the last row (show_home_on_startup)
 		_, _ = page.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
 	}
 	_, cmd := page.Update(tea.KeyMsg{Type: tea.KeyEnter})

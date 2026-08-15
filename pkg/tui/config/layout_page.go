@@ -24,11 +24,30 @@ func layoutTUI(lc *config.LayeredConfig) *config.TUIConfig {
 	return nil
 }
 
+// drawerViews returns the merged [tui.drawer] block, or nil when absent. The
+// three page-set-wide booleans are read back through the config package's own
+// accessors rather than by dereferencing, so an unset key shows the value the
+// drawer actually uses — responsive is on by default, the other two off — and
+// the default lives in exactly one place.
+func drawerViews(lc *config.LayeredConfig) *config.DrawerViewsConfig {
+	if t := layoutTUI(lc); t != nil {
+		return t.Drawer
+	}
+	return nil
+}
+
 // LayoutSettings returns the Layout page's setting descriptors: the active
-// sessions drawer (orientation + expanded-on-start), the icon rail
-// expanded-on-start, and Home-on-startup. The first three hot-apply through
-// the treemux SettingAppliedMsg handler; Home-on-startup is startup-only
-// (no apply domain).
+// sessions drawer (orientation, expanded-on-start, and the three page-set-wide
+// [tui.drawer] booleans), the icon rail (expanded-on-start plus its shortcut
+// footer), and Home-on-startup. Everything but Home-on-startup hot-applies
+// through the treemux SettingAppliedMsg handler; that one is startup-only (no
+// apply domain).
+//
+// The [tui.drawer] booleans are here rather than only in the Data page's raw
+// key tree because they are the drawer's SHAPE — how its tab bar reads and
+// which pages it lists — which is the question a user arrives at this page
+// with. They were reachable only by hand-editing TOML, which is how a user ends
+// up staring at a strip of glyphs not knowing the labelled form exists.
 //
 // Home-on-startup is the INVERTED presentation of tui.hide_splash_on_startup
 // — the same key the Home panel's own h toggle writes via treemux's
@@ -72,6 +91,39 @@ func LayoutSettings() []Setting {
 				return strconv.FormatBool(t != nil && t.DrawerExpanded)
 			},
 			ApplyDomain: embed.SettingDomainDrawerExpanded,
+		},
+		{
+			ID:          "drawer_page_map_long_form",
+			Label:       "Drawer tabs show names",
+			Description: "Label every drawer page in the tab bar with its name and jump key, wrapping over more rows, instead of the compact strip of icons",
+			Path:        []string{"tui", "drawer", "page_map_long_form"},
+			Control:     ControlBool,
+			Read: func(lc *config.LayeredConfig) string {
+				return strconv.FormatBool(drawerViews(lc).LongFormPageMap())
+			},
+			ApplyDomain: embed.SettingDomainDrawerViews,
+		},
+		{
+			ID:          "drawer_hide_inapplicable_pages",
+			Label:       "Hide unusable drawer pages",
+			Description: "Drop a drawer page whose subject is absent (an agent page with no agent focused) from the tab bar instead of dimming it; the page you are on is never hidden",
+			Path:        []string{"tui", "drawer", "hide_inapplicable_pages"},
+			Control:     ControlBool,
+			Read: func(lc *config.LayeredConfig) string {
+				return strconv.FormatBool(drawerViews(lc).HideInapplicableDrawerPages())
+			},
+			ApplyDomain: embed.SettingDomainDrawerViews,
+		},
+		{
+			ID:          "drawer_responsive",
+			Label:       "Drawer panes yield empty rows",
+			Description: "Let a drawer pane with nothing to show shrink to its heading and hand the rows it cannot use to a pane on the same page that has content",
+			Path:        []string{"tui", "drawer", "responsive"},
+			Control:     ControlBool,
+			Read: func(lc *config.LayeredConfig) string {
+				return strconv.FormatBool(drawerViews(lc).ResponsiveDrawer())
+			},
+			ApplyDomain: embed.SettingDomainDrawerViews,
 		},
 		{
 			ID:          "sidebar_expanded",
