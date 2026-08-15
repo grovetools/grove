@@ -1876,6 +1876,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "DrawerPageToc", Keys: []string{"<action> T"}, Description: "drawer: toc page", Enabled: true, ConfigKey: "drawer_page_toc"},
 					{Name: "DrawerPageFiles", Keys: []string{"<action> V"}, Description: "drawer: files page", Enabled: true, ConfigKey: "drawer_page_files"},
 					{Name: "DrawerPageGit", Keys: []string{"<action> G"}, Description: "drawer: git page", Enabled: true, ConfigKey: "drawer_page_git"},
+					{Name: "DrawerPageSync", Keys: []string{"<action> Y"}, Description: "drawer: sync page", Enabled: true, ConfigKey: "drawer_page_sync"},
 				},
 			},
 			{
