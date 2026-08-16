@@ -101,6 +101,30 @@ func TestTartGuestConfigScriptBare(t *testing.T) {
 	}
 }
 
+// TestMergeSatelliteEntriesBare pins the config∪state merge carrying the bare
+// marker: yaml can never author Bare (tag "-"), so the state snapshot is its
+// only source, and a config-side table for the same name (e.g. the
+// marker-tagged infra block `up` itself writes) must not strip it — that
+// stripping is exactly the live bug this test was written against: status
+// showed bare:false and the idempotent bare re-`up` refused its own satellite.
+func TestMergeSatelliteEntriesBare(t *testing.T) {
+	state := map[string]satelliteConfigEntry{
+		"clean": {ProviderRef: "tart:grove-sat-clean", Kind: satelliteKindExec, Bare: true},
+	}
+	config := map[string]satelliteConfigEntry{
+		"clean": {}, // an all-zero row, as an infra-subtable-only config table decodes
+	}
+	merged, _ := mergeSatelliteEntries(config, state)
+	if !merged["clean"].Bare {
+		t.Fatalf("merge with a config-side table stripped Bare: %+v", merged["clean"])
+	}
+	// State-only passthrough keeps it too.
+	merged, _ = mergeSatelliteEntries(nil, state)
+	if !merged["clean"].Bare {
+		t.Fatalf("state-only merge lost Bare: %+v", merged["clean"])
+	}
+}
+
 func TestSatelliteBareStateAndViews(t *testing.T) {
 	setupGroveHome(t)
 

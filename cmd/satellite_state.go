@@ -203,6 +203,12 @@ func mergeSatelliteEntries(fromConfig, fromState map[string]satelliteConfigEntry
 		if st.ProviderTartHome != "" {
 			out.ProviderTartHome = st.ProviderTartHome
 		}
+		// Bare is machine-derived provisioning state like provider_ref, and
+		// its yaml tag is "-" so a config table can never author it: the
+		// state snapshot is its only source — copy unconditionally, or the
+		// merge silently strips the marker whenever a config-side table
+		// exists (e.g. the marker-tagged infra block `up` itself writes).
+		out.Bare = st.Bare
 		if out.User == "" {
 			out.User = st.User
 		}
