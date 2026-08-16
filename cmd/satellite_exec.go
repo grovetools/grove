@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -98,6 +99,16 @@ func runSatelliteRemote(name, command string, tty bool) error {
 	if satelliteEntryIsPartial(entry) {
 		return fmt.Errorf("satellite %q is only partially provisioned (no pinned endpoint): %s", name, satellitePartialUpRemediation(name))
 	}
+	// F3's ssh/exec half: status consults the local-provider machine-state
+	// probe, but dialing never did — so an exec against a stopped/deleted VM
+	// sank into the NAT black hole instead of failing. Probe just this entry
+	// (same machinery, 3s cap) and refuse a machine that is knowably not
+	// running; "" (gcp/full, probe timeout, provider missing) proceeds to
+	// dial exactly as before — the probe only ever makes failure faster.
+	machineState := probeSatelliteMachineStates(map[string]satelliteConfigEntry{name: entry})[name]
+	if msg := satelliteRemoteRefusal(machineState, satelliteProviderRefTarget(entry.ProviderRef), name); msg != "" {
+		return errors.New(msg)
+	}
 	tmpDir, err := os.MkdirTemp("", "grove-satellite-exec-")
 	if err != nil {
 		return err
@@ -114,6 +125,33 @@ func runSatelliteRemote(name, command string, tty bool) error {
 		return err
 	}
 	return nil
+}
+
+// satelliteRemoteRefusal decides whether a reach-the-guest verb should refuse
+// before dialing, given the entry's probed machine_state and provider. "" means
+// proceed. Only the two knowably-dead states refuse; "running" and "" (the
+// probe could not say — gcp/full, timeout, provider missing) dial as always,
+// so this can only ever make failure faster, never block a machine the probe
+// cannot classify. Both exits from a refusal are commands, matching the
+// partial-up remediation's stance.
+func satelliteRemoteRefusal(machineState, provider, name string) string {
+	switch machineState {
+	case satelliteMachineStopped:
+		return fmt.Sprintf("satellite %q VM is stopped (%s) — start it with `grove satellite up %s --target %s`, or destroy it with `grove satellite down %s`",
+			name, provider, name, provider, name)
+	case satelliteMachineAbsent:
+		msg := fmt.Sprintf("satellite %q VM is absent from the %s inventory (deleted out of band?) — re-provision with `grove satellite up %s --target %s`, or drop the entry with `grove satellite down %s`",
+			name, provider, name, provider, name)
+		if provider == tartSatelliteTarget {
+			// A VM living in a relocated store reads as absent when the entry
+			// predates provider_tart_home: the probe then falls back to the
+			// default store. Passing --tart-home on `up` records it.
+			msg += " (if the VM lives in a non-default TART_HOME, the entry may predate provider_tart_home — pass --tart-home to `up`)"
+		}
+		return msg
+	default:
+		return ""
+	}
 }
 
 // buildSatelliteRemoteCommand renders the caller's argv as one remote shell

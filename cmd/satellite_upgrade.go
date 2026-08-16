@@ -1115,6 +1115,9 @@ func (s *satelliteSSH) dest() string {
 func (s *satelliteSSH) baseOptions() []string {
 	opts := []string{
 		"-o", "BatchMode=yes",
+		// A dead address on the tart NAT subnet black-holes SYNs (no RST), so
+		// without a bound the connect sinks for the kernel default — minutes.
+		"-o", "ConnectTimeout=10",
 		"-o", "StrictHostKeyChecking=yes",
 		"-o", "UserKnownHostsFile=" + s.knownHosts,
 		"-o", "GlobalKnownHostsFile=/dev/null",

@@ -182,3 +182,49 @@ func TestSatelliteRemoteRefusesUnknownSatellite(t *testing.T) {
 		t.Fatalf("error = %q", err.Error())
 	}
 }
+
+// TestSatelliteRemoteRefusal pins the pre-dial machine-state gate: only the
+// two knowably-dead states refuse (with command remediations), and everything
+// the probe cannot classify dials as before — the gate must only ever make
+// failure faster.
+func TestSatelliteRemoteRefusal(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		machineState string
+		provider     string
+		wants        []string // all must appear; empty slice = must proceed ("")
+	}{
+		{"running proceeds", satelliteMachineRunning, tartSatelliteTarget, nil},
+		{"unknown proceeds", "", tartSatelliteTarget, nil},
+		{"unknown gcp proceeds", "", "", nil},
+		{"stopped tart refuses with up and down", satelliteMachineStopped, tartSatelliteTarget,
+			[]string{"is stopped (tart)", "grove satellite up demo --target tart", "grove satellite down demo"}},
+		{"stopped docker names docker", satelliteMachineStopped, dockerSatelliteTarget,
+			[]string{"is stopped (docker)", "--target docker"}},
+		{"absent tart hints at relocated TART_HOME", satelliteMachineAbsent, tartSatelliteTarget,
+			[]string{"absent from the tart inventory", "grove satellite up demo --target tart", "--tart-home"}},
+		{"absent docker has no tart-home hint", satelliteMachineAbsent, dockerSatelliteTarget,
+			[]string{"absent from the docker inventory"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := satelliteRemoteRefusal(tc.machineState, tc.provider, "demo")
+			if len(tc.wants) == 0 {
+				if got != "" {
+					t.Fatalf("expected to proceed, got refusal %q", got)
+				}
+				return
+			}
+			if got == "" {
+				t.Fatal("expected a refusal, got proceed")
+			}
+			for _, want := range tc.wants {
+				if !strings.Contains(got, want) {
+					t.Fatalf("refusal %q missing %q", got, want)
+				}
+			}
+			if tc.provider == dockerSatelliteTarget && strings.Contains(got, "tart-home") {
+				t.Fatalf("docker refusal carries the tart-home hint: %q", got)
+			}
+		})
+	}
+}
