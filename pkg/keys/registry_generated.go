@@ -422,6 +422,7 @@ var TUIRegistry = []TUIRegistryEntry{
 					{Name: "ViewAccessedFiles", Keys: []string{"vy"}, Description: "accessed files", Enabled: true, ConfigKey: "view_accessed_files"},
 					{Name: "ViewArtifacts", Keys: []string{"vj"}, Description: "job artifacts", Enabled: true, ConfigKey: "view_artifacts"},
 					{Name: "ViewOutline", Keys: []string{"vo"}, Description: "view outline", Enabled: true, ConfigKey: "view_outline"},
+					{Name: "ViewActionError", Keys: []string{"ve"}, Description: "view last error", Enabled: true, ConfigKey: "view_action_error"},
 				},
 			},
 			{
