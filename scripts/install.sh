@@ -197,12 +197,22 @@ main() {
         echo '  fish_add_path ~/.local/bin             # fish'
     fi
 
-    # Run onboarding wizard
-    echo ""
-    echo "Starting Grove onboarding..."
+    # Run onboarding wizard — only where it can actually run. The wizard
+    # needs /dev/tty (curl|bash leaves a pipe on stdin, but the terminal is
+    # still there; CI/automation has neither). Gating on the tty rather than
+    # stdin keeps the piped interactive install working, and a headless
+    # install exits 0 with the next step named instead of dying on a TTY
+    # error after everything already succeeded.
     trap - EXIT INT TERM
     rm -f "$SUMS"
-    exec "$INSTALL_DIR/grove" onboard
+    if ( : < /dev/tty ) 2>/dev/null; then
+        echo ""
+        echo "Starting Grove onboarding..."
+        exec "$INSTALL_DIR/grove" onboard
+    fi
+    echo ""
+    echo "No terminal available - skipping the onboarding wizard."
+    echo "Run 'grove onboard' to finish setup."
 }
 
 main "$@"
