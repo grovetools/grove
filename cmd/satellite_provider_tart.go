@@ -227,6 +227,7 @@ func (p *tartSatelliteProvider) Up(ctx context.Context, opts *satelliteUpOptions
 		stamp.ProviderRef = tartProviderRef(vmName)
 		stamp.ProviderTartHome = opts.Infra.TartHome
 		stamp.Kind = opts.SatelliteKind
+		stamp.Bare = opts.Bare
 		if err := upsertSatelliteState(opts.Name, stamp); err != nil {
 			_ = tartCommand(opts.Infra, "delete", vmName).Run()
 			return satelliteEndpoint{}, fmt.Errorf("persist provider_ref and TART_HOME immediately after clone (VM deleted): %w", err)
@@ -256,7 +257,7 @@ func (p *tartSatelliteProvider) Up(ctx context.Context, opts *satelliteUpOptions
 	if full {
 		fmt.Println("warning: this Tart image carries clone-shared SSH host keys; Grove pins the key, but clone identity is not yet unique")
 	}
-	if err := tartLayer0Bootstrap(ip, hostKey, keyPath, opts.Name, full); err != nil {
+	if err := tartLayer0Bootstrap(ip, hostKey, keyPath, opts.Name, full, opts.Bare); err != nil {
 		return satelliteEndpoint{}, fmt.Errorf("layer-0 ssh bootstrap of %s: %w", vmName, err)
 	}
 
@@ -570,7 +571,7 @@ func ensureTartSatelliteKey(satName string) (string, error) {
 // with the image's default password AND the keyscanned host key pinned (never
 // TOFU, C2). Idempotent: when the dedicated key already authenticates and the
 // grove sshd drop-in is in place (a restarted VM), it does nothing.
-func tartLayer0Bootstrap(ip, hostKey, keyPath, satName string, full bool) error {
+func tartLayer0Bootstrap(ip, hostKey, keyPath, satName string, full, bare bool) error {
 	pub, err := os.ReadFile(keyPath + ".pub")
 	if err != nil {
 		return err
@@ -602,14 +603,10 @@ func tartLayer0Bootstrap(ip, hostKey, keyPath, satName string, full bool) error 
 	// exists; an exec-prepared clone must not satisfy a later full request.
 	if client, err := gossh.Dial("tcp", ip+":22", baseConfig(gossh.PublicKeys(signer))); err == nil {
 		defer func() { _ = client.Close() }()
-		probe := "test -f /etc/ssh/sshd_config.d/00-grove.conf"
-		if full {
-			probe += " && test -f /var/lib/grove-satellite/startup-done"
-		}
-		if _, err := tartSSHOutput(client, probe); err == nil {
+		if _, err := tartSSHOutput(client, tartLayer0Probe(full, bare)); err == nil {
 			return nil
 		}
-		return tartConfigureGuest(client, pubLine, full)
+		return tartConfigureGuest(client, pubLine, full, bare)
 	}
 
 	// Fresh VM: the image's default password is the only way in.
@@ -619,14 +616,43 @@ func tartLayer0Bootstrap(ip, hostKey, keyPath, satName string, full bool) error 
 	}
 	defer func() { _ = client.Close() }()
 	fmt.Printf("Installing the satellite ssh key and disabling password auth on the guest...\n")
-	return tartConfigureGuest(client, pubLine, full)
+	return tartConfigureGuest(client, pubLine, full, bare)
+}
+
+// tartLayer0Probe is the idempotency probe tartLayer0Bootstrap runs over an
+// already-authenticated connection: prep is complete only when every artifact
+// the requested mode writes exists. Bare mode writes only the sshd drop-in;
+// non-bare exec prep additionally writes the login-PATH profile fragment —
+// including it in the probe is what makes a plain `up` on a bare guest
+// (promotion) re-run the configure step instead of skipping it.
+func tartLayer0Probe(full, bare bool) string {
+	probe := "test -f /etc/ssh/sshd_config.d/00-grove.conf"
+	if !bare {
+		probe += " && test -f /etc/profile.d/grove-satellite.sh"
+	}
+	if full {
+		probe += " && test -f /var/lib/grove-satellite/startup-done"
+	}
+	return probe
 }
 
 // tartConfigureGuest applies the layer-0 guest state: authorized_keys entry,
 // the FIRST-sorting sshd drop-in disabling password auth, the minimal exec
 // guest prep the gcp bootstrap normally provides (grove bin dir + login-shell
 // PATH), and a final `sync` so a subsequent stop cannot lose the changes.
-func tartConfigureGuest(client *gossh.Client, pubLine string, full bool) error {
+func tartConfigureGuest(client *gossh.Client, pubLine string, full, bare bool) error {
+	if out, err := tartSSHOutput(client, tartGuestConfigScript(pubLine, full, bare)); err != nil {
+		return fmt.Errorf("guest configuration script: %w: %s", err, strings.TrimSpace(out))
+	}
+	return nil
+}
+
+// tartGuestConfigScript renders the layer-0 guest configuration script. Bare
+// mode stops at transport state (authorized_keys + the sshd drop-in): the
+// grove bin dir and the login-PATH profile fragment are exactly the guest
+// mutations `up --bare` promises not to make — a bare guest must look like a
+// stock image to whatever install flow is being tested on it.
+func tartGuestConfigScript(pubLine string, full, bare bool) string {
 	fullPrep := ""
 	if full {
 		fullPrep = `
@@ -641,7 +667,16 @@ sudo install -d -m 0755 /var/lib/grove-satellite
 printf 'full-tart-v1\n' | sudo tee /var/lib/grove-satellite/startup-done >/dev/null
 `
 	}
-	script := fmt.Sprintf(`set -eu
+	execPrep := ""
+	if !bare {
+		execPrep = `
+# Exec-satellite guest prep (the gcp bootstrap's equivalents): the grove bin
+# dir the prebuilt install targets, and a login-shell PATH that includes it.
+mkdir -p "$HOME/.local/share/grove/bin"
+printf 'export PATH="$HOME/.local/share/grove/bin:$PATH"\n' | sudo tee /etc/profile.d/grove-satellite.sh >/dev/null
+`
+	}
+	return fmt.Sprintf(`set -eu
 umask 077
 mkdir -p "$HOME/.ssh"
 grep -qF '%[1]s' "$HOME/.ssh/authorized_keys" 2>/dev/null || printf '%%s\n' '%[1]s' >> "$HOME/.ssh/authorized_keys"
@@ -651,18 +686,10 @@ chmod 600 "$HOME/.ssh/authorized_keys"
 # with "PasswordAuthentication yes" — this drop-in must sort FIRST (00-).
 printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\n' | sudo tee /etc/ssh/sshd_config.d/00-grove.conf >/dev/null
 sudo systemctl reload ssh
-# Exec-satellite guest prep (the gcp bootstrap's equivalents): the grove bin
-# dir the prebuilt install targets, and a login-shell PATH that includes it.
-mkdir -p "$HOME/.local/share/grove/bin"
-printf 'export PATH="$HOME/.local/share/grove/bin:$PATH"\n' | sudo tee /etc/profile.d/grove-satellite.sh >/dev/null
-%[2]s
+%[2]s%[3]s
 # tart stop is effectively a hard poweroff; sync so none of the above is lost.
 sync
-`, pubLine, fullPrep)
-	if out, err := tartSSHOutput(client, script); err != nil {
-		return fmt.Errorf("guest configuration script: %w: %s", err, strings.TrimSpace(out))
-	}
-	return nil
+`, pubLine, execPrep, fullPrep)
 }
 
 // tartSSHOutput runs one remote command/script over an established layer-0

@@ -64,6 +64,11 @@ type satelliteUpOptions struct {
 	// ServiceAccountEmail is the provision block's service account (gcp:
 	// terraform var service_account_email).
 	ServiceAccountEmail string
+	// Bare is `up --bare`: create the machine and pin the transport, and
+	// write nothing grove-shaped onto the guest (no bin dir, no PATH prep;
+	// the shared verb separately ships no stack, config, or repos). Tart
+	// exec satellites only — validated before the provider runs.
+	Bare bool
 	// PostConfirm, when non-nil, runs after the provider's confirm prompt
 	// succeeds and BEFORE any resource is created. The shared verb resolves
 	// the provision-token commands here so a broken one aborts while the

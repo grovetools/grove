@@ -46,6 +46,10 @@ type satelliteJSON struct {
 	// provider_ref and `up` then failed. The machine may exist; the
 	// satellite is unusable.
 	PartialUp bool `json:"partial_up"`
+	// Bare reports an `up --bare` provision: machine + pinned sshd only, no
+	// grove stack on the guest. Absent from a consumer's view only when the
+	// grove binary predates the field.
+	Bare bool `json:"bare"`
 	// Live reports whether the running daemon had a status for this name
 	// (false = the row is registry-derived only).
 	Live bool `json:"live"`
@@ -160,6 +164,7 @@ func satelliteEntryJSON(name string, entry satelliteConfigEntry, live *satellite
 		Kind:            satelliteEntryKind(entry),
 		State:           satelliteEntryState(name, entry, live),
 		PartialUp:       satelliteEntryIsPartial(entry),
+		Bare:            entry.Bare,
 		Live:            live != nil,
 		Provider:        satelliteProviderRefTarget(entry.ProviderRef),
 		ProviderRef:     entry.ProviderRef,

@@ -74,6 +74,13 @@ type satelliteConfigEntry struct {
 	// ProviderTartHome is partial-up recovery state, persisted atomically with
 	// provider_ref as soon as a Tart VM exists. It is not daemon configuration.
 	ProviderTartHome string `yaml:"-" json:"provider_tart_home,omitempty"`
+	// Bare marks an exec satellite provisioned with `up --bare`: machine +
+	// pinned sshd transport only — no grove stack shipped, no guest bin-dir
+	// or PATH prep, no config push, no repo mirror. Provisioning state, not
+	// daemon configuration (the daemon ignores it). A later plain `up`
+	// installs the stack and clears the marker; `up --bare` against a
+	// non-bare entry is refused (a shipped stack cannot be unshipped).
+	Bare bool `yaml:"-" json:"bare,omitempty"`
 	// RecordWorkspaces persists the exact selected replica for destructive
 	// return checks, including flag-only selections that are absent from config.
 	RecordWorkspaces    string `yaml:"-" json:"record_workspaces,omitempty"`
@@ -137,7 +144,12 @@ func satelliteEntryState(name string, entry satelliteConfigEntry, live *satellit
 		// Exec satellites have no groved connection to report: derive the
 		// daemon's exec-only state from the merged registry so it shows even
 		// when groved isn't running (and agrees with the live status when it
-		// is).
+		// is). A bare provision is flagged inline; the daemon does not know
+		// the marker, so a live row reads plain "exec-only" — machine
+		// consumers branch on the JSON `bare` bool, never on this string.
+		if entry.Bare {
+			return satelliteStateExecOnly + " (bare)"
+		}
 		return satelliteStateExecOnly
 	default:
 		return "not connected (restart groved?)"
@@ -232,6 +244,7 @@ func newSatelliteUpCmd() *cobra.Command {
 		prebuilt       bool
 		prebuiltTarget string
 		sourceDir      string
+		bare           bool
 	)
 	cmd := cli.NewStandardCommand("up <name>", "Provision a satellite VM (billable)")
 	cmd.Long = `Provision a satellite VM: terraform apply, host-key pin, bootstrap, registry.
@@ -244,6 +257,14 @@ SSH connection, and installed before bootstrap runs — no VM-side git clone,
 make, Go, or zig for the grove stack. --source-dir picks the ecosystem worktree
 to build from (default: the go.work root above cwd). NOTE: the cross-compile
 target is --prebuilt-target, not --target (--target selects the infra module).
+
+Bare mode (tart exec satellites only): --bare provisions the machine and the
+pinned SSH transport and nothing else — no grove stack, no guest bin dir or
+login-PATH prep, no config push, no repo mirror. The guest stays a stock image
+reachable via 'grove satellite ssh/exec': a clean room for testing install and
+onboarding flows. A later plain 'up' of the same name installs the stack
+(promotion); 'up --bare' against a satellite that already has the stack is
+refused — destroy and recreate instead.
 
 Infra inputs (--project, --zone, --ssh-user, --cidr, --identity-file,
 --target) default from a [satellites.<name>.infra] block in the same grove
@@ -333,6 +354,7 @@ trades it for a cheap, replaceable node.`
 	// infra --target, so there it is spelled --target.)
 	cmd.Flags().StringVar(&prebuiltTarget, "prebuilt-target", "linux/amd64", "Cross-compile target for --prebuilt as <goos>/<goarch> (the VM arch)")
 	cmd.Flags().StringVar(&sourceDir, "source-dir", "", "Local ecosystem worktree root the --prebuilt stack is cross-built from (default: the go.work root above cwd)")
+	cmd.Flags().BoolVar(&bare, "bare", false, "Provision the machine and pinned SSH transport only — no grove stack, no guest bin dir or PATH prep, no config push, no repo mirror (tart exec satellites only; a clean-room guest for install testing). Re-run `up` without --bare to install the stack later")
 	cmd.RunE = func(cmd *cobra.Command, args []string) (runErr error) {
 		name := args[0]
 		report := beginSatelliteVerbReport(cmd, "up", satelliteUpSchema, name)
@@ -400,9 +422,17 @@ trades it for a cheap, replaceable node.`
 		// shared bootstrap; exec Tart and Docker still skip that bootstrap.
 		usesBootstrap := provider.UsesBootstrapScript(resolvedKind)
 		impliesPrebuilt := !usesBootstrap || provider.Kind() == tartSatelliteTarget
-		if impliesPrebuilt {
+		if bare {
+			// --bare SUPPRESSES the tart-implied --prebuilt rather than being
+			// contradicted by it: the machine and pinned transport come up,
+			// and nothing grove-shaped touches the guest.
+			if err := validateSatelliteBareUp(provider.Kind(), execKind, cmd.Flags().Changed("prebuilt") && prebuilt, existing, name); err != nil {
+				return err
+			}
+			prebuilt = false
+		} else if impliesPrebuilt {
 			if cmd.Flags().Changed("prebuilt") && !prebuilt {
-				return fmt.Errorf("--prebuilt=false contradicts the %q target: it always provisions from a locally cross-built stack (--prebuilt is implied)", provider.Kind())
+				return fmt.Errorf("--prebuilt=false contradicts the %q target: it always provisions from a locally cross-built stack (--prebuilt is implied, or pass --bare to ship no stack at all)", provider.Kind())
 			}
 			prebuilt = true
 			if !cmd.Flags().Changed("prebuilt-target") {
@@ -417,14 +447,14 @@ trades it for a cheap, replaceable node.`
 				}
 				prebuiltTarget = dt
 			}
-			if !usesBootstrap {
-				if !execKind {
-					return fmt.Errorf("--kind %s is not supported by the %q target: no bootstrap script runs", resolvedKind, provider.Kind())
-				}
-				for _, f := range []string{"gh-token-cmd", "claude", "claude-token-cmd", "dotfiles-repo"} {
-					if cmd.Flags().Changed(f) {
-						return fmt.Errorf("--%s needs the bootstrap script, which the %q target does not run", f, provider.Kind())
-					}
+		}
+		if !usesBootstrap {
+			if !execKind {
+				return fmt.Errorf("--kind %s is not supported by the %q target: no bootstrap script runs", resolvedKind, provider.Kind())
+			}
+			for _, f := range []string{"gh-token-cmd", "claude", "claude-token-cmd", "dotfiles-repo"} {
+				if cmd.Flags().Changed(f) {
+					return fmt.Errorf("--%s needs the bootstrap script, which the %q target does not run", f, provider.Kind())
 				}
 			}
 		}
@@ -571,6 +601,7 @@ trades it for a cheap, replaceable node.`
 			TFDir:               tfDir,
 			AssumeYes:           assumeYes,
 			ServiceAccountEmail: prov.ServiceAccountEmail,
+			Bare:                bare,
 		}
 		if err := provider.PrepareUp(upOpts); err != nil {
 			return err
@@ -810,6 +841,10 @@ trades it for a cheap, replaceable node.`
 		if resolvedKind != satelliteKindFull {
 			entry.Kind = resolvedKind
 		}
+		// Bare marker: set on a --bare provision, and cleared naturally by a
+		// later plain `up` because this entry is assembled from scratch (the
+		// promote path — the ship above just installed the stack).
+		entry.Bare = bare
 		// Sync forward fields (fixed M2 contract with the daemon side): the
 		// daemon binds 127.0.0.1:<sync_local_port> and forwards to the VM's
 		// syncd over the pinned SSH connection. 0 = forward off (fields
@@ -873,6 +908,13 @@ trades it for a cheap, replaceable node.`
 		// validated) before terraform — the same code path as `grove
 		// satellite config push`. Non-fatal: the VM is provisioned and
 		// registered; a transport hiccup here is retried with the verb.
+		if len(configPushFiles) > 0 && bare {
+			// A bare guest gets no grove config either — the fragments were
+			// only assembled (and validated) before it was known the push
+			// would be skipped.
+			fmt.Printf("\n(--bare: skipping the %d config fragment(s) [satellites.%s] would have pushed)\n", len(configPushFiles), name)
+			configPushFiles = nil
+		}
 		if len(configPushFiles) > 0 {
 			fmt.Printf("\nPushing %d config fragment(s) to %q...\n", len(configPushFiles), name)
 			if err := pushSatelliteConfigOverSSH(name, entry, configPushFiles, false); err != nil {
@@ -954,7 +996,13 @@ trades it for a cheap, replaceable node.`
 		// the provision's own output — it used to have to be reassembled from
 		// the state file plus the provider's key-path convention.
 		if line := satelliteSSHCommand(entry); line != "" {
-			fmt.Printf("Reach it with: grove satellite ssh %s   (or: grove satellite exec %s -- grove version)\n", name, name)
+			// The sample exec probe must exist on the guest: a bare guest has
+			// no grove binary — that is the point of --bare.
+			sample := "grove version"
+			if bare {
+				sample = "uname -a"
+			}
+			fmt.Printf("Reach it with: grove satellite ssh %s   (or: grove satellite exec %s -- %s)\n", name, name, sample)
 			fmt.Printf("  raw equivalent: %s\n", line)
 		}
 		summary, reloaded := reloadDaemonSatelliteRegistry()
